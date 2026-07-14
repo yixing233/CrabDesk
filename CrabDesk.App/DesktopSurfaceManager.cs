@@ -43,7 +43,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
-    internal void UpdateRegions() => Refresh();
+    internal void UpdateRegions()
+    {
+        foreach (var surface in _surfaces)
+        {
+            surface.UpdateInteractionRegion();
+        }
+    }
 
     internal int ClearIconCaches()
     {

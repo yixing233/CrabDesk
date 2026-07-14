@@ -53,6 +53,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private string? _recoveryMarker;
     private bool _guardStarted;
     private bool _disposed;
+    private bool _hostCheckInProgress;
     private DateTimeOffset _lastMappedHealthCheckAt;
 
     public CrabDeskRuntime(Dispatcher dispatcher)
@@ -1683,39 +1684,52 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private async void OnHostTimer(object? sender, EventArgs eventArgs)
     {
-        if (State.Boxes.Any(box => box.IsMappedFolder) &&
-            (_mappedFolderSnapshots.Values.Any(snapshot => !snapshot.IsAvailable) ||
-             DateTimeOffset.UtcNow - _lastMappedHealthCheckAt >= TimeSpan.FromSeconds(10)))
+        if (_disposed || _hostCheckInProgress)
         {
-            await RefreshMappedFoldersAsync();
-        }
-        var hostChanged = _desktopHost.Refresh();
-        if (_desktopDoubleClickMonitor is not null)
-        {
-            _desktopDoubleClickMonitor.DesktopListView = _desktopHost.DesktopListView;
-        }
-        var monitors = _monitorService.GetMonitors();
-        var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
-            .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
-        if (!hostChanged && !topologyChanged)
-        {
-            _surfaceManager?.UpdateRegions();
             return;
         }
 
-        Monitors = monitors;
-        if (hostChanged)
+        _hostCheckInProgress = true;
+        try
         {
-            RestoreOriginalIconPositions(false);
+            if (State.Boxes.Any(box => box.IsMappedFolder) &&
+                (_mappedFolderSnapshots.Values.Any(snapshot => !snapshot.IsAvailable) ||
+                 DateTimeOffset.UtcNow - _lastMappedHealthCheckAt >= TimeSpan.FromSeconds(10)))
+            {
+                await RefreshMappedFoldersAsync();
+            }
+            var hostChanged = _desktopHost.Refresh();
+            if (_desktopDoubleClickMonitor is not null)
+            {
+                _desktopDoubleClickMonitor.DesktopListView = _desktopHost.DesktopListView;
+            }
+            var monitors = _monitorService.GetMonitors();
+            var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
+                .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
+            if (!hostChanged && !topologyChanged)
+            {
+                // This timer is a health check. Repainting here causes a visible desktop flash every two seconds.
+                return;
+            }
+
+            Monitors = monitors;
+            if (hostChanged)
+            {
+                RestoreOriginalIconPositions(false);
+            }
+            NormalizeMonitorIds();
+            LayoutCoordinator.NormalizeForMonitors(State, Monitors);
+            if (!IsPaused)
+            {
+                _iconVisibility.SetIconsHidden(true);
+                RebuildSurfaces();
+            }
+            Changed?.Invoke(this, EventArgs.Empty);
         }
-        NormalizeMonitorIds();
-        LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        if (!IsPaused)
+        finally
         {
-            _iconVisibility.SetIconsHidden(true);
-            RebuildSurfaces();
+            _hostCheckInProgress = false;
         }
-        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static bool MappedSnapshotsEqual(MappedFolderSnapshot left, MappedFolderSnapshot right)

@@ -114,7 +114,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         PruneIconCache();
         UpdateWindowRegion();
         Invalidate();
-        Update();
+    }
+
+    internal void UpdateInteractionRegion()
+    {
+        UpdateWindowRegion();
+        Invalidate();
     }
 
     protected override void OnPaintBackground(Forms.PaintEventArgs eventArgs)
