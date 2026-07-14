@@ -11,6 +11,10 @@ internal sealed class DesktopBoxForm : Forms.Form
 {
     private const string ItemKeysFormat = "CrabDesk.DesktopItemKeys";
     private const string SourceBoxFormat = "CrabDesk.SourceBoxId";
+    private const int WmNcHitTest = 0x0084;
+    private const int WmMouseActivate = 0x0021;
+    private static readonly IntPtr HtTransparent = new(-1);
+    private static readonly IntPtr MaNoActivate = new(3);
     private readonly CrabDeskRuntime _runtime;
     private readonly DesktopHostService _desktopHost;
     private readonly MonitorLayout _monitor;
@@ -41,6 +45,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private bool _dragStarted;
     private string? _hoveredItemKey;
     private int _iconCacheVersion;
+    private bool _mouseInputEnabled;
 
     internal DesktopBoxForm(
         CrabDeskRuntime runtime,
@@ -94,6 +99,31 @@ internal sealed class DesktopBoxForm : Forms.Form
     }
 
     protected override bool ShowWithoutActivation => true;
+
+    protected override void WndProc(ref Forms.Message message)
+    {
+        if (message.Msg == WmMouseActivate)
+        {
+            message.Result = MaNoActivate;
+            return;
+        }
+        if (message.Msg == WmNcHitTest)
+        {
+            var packed = message.LParam.ToInt64();
+            var screenPoint = new Point(
+                unchecked((short)(packed & 0xffff)),
+                unchecked((short)((packed >> 16) & 0xffff)));
+            var clientPoint = PointToClient(screenPoint);
+            if (clientPoint.X < 0 || clientPoint.Y < 0 ||
+                clientPoint.X >= ClientSize.Width || clientPoint.Y >= ClientSize.Height ||
+                !IsInteractivePointSafe(ToDip(clientPoint)))
+            {
+                message.Result = HtTransparent;
+                return;
+            }
+        }
+        base.WndProc(ref message);
+    }
 
     private IEnumerable<DesktopBox> DesktopBoxes => _runtime.State.Boxes.Where(box =>
         string.Equals(box.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase));
@@ -832,17 +862,69 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void OnHoverTimer(object? sender, EventArgs eventArgs)
     {
-        if (!_runtime.State.Settings.DesktopBehavior.ExpandBoxOnHover && _hoverExpandedBoxes.Count == 0)
+        try
+        {
+            var clientPoint = PointToClient(Forms.Cursor.Position);
+            var pointInsideSurface = clientPoint.X >= 0 && clientPoint.Y >= 0 &&
+                clientPoint.X < ClientSize.Width && clientPoint.Y < ClientSize.Height;
+            var dipPoint = pointInsideSurface ? ToDip(clientPoint) : PointF.Empty;
+            UpdateMouseInputMode(pointInsideSurface && IsInteractivePointSafe(dipPoint));
+            if (!_mouseInputEnabled)
+            {
+                ClearHoverState();
+                return;
+            }
+            if (!_runtime.State.Settings.DesktopBehavior.ExpandBoxOnHover && _hoverExpandedBoxes.Count == 0)
+            {
+                return;
+            }
+            UpdateHoverState(dipPoint);
+        }
+        catch
+        {
+            DisableMouseInput();
+        }
+    }
+
+    private bool IsInteractivePoint(PointF point)
+    {
+        RebuildGeometry();
+        return _boxes.Any(box => box.Bounds.Contains(point)) ||
+            _items.Any(item => item.Bounds.Contains(point));
+    }
+
+    private bool IsInteractivePointSafe(PointF point)
+    {
+        try
+        {
+            return IsInteractivePoint(point);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void UpdateMouseInputMode(bool pointerOverContent)
+    {
+        var shouldEnable = pointerOverContent || Capture || _movingBox is not null ||
+            _resizingBox is not null || _selectionBox is not null;
+        if (_mouseInputEnabled == shouldEnable)
         {
             return;
         }
-        var clientPoint = PointToClient(Forms.Cursor.Position);
-        if (clientPoint.X < 0 || clientPoint.Y < 0 || clientPoint.X >= ClientSize.Width || clientPoint.Y >= ClientSize.Height)
+
+        _mouseInputEnabled = shouldEnable;
+        DesktopWindowTools.SetMouseInputEnabled(Handle, shouldEnable);
+    }
+
+    private void DisableMouseInput()
+    {
+        _mouseInputEnabled = false;
+        if (IsHandleCreated && !IsDisposed)
         {
-            ClearHoverState();
-            return;
+            DesktopWindowTools.SetMouseInputEnabled(Handle, false);
         }
-        UpdateHoverState(ToDip(clientPoint));
     }
 
     private void ClearHoverState()

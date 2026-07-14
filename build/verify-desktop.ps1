@@ -306,7 +306,6 @@ try {
     if (($surfaceStyle -band 0x40000000L) -eq 0 -or
         ($surfaceExtendedStyle -band 0x00000080L) -eq 0 -or
         ($surfaceExtendedStyle -band 0x08000000L) -eq 0 -or
-        ($surfaceExtendedStyle -band 0x00000020L) -ne 0 -or
         ($surfaceExtendedStyle -band 0x00000008L) -ne 0) {
         throw "Desktop surface styles do not guarantee direct non-activating child input without topmost. Style=$surfaceStyle, ExStyle=$surfaceExtendedStyle"
     }
@@ -317,6 +316,10 @@ try {
     [void][DesktopVerifier]::GetWindowRect($surface, [ref]$initialSurfaceBounds)
     [void][DesktopVerifier]::SetCursorPos($initialSurfaceBounds.Right - 10, $initialSurfaceBounds.Bottom - 10)
     Start-Sleep -Milliseconds 350
+    $emptyAreaExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
+    if (($emptyAreaExtendedStyle -band 0x00000020L) -eq 0) {
+        throw "Desktop surface did not become click-through over an empty desktop area. ExStyle=$emptyAreaExtendedStyle"
+    }
     Send-WinD
     Start-Sleep -Milliseconds 900
     $collapsedHeight = Get-BoxRegionHeight $surface ($boxX + 200) $boxY $boxHeight
@@ -340,6 +343,10 @@ try {
         $surfaceBounds.Top + $boxY + 20)
     [DesktopVerifier]::mouse_event(0x0001, 10, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 900
+    $contentExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
+    if (($contentExtendedStyle -band 0x00000020L) -ne 0) {
+        throw "Desktop surface remained click-through while the pointer was over box content. ExStyle=$contentExtendedStyle"
+    }
     $hoverExpandedHeight = Get-BoxRegionHeight $surface ($boxX + 200) $boxY $boxHeight
     if ($hoverExpandedHeight -lt 295) {
         $screenProbe = [DesktopVerifier+Point]::new()

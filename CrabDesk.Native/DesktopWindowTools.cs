@@ -42,10 +42,27 @@ public static class DesktopWindowTools
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(style));
 
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
-        extendedStyle &= ~NativeMethods.WsExTransparent;
-        extendedStyle |= NativeMethods.WsExToolWindow | WsExNoActivate;
+        // Start fail-open: the desktop keeps receiving input until the surface confirms the pointer is over content.
+        extendedStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExTransparent | WsExNoActivate;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
         NativeMethods.SetParent(hwnd, desktopParent);
+    }
+
+    public static void SetMouseInputEnabled(IntPtr hwnd, bool enabled)
+    {
+        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        {
+            return;
+        }
+
+        var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+        var updatedStyle = enabled
+            ? extendedStyle & ~NativeMethods.WsExTransparent
+            : extendedStyle | NativeMethods.WsExTransparent;
+        if (updatedStyle != extendedStyle)
+        {
+            NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(updatedStyle));
+        }
     }
 
     public static void PositionAboveDesktop(IntPtr hwnd, IntPtr desktopView, int x, int y, int width, int height)
