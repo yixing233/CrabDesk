@@ -2138,24 +2138,50 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
 
-        var changed = false;
-        foreach (var item in items)
+        var uncaptured = items
+            .Where(item => !_originalIconPositions.ContainsKey(item.Key.ToString()))
+            .Select(item => new
+            {
+                Item = item,
+                Names = GetExplorerNames(item)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(NormalizeExplorerName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            })
+            .Where(entry => entry.Names.Length > 0)
+            .ToArray();
+        if (uncaptured.Length == 0)
         {
-            var key = item.Key.ToString();
-            if (_originalIconPositions.ContainsKey(key))
+            return;
+        }
+
+        var captured = DesktopIconPositionService.CaptureItemPositions(
+            _desktopHost.DesktopListView,
+            uncaptured.SelectMany(entry => entry.Names));
+        var positionsByName = captured
+            .GroupBy(position => NormalizeExplorerName(position.DisplayName), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        var changed = false;
+        foreach (var entry in uncaptured)
+        {
+            DesktopIconPositionSnapshot? position = null;
+            foreach (var name in entry.Names)
+            {
+                if (positionsByName.TryGetValue(name, out var candidate))
+                {
+                    position = candidate;
+                    break;
+                }
+            }
+            if (position is not { } capturedPosition)
             {
                 continue;
             }
 
-            var position = DesktopIconPositionService.CaptureItemPositions(
-                    _desktopHost.DesktopListView,
-                    GetExplorerNames(item))
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(position.DisplayName))
-            {
-                _originalIconPositions[key] = position;
-                changed = true;
-            }
+            _originalIconPositions[entry.Item.Key.ToString()] = capturedPosition;
+            changed = true;
         }
 
         if (changed && _originalIconStateCaptured)
@@ -2214,6 +2240,8 @@ public sealed class CrabDeskRuntime : IDisposable
             yield return Path.GetFileName(item.FileSystemPath);
         }
     }
+
+    private static string NormalizeExplorerName(string value) => value.Trim().TrimEnd('.');
 
     private async void OnDesktopItemsChanged()
     {

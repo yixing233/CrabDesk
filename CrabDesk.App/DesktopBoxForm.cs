@@ -17,6 +17,9 @@ internal sealed class DesktopBoxForm : Forms.Form
     private readonly double _scale;
     private readonly DesktopBox _looseItemBox;
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
+    private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
+    private readonly CancellationTokenSource _iconLoadCancellation = new();
+    private readonly SemaphoreSlim _iconLoadGate = new(2, 2);
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _hoverExpandedBoxes = [];
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
@@ -37,6 +40,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private RectangleF _selectionRectangle;
     private bool _dragStarted;
     private string? _hoveredItemKey;
+    private int _iconCacheVersion;
 
     internal DesktopBoxForm(
         CrabDeskRuntime runtime,
@@ -150,11 +154,13 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         if (disposing)
         {
+            _iconLoadCancellation.Cancel();
             _animationTimer.Stop();
             _animationTimer.Dispose();
             _hoverTimer.Stop();
             _hoverTimer.Dispose();
             ClearIconCache();
+            _iconLoadCancellation.Dispose();
             Region?.Dispose();
         }
         base.Dispose(disposing);
@@ -162,6 +168,8 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     internal int ClearIconCache()
     {
+        _iconCacheVersion++;
+        _pendingIconLoads.Clear();
         var count = _iconCache.Count;
         foreach (var bitmap in _iconCache.Values)
         {
@@ -518,21 +526,79 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return bitmap;
         }
-        var source = _runtime.IconProvider.GetIcon(item.ParsingName, key.PixelSize);
-        if (source is null)
+        if (_pendingIconLoads.Add(key))
         {
-            _iconCache[key] = null;
-            return null;
+            _ = LoadIconBitmapAsync(key, _iconCacheVersion);
         }
-        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
-        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        stream.Position = 0;
-        using var temporary = new Bitmap(stream);
-        bitmap = new Bitmap(temporary);
-        _iconCache[key] = bitmap;
-        return bitmap;
+        return null;
+    }
+
+    private async Task LoadIconBitmapAsync(IconBitmapKey key, int cacheVersion)
+    {
+        Bitmap? bitmap = null;
+        var token = _iconLoadCancellation.Token;
+        try
+        {
+            await _iconLoadGate.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
+                if (source is not null)
+                {
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+                    using var stream = new MemoryStream();
+                    encoder.Save(stream);
+                    stream.Position = 0;
+                    using var temporary = new Bitmap(stream);
+                    bitmap = new Bitmap(temporary);
+                }
+            }
+            finally
+            {
+                _iconLoadGate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            bitmap?.Dispose();
+            return;
+        }
+        catch
+        {
+            bitmap?.Dispose();
+            bitmap = null;
+        }
+
+        if (token.IsCancellationRequested || IsDisposed || !IsHandleCreated)
+        {
+            bitmap?.Dispose();
+            return;
+        }
+
+        try
+        {
+            BeginInvoke((Action)(() =>
+            {
+                _pendingIconLoads.Remove(key);
+                if (IsDisposed || cacheVersion != _iconCacheVersion)
+                {
+                    bitmap?.Dispose();
+                    return;
+                }
+                if (_iconCache.ContainsKey(key))
+                {
+                    bitmap?.Dispose();
+                    return;
+                }
+                _iconCache[key] = bitmap;
+                Invalidate();
+            }));
+        }
+        catch (InvalidOperationException)
+        {
+            bitmap?.Dispose();
+        }
     }
 
     private void PruneIconCache()

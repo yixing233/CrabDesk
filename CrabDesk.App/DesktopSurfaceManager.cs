@@ -6,7 +6,6 @@ namespace CrabDesk.App;
 internal sealed class DesktopSurfaceManager : IDisposable
 {
     private readonly List<DesktopBoxForm> _surfaces = [];
-    private readonly DesktopMouseInputRouter _mouseInput;
 
     internal int SurfaceCount => _surfaces.Count;
 
@@ -31,7 +30,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 (int)monitor.PixelBounds.Height);
             _surfaces.Add(surface);
         }
-        _mouseInput = new DesktopMouseInputRouter(_surfaces.Select(surface => surface.Handle));
         Refresh();
     }
 
@@ -63,7 +61,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     public void Dispose()
     {
-        _mouseInput.Dispose();
         foreach (var surface in _surfaces)
         {
             surface.Close();

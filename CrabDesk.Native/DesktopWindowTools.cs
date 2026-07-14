@@ -6,6 +6,8 @@ namespace CrabDesk.Native;
 
 public static class DesktopWindowTools
 {
+    private const long WsExNoActivate = 0x08000000L;
+
     public static void ToggleDesktop()
     {
         var shellType = Type.GetTypeFromProgID("Shell.Application");
@@ -40,7 +42,8 @@ public static class DesktopWindowTools
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(style));
 
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
-        extendedStyle |= NativeMethods.WsExToolWindow | NativeMethods.WsExTransparent;
+        extendedStyle &= ~NativeMethods.WsExTransparent;
+        extendedStyle |= NativeMethods.WsExToolWindow | WsExNoActivate;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
         NativeMethods.SetParent(hwnd, desktopParent);
     }

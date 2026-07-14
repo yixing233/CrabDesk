@@ -305,8 +305,10 @@ try {
     $surfaceExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
     if (($surfaceStyle -band 0x40000000L) -eq 0 -or
         ($surfaceExtendedStyle -band 0x00000080L) -eq 0 -or
+        ($surfaceExtendedStyle -band 0x08000000L) -eq 0 -or
+        ($surfaceExtendedStyle -band 0x00000020L) -ne 0 -or
         ($surfaceExtendedStyle -band 0x00000008L) -ne 0) {
-        throw "Desktop surface styles do not guarantee child/tool-window behavior without topmost. Style=$surfaceStyle, ExStyle=$surfaceExtendedStyle"
+        throw "Desktop surface styles do not guarantee direct non-activating child input without topmost. Style=$surfaceStyle, ExStyle=$surfaceExtendedStyle"
     }
     if (Test-IsTopLevelWindow $surface) {
         throw "Desktop surface was enumerated as a top-level window and could enter Alt+Tab or the taskbar."
@@ -363,9 +365,9 @@ try {
     $collapseX = $boxX + $boxWidth - 49
     $collapseY = $boxY + 26
     $collapsePoint = [IntPtr](($collapseY -shl 16) -bor ($collapseX -band 0xffff))
-    [void][DesktopVerifier]::SetCursorPos($surfaceBounds.Left + $collapseX, $surfaceBounds.Top + $collapseY)
-    [DesktopVerifier]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-    [DesktopVerifier]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    # Use direct messages so hover expansion cannot make the box visually expanded before the animation starts.
+    [void][DesktopVerifier]::SendMessage($surface, 0x0201, [IntPtr]1, $collapsePoint)
+    [void][DesktopVerifier]::SendMessage($surface, 0x0202, [IntPtr]::Zero, $collapsePoint)
     Start-Sleep -Milliseconds 60
     $animatingHeight = Get-BoxRegionHeight $surface ($boxX + 200) $boxY $boxHeight
     if ($animatingHeight -le 52 -or $animatingHeight -ge 300) {
