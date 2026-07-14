@@ -11,6 +11,8 @@ internal static class NativeMethods
     internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
     internal const int WsChild = 0x40000000;
+    internal const long WsPopup = 0x80000000L;
+    internal const int WsDisabled = 0x08000000;
     internal const int WsVisible = 0x10000000;
     internal const int WsClipSiblings = 0x04000000;
     internal const int WsExToolWindow = 0x00000080;

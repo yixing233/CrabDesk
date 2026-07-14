@@ -1165,7 +1165,14 @@ public sealed class CrabDeskRuntime : IDisposable
         EnsureSmartOrganizationStructure();
         State.Organization.Enabled = true;
         var result = ApplyOrganizationRules(false);
-        NotifyWorkspaceChanged(true);
+        if (IsPaused)
+        {
+            SetPaused(false);
+        }
+        else
+        {
+            NotifyWorkspaceChanged(true);
+        }
         return result;
     }
 

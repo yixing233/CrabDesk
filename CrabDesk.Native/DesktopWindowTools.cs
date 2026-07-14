@@ -37,7 +37,7 @@ public static class DesktopWindowTools
     public static void AttachAsDesktopChild(IntPtr hwnd, IntPtr desktopParent)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
-        style &= ~0x00CF0000L;
+        style &= ~(0x00CF0000L | NativeMethods.WsPopup | NativeMethods.WsDisabled);
         style |= NativeMethods.WsChild | NativeMethods.WsVisible | NativeMethods.WsClipSiblings;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(style));
 

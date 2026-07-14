@@ -65,7 +65,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [DesktopVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][DesktopVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -eq "SHELLDLL_DefView" -and [DesktopVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW") -and [DesktopVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }
@@ -215,7 +215,7 @@ $boxWidth = 420
 $boxHeight = 300
 $titleHeight = 52
 $config = @{
-    SchemaVersion = 14
+    SchemaVersion = 15
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false
@@ -299,7 +299,7 @@ try {
 
     $surface = Find-DesktopSurface $process.Id
     if ($surface -eq [IntPtr]::Zero) {
-        throw "CrabDesk desktop surface was not attached to SHELLDLL_DefView."
+        throw "CrabDesk desktop surface was not attached to Progman/WorkerW."
     }
     $surfaceStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -16).ToInt64()
     $surfaceExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()

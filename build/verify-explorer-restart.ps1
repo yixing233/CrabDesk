@@ -45,7 +45,7 @@ function Test-CrabDeskSurface {
                 $parent = [ExplorerRestartVerifier]::GetParent($child)
                 $className = New-Object Text.StringBuilder 128
                 [void][ExplorerRestartVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -eq "SHELLDLL_DefView" -and [ExplorerRestartVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW") -and [ExplorerRestartVerifier]::IsWindowVisible($child)) {
                     $script:surfaceFound = $true
                 }
             }
@@ -67,7 +67,7 @@ catch {
 }
 $env:CRABDESK_DATA_DIR = $testRoot
 $config = @{
-    SchemaVersion = 14
+    SchemaVersion = 15
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false

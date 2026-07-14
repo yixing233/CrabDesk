@@ -10,6 +10,7 @@ public sealed class LayoutTests
         var state = JsonLayoutStore.CreateDefaultState();
 
         Assert.Empty(state.Boxes);
+        Assert.False(state.Settings.TakeOverDesktop);
         Assert.True(state.Settings.DesktopBehavior.ShowDesktopContextMenu);
     }
 

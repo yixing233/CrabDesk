@@ -14,7 +14,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         DesktopHostService host,
         IReadOnlyList<MonitorLayout> monitors)
     {
-        var parentHandle = host.DesktopView != IntPtr.Zero ? host.DesktopView : host.DesktopParent;
+        var parentHandle = host.DesktopParent;
         var parentBounds = DesktopWindowTools.GetWindowBounds(parentHandle);
         foreach (var monitor in monitors)
         {

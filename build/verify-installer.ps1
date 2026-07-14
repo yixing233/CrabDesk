@@ -45,7 +45,7 @@ $previousHideIcons = Get-ExplorerHideIcons
 $env:CRABDESK_DATA_DIR = $dataDirectory
 
 $config = @{
-    SchemaVersion = 14
+    SchemaVersion = 15
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false

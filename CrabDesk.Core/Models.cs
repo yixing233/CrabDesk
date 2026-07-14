@@ -245,7 +245,7 @@ public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move
 public sealed class AppSettings
 {
     public bool StartWithWindows { get; set; }
-    public bool TakeOverDesktop { get; set; } = true;
+    public bool TakeOverDesktop { get; set; }
     public bool ShowSystemItems { get; set; } = true;
     public bool ConfirmDeleteBox { get; set; } = true;
     public ApplicationThemeMode ThemeMode { get; set; } = ApplicationThemeMode.System;
@@ -384,7 +384,7 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 14;
+    public int SchemaVersion { get; set; } = 15;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);

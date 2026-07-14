@@ -85,7 +85,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [OpacityVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][OpacityVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -eq "SHELLDLL_DefView" -and [OpacityVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW") -and [OpacityVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }
@@ -145,7 +145,7 @@ $previousDataDirectory = $env:CRABDESK_DATA_DIR
 $previousHideIcons = Get-ExplorerHideIcons
 $env:CRABDESK_DATA_DIR = $testRoot
 $config = @{
-    SchemaVersion = 14
+    SchemaVersion = 15
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false
@@ -206,7 +206,7 @@ try {
 
     $surface = Find-DesktopSurface $process.Id
     if ($surface -eq [IntPtr]::Zero) {
-        throw "CrabDesk desktop surface was not attached to SHELLDLL_DefView."
+        throw "CrabDesk desktop surface was not attached to Progman/WorkerW."
     }
     $boxPixelX = [int][Math]::Round($boxX * $scale)
     $boxPixelY = [int][Math]::Round($boxY * $scale)

@@ -130,7 +130,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [CrabDeskDoubleClickVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][CrabDeskDoubleClickVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -eq "SHELLDLL_DefView" -and [CrabDeskDoubleClickVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW") -and [CrabDeskDoubleClickVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }

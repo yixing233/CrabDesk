@@ -79,7 +79,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 14;
+        state.SchemaVersion = 15;
         state.Settings ??= new AppSettings();
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();
@@ -134,6 +134,12 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Assignments = new Dictionary<string, Guid>(state.Assignments ?? [], StringComparer.OrdinalIgnoreCase);
         state.Organization ??= new OrganizationSettings();
         state.OrganizationRules ??= [];
+
+        if (previousVersion < 15)
+        {
+            // Older desktop surfaces could trap Explorer input. Upgrades restart in fail-open mode.
+            state.Settings.TakeOverDesktop = false;
+        }
 
         if (previousVersion < 14)
         {

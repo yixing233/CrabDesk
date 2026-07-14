@@ -86,7 +86,7 @@ function Find-CrabDeskSurface([int]$ProcessId) {
             if ($windowProcessId -eq $ProcessId -and [DynamicWallpaperVerifier]::IsWindowVisible($child)) {
                 $parent = [DynamicWallpaperVerifier]::GetParent($child)
                 $parentClass = Get-WindowClass $parent
-                if ($parentClass -eq "SHELLDLL_DefView") {
+                if ($parentClass -in @("Progman", "WorkerW")) {
                     $script:crabSurface = [pscustomobject]@{
                         Handle = $child
                         Class = Get-WindowClass $child
@@ -131,7 +131,7 @@ $previousDataDirectory = $env:CRABDESK_DATA_DIR
 $previousHideIcons = Get-ExplorerHideIcons
 $env:CRABDESK_DATA_DIR = $testRoot
 $config = @{
-    SchemaVersion = 14
+    SchemaVersion = 15
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false
@@ -173,7 +173,7 @@ try {
     }
     $surface = Find-CrabDeskSurface $process.Id
     if ($null -eq $surface) {
-        throw "CrabDesk did not attach a visible surface below SHELLDLL_DefView while Wallpaper Engine was active."
+        throw "CrabDesk did not attach a visible surface below Progman/WorkerW while Wallpaper Engine was active."
     }
     if ($surface.Parent -eq $wallpaper.Parent -or $surface.ParentClass -eq $wallpaper.ParentClass) {
         throw "CrabDesk and Wallpaper Engine were attached to the same desktop layer."

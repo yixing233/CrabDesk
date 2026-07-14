@@ -121,7 +121,9 @@ public static class CrabDeskHardwareProbe
                 GetWindowThreadProcessId(child, out processId);
                 if (processId != targetProcessId) return true;
                 var parent = GetParent(child);
-                if (!String.Equals(ReadClass(parent), "SHELLDLL_DefView", StringComparison.Ordinal)) return true;
+                var parentClass = ReadClass(parent);
+                if (!String.Equals(parentClass, "Progman", StringComparison.Ordinal) &&
+                    !String.Equals(parentClass, "WorkerW", StringComparison.Ordinal)) return true;
                 var numericHandle = child.ToInt64();
                 if (!seen.Add(numericHandle)) return true;
                 Rect rect;
@@ -321,8 +323,8 @@ function Assert-CrabDeskHardwareSnapshot {
     }
 
     foreach ($surface in $Snapshot.Surfaces) {
-        if (-not $surface.Visible -or $surface.ParentClass -ne "SHELLDLL_DefView") {
-            throw "Desktop surface $($surface.Handle) is not a visible SHELLDLL_DefView child."
+        if (-not $surface.Visible -or $surface.ParentClass -notin @("Progman", "WorkerW")) {
+            throw "Desktop surface $($surface.Handle) is not a visible Progman/WorkerW child."
         }
         if (($surface.Style -band 0x40000000) -eq 0) {
             throw "Desktop surface $($surface.Handle) does not have WS_CHILD."
