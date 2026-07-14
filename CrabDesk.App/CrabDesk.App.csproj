@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
+    <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\CrabDesk.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <Version>0.6.0</Version>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
+    <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
+    <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\CrabDesk.ico" />
+    <Resource Include="Assets\CrabDesk-256.png" />
+    <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="GitHubRepositoryOwner"
+                      Value="$(CrabDeskGitHubOwner)"
+                      Condition="'$(CrabDeskGitHubOwner)' != ''" />
+    <AssemblyMetadata Include="GitHubRepositoryName"
+                      Value="$(CrabDeskGitHubRepository)"
+                      Condition="'$(CrabDeskGitHubRepository)' != ''" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrabDesk.IconGuard\CrabDesk.IconGuard.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyIconGuard" AfterTargets="Build">
+    <ItemGroup>
+      <IconGuardFiles Include="..\CrabDesk.IconGuard\bin\$(Configuration)\net8.0-windows\CrabDesk.IconGuard.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(IconGuardFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

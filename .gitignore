@@ -1,0 +1,39 @@
+# Build outputs
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Local runtime state
+config.json
+config.json.bak
+config.json.tmp
+desktop-visibility.lock
+Backups/
+
+# Signing material and local secrets
+*.pfx
+*.p12
+*.snk
+*.key
+*.pem
+*.cer
+*.crt
+.env
+.env.*
+!.env.example
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,1400 @@
+<Window x:Class="CrabDesk.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CrabDesk 设置"
+        Width="920"
+        Height="640"
+        MinWidth="820"
+        MinHeight="560"
+        Background="{DynamicResource WindowBackground}"
+        Icon="Assets/CrabDesk.ico"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <DataTemplate x:Key="HotkeyOptionTemplate">
+            <TextBlock Text="{Binding Label}" />
+        </DataTemplate>
+        <Style x:Key="NavTabItemStyle" TargetType="TabItem">
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Grid Height="44">
+                            <Border x:Name="Selection" CornerRadius="6" Background="Transparent" />
+                            <Border x:Name="Indicator" Width="3" Height="20" CornerRadius="2"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    Background="{DynamicResource AccentBrush}" Visibility="Collapsed" />
+                            <ContentPresenter ContentSource="Header" Margin="16,0,12,0" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Selection" Property="Background" Value="{DynamicResource ControlBackground}" />
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Selection" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                <Setter TargetName="Indicator" Property="Visibility" Value="Visible" />
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingRowStyle" TargetType="Border">
+            <Setter Property="MinHeight" Value="62" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+        </Style>
+
+        <Style x:Key="RuleGridItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource SurfaceBorder}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Row" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlBackground}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Row" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="RuleToolButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0,0,3,0" />
+            <Setter Property="FontFamily" Value="Segoe Fluent Icons" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonSurface" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="{DynamicResource ControlBackground}" />
+                                <Setter TargetName="ButtonSurface" Property="BorderBrush" Value="{DynamicResource ControlBorder}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonSurface" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+                                <Setter Property="Opacity" Value="0.38" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="RuleHeaderTextStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <TabControl x:Name="SettingsTabs" TabStripPlacement="Left" BorderThickness="0" Background="Transparent">
+            <TabControl.Template>
+                <ControlTemplate TargetType="TabControl">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="208" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Background="{DynamicResource PanelBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="0,0,1,0" />
+                        <TabPanel Grid.Column="0" IsItemsHost="True" Margin="12,104,12,72" />
+                        <Border Grid.Column="1" Background="{DynamicResource WindowBackground}">
+                            <ContentPresenter ContentSource="SelectedContent" />
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </TabControl.Template>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}" AutomationProperties.Name="常规">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE80F;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="常规" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer x:Name="GeneralScrollViewer" VerticalScrollBarVisibility="Auto">
+                    <Grid Margin="44,36,48,38" MaxWidth="700">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="常规" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="桌面接管、启动和外观" Style="{StaticResource PageSubtitleStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="1" Margin="0,34,0,0">
+                            <TextBlock Text="桌面" Style="{StaticResource SectionTitleStyle}" />
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border x:Name="StatusIndicator" Width="8" Height="8" CornerRadius="4" Margin="0,0,10,0"
+                                                Background="{DynamicResource SuccessBrush}" />
+                                        <TextBlock x:Name="StatusText" Text="桌面已连接" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <Button x:Name="PauseButton" Grid.Column="1" Content="暂停接管"
+                                            Width="104" VerticalAlignment="Center" Click="PauseButton_OnClick" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Explorer 桌面连接" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1" Width="104" VerticalAlignment="Center" Click="ReconnectButton_OnClick">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                            <TextBlock Text="重新连接" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2" Margin="0,30,0,0">
+                            <TextBlock Text="偏好" Style="{StaticResource SectionTitleStyle}" />
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <TextBlock Text="登录 Windows 后启动" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="StartupCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="StartupCheckBox_OnChanged" Unchecked="StartupCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <TextBlock Text="删除盒子前确认" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="ConfirmDeleteCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="ConfirmDeleteCheckBox_OnChanged" Unchecked="ConfirmDeleteCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <TextBlock Text="启动后仅驻留托盘" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="LaunchToTrayCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="LaunchToTrayCheckBox_OnChanged" Unchecked="LaunchToTrayCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <TextBlock Text="显示系统桌面项目" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="ShowSystemItemsCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="ShowSystemItemsCheckBox_OnChanged" Unchecked="ShowSystemItemsCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="双击桌面空白处隐藏图标" />
+                                        <TextBlock Text="再次双击恢复桌面和盒子中的图标" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="DesktopDoubleClickCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="DesktopDoubleClickCheckBox_OnChanged"
+                                              Unchecked="DesktopDoubleClickCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="桌面右键菜单入口" />
+                                        <TextBlock Text="在桌面空白处右键打开 CrabDesk" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="DesktopContextMenuCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="DesktopContextMenuCheckBox_OnChanged"
+                                              Unchecked="DesktopContextMenuCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="悬停展开折叠盒子" />
+                                        <TextBlock Text="鼠标离开盒子后恢复折叠状态" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="ExpandBoxOnHoverCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="ExpandBoxOnHoverCheckBox_OnChanged"
+                                              Unchecked="ExpandBoxOnHoverCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="桌面变化后自动刷新" />
+                                        <TextBlock Text="重命名、新增或删除项目后更新盒子内容" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="RefreshDesktopItemsCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="RefreshDesktopItemsCheckBox_OnChanged"
+                                              Unchecked="RefreshDesktopItemsCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="界面动画" />
+                                        <TextBlock Text="盒子折叠和主题切换使用平滑过渡" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="{DynamicResource MutedTextBrush}" />
+                                    </StackPanel>
+                                    <CheckBox x:Name="AnimationEnabledCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="AnimationEnabledCheckBox_OnChanged"
+                                              Unchecked="AnimationEnabledCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border MinHeight="68">
+                                <Grid>
+                                    <TextBlock Text="主题" VerticalAlignment="Center" />
+                                    <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="3"
+                                            CornerRadius="7" Background="{DynamicResource ControlBackground}"
+                                            BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="SystemThemeRadioButton" Content="跟随系统" Tag="System"
+                                                         GroupName="ThemeMode" Style="{StaticResource SegmentRadioStyle}"
+                                                         Checked="ThemeModeRadioButton_OnChecked" />
+                                            <RadioButton x:Name="LightThemeRadioButton" Content="浅色" Tag="Light"
+                                                         GroupName="ThemeMode" Style="{StaticResource SegmentRadioStyle}"
+                                                         Checked="ThemeModeRadioButton_OnChecked" />
+                                            <RadioButton x:Name="DarkThemeRadioButton" Content="深色" Tag="Dark"
+                                                         GroupName="ThemeMode" Style="{StaticResource SegmentRadioStyle}"
+                                                         Checked="ThemeModeRadioButton_OnChecked" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE765;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="快捷键" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="44,36,48,38" MaxWidth="760">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="34" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="全局快捷键" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="在其他窗口中快速返回桌面或执行整理" Style="{StaticResource PageSubtitleStyle}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2">
+                        <Border Style="{StaticResource SettingRowStyle}" MinHeight="88">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="显示桌面" FontWeight="SemiBold" />
+                                    <TextBlock Text="最小化或恢复普通窗口" Margin="0,5,0,0" FontSize="12"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <CheckBox x:Name="ShowDesktopHotkeyEnabledCheckBox"
+                                                  Style="{StaticResource ToggleSwitchStyle}" Margin="0,0,16,0"
+                                                  Checked="HotkeyControl_OnChanged" Unchecked="HotkeyControl_OnChanged" />
+                                        <ComboBox x:Name="ShowDesktopModifiersComboBox" Width="126"
+                                                  ItemTemplate="{StaticResource HotkeyOptionTemplate}" SelectedValuePath="Value"
+                                                  SelectionChanged="HotkeyControl_OnChanged" />
+                                        <TextBlock Text="+" Margin="8,0" VerticalAlignment="Center" />
+                                        <ComboBox x:Name="ShowDesktopKeyComboBox" Width="72"
+                                                  ItemTemplate="{StaticResource HotkeyOptionTemplate}" SelectedValuePath="Value"
+                                                  SelectionChanged="HotkeyControl_OnChanged" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="ShowDesktopHotkeyStatusText" HorizontalAlignment="Right"
+                                               Margin="0,6,0,0" FontSize="11"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingRowStyle}" MinHeight="88">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="立即整理" FontWeight="SemiBold" />
+                                    <TextBlock Text="按当前启用的规则整理桌面项目" Margin="0,5,0,0" FontSize="12"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <CheckBox x:Name="OrganizeHotkeyEnabledCheckBox"
+                                                  Style="{StaticResource ToggleSwitchStyle}" Margin="0,0,16,0"
+                                                  Checked="HotkeyControl_OnChanged" Unchecked="HotkeyControl_OnChanged" />
+                                        <ComboBox x:Name="OrganizeModifiersComboBox" Width="126"
+                                                  ItemTemplate="{StaticResource HotkeyOptionTemplate}" SelectedValuePath="Value"
+                                                  SelectionChanged="HotkeyControl_OnChanged" />
+                                        <TextBlock Text="+" Margin="8,0" VerticalAlignment="Center" />
+                                        <ComboBox x:Name="OrganizeKeyComboBox" Width="72"
+                                                  ItemTemplate="{StaticResource HotkeyOptionTemplate}" SelectedValuePath="Value"
+                                                  SelectionChanged="HotkeyControl_OnChanged" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="OrganizeHotkeyStatusText" HorizontalAlignment="Right"
+                                               Margin="0,6,0,0" FontSize="11"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}" AutomationProperties.Name="布局备份"
+                     AutomationProperties.AutomationId="BackupTab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE74E;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="布局备份" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="44,36,48,38" MaxWidth="760">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="布局备份" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="保存和恢复盒子、规则与设置" Style="{StaticResource PageSubtitleStyle}" />
+                        </StackPanel>
+                        <Button x:Name="CreateBackupButton" Grid.Column="1" Style="{StaticResource PrimaryButtonStyle}"
+                                Width="112" Height="38" Content="立即备份"
+                                AutomationProperties.Name="立即备份"
+                                AutomationProperties.AutomationId="CreateBackupButton"
+                                Click="CreateBackupButton_OnClick" />
+                    </Grid>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <Border Style="{StaticResource SettingRowStyle}">
+                                <Grid>
+                                    <TextBlock Text="每日自动备份" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="DailyBackupCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="DailyBackupCheckBox_OnChanged"
+                                              Unchecked="DailyBackupCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border MinHeight="62">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="42" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="保留天数" VerticalAlignment="Center" />
+                                    <Slider x:Name="BackupRetentionSlider" Grid.Column="1"
+                                            Minimum="1" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            ValueChanged="BackupRetentionSlider_OnValueChanged" />
+                                    <TextBlock x:Name="BackupRetentionValueText" Grid.Column="2"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="备份目录" Style="{StaticResource SectionTitleStyle}" />
+                            <Border Background="{DynamicResource SurfaceBackground}"
+                                    BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                    CornerRadius="7" Padding="12,10" Margin="0,0,0,12">
+                                <TextBlock x:Name="BackupDirectoryText" TextWrapping="Wrap"
+                                           FontSize="12" Foreground="{DynamicResource MutedTextBrush}" />
+                            </Border>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="导出" Width="88" Margin="0,0,10,0" Click="ExportBackupButton_OnClick" />
+                                <Button Content="导入" Width="88" Click="ImportBackupButton_OnClick" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Row="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="历史备份" Style="{StaticResource SectionTitleStyle}" />
+                        <Border Grid.Row="2" Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="8" Padding="8">
+                            <ListBox x:Name="BackupList" AutomationProperties.Name="备份历史"
+                                     AutomationProperties.AutomationId="BackupList">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="2*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding CreatedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Foreground="{DynamicResource MutedTextBrush}">
+                                                <Run Text="{Binding BoxCount}" /><Run Text=" 个盒子" />
+                                            </TextBlock>
+                                            <TextBlock Grid.Column="2" Foreground="{DynamicResource MutedTextBrush}">
+                                                <Run Text="{Binding RuleCount}" /><Run Text=" 条规则" />
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+                        <Grid Grid.Row="3" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="RestoreBackupButton" Content="恢复" Width="82" Margin="0,0,10,0"
+                                        AutomationProperties.Name="恢复选中备份"
+                                        AutomationProperties.AutomationId="RestoreBackupButton"
+                                        Click="RestoreBackupButton_OnClick" />
+                                <Button Content="删除" Width="82" Style="{StaticResource DangerButtonStyle}"
+                                        Click="DeleteBackupButton_OnClick" />
+                            </StackPanel>
+                            <TextBlock x:Name="BackupStatusText" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource MutedTextBrush}" />
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}" AutomationProperties.Name="整理规则">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8FD;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="整理规则" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="34,30,38,32" MaxWidth="800">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="22" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="22" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="整理规则" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="按列表顺序匹配，首条命中规则生效" Style="{StaticResource PageSubtitleStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <Button x:Name="UndoOrganizationButton" Width="92" Height="36" Margin="0,0,8,0"
+                                    Content="撤销整理" Click="UndoOrganizationButton_OnClick" />
+                            <Button Style="{StaticResource PrimaryButtonStyle}"
+                                    Width="104" Height="36" Content="立即整理"
+                                    Click="ApplyOrganizationRulesButton_OnClick" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel Grid.Row="2">
+                        <Grid Height="42">
+                            <TextBlock Text="启用自动整理" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <CheckBox x:Name="OrganizationEnabledCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                                      Checked="OrganizationEnabledCheckBox_OnChanged"
+                                      Unchecked="OrganizationEnabledCheckBox_OnChanged" />
+                        </Grid>
+                        <Grid Height="48">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="触发方式" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <Border Height="1" Width="24" Margin="12,0,0,0" Background="{DynamicResource SurfaceBorder}" />
+                            </StackPanel>
+                            <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                                <CheckBox x:Name="RunRulesOnStartupCheckBox" Content="程序启动时" Margin="0,0,24,0"
+                                          Checked="RunRulesOnStartupCheckBox_OnChanged"
+                                          Unchecked="RunRulesOnStartupCheckBox_OnChanged" />
+                                <CheckBox x:Name="RunRulesRealtimeCheckBox" Content="桌面变化时" Margin="0,0,24,0"
+                                          Checked="RunRulesRealtimeCheckBox_OnChanged"
+                                          Unchecked="RunRulesRealtimeCheckBox_OnChanged" />
+                                <CheckBox x:Name="ReassignExistingItemsCheckBox" Content="重新整理已分组项目"
+                                          Checked="ReassignExistingItemsCheckBox_OnChanged"
+                                          Unchecked="ReassignExistingItemsCheckBox_OnChanged" />
+                            </WrapPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <Grid Grid.Row="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="8" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="自定义规则" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock x:Name="OrganizationConflictText" Grid.Column="1" Margin="12,-6,0,8"
+                                       Foreground="{DynamicResource DangerBrush}" FontSize="12"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Border Grid.Row="2" Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="6" ClipToBounds="True">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="34" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border Background="{DynamicResource ControlBackground}"
+                                        BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="0,0,0,1">
+                                    <Grid Margin="8,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="36" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="24" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="启用" Style="{StaticResource RuleHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="1" Text="标题" Style="{StaticResource RuleHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="2" Text="文件名" Style="{StaticResource RuleHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="3" Text="后缀" Style="{StaticResource RuleHeaderTextStyle}" />
+                                        <TextBlock Grid.Column="4" Text="盒子" Style="{StaticResource RuleHeaderTextStyle}" />
+                                    </Grid>
+                                </Border>
+                                <ListBox x:Name="OrganizationRulesList" Grid.Row="1"
+                                         BorderThickness="0" Background="Transparent"
+                                         ItemContainerStyle="{StaticResource RuleGridItemStyle}"
+                                         SelectionChanged="OrganizationRulesList_OnSelectionChanged"
+                                         MouseDoubleClick="OrganizationRulesList_OnMouseDoubleClick">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="8,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="36" />
+                                                    <ColumnDefinition Width="110" />
+                                                    <ColumnDefinition Width="100" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="110" />
+                                                    <ColumnDefinition Width="24" />
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox IsChecked="{Binding Rule.Enabled}" VerticalAlignment="Center"
+                                                          Checked="RuleEnabledCheckBox_OnChanged"
+                                                          Unchecked="RuleEnabledCheckBox_OnChanged" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Rule.Title}" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Rule.NamePattern}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                                <TextBlock Grid.Column="3" Text="{Binding ExtensionsDisplay}"
+                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                                <TextBlock Grid.Column="4" Text="{Binding TargetDisplay}"
+                                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                                                <TextBlock Grid.Column="5" Text="&#xE76C;" FontFamily="Segoe Fluent Icons"
+                                                           Foreground="{DynamicResource MutedTextBrush}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="3" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource RuleToolButtonStyle}" Content="&#xE710;" ToolTip="新增规则"
+                                        AutomationProperties.Name="新增规则" Click="AddRuleButton_OnClick" />
+                                <Button x:Name="DeleteRuleButton" Style="{StaticResource RuleToolButtonStyle}" Content="&#xE74D;" ToolTip="删除规则"
+                                        AutomationProperties.Name="删除规则" Click="DeleteRuleButton_OnClick" />
+                                <Button x:Name="MoveRuleUpButton" Style="{StaticResource RuleToolButtonStyle}" Content="&#xE74A;" ToolTip="上移"
+                                        AutomationProperties.Name="上移规则" Click="MoveRuleUpButton_OnClick" />
+                                <Button x:Name="MoveRuleDownButton" Style="{StaticResource RuleToolButtonStyle}" Content="&#xE74B;" ToolTip="下移"
+                                        AutomationProperties.Name="下移规则" Click="MoveRuleDownButton_OnClick" />
+                                <Button x:Name="EditRuleButton" Style="{StaticResource RuleToolButtonStyle}" Content="&#xE70F;" ToolTip="编辑规则"
+                                        AutomationProperties.Name="编辑规则" Click="EditRuleButton_OnClick" />
+                                <Button x:Name="DuplicateRuleButton" Style="{StaticResource RuleToolButtonStyle}" Content="&#xE8C8;" ToolTip="复制规则"
+                                        AutomationProperties.Name="复制规则" Click="DuplicateRuleButton_OnClick" />
+                                <Button Style="{StaticResource RuleToolButtonStyle}" Content="&#xE8FD;" ToolTip="安装内置规则"
+                                        AutomationProperties.Name="安装内置规则" Click="InstallDefaultRulesButton_OnClick" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" x:Name="OrganizationResultText" MaxWidth="260"
+                                       Foreground="{DynamicResource MutedTextBrush}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE790;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="外观" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="44,36,48,38" MaxWidth="760">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="主题与外观" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="调整桌面盒子和图标布局" Style="{StaticResource PageSubtitleStyle}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Style="{StaticResource SettingRowStyle}" MinHeight="48">
+                                <Grid>
+                                    <TextBlock Text="应用到全部盒子" VerticalAlignment="Center" />
+                                    <CheckBox x:Name="ApplyAppearanceToAllCheckBox"
+                                              IsChecked="True"
+                                              Style="{StaticResource ToggleSwitchStyle}"
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              Checked="ApplyAppearanceToAllCheckBox_OnChanged"
+                                              Unchecked="ApplyAppearanceToAllCheckBox_OnChanged" />
+                                </Grid>
+                            </Border>
+                            <Border Grid.Row="2" Background="{DynamicResource SurfaceBackground}"
+                                    BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                    CornerRadius="8" Padding="8">
+                                <ListBox x:Name="AppearanceBoxesList"
+                                         SelectionChanged="AppearanceBoxesList_OnSelectionChanged">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Grid>
+
+                        <ScrollViewer x:Name="AppearanceScrollViewer" Grid.Column="2" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="盒子" Style="{StaticResource SectionTitleStyle}" />
+                                <Border Style="{StaticResource SettingRowStyle}" MinHeight="62">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="背景颜色" VerticalAlignment="Center" />
+                                        <TextBox x:Name="BoxBackgroundTextBox" Grid.Column="1" VerticalAlignment="Center"
+                                                 LostFocus="BoxBackgroundTextBox_OnLostFocus" />
+                                        <Border x:Name="BoxBackgroundPreview" Grid.Column="2" Width="22" Height="22"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="5"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}" MinHeight="62">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="强调颜色" VerticalAlignment="Center" />
+                                        <TextBox x:Name="BoxAccentTextBox" Grid.Column="1" VerticalAlignment="Center"
+                                                 LostFocus="BoxAccentTextBox_OnLostFocus" />
+                                        <Border x:Name="BoxAccentPreview" Grid.Column="2" Width="22" Height="22"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center" CornerRadius="5"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="盒子不透明度" VerticalAlignment="Center" />
+                                        <Slider x:Name="BoxOpacitySlider" Grid.Column="1" Minimum="35" Maximum="100"
+                                                ValueChanged="BoxOpacitySlider_OnValueChanged" />
+                                        <TextBlock x:Name="BoxOpacityValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="圆角" VerticalAlignment="Center" />
+                                        <Slider x:Name="CornerRadiusSlider" Grid.Column="1" Minimum="0" Maximum="20"
+                                                ValueChanged="CornerRadiusSlider_OnValueChanged" />
+                                        <TextBlock x:Name="CornerRadiusValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="显示盒子边框" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowBoxBorderCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="ShowBoxBorderCheckBox_OnChanged" Unchecked="ShowBoxBorderCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="显示缩放手柄" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowResizeGripCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="ShowResizeGripCheckBox_OnChanged" Unchecked="ShowResizeGripCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Text="标题" Style="{StaticResource SectionTitleStyle}" Margin="0,28,0,10" />
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="标题栏高度" VerticalAlignment="Center" />
+                                        <Slider x:Name="TitleBarHeightSlider" Grid.Column="1" Minimum="32" Maximum="56"
+                                                ValueChanged="TitleBarHeightSlider_OnValueChanged" />
+                                        <TextBlock x:Name="TitleBarHeightValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}" MinHeight="68">
+                                    <Grid>
+                                        <TextBlock Text="标题位置" VerticalAlignment="Center" />
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="3"
+                                                CornerRadius="7" Background="{DynamicResource ControlBackground}"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="TitleLeftRadioButton" Content="左侧" Tag="Left"
+                                                             GroupName="BoxTitleAlignment" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxTitleAlignmentRadioButton_OnChecked" />
+                                                <RadioButton x:Name="TitleCenterRadioButton" Content="居中" Tag="Center"
+                                                             GroupName="BoxTitleAlignment" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxTitleAlignmentRadioButton_OnChecked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="标题字号" VerticalAlignment="Center" />
+                                        <Slider x:Name="TitleFontSizeSlider" Grid.Column="1" Minimum="8" Maximum="20"
+                                                ValueChanged="TitleFontSizeSlider_OnValueChanged" />
+                                        <TextBlock x:Name="TitleFontSizeValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="标题加粗" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="TitleFontBoldCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="TitleFontBoldCheckBox_OnChanged"
+                                                  Unchecked="TitleFontBoldCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="显示折叠按钮" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowCollapseButtonCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="ShowCollapseButtonCheckBox_OnChanged"
+                                                  Unchecked="ShowCollapseButtonCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border MinHeight="62">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="标题颜色" VerticalAlignment="Center" />
+                                        <TextBox x:Name="TitleColorTextBox" Grid.Column="1"
+                                                 VerticalAlignment="Center"
+                                                 LostFocus="TitleColorTextBox_OnLostFocus" />
+                                        <Border x:Name="TitleColorPreview" Grid.Column="2" Width="22" Height="22"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                CornerRadius="5" BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Text="图标" Style="{StaticResource SectionTitleStyle}" Margin="0,28,0,10" />
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="图标尺寸" VerticalAlignment="Center" />
+                                        <Slider x:Name="IconSizeSlider" Grid.Column="1" Minimum="24" Maximum="96"
+                                                ValueChanged="IconSizeSlider_OnValueChanged" />
+                                        <TextBlock x:Name="IconSizeValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="标签字号" VerticalAlignment="Center" />
+                                        <Slider x:Name="LabelFontSizeSlider" Grid.Column="1" Minimum="8" Maximum="16"
+                                                ValueChanged="LabelFontSizeSlider_OnValueChanged" />
+                                        <TextBlock x:Name="LabelFontSizeValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="显示图标名称" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowItemLabelsCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="ShowItemLabelsCheckBox_OnChanged"
+                                                  Unchecked="ShowItemLabelsCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="显示快捷方式角标" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="ShowShortcutBadgesCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="ShowShortcutBadgesCheckBox_OnChanged"
+                                                  Unchecked="ShowShortcutBadgesCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <TextBlock Text="图标悬停反馈" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="HoverFeedbackCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  Checked="HoverFeedbackCheckBox_OnChanged"
+                                                  Unchecked="HoverFeedbackCheckBox_OnChanged" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="横向间距" VerticalAlignment="Center" />
+                                        <Slider x:Name="HorizontalSpacingSlider" Grid.Column="1" Minimum="56" Maximum="160"
+                                                ValueChanged="IconSpacingSlider_OnValueChanged" />
+                                        <TextBlock x:Name="HorizontalSpacingValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="42" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="纵向间距" VerticalAlignment="Center" />
+                                        <Slider x:Name="VerticalSpacingSlider" Grid.Column="1" Minimum="56" Maximum="180"
+                                                ValueChanged="IconSpacingSlider_OnValueChanged" />
+                                        <TextBlock x:Name="VerticalSpacingValueText" Grid.Column="2"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}" MinHeight="68">
+                                    <Grid>
+                                        <TextBlock Text="视图" VerticalAlignment="Center" />
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="3"
+                                                CornerRadius="7" Background="{DynamicResource ControlBackground}"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="GridViewRadioButton" Content="网格" Tag="Grid"
+                                                             GroupName="BoxViewMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxViewModeRadioButton_OnChecked" />
+                                                <RadioButton x:Name="ListViewRadioButton" Content="列表" Tag="List"
+                                                             GroupName="BoxViewMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxViewModeRadioButton_OnChecked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingRowStyle}" MinHeight="68">
+                                    <Grid>
+                                        <TextBlock Text="排序" VerticalAlignment="Center" />
+                                        <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="3"
+                                                CornerRadius="7" Background="{DynamicResource ControlBackground}"
+                                                BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal">
+                                                <RadioButton x:Name="ManualSortRadioButton" Content="手动" Tag="Manual"
+                                                             GroupName="BoxSortMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxSortModeRadioButton_OnChecked" />
+                                                <RadioButton x:Name="NameSortRadioButton" Content="名称" Tag="Name"
+                                                             GroupName="BoxSortMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxSortModeRadioButton_OnChecked" />
+                                                <RadioButton x:Name="TypeSortRadioButton" Content="类型" Tag="Type"
+                                                             GroupName="BoxSortMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxSortModeRadioButton_OnChecked" />
+                                                <RadioButton x:Name="ModifiedSortRadioButton" Content="时间" Tag="Modified"
+                                                             GroupName="BoxSortMode" Style="{StaticResource SegmentRadioStyle}"
+                                                             Checked="BoxSortModeRadioButton_OnChecked" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </Border>
+                                <Border MinHeight="62">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="选中颜色" VerticalAlignment="Center" />
+                                        <TextBox x:Name="SelectionColorTextBox" Grid.Column="1"
+                                                 VerticalAlignment="Center"
+                                                 LostFocus="SelectionColorTextBox_OnLostFocus" />
+                                        <Border x:Name="SelectionColorPreview" Grid.Column="2" Width="22" Height="22"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                CornerRadius="5" BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" />
+                                    </Grid>
+                                </Border>
+                                <Button Content="恢复全部默认外观" Width="150" Margin="0,22,0,8"
+                                        HorizontalAlignment="Left" Click="ResetAppearanceButton_OnClick" />
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}" AutomationProperties.Name="盒子"
+                     AutomationProperties.AutomationId="BoxesTab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xF246;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="盒子" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Margin="44,36,48,38" MaxWidth="760">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="28" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="桌面盒子" Style="{StaticResource PageTitleStyle}" />
+                            <TextBlock Text="管理盒子名称和显示顺序" Style="{StaticResource PageSubtitleStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <Button Width="126" Height="38" Margin="0,0,10,0"
+                                    Click="AddMappedFolderButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8B7;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="映射文件夹" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource PrimaryButtonStyle}"
+                                    Width="120" Height="38"
+                                    Click="AddBoxButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE710;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="新建盒子" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="24" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="8" Padding="8">
+                            <ListBox x:Name="BoxesList" AutomationProperties.Name="盒子列表"
+                                     AutomationProperties.AutomationId="BoxesList"
+                                     SelectionChanged="BoxesList_OnSelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="6" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="4" CornerRadius="2" Background="{DynamicResource AccentBrush}" />
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock FontSize="11" Foreground="{DynamicResource MutedTextBrush}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="桌面分组" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsMappedFolder}" Value="True">
+                                                                    <Setter Property="Text" Value="文件夹映射" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Border>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="盒子名称" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBox x:Name="BoxTitleTextBox" AutomationProperties.Name="盒子名称"
+                                     AutomationProperties.AutomationId="BoxTitleTextBox"
+                                     LostFocus="BoxTitleTextBox_OnLostFocus" />
+                            <StackPanel x:Name="MappedFolderPanel" Margin="0,22,0,0" Visibility="Collapsed">
+                                <TextBlock Text="映射位置" Style="{StaticResource SectionTitleStyle}" />
+                                <Border Background="{DynamicResource SurfaceBackground}"
+                                        BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                        CornerRadius="7" Padding="12,9">
+                                    <TextBlock x:Name="MappedFolderPathText" TextWrapping="Wrap"
+                                               FontSize="12" Foreground="{DynamicResource MutedTextBrush}" />
+                                </Border>
+                                <TextBlock x:Name="MappedFolderStatusText" Margin="2,7,0,0" FontSize="12"
+                                           Foreground="{DynamicResource MutedTextBrush}" />
+                                <Grid Margin="0,14,0,0">
+                                    <Button Content="更改文件夹" Width="108" HorizontalAlignment="Left"
+                                            Click="ChangeMappedFolderButton_OnClick" />
+                                    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="只读" Margin="0,0,10,0" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="MappedFolderReadOnlyCheckBox"
+                                                  Style="{StaticResource ToggleSwitchStyle}"
+                                                  Checked="MappedFolderReadOnlyCheckBox_OnChanged"
+                                                  Unchecked="MappedFolderReadOnlyCheckBox_OnChanged" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                            <Border BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="0,0,0,1" Margin="0,22,0,18" />
+                            <Button Content="删除盒子" Style="{StaticResource DangerButtonStyle}"
+                                    AutomationProperties.AutomationId="DeleteBoxButton"
+                                    Click="DeleteBoxButton_OnClick" HorizontalAlignment="Left" Width="112" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Style="{StaticResource NavTabItemStyle}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE946;" FontFamily="Segoe Fluent Icons" FontSize="16" Width="28" />
+                        <TextBlock Text="关于" VerticalAlignment="Center" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ScrollViewer x:Name="AboutScrollViewer" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="44,36,48,38" MaxWidth="660">
+                        <TextBlock Text="关于" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="版本、更新和本地数据" Style="{StaticResource PageSubtitleStyle}" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,36,0,30">
+                            <Image Source="Assets/CrabDesk-256.png" Width="72" Height="72" Margin="0,0,20,0" />
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="CrabDesk" FontFamily="{x:Static SystemFonts.MessageFontFamily}"
+                                           FontSize="27" FontWeight="SemiBold" />
+                                <TextBlock x:Name="AppVersionText" Foreground="{DynamicResource MutedTextBrush}" Margin="0,5,0,0" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="检查更新" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                            <Button x:Name="CheckForUpdatesButton" HorizontalAlignment="Right" Width="112" Height="36"
+                                    Click="CheckForUpdatesButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="检查更新" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                        <Border Style="{StaticResource SettingRowStyle}">
+                            <Grid>
+                                <TextBlock Text="启动时检查更新" VerticalAlignment="Center" />
+                                <CheckBox x:Name="CheckUpdatesOnStartupCheckBox" Style="{StaticResource ToggleSwitchStyle}"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          Checked="CheckUpdatesOnStartupCheckBox_OnChanged"
+                                          Unchecked="CheckUpdatesOnStartupCheckBox_OnChanged" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}" MinHeight="68">
+                            <Grid>
+                                <TextBlock Text="发布通道" VerticalAlignment="Center" />
+                                <Border HorizontalAlignment="Right" VerticalAlignment="Center" Padding="3"
+                                        CornerRadius="7" Background="{DynamicResource ControlBackground}"
+                                        BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="StableUpdateChannelRadioButton" Content="稳定版" Tag="Stable"
+                                                     GroupName="UpdateChannel" Style="{StaticResource SegmentRadioStyle}"
+                                                     Checked="UpdateChannelRadioButton_OnChecked" />
+                                        <RadioButton x:Name="PreviewUpdateChannelRadioButton" Content="测试版" Tag="Preview"
+                                                     GroupName="UpdateChannel" Style="{StaticResource SegmentRadioStyle}"
+                                                     Checked="UpdateChannelRadioButton_OnChecked" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}" MinHeight="72">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="GitHub Releases" />
+                                    <TextBlock x:Name="UpdateRepositoryText" Margin="0,4,0,0" FontSize="12"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                                <TextBlock x:Name="LastUpdateCheckText" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           FontSize="12" Foreground="{DynamicResource MutedTextBrush}" />
+                            </Grid>
+                        </Border>
+                        <Grid Margin="0,14,0,26">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,16,0">
+                                <TextBlock x:Name="UpdateStatusText" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="UpdateReleaseNameText" Margin="0,5,0,0" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource MutedTextBrush}" />
+                            </StackPanel>
+                            <Button x:Name="OpenReleasePageButton" Grid.Column="1" Content="查看发布页" Width="104"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    Visibility="Collapsed" Click="OpenReleasePageButton_OnClick" />
+                        </Grid>
+                        <Border x:Name="ReleaseNotesBorder" Visibility="Collapsed"
+                                Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="7" Padding="14,11" Margin="0,-12,0,26" MaxHeight="150">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <TextBlock x:Name="ReleaseNotesText" TextWrapping="Wrap" FontSize="12" />
+                            </ScrollViewer>
+                        </Border>
+
+                        <Grid Margin="0,0,0,10">
+                            <TextBlock Text="配置目录" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
+                            <Button HorizontalAlignment="Right" Width="104" Height="34"
+                                    Click="OpenConfigDirectoryButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE838;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="打开目录" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                        <Border Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="7" Padding="14,12">
+                            <TextBlock x:Name="ConfigPathText" TextWrapping="Wrap"
+                                       FontFamily="{x:Static SystemFonts.MessageFontFamily}" FontSize="12"
+                                       Foreground="{DynamicResource MutedTextBrush}" />
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}" Margin="0,14,0,0" MinHeight="68">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="图标与缩略图缓存" />
+                                    <TextBlock x:Name="ThumbnailCacheStatusText" Text="用于加快桌面盒子绘制"
+                                               Margin="0,4,0,0" FontSize="12"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="清理缓存" Width="92"
+                                        VerticalAlignment="Center" Click="ClearThumbnailCacheButton_OnClick" />
+                            </Grid>
+                        </Border>
+
+                        <TextBlock Text="桌面宿主诊断" Style="{StaticResource SectionTitleStyle}" Margin="0,28,0,10" />
+                        <Border Background="{DynamicResource SurfaceBackground}"
+                                BorderBrush="{DynamicResource SurfaceBorder}" BorderThickness="1"
+                                CornerRadius="7" Padding="14,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock x:Name="DiagnosticsStatusText" FontWeight="SemiBold" />
+                                <TextBlock x:Name="DiagnosticsHostText" Grid.Row="1" Margin="0,5,0,0" FontSize="12"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" />
+                                <TextBlock x:Name="DiagnosticsTopologyText" Grid.Row="2" Margin="0,3,0,0" FontSize="12"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource MutedTextBrush}" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Width="104" Margin="0,0,10,0" Click="CopyDiagnosticsButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE8C8;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="复制诊断" />
+                                </StackPanel>
+                            </Button>
+                            <Button Width="104" Click="ReconnectButton_OnClick">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE72C;" FontFamily="Segoe Fluent Icons" FontSize="14" Margin="0,0,7,0" />
+                                    <TextBlock Text="重新连接" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+
+                        <TextBlock Text="维护" Style="{StaticResource SectionTitleStyle}" Margin="0,28,0,10" />
+                        <Border Style="{StaticResource SettingRowStyle}" MinHeight="76">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="重置桌面布局" />
+                                    <TextBlock Text="重建默认盒子，当前布局会先自动备份" Margin="0,4,0,0" FontSize="12"
+                                               Foreground="{DynamicResource MutedTextBrush}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="重置布局" Width="92" VerticalAlignment="Center"
+                                        Style="{StaticResource DangerButtonStyle}" Click="ResetLayoutButton_OnClick" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button Content="隐私说明" Width="92" Margin="0,0,10,0"
+                                    Click="PrivacyButton_OnClick" />
+                            <Button Content="开源许可" Width="92" Click="LicenseButton_OnClick" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Grid Width="208" HorizontalAlignment="Left" IsHitTestVisible="False">
+            <StackPanel Margin="20,24,16,0" VerticalAlignment="Top">
+                <StackPanel Orientation="Horizontal">
+                    <Image Source="Assets/CrabDesk-256.png" Width="36" Height="36" Margin="0,0,11,0" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="CrabDesk" FontFamily="{x:Static SystemFonts.MessageFontFamily}"
+                                   FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
+                        <TextBlock Text="桌面整理" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+            <TextBlock x:Name="SidebarVersionText" Margin="20,0,0,24" VerticalAlignment="Bottom"
+                       FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
+        </Grid>
+    </Grid>
+</Window>

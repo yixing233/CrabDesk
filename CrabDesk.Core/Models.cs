@@ -1,0 +1,409 @@
+using System.Text.Json.Serialization;
+
+namespace CrabDesk.Core;
+
+public enum DesktopItemKind
+{
+    File,
+    Folder,
+    Shortcut,
+    Shell
+}
+
+public enum BoxViewMode
+{
+    Grid,
+    List
+}
+
+public enum BoxSortMode
+{
+    Manual,
+    Name,
+    Type,
+    Modified
+}
+
+public enum BoxTransferEffect
+{
+    None,
+    VirtualMove,
+    CopyFiles,
+    MoveFiles
+}
+
+public enum BoxTitleAlignment
+{
+    Left,
+    Center
+}
+
+public enum ApplicationThemeMode
+{
+    System,
+    Light,
+    Dark
+}
+
+public enum OrganizationRuleAction
+{
+    AssignToBox,
+    KeepUnassigned,
+    Ignore
+}
+
+public enum MappedFolderAvailability
+{
+    Available,
+    Missing,
+    Offline,
+    AccessDenied,
+    Error
+}
+
+[Flags]
+public enum HotkeyModifiers
+{
+    None = 0,
+    Alt = 1,
+    Control = 2,
+    Shift = 4,
+    Windows = 8
+}
+
+public enum HotkeyKey
+{
+    A = 0x41, B, C, D, E, F, G, H, I, J, K, L, M,
+    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+    F1 = 0x70, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12
+}
+
+public enum HotkeyAction
+{
+    ShowDesktop,
+    OrganizeDesktop
+}
+
+public enum HotkeyRegistrationStatus
+{
+    Disabled,
+    Registered,
+    Conflict,
+    Failed
+}
+
+public enum UpdateChannel
+{
+    Stable,
+    Preview
+}
+
+public enum UpdateCheckStatus
+{
+    NotChecked,
+    NotConfigured,
+    UpToDate,
+    UpdateAvailable,
+    Offline,
+    RateLimited,
+    Failed
+}
+
+public readonly record struct LayoutRect(double X, double Y, double Width, double Height)
+{
+    public LayoutRect Clamp(LayoutRect bounds, double minWidth = 220, double minHeight = 120)
+    {
+        var width = Math.Clamp(Width, minWidth, Math.Max(minWidth, bounds.Width));
+        var height = Math.Clamp(Height, minHeight, Math.Max(minHeight, bounds.Height));
+        var x = Math.Clamp(X, bounds.X, bounds.X + bounds.Width - width);
+        var y = Math.Clamp(Y, bounds.Y, bounds.Y + bounds.Height - height);
+        return new LayoutRect(x, y, width, height);
+    }
+
+    public bool Contains(double x, double y) =>
+        x >= X && x <= X + Width && y >= Y && y <= Y + Height;
+
+    public bool Intersects(LayoutRect other) =>
+        Width > 0 && Height > 0 && other.Width > 0 && other.Height > 0 &&
+        X < other.X + other.Width && X + Width > other.X &&
+        Y < other.Y + other.Height && Y + Height > other.Y;
+}
+
+public sealed class BoxAppearance
+{
+    public string Background { get; set; } = "#FF2A2D32";
+    public string Accent { get; set; } = "#FF4EA1D3";
+    public double Opacity { get; set; } = 1;
+    public double IconSize { get; set; } = 42;
+    public double LabelFontSize { get; set; } = 8.5;
+    public bool ShowItemLabels { get; set; } = true;
+    public bool ShowShortcutBadges { get; set; } = true;
+    public double TitleBarHeight { get; set; } = 38;
+    public BoxTitleAlignment TitleAlignment { get; set; } = BoxTitleAlignment.Left;
+    public string TitleColor { get; set; } = "Auto";
+    public double TitleFontSize { get; set; } = 10;
+    public bool TitleFontBold { get; set; } = true;
+    public bool ShowCollapseButton { get; set; } = true;
+}
+
+public sealed class DesktopBox
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = "新盒子";
+    public string MonitorId { get; set; } = string.Empty;
+    public LayoutRect Bounds { get; set; } = new(32, 32, 420, 300);
+    public bool IsCollapsed { get; set; }
+    public bool IsSystemBox { get; set; }
+    public BoxViewMode ViewMode { get; set; } = BoxViewMode.Grid;
+    public BoxSortMode SortMode { get; set; } = BoxSortMode.Name;
+    public BoxAppearance Appearance { get; set; } = new();
+    public List<string> ItemOrder { get; set; } = [];
+    public MappedFolderSettings? MappedFolder { get; set; }
+
+    [JsonIgnore]
+    public bool IsMappedFolder => MappedFolder is not null;
+}
+
+public sealed class MappedFolderSettings
+{
+    public string Path { get; set; } = string.Empty;
+    public bool IsReadOnly { get; set; }
+}
+
+public sealed record MappedFolderSnapshot(
+    string Path,
+    MappedFolderAvailability Availability,
+    IReadOnlyList<DesktopItemRef> Items,
+    string? Message = null)
+{
+    public bool IsAvailable => Availability == MappedFolderAvailability.Available;
+}
+
+public readonly record struct DesktopItemKey(string Kind, string Value)
+{
+    public override string ToString() => $"{Kind}:{Value}";
+
+    public static DesktopItemKey Parse(string value)
+    {
+        var separator = value.IndexOf(':');
+        return separator < 0
+            ? new DesktopItemKey("path", value)
+            : new DesktopItemKey(value[..separator], value[(separator + 1)..]);
+    }
+}
+
+public sealed class DesktopItemRef
+{
+    public required DesktopItemKey Key { get; init; }
+    public required string DisplayName { get; init; }
+    public required string ParsingName { get; init; }
+    public string? FileSystemPath { get; init; }
+    public DesktopItemKind Kind { get; init; }
+    public DateTimeOffset? ModifiedAt { get; init; }
+    public bool IsReadOnly { get; init; }
+    public bool IsSystem => Kind == DesktopItemKind.Shell;
+}
+
+public sealed class MonitorLayout
+{
+    public required string Id { get; init; }
+    public required string DeviceName { get; init; }
+    public required LayoutRect Bounds { get; init; }
+    public required LayoutRect WorkArea { get; init; }
+    public required LayoutRect PixelBounds { get; init; }
+    public required LayoutRect PixelWorkArea { get; init; }
+    public double DpiScale { get; init; } = 1;
+    public bool IsPrimary { get; init; }
+}
+
+public sealed record DesktopHostDiagnostics(
+    DateTimeOffset CapturedAt,
+    bool Connected,
+    bool Paused,
+    string DesktopParentHandle,
+    string DesktopParentClass,
+    string DesktopViewHandle,
+    string DesktopViewClass,
+    string DesktopListViewHandle,
+    int MonitorCount,
+    int SurfaceCount,
+    int BoxCount,
+    int MappedBoxCount,
+    int AssignmentCount,
+    int SchemaVersion,
+    string Theme,
+    IReadOnlyList<string> Monitors);
+
+public sealed record LayoutResetResult(LayoutBackupInfo Backup, int DisabledRuleCount);
+
+public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move)
+{
+    public bool HasFiles => Paths.Count > 0;
+}
+
+public sealed class AppSettings
+{
+    public bool StartWithWindows { get; set; }
+    public bool TakeOverDesktop { get; set; } = true;
+    public bool ShowSystemItems { get; set; } = true;
+    public bool ConfirmDeleteBox { get; set; } = true;
+    public ApplicationThemeMode ThemeMode { get; set; } = ApplicationThemeMode.System;
+    public DesktopBehaviorSettings DesktopBehavior { get; set; } = new();
+    public GlobalAppearanceSettings Appearance { get; set; } = new();
+    public BackupSettings Backup { get; set; } = new();
+    public HotkeySettings Hotkeys { get; set; } = new();
+    public UpdateSettings Updates { get; set; } = new();
+    public string Language { get; set; } = "zh-CN";
+}
+
+public sealed class UpdateSettings
+{
+    public bool CheckOnStartup { get; set; } = true;
+    public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
+    public DateTimeOffset? LastCheckedAt { get; set; }
+    public UpdateCheckStatus LastStatus { get; set; } = UpdateCheckStatus.NotChecked;
+    public string LastMessage { get; set; } = string.Empty;
+    public string CachedETag { get; set; } = string.Empty;
+    public string LatestKnownVersion { get; set; } = string.Empty;
+    public string CachedReleaseName { get; set; } = string.Empty;
+    public DateTimeOffset? CachedPublishedAt { get; set; }
+    public string CachedReleaseNotes { get; set; } = string.Empty;
+    public string CachedReleasePageUrl { get; set; } = string.Empty;
+    public string CachedInstallerUrl { get; set; } = string.Empty;
+    public string CachedSha256Url { get; set; } = string.Empty;
+    public bool CachedIsPrerelease { get; set; }
+    public string RepositoryOwner { get; set; } = string.Empty;
+    public string RepositoryName { get; set; } = string.Empty;
+}
+
+public sealed record UpdateCheckRequest(
+    string RepositoryOwner,
+    string RepositoryName,
+    string CurrentVersion,
+    UpdateChannel Channel,
+    string CachedETag,
+    string CachedLatestVersion,
+    string CachedReleaseName,
+    DateTimeOffset? CachedPublishedAt,
+    string CachedReleaseNotes,
+    string CachedReleasePageUrl,
+    string CachedInstallerUrl,
+    string CachedSha256Url,
+    bool CachedIsPrerelease);
+
+public sealed record UpdateCheckResult(
+    UpdateCheckStatus Status,
+    string CurrentVersion,
+    string LatestVersion = "",
+    string ReleaseName = "",
+    DateTimeOffset? PublishedAt = null,
+    string ReleaseNotes = "",
+    string ReleasePageUrl = "",
+    string InstallerUrl = "",
+    string Sha256Url = "",
+    bool IsPrerelease = false,
+    string ETag = "",
+    string Message = "");
+
+public sealed class HotkeySettings
+{
+    public HotkeyBinding ShowDesktop { get; set; } = new()
+    {
+        Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
+        Key = HotkeyKey.D
+    };
+    public HotkeyBinding OrganizeDesktop { get; set; } = new()
+    {
+        Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
+        Key = HotkeyKey.O
+    };
+}
+
+public sealed class HotkeyBinding
+{
+    public bool Enabled { get; set; }
+    public HotkeyModifiers Modifiers { get; set; }
+    public HotkeyKey Key { get; set; }
+}
+
+public sealed class GlobalHotkeyPressedEventArgs(HotkeyAction action) : EventArgs
+{
+    public HotkeyAction Action { get; } = action;
+}
+
+public sealed class DesktopBehaviorSettings
+{
+    public bool LaunchToTray { get; set; }
+    public bool RefreshAfterRename { get; set; } = true;
+    public bool ShowDesktopContextMenu { get; set; }
+    public bool ToggleIconsOnDesktopDoubleClick { get; set; }
+    public bool ExpandBoxOnHover { get; set; }
+}
+
+public sealed class GlobalAppearanceSettings
+{
+    public double CornerRadius { get; set; } = 8;
+    public bool ShowBorder { get; set; } = true;
+    public bool ShowResizeGrip { get; set; } = true;
+    public double IconHorizontalSpacing { get; set; } = 82;
+    public double IconVerticalSpacing { get; set; } = 88;
+    public string SelectionColor { get; set; } = "#FF4A5BB1";
+    public bool HoverFeedback { get; set; } = true;
+    public bool AnimationEnabled { get; set; } = true;
+}
+
+public sealed class BackupSettings
+{
+    public bool DailyBackup { get; set; }
+    public int RetentionDays { get; set; } = 7;
+    public string BackupDirectory { get; set; } = string.Empty;
+    public DateTimeOffset? LastBackupAt { get; set; }
+}
+
+public sealed class OrganizationSettings
+{
+    public bool Enabled { get; set; }
+    public bool RunOnStartup { get; set; } = true;
+    public bool RunOnDesktopChanges { get; set; }
+    public bool ReassignExistingItems { get; set; }
+}
+
+public sealed class OrganizationRule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Title { get; set; } = "新规则";
+    public bool Enabled { get; set; } = true;
+    public int Priority { get; set; }
+    public List<DesktopItemKind> ItemKinds { get; set; } = [];
+    public string NamePattern { get; set; } = "*";
+    public List<string> Extensions { get; set; } = [];
+    public OrganizationRuleAction Action { get; set; } = OrganizationRuleAction.AssignToBox;
+    public Guid? TargetBoxId { get; set; }
+}
+
+public sealed class CrabDeskState
+{
+    public int SchemaVersion { get; set; } = 13;
+    public AppSettings Settings { get; set; } = new();
+    public List<DesktopBox> Boxes { get; set; } = [];
+    public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public OrganizationSettings Organization { get; set; } = new();
+    public List<OrganizationRule> OrganizationRules { get; set; } = [];
+
+    [JsonIgnore]
+    public bool MigratedFromLegacyIconTakeover { get; set; }
+
+    [JsonIgnore]
+    public DesktopBox? UnassignedBox => Boxes.FirstOrDefault(box => !box.IsSystemBox && !box.IsMappedFolder);
+
+    [JsonIgnore]
+    public DesktopBox? SystemBox => Boxes.FirstOrDefault(box => box.IsSystemBox);
+}
+
+public readonly record struct DesktopIconPositionSnapshot(string DisplayName, int X, int Y);
+
+public sealed class DesktopRecoveryState
+{
+    public bool PreviousHidden { get; set; }
+    public List<DesktopIconPositionSnapshot> IconPositions { get; set; } = [];
+}

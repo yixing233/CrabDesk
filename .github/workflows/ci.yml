@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore CrabDesk.sln
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build CrabDesk.sln -c Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test CrabDesk.sln -c Release --no-build
+
+      - name: Verify release policy
+        shell: pwsh
+        run: .\build\verify-release-workflow.ps1
