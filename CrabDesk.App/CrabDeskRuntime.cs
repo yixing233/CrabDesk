@@ -10,6 +10,17 @@ namespace CrabDesk.App;
 
 public sealed class CrabDeskRuntime : IDisposable
 {
+    private static readonly SmartBoxSpec[] SmartBoxSpecs =
+    [
+        new("快捷方式", "#FF4FAED2", 10, [DesktopItemKind.Shortcut], []),
+        new("目录", "#FF62B985", 20, [DesktopItemKind.Folder], []),
+        new("文档", "#FFFFB454", 30, [DesktopItemKind.File],
+            ["doc", "docx", "pdf", "rtf", "txt", "xls", "xlsx", "ppt", "pptx", "md"]),
+        new("图片", "#FFFF756B", 40, [DesktopItemKind.File],
+            ["bmp", "gif", "jpg", "jpeg", "png", "tif", "tiff", "webp", "heic"]),
+        new("压缩包", "#FF9C82E5", 50, [DesktopItemKind.File],
+            ["7z", "bz2", "gz", "rar", "tar", "xz", "zip"])
+    ];
     private readonly Dispatcher _dispatcher;
     private readonly ILayoutStore _layoutStore = new JsonLayoutStore();
     private readonly IMonitorTopologyService _monitorService = new MonitorTopologyService();
@@ -298,12 +309,11 @@ public sealed class CrabDeskRuntime : IDisposable
     public DesktopBox AddBox(string title = "新盒子")
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
-        var offset = State.Boxes.Count * 24 % 180;
         var box = new DesktopBox
         {
             Title = title,
             MonitorId = monitor.Id,
-            Bounds = new LayoutRect(72 + offset, 82 + offset, 420, 310)
+            Bounds = FindAvailableBoxBounds(monitor, 420, 310)
         };
         State.Boxes.Add(box);
         NotifyWorkspaceChanged(true);
@@ -314,12 +324,11 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         var normalizedPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
-        var offset = State.Boxes.Count * 24 % 180;
         var box = new DesktopBox
         {
             Title = Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
             MonitorId = monitor.Id,
-            Bounds = new LayoutRect(72 + offset, 82 + offset, 420, 310),
+            Bounds = FindAvailableBoxBounds(monitor, 420, 310),
             MappedFolder = new MappedFolderSettings
             {
                 Path = normalizedPath,
@@ -1145,6 +1154,21 @@ public sealed class CrabDeskRuntime : IDisposable
         return result;
     }
 
+    public OrganizationApplyResult SmartOrganize()
+    {
+        var currentKeys = Items.Select(item => item.Key.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var staleKey in State.Assignments.Keys.Where(key => !currentKeys.Contains(key)).ToArray())
+        {
+            State.Assignments.Remove(staleKey);
+            MoveItemOrderKey(staleKey, null);
+        }
+        EnsureSmartOrganizationStructure();
+        State.Organization.Enabled = true;
+        var result = ApplyOrganizationRules(false);
+        NotifyWorkspaceChanged(true);
+        return result;
+    }
+
     public IReadOnlyList<OrganizationDecision> PreviewOrganizationRules() =>
         _organizationRuleEngine.Preview(State, Items, State.Organization.ReassignExistingItems);
 
@@ -1182,21 +1206,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public void InstallDefaultOrganizationRules()
     {
-        var shortcuts = EnsureOrganizationBox("快捷方式", "#FF4FAED2");
-        var folders = EnsureOrganizationBox("目录", "#FF62B985");
-        var documents = EnsureOrganizationBox("文档", "#FFFFB454");
-        var pictures = EnsureOrganizationBox("图片", "#FFFF756B");
-        var archives = EnsureOrganizationBox("压缩包", "#FF9C82E5");
-
-        AddDefaultRule("快捷方式", [DesktopItemKind.Shortcut], [], shortcuts.Id, 10);
-        AddDefaultRule("目录", [DesktopItemKind.Folder], [], folders.Id, 20);
-        AddDefaultRule("文档", [DesktopItemKind.File],
-            ["doc", "docx", "pdf", "rtf", "txt", "xls", "xlsx", "ppt", "pptx", "md"], documents.Id, 30);
-        AddDefaultRule("图片", [DesktopItemKind.File],
-            ["bmp", "gif", "jpg", "jpeg", "png", "tif", "tiff", "webp", "heic"], pictures.Id, 40);
-        AddDefaultRule("压缩包", [DesktopItemKind.File],
-            ["7z", "bz2", "gz", "rar", "tar", "xz", "zip"], archives.Id, 50);
-        NormalizeRulePriorities();
+        EnsureSmartOrganizationStructure();
         NotifyWorkspaceChanged(true);
     }
 
@@ -1550,50 +1560,143 @@ public sealed class CrabDeskRuntime : IDisposable
         ? State.Boxes
         : State.Boxes.Where(box => box.Id == boxId.Value);
 
-    private DesktopBox EnsureOrganizationBox(string title, string accent)
+    private void EnsureSmartOrganizationStructure()
     {
-        var existing = State.Boxes.FirstOrDefault(box =>
-            !box.IsMappedFolder && string.Equals(box.Title, title, StringComparison.CurrentCultureIgnoreCase));
-        if (existing is not null)
+        var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
+        var active = new List<(DesktopBox Box, int ItemCount)>();
+        foreach (var spec in SmartBoxSpecs)
         {
-            return existing;
+            var matchingItems = Items.Where(item => MatchesSmartSpec(item, spec)).ToArray();
+            var rule = State.OrganizationRules.FirstOrDefault(candidate =>
+                string.Equals(candidate.Title, spec.Title, StringComparison.CurrentCultureIgnoreCase));
+            var box = rule?.TargetBoxId is { } target
+                ? State.Boxes.FirstOrDefault(candidate => candidate.Id == target && !candidate.IsMappedFolder)
+                : State.Boxes.FirstOrDefault(candidate => candidate.IsAutoGenerated &&
+                    string.Equals(candidate.Title, spec.Title, StringComparison.CurrentCultureIgnoreCase));
+
+            if (matchingItems.Length == 0)
+            {
+                if (box is not null &&
+                    (box.IsAutoGenerated || rule?.TargetBoxId == box.Id) &&
+                    !State.Assignments.Values.Contains(box.Id))
+                {
+                    State.Boxes.Remove(box);
+                }
+                if (rule is not null && (box is null || rule.TargetBoxId == box.Id))
+                {
+                    State.OrganizationRules.Remove(rule);
+                }
+                continue;
+            }
+
+            box ??= new DesktopBox
+            {
+                Title = spec.Title,
+                MonitorId = monitor.Id,
+                IsAutoGenerated = true,
+                Appearance = new BoxAppearance { Accent = spec.Accent }
+            };
+            box.Title = spec.Title;
+            box.MonitorId = monitor.Id;
+            box.IsAutoGenerated = true;
+            box.Appearance.Accent = spec.Accent;
+            if (!State.Boxes.Contains(box))
+            {
+                State.Boxes.Add(box);
+            }
+
+            rule ??= new OrganizationRule { Title = spec.Title };
+            rule.Enabled = true;
+            rule.Priority = spec.Priority;
+            rule.ItemKinds = spec.Kinds.ToList();
+            rule.Extensions = spec.Extensions.ToList();
+            rule.NamePattern = "*";
+            rule.Action = OrganizationRuleAction.AssignToBox;
+            rule.TargetBoxId = box.Id;
+            if (!State.OrganizationRules.Contains(rule))
+            {
+                State.OrganizationRules.Add(rule);
+            }
+            active.Add((box, matchingItems.Length));
         }
 
-        var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
-        var offset = State.Boxes.Count * 22 % 220;
-        var box = new DesktopBox
+        var builtInTitles = SmartBoxSpecs.Select(spec => spec.Title).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        foreach (var rule in State.OrganizationRules.Where(rule =>
+                     rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox &&
+                     !builtInTitles.Contains(rule.Title)).ToArray())
         {
-            Title = title,
-            MonitorId = monitor.Id,
-            Bounds = new LayoutRect(80 + offset, 90 + offset, 360, 280),
-            Appearance = new BoxAppearance { Accent = accent }
-        };
-        State.Boxes.Add(box);
-        return box;
+            var matchingItems = Items.Where(item => OrganizationRuleEngine.MatchesRule(rule, item)).ToArray();
+            if (matchingItems.Length == 0)
+            {
+                continue;
+            }
+
+            var box = rule.TargetBoxId is { } target
+                ? State.Boxes.FirstOrDefault(candidate => candidate.Id == target && !candidate.IsMappedFolder)
+                : null;
+            if (box is null)
+            {
+                box = State.Boxes.FirstOrDefault(candidate => candidate.IsAutoGenerated &&
+                    string.Equals(candidate.Title, rule.Title, StringComparison.CurrentCultureIgnoreCase));
+                box ??= new DesktopBox
+                {
+                    Title = rule.Title,
+                    MonitorId = monitor.Id,
+                    IsAutoGenerated = true
+                };
+                if (!State.Boxes.Contains(box))
+                {
+                    State.Boxes.Add(box);
+                }
+                rule.TargetBoxId = box.Id;
+            }
+            if (box.IsAutoGenerated && active.All(entry => entry.Box.Id != box.Id))
+            {
+                box.MonitorId = monitor.Id;
+                active.Add((box, matchingItems.Length));
+            }
+        }
+
+        var activeIds = active.Select(entry => entry.Box.Id).ToHashSet();
+        var occupied = State.Boxes
+            .Where(box => string.Equals(box.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase) &&
+                !activeIds.Contains(box.Id))
+            .Select(box => box.Bounds)
+            .ToArray();
+        var requested = active.Select(entry => new LayoutRect(
+            0,
+            0,
+            360,
+            Math.Clamp(82 + Math.Ceiling(entry.ItemCount / 4d) * 88, 190, 366))).ToArray();
+        var arranged = BoxLayoutPlanner.Arrange(monitor.WorkArea, requested, occupied);
+        for (var index = 0; index < active.Count; index++)
+        {
+            active[index].Box.Bounds = arranged[index];
+        }
+        NormalizeRulePriorities();
     }
 
-    private void AddDefaultRule(
-        string title,
-        List<DesktopItemKind> kinds,
-        List<string> extensions,
-        Guid targetBoxId,
-        int priority)
+    private LayoutRect FindAvailableBoxBounds(MonitorLayout monitor, double width, double height)
     {
-        var existing = State.OrganizationRules.FirstOrDefault(rule =>
-            string.Equals(rule.Title, title, StringComparison.CurrentCultureIgnoreCase));
-        if (existing is not null)
+        var occupied = State.Boxes
+            .Where(box => string.Equals(box.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase))
+            .Select(box => box.Bounds)
+            .ToArray();
+        return BoxLayoutPlanner.Arrange(monitor.WorkArea, [new LayoutRect(0, 0, width, height)], occupied)[0];
+    }
+
+    private static bool MatchesSmartSpec(DesktopItemRef item, SmartBoxSpec spec)
+    {
+        if (!spec.Kinds.Contains(item.Kind))
         {
-            existing.TargetBoxId = targetBoxId;
-            return;
+            return false;
         }
-        State.OrganizationRules.Add(new OrganizationRule
+        if (spec.Extensions.Count == 0)
         {
-            Title = title,
-            Priority = priority,
-            ItemKinds = kinds,
-            Extensions = extensions,
-            TargetBoxId = targetBoxId
-        });
+            return true;
+        }
+        var extension = Path.GetExtension(item.FileSystemPath ?? item.DisplayName).TrimStart('.');
+        return spec.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
     private void NormalizeRulePriorities()
@@ -1784,7 +1887,7 @@ public sealed class CrabDeskRuntime : IDisposable
                     return;
                 }
 
-                var result = ApplyOrganizationRules();
+                var result = SmartOrganize();
                 _trayIcon?.ShowBalloonTip(
                     1800,
                     "CrabDesk",
@@ -1987,6 +2090,10 @@ public sealed class CrabDeskRuntime : IDisposable
             (_, _) => _dispatcher.BeginInvoke(RequestShowSettings));
         showSettingsItem.Font = new System.Drawing.Font(showSettingsItem.Font, System.Drawing.FontStyle.Bold);
         _trayMenu.Items.Add(showSettingsItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
+            "智能整理",
+            null,
+            (_, _) => _dispatcher.BeginInvoke(() => SmartOrganize())));
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
             "新建盒子",
             null,
@@ -2284,4 +2391,11 @@ public sealed class CrabDeskRuntime : IDisposable
     }
 
     private static string FormatHandle(IntPtr handle) => $"0x{handle.ToInt64():X}";
+
+    private sealed record SmartBoxSpec(
+        string Title,
+        string Accent,
+        int Priority,
+        IReadOnlyList<DesktopItemKind> Kinds,
+        IReadOnlyList<string> Extensions);
 }

@@ -18,7 +18,7 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("CrabDesk.UpdateTest." 
 [System.IO.Directory]::CreateDirectory($testRoot) | Out-Null
 $boxId = [Guid]::NewGuid()
 $config = @{
-    SchemaVersion = 13
+    SchemaVersion = 14
     Settings = @{
         TakeOverDesktop = $false
         ShowSystemItems = $false

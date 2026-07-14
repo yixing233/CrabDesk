@@ -55,7 +55,11 @@ public static class LayoutCoordinator
         }
 
         var target = item.IsSystem ? state.SystemBox : state.UnassignedBox;
-        target ??= state.Boxes.First();
+        target ??= state.Boxes.FirstOrDefault();
+        if (target is null)
+        {
+            return Guid.Empty;
+        }
         state.Assignments[key] = target.Id;
         return target.Id;
     }

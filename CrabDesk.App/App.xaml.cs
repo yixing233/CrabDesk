@@ -27,7 +27,6 @@ public partial class App : Application
             string.Equals(argument, "--organize", StringComparison.OrdinalIgnoreCase));
         var undoOrganization = e.Args.Any(argument =>
             string.Equals(argument, "--undo-organization", StringComparison.OrdinalIgnoreCase));
-        var commandOnly = exitExisting || organizeExisting || undoOrganization;
         _singleInstanceMutex = new Mutex(true, @"Local\CrabDesk.SingleInstance", out var createdNew);
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
@@ -65,7 +64,7 @@ public partial class App : Application
             Shutdown();
             return;
         }
-        if (commandOnly)
+        if (exitExisting)
         {
             Shutdown();
             return;
@@ -86,7 +85,7 @@ public partial class App : Application
         {
             while (_organizeEvent.WaitOne())
             {
-                Dispatcher.BeginInvoke(() => _runtime?.ApplyOrganizationRules());
+                Dispatcher.BeginInvoke(() => _runtime?.SmartOrganize());
             }
         });
         _ = Task.Run(() =>
@@ -110,6 +109,14 @@ public partial class App : Application
             await _runtime.InitializeAsync();
             _runtime.ShowSettingsRequested += (_, _) => ShowSettings();
             _runtime.ExitRequested += (_, _) => ExitApplication();
+            if (organizeExisting)
+            {
+                _runtime.SmartOrganize();
+            }
+            else if (undoOrganization)
+            {
+                _runtime.UndoLastOrganization();
+            }
             if (backupVerificationResultPath is not null)
             {
                 ShowSettings();
@@ -135,7 +142,7 @@ public partial class App : Application
                 Shutdown(0);
                 return;
             }
-            if (_runtime.State.Settings.DesktopBehavior.LaunchToTray)
+            if (organizeExisting || undoOrganization || _runtime.State.Settings.DesktopBehavior.LaunchToTray)
             {
                 _runtime.NotifyMinimizedToTray();
             }

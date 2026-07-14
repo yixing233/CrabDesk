@@ -64,7 +64,7 @@ for ($folderIndex = 0; $folderIndex -lt 4; $folderIndex++) {
 }
 
 $config = @{
-    SchemaVersion = 13
+    SchemaVersion = 14
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false

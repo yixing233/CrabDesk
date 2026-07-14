@@ -67,7 +67,7 @@ catch {
 }
 $env:CRABDESK_DATA_DIR = $testRoot
 $config = @{
-    SchemaVersion = 13
+    SchemaVersion = 14
     Settings = @{
         TakeOverDesktop = $true
         ShowSystemItems = $false

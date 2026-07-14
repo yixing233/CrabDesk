@@ -45,9 +45,12 @@ public sealed class WindowsIntegrationTests
 
             Assert.True(registration.IsEnabled);
             using var key = Registry.CurrentUser.OpenSubKey(keyPath);
-            using var command = key?.OpenSubKey("command");
-            Assert.Equal("打开 CrabDesk", key?.GetValue(null));
-            Assert.Equal($"\"{Path.GetFullPath(executable)}\"", command?.GetValue(null));
+            using var organizeCommand = key?.OpenSubKey(@"shell\Organize\command");
+            using var openCommand = key?.OpenSubKey(@"shell\Open\command");
+            Assert.Equal("CrabDesk", key?.GetValue(null));
+            Assert.Equal(string.Empty, key?.GetValue("SubCommands"));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --organize", organizeCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\"", openCommand?.GetValue(null));
 
             registration.SetEnabled(false, executable);
             Assert.False(registration.IsEnabled);

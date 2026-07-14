@@ -46,7 +46,7 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
                 continue;
             }
 
-            var rule = rules.FirstOrDefault(candidate => Matches(candidate, item));
+            var rule = rules.FirstOrDefault(candidate => MatchesRule(candidate, item));
             if (rule is null)
             {
                 continue;
@@ -123,7 +123,7 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
         return conflicts;
     }
 
-    private static bool Matches(OrganizationRule rule, DesktopItemRef item)
+    public static bool MatchesRule(OrganizationRule rule, DesktopItemRef item)
     {
         if (rule.ItemKinds.Count > 0 && !rule.ItemKinds.Contains(item.Kind))
         {

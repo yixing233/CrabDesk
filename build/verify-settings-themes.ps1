@@ -30,7 +30,7 @@ $env:CRABDESK_DATA_DIR = $dataDirectory
 $boxId = [Guid]::NewGuid()
 
 $config = @{
-    SchemaVersion = 13
+    SchemaVersion = 14
     Settings = @{
         TakeOverDesktop = $false
         ShowSystemItems = $false

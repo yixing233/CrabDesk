@@ -11,6 +11,7 @@ public sealed class BackupServiceTests : IDisposable
     {
         var service = new JsonBackupService(_root);
         var state = JsonLayoutStore.CreateDefaultState("display-1");
+        state.Boxes.Add(new DesktopBox { Title = "文档", MonitorId = "display-1" });
         state.Settings.Backup.DailyBackup = true;
         state.OrganizationRules.Add(new OrganizationRule
         {
@@ -23,7 +24,7 @@ public sealed class BackupServiceTests : IDisposable
         var loaded = await service.LoadAsync(backup.Path);
 
         Assert.True(File.Exists(backup.Path));
-        Assert.Equal(13, loaded.SchemaVersion);
+        Assert.Equal(14, loaded.SchemaVersion);
         Assert.True(loaded.Settings.Backup.DailyBackup);
         Assert.Equal("文档", loaded.OrganizationRules[0].Title);
         Assert.Equal(state.Boxes[0].Id, loaded.OrganizationRules[0].TargetBoxId);
@@ -35,6 +36,7 @@ public sealed class BackupServiceTests : IDisposable
         var service = new JsonBackupService(_root);
         var destination = Path.Combine(_root, "export.crabdesk.json");
         var state = JsonLayoutStore.CreateDefaultState();
+        state.Boxes.Add(new DesktopBox { Title = "测试", MonitorId = "primary" });
 
         await service.ExportAsync(state, destination);
         state.Boxes[0].Title = "更新后的布局";

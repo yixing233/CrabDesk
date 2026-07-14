@@ -36,11 +36,25 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         var normalizedExecutable = Path.GetFullPath(executablePath);
         using var key = _root.CreateSubKey(_keyPath, true)
             ?? throw new InvalidOperationException("无法创建桌面右键菜单注册项。");
-        key.SetValue(null, "打开 CrabDesk", RegistryValueKind.String);
+        key.SetValue(null, "CrabDesk", RegistryValueKind.String);
+        key.SetValue("MUIVerb", "CrabDesk", RegistryValueKind.String);
         key.SetValue("Icon", $"\"{normalizedExecutable}\",0", RegistryValueKind.String);
         key.SetValue("Position", "Bottom", RegistryValueKind.String);
-        using var command = key.CreateSubKey("command", true)
-            ?? throw new InvalidOperationException("无法创建桌面右键菜单命令。");
-        command.SetValue(null, $"\"{normalizedExecutable}\"", RegistryValueKind.String);
+        key.SetValue("SubCommands", string.Empty, RegistryValueKind.String);
+
+        using var organize = key.CreateSubKey(@"shell\Organize", true)
+            ?? throw new InvalidOperationException("无法创建智能整理菜单命令。");
+        organize.SetValue(null, "智能整理", RegistryValueKind.String);
+        organize.SetValue("Icon", $"\"{normalizedExecutable}\",0", RegistryValueKind.String);
+        using var organizeCommand = organize.CreateSubKey("command", true)
+            ?? throw new InvalidOperationException("无法创建智能整理命令行。");
+        organizeCommand.SetValue(null, $"\"{normalizedExecutable}\" --organize", RegistryValueKind.String);
+
+        using var open = key.CreateSubKey(@"shell\Open", true)
+            ?? throw new InvalidOperationException("无法创建设置菜单命令。");
+        open.SetValue(null, "打开设置", RegistryValueKind.String);
+        using var openCommand = open.CreateSubKey("command", true)
+            ?? throw new InvalidOperationException("无法创建设置命令行。");
+        openCommand.SetValue(null, $"\"{normalizedExecutable}\"", RegistryValueKind.String);
     }
 }

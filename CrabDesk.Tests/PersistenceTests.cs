@@ -11,6 +11,7 @@ public sealed class PersistenceTests : IDisposable
     {
         var store = new JsonLayoutStore(_root);
         var state = JsonLayoutStore.CreateDefaultState("display-1");
+        state.Boxes.Add(new DesktopBox { MonitorId = "display-1" });
         state.Boxes[0].Title = "工作";
         state.Boxes[0].Appearance.TitleAlignment = BoxTitleAlignment.Center;
         state.Boxes[0].Appearance.TitleColor = "#FF21A179";
@@ -94,6 +95,7 @@ public sealed class PersistenceTests : IDisposable
     {
         var store = new JsonLayoutStore(_root);
         var state = JsonLayoutStore.CreateDefaultState();
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
         await store.SaveAsync(state);
         state.Boxes[0].Title = "备份版本";
         await store.SaveAsync(state);
@@ -119,8 +121,9 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(13, loaded.SchemaVersion);
+        Assert.Equal(14, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
+        Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
         Assert.True(loaded.MigratedFromLegacyIconTakeover);
     }
@@ -141,10 +144,64 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(13, loaded.SchemaVersion);
+        Assert.Equal(14, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
+    }
+
+    [Fact]
+    public async Task VersionThirteenDemoLayoutMigratesToEmptyDesktop()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 13,
+          "Settings": { "DesktopBehavior": { "ShowDesktopContextMenu": false } },
+          "Boxes": [
+            { "Title": "常用", "MonitorId": "primary", "Bounds": { "X": 36, "Y": 52, "Width": 520, "Height": 420 } },
+            { "Title": "工作", "MonitorId": "primary", "Bounds": { "X": 584, "Y": 52, "Width": 360, "Height": 250 } }
+          ],
+          "Assignments": {},
+          "OrganizationRules": []
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal(14, loaded.SchemaVersion);
+        Assert.Empty(loaded.Boxes);
+        Assert.True(loaded.Settings.DesktopBehavior.ShowDesktopContextMenu);
+    }
+
+    [Fact]
+    public async Task VersionThirteenEmptyBuiltInRuleBoxesAreRemoved()
+    {
+        Directory.CreateDirectory(_root);
+        var boxId = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 13,
+          "Boxes": [{
+            "Id": "{{boxId}}",
+            "Title": "文档",
+            "MonitorId": "primary",
+            "Bounds": { "X": 80, "Y": 90, "Width": 360, "Height": 280 }
+          }],
+          "Assignments": {},
+          "OrganizationRules": [{
+            "Title": "文档",
+            "TargetBoxId": "{{boxId}}",
+            "ItemKinds": [0],
+            "Extensions": ["pdf"]
+          }]
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Empty(loaded.Boxes);
+        Assert.Empty(loaded.OrganizationRules);
     }
 
     [Fact]
@@ -173,7 +230,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(13, loaded.SchemaVersion);
+        Assert.Equal(14, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -197,7 +254,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(13, loaded.SchemaVersion);
+        Assert.Equal(14, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);
@@ -213,6 +270,7 @@ public sealed class PersistenceTests : IDisposable
     {
         var store = new JsonLayoutStore(_root);
         var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
         state.Boxes[0].Appearance.Opacity = opacity;
 
         await store.SaveAsync(state);

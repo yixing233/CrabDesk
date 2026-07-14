@@ -5,6 +5,50 @@ namespace CrabDesk.Tests;
 public sealed class LayoutTests
 {
     [Fact]
+    public void DefaultStateStartsWithoutDemoBoxes()
+    {
+        var state = JsonLayoutStore.CreateDefaultState();
+
+        Assert.Empty(state.Boxes);
+        Assert.True(state.Settings.DesktopBehavior.ShowDesktopContextMenu);
+    }
+
+    [Fact]
+    public void AutomaticBoxLayoutAvoidsOverlapAndStaysVisible()
+    {
+        var workArea = new LayoutRect(0, 0, 1366, 728);
+        var sizes = Enumerable.Range(0, 5)
+            .Select(_ => new LayoutRect(0, 0, 360, 260))
+            .ToArray();
+
+        var arranged = BoxLayoutPlanner.Arrange(workArea, sizes);
+
+        Assert.Equal(5, arranged.Count);
+        Assert.True(arranged[0].X > workArea.Width / 2);
+        Assert.All(arranged, box => Assert.Equal(box, box.Clamp(workArea, 260, 160)));
+        for (var first = 0; first < arranged.Count; first++)
+        {
+            for (var second = first + 1; second < arranged.Count; second++)
+            {
+                Assert.False(arranged[first].Intersects(arranged[second]));
+            }
+        }
+    }
+
+    [Fact]
+    public void AutomaticBoxLayoutAvoidsManualBoxes()
+    {
+        var occupied = new LayoutRect(24, 24, 420, 310);
+
+        var arranged = BoxLayoutPlanner.Arrange(
+            new LayoutRect(0, 0, 1920, 1040),
+            [new LayoutRect(0, 0, 360, 280)],
+            [occupied]);
+
+        Assert.False(arranged[0].Intersects(occupied));
+    }
+
+    [Fact]
     public void ClampKeepsBoxInsideMonitor()
     {
         var monitor = new LayoutRect(0, 0, 1920, 1080);
@@ -20,6 +64,7 @@ public sealed class LayoutTests
     public void MissingMonitorMovesBoxToPrimary()
     {
         var state = JsonLayoutStore.CreateDefaultState("removed-monitor");
+        state.Boxes.Add(new DesktopBox { MonitorId = "removed-monitor" });
         var monitors = new[]
         {
             Monitor("primary", true, 1920, 1040),
@@ -32,7 +77,7 @@ public sealed class LayoutTests
     }
 
     [Fact]
-    public void ItemsResolveToFirstBoxWhenNoDedicatedSystemBoxExists()
+    public void ItemsRemainUnassignedWhenNoBoxesExist()
     {
         var state = JsonLayoutStore.CreateDefaultState();
         var item = new DesktopItemRef
@@ -45,8 +90,8 @@ public sealed class LayoutTests
 
         var boxId = LayoutCoordinator.ResolveBox(state, item);
 
-        Assert.Equal(state.UnassignedBox!.Id, boxId);
-        Assert.Equal(boxId, state.Assignments[item.Key.ToString()]);
+        Assert.Equal(Guid.Empty, boxId);
+        Assert.Empty(state.Assignments);
     }
 
     [Fact]
@@ -110,6 +155,7 @@ public sealed class LayoutTests
     public void RemovedHighDpiMonitorMigratesAndClampsBoxToPrimary()
     {
         var state = JsonLayoutStore.CreateDefaultState("removed-4k");
+        state.Boxes.Add(new DesktopBox { MonitorId = "removed-4k" });
         state.Boxes[0].Bounds = new LayoutRect(1600, 900, 600, 400);
 
         LayoutCoordinator.NormalizeForMonitors(state, [Monitor("primary", true, 1366, 728)]);
@@ -213,6 +259,7 @@ public sealed class LayoutTests
     public void ResetLayoutRebuildsBoxesAndDisablesRulesTargetingRemovedBoxes()
     {
         var state = JsonLayoutStore.CreateDefaultState("old-monitor");
+        state.Boxes.Add(new DesktopBox { Title = "旧盒子", MonitorId = "old-monitor" });
         var oldTarget = state.Boxes[0].Id;
         state.Settings.ThemeMode = ApplicationThemeMode.Dark;
         state.Assignments["path:test"] = oldTarget;
@@ -232,8 +279,7 @@ public sealed class LayoutTests
         var disabled = LayoutCoordinator.ResetLayout(state, "new-primary");
 
         Assert.Equal(1, disabled);
-        Assert.Equal(2, state.Boxes.Count);
-        Assert.All(state.Boxes, box => Assert.Equal("new-primary", box.MonitorId));
+        Assert.Empty(state.Boxes);
         Assert.Empty(state.Assignments);
         Assert.False(state.OrganizationRules[0].Enabled);
         Assert.Null(state.OrganizationRules[0].TargetBoxId);
