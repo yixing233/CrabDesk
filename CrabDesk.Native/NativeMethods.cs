@@ -18,8 +18,13 @@ internal static class NativeMethods
     internal const int WsExToolWindow = 0x00000080;
     internal const int WsExTransparent = 0x00000020;
     internal const int SwpNoActivate = 0x0010;
+    internal const int SwpNoSize = 0x0001;
+    internal const int SwpNoMove = 0x0002;
+    internal const int SwpNoZOrder = 0x0004;
+    internal const int SwpFrameChanged = 0x0020;
     internal const int SwpShowWindow = 0x0040;
     internal const int SwpNoOwnerZOrder = 0x0200;
+    internal const uint GwHwndNext = 2;
     internal const int RgnOr = 2;
     internal static readonly IntPtr HwndTop = IntPtr.Zero;
 
@@ -42,6 +47,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr GetParent(IntPtr hwnd);
 
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetTopWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern IntPtr SetParent(IntPtr child, IntPtr newParent);
 
@@ -59,6 +70,14 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool IsWindowVisible(IntPtr hwnd);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool EnableWindow(IntPtr hwnd, bool enable);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern IntPtr SendMessageTimeout(
         IntPtr hwnd,
@@ -71,6 +90,10 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -1,6 +1,8 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using CrabDesk.Core;
+using CrabDesk.Native;
 
 namespace CrabDesk.Tests;
 
@@ -141,6 +143,86 @@ public sealed class UpdateServiceTests
 
         Assert.Equal(UpdateCheckStatus.RateLimited, rateResult.Status);
         Assert.Equal(UpdateCheckStatus.Offline, offlineResult.Status);
+    }
+
+    [Fact]
+    public async Task DownloadVerifiesSha256BeforePublishingInstaller()
+    {
+        var installer = Encoding.UTF8.GetBytes("signed installer fixture");
+        var hash = Convert.ToHexString(SHA256.HashData(installer)).ToLowerInvariant();
+        using var client = new HttpClient(new StubHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"{hash}  CrabDesk-Setup-x64.exe\n", Encoding.ASCII)
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(installer)
+                }));
+        using var service = new GitHubUpdateService(client);
+        var root = Path.Combine(Path.GetTempPath(), "CrabDesk.UpdateTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = await service.DownloadAsync(new UpdateDownloadRequest(
+                "https://download.test/CrabDesk-Setup-x64.exe",
+                "https://download.test/SHA256SUMS.txt",
+                "0.7.0",
+                root));
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(hash, result.Sha256);
+            Assert.Equal(installer, await File.ReadAllBytesAsync(result.InstallerPath));
+            Assert.False(File.Exists(result.InstallerPath + ".part"));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadRejectsHashMismatchAndRemovesPartialFile()
+    {
+        var installer = Encoding.UTF8.GetBytes("tampered installer fixture");
+        using var client = new HttpClient(new StubHandler(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("SHA256SUMS.txt", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"{new string('0', 64)}  CrabDesk-Setup-x64.exe\n", Encoding.ASCII)
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(installer)
+                }));
+        using var service = new GitHubUpdateService(client);
+        var root = Path.Combine(Path.GetTempPath(), "CrabDesk.UpdateTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var result = await service.DownloadAsync(new UpdateDownloadRequest(
+                "https://download.test/CrabDesk-Setup-x64.exe",
+                "https://download.test/SHA256SUMS.txt",
+                "0.7.0",
+                root));
+
+            Assert.False(result.Success);
+            Assert.Contains("SHA-256", result.Message);
+            Assert.Empty(Directory.EnumerateFiles(root, "*.exe", SearchOption.AllDirectories));
+            Assert.Empty(Directory.EnumerateFiles(root, "*.part", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void AuthenticodeVerifierRejectsUnsignedAssembly()
+    {
+        var result = AuthenticodeVerifier.Verify(typeof(UpdateServiceTests).Assembly.Location);
+
+        Assert.False(result.IsTrusted);
+        Assert.NotEmpty(result.Message);
     }
 
     private static UpdateCheckRequest Request(UpdateChannel channel = UpdateChannel.Stable) => new(

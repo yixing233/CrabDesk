@@ -3,7 +3,7 @@
   #define MyAppVersion "0.6.0"
 #endif
 #define MyAppPublisher "CrabDesk"
-#define MyAppExeName "CrabDesk.App.exe"
+#define MyAppExeName "CrabDesk.WinUI.exe"
 
 [Setup]
 AppId={{8AF9FCA9-D889-4ED7-B5A2-AC052B94016D}

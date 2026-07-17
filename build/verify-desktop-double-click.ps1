@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe"
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (Get-Process CrabDesk.App -ErrorAction SilentlyContinue) {
+if (Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue) {
     throw "Close the running CrabDesk instance before the desktop double-click verifier."
 }
 
@@ -130,7 +130,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [CrabDeskDoubleClickVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][CrabDeskDoubleClickVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -in @("Progman", "WorkerW") -and [CrabDeskDoubleClickVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW", "SHELLDLL_DefView") -and [CrabDeskDoubleClickVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }
@@ -197,10 +197,10 @@ try {
     if ($listView -eq [IntPtr]::Zero) { throw "Explorer desktop list view was not found." }
     $surface = Find-DesktopSurface $process.Id
     if ($surface -eq [IntPtr]::Zero) { throw "CrabDesk desktop surface was not found." }
-    if ((Get-HideIcons) -ne 1) { throw "Explorer icons were not hidden during desktop takeover." }
+    if ((Get-HideIcons) -ne $originalHidden) { throw "Desktop hosting changed Explorer's native icon visibility before the gesture." }
     $visibleRegion = [CrabDeskDoubleClickVerifier+Rect]::new()
     if ([CrabDeskDoubleClickVerifier]::GetWindowRgnBox($surface, [ref]$visibleRegion) -le 1) {
-        throw "CrabDesk did not render the loose desktop icons."
+        throw "CrabDesk did not render the desktop box surface."
     }
     $point = [CrabDeskDoubleClickVerifier]::FindEmptyDesktopPoint($listView)
 
@@ -208,11 +208,10 @@ try {
     Start-Sleep -Milliseconds 80
     [CrabDeskDoubleClickVerifier]::Click($point)
     Start-Sleep -Milliseconds 900
-    if ((Get-HideIcons) -ne 1) { throw "Double-click exposed Explorer icons during active takeover." }
+    if ((Get-HideIcons) -ne 1) { throw "Double-click did not hide Explorer's native desktop icons." }
     $hiddenRegion = [CrabDeskDoubleClickVerifier+Rect]::new()
-    if ([CrabDeskDoubleClickVerifier]::GetWindowRgnBox($surface, [ref]$hiddenRegion) -le 1 -or
-        ($hiddenRegion.Left -le $visibleRegion.Left + 100 -and $hiddenRegion.Top -le $visibleRegion.Top + 100)) {
-        throw "Double-click did not hide CrabDesk's loose desktop icons."
+    if ([CrabDeskDoubleClickVerifier]::GetWindowRgnBox($surface, [ref]$hiddenRegion) -le 1) {
+        throw "Double-click unexpectedly removed the desktop box surface."
     }
 
     Start-Sleep -Milliseconds 650
@@ -220,14 +219,14 @@ try {
     Start-Sleep -Milliseconds 80
     [CrabDeskDoubleClickVerifier]::Click($point)
     Start-Sleep -Milliseconds 900
-    if ((Get-HideIcons) -ne 1) { throw "Double-click exposed Explorer icons during active takeover." }
+    if ((Get-HideIcons) -ne $originalHidden) { throw "Double-click did not restore Explorer's native desktop icons." }
     $restoredRegion = [CrabDeskDoubleClickVerifier+Rect]::new()
     if ([CrabDeskDoubleClickVerifier]::GetWindowRgnBox($surface, [ref]$restoredRegion) -le 1 -or
         [Math]::Abs($restoredRegion.Left - $visibleRegion.Left) -gt 2 -or
         [Math]::Abs($restoredRegion.Top - $visibleRegion.Top) -gt 2) {
-        throw "Double-click did not restore CrabDesk's loose desktop icons."
+        throw "Double-click changed the desktop box surface geometry."
     }
-    Write-Host "Desktop empty-area double-click hid and restored CrabDesk-rendered icons without exposing Explorer icons."
+    Write-Host "Desktop empty-area double-click hid and restored Explorer's native icons while preserving the CrabDesk box surface."
 
     $exitCommand = Start-Process -FilePath $exe -ArgumentList "--exit-existing" -Wait -PassThru
     if ($exitCommand.ExitCode -ne 0) {

@@ -22,21 +22,27 @@ catch (InvalidOperationException)
 {
 }
 
+var recoveryCompleted = false;
 try
 {
     var recovery = ReadRecoveryState(markerPath, previousHidden);
+    var inputRestored = ExplorerIcons.EnsureDesktopInputEnabled();
+    var workAreasRestored = recovery.WorkAreas is null || ExplorerIcons.RestoreWorkAreas(recovery.WorkAreas);
+    var positionsRestored = recovery.IconPositions.Count == 0;
     if (recovery.IconPositions.Count > 0)
     {
         for (var attempt = 0; attempt < 12; attempt++)
         {
             if (ExplorerIcons.RestorePositions(recovery.IconPositions) >= recovery.IconPositions.Count)
             {
+                positionsRestored = true;
                 break;
             }
             Thread.Sleep(500);
         }
     }
-    ExplorerIcons.SetHidden(recovery.PreviousHidden);
+    var visibilityRestored = ExplorerIcons.SetHidden(recovery.PreviousHidden);
+    recoveryCompleted = workAreasRestored && positionsRestored && visibilityRestored && inputRestored;
 }
 catch
 {
@@ -45,7 +51,10 @@ catch
 
 try
 {
-    File.Delete(markerPath);
+    if (recoveryCompleted)
+    {
+        File.Delete(markerPath);
+    }
 }
 catch
 {
@@ -68,9 +77,11 @@ internal sealed class RecoveryState
 {
     public bool PreviousHidden { get; set; }
     public List<RecoveryIconPosition> IconPositions { get; set; } = [];
+    public List<RecoveryWorkArea>? WorkAreas { get; set; }
 }
 
 internal readonly record struct RecoveryIconPosition(string DisplayName, int X, int Y);
+internal readonly record struct RecoveryWorkArea(int Left, int Top, int Right, int Bottom);
 
 [JsonSerializable(typeof(RecoveryState))]
 internal partial class GuardJsonContext : JsonSerializerContext;
@@ -85,6 +96,7 @@ internal static class ExplorerIcons
     private const uint LvmGetItemCount = LvmFirst + 4;
     private const uint LvmGetItemTextW = LvmFirst + 115;
     private const uint LvmSetItemPosition32 = LvmFirst + 49;
+    private const uint LvmSetWorkAreas = LvmFirst + 65;
     private const uint ProcessVmOperation = 0x0008;
     private const uint ProcessVmRead = 0x0010;
     private const uint ProcessVmWrite = 0x0020;
@@ -94,6 +106,7 @@ internal static class ExplorerIcons
     private const uint MemRelease = 0x8000;
     private const uint PageReadWrite = 0x04;
     private const int TextBytes = 1024;
+    private const uint MessageTimeoutMilliseconds = 500;
 
     internal static int RestorePositions(IReadOnlyList<RecoveryIconPosition> positions)
     {
@@ -141,7 +154,16 @@ internal static class ExplorerIcons
         try
         {
             var restored = 0;
-            var count = SendMessage(listView, LvmGetItemCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+            if (!TrySendMessage(
+                    listView,
+                    LvmGetItemCount,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    out var countResult))
+            {
+                return 0;
+            }
+            var count = countResult.ToInt32();
             for (var index = 0; index < count; index++)
             {
                 var item = new ListViewItem
@@ -152,7 +174,15 @@ internal static class ExplorerIcons
                     TextMax = TextBytes / 2
                 };
                 WriteStructure(process, remoteItem, item);
-                SendMessage(listView, LvmGetItemTextW, new IntPtr(index), remoteItem);
+                if (!TrySendMessage(
+                        listView,
+                        LvmGetItemTextW,
+                        new IntPtr(index),
+                        remoteItem,
+                        out _))
+                {
+                    return restored;
+                }
                 var textBuffer = new byte[TextBytes];
                 if (!ReadProcessMemory(process, remoteText, textBuffer, textBuffer.Length, out _))
                 {
@@ -171,8 +201,19 @@ internal static class ExplorerIcons
                 }
 
                 WriteStructure(process, remotePoint, new NativePoint { X = position.X, Y = position.Y });
-                SendMessage(listView, LvmSetItemPosition32, new IntPtr(index), remotePoint);
-                restored++;
+                if (!TrySendMessage(
+                        listView,
+                        LvmSetItemPosition32,
+                        new IntPtr(index),
+                        remotePoint,
+                        out var positionResult))
+                {
+                    return restored;
+                }
+                if (positionResult != IntPtr.Zero)
+                {
+                    restored++;
+                }
             }
             return restored;
         }
@@ -184,11 +225,80 @@ internal static class ExplorerIcons
         }
     }
 
-    internal static void SetHidden(bool hidden)
+    internal static bool RestoreWorkAreas(IReadOnlyList<RecoveryWorkArea> workAreas)
+    {
+        var listView = FindWindowEx(FindDesktopView(), IntPtr.Zero, "SysListView32", "FolderView");
+        if (listView == IntPtr.Zero)
+        {
+            return false;
+        }
+        if (workAreas.Count == 0)
+        {
+            return TrySendMessage(
+                listView,
+                LvmSetWorkAreas,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                out _);
+        }
+
+        GetWindowThreadProcessId(listView, out var processId);
+        using var process = OpenProcess(
+            ProcessVmOperation | ProcessVmRead | ProcessVmWrite | ProcessQueryInformation,
+            false,
+            processId);
+        if (process.IsInvalid)
+        {
+            return false;
+        }
+
+        var rectangles = workAreas.Select(area => new NativeRectangle
+        {
+            Left = area.Left,
+            Top = area.Top,
+            Right = area.Right,
+            Bottom = area.Bottom
+        }).ToArray();
+        var size = Marshal.SizeOf<NativeRectangle>();
+        var byteCount = checked(size * rectangles.Length);
+        var local = Marshal.AllocHGlobal(byteCount);
+        var remote = IntPtr.Zero;
+        try
+        {
+            for (var index = 0; index < rectangles.Length; index++)
+            {
+                Marshal.StructureToPtr(rectangles[index], local + index * size, false);
+            }
+            var buffer = new byte[byteCount];
+            Marshal.Copy(local, buffer, 0, byteCount);
+            remote = VirtualAllocEx(
+                process,
+                IntPtr.Zero,
+                (nuint)byteCount,
+                MemCommit | MemReserve,
+                PageReadWrite);
+            return remote != IntPtr.Zero &&
+                WriteProcessMemory(process, remote, buffer, buffer.Length, out var written) &&
+                written == (nuint)buffer.Length &&
+                TrySendMessage(
+                    listView,
+                    LvmSetWorkAreas,
+                    new IntPtr(rectangles.Length),
+                    remote,
+                    out _);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(local);
+            Free(process, remote);
+        }
+    }
+
+    internal static bool SetHidden(bool hidden)
     {
         if (GetHidden() == hidden)
         {
-            return;
+            return true;
         }
 
         var view = FindDesktopView();
@@ -202,7 +312,40 @@ internal static class ExplorerIcons
             using var key = Registry.CurrentUser.CreateSubKey(AdvancedKey);
             key.SetValue("HideIcons", hidden ? 1 : 0, RegistryValueKind.DWord);
         }
+        return GetHidden() == hidden;
     }
+
+    internal static bool EnsureDesktopInputEnabled()
+    {
+        var view = FindDesktopView();
+        var desktopParent = view == IntPtr.Zero ? IntPtr.Zero : GetParent(view);
+        if (desktopParent == IntPtr.Zero)
+        {
+            return false;
+        }
+        if (IsWindowEnabled(desktopParent))
+        {
+            return true;
+        }
+
+        EnableWindow(desktopParent, true);
+        return IsWindowEnabled(desktopParent);
+    }
+
+    private static bool TrySendMessage(
+        IntPtr window,
+        uint message,
+        IntPtr wParam,
+        IntPtr lParam,
+        out IntPtr result) =>
+        SendMessageTimeout(
+            window,
+            message,
+            wParam,
+            lParam,
+            SmtoAbortIfHung,
+            MessageTimeoutMilliseconds,
+            out result) != IntPtr.Zero;
 
     private static bool GetHidden()
     {
@@ -288,6 +431,15 @@ internal static class ExplorerIcons
         internal int Y;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRectangle
+    {
+        internal int Left;
+        internal int Top;
+        internal int Right;
+        internal int Bottom;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -301,10 +453,18 @@ internal static class ExplorerIcons
     private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
 
     [DllImport("user32.dll")]
-    private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 
     [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    private static extern IntPtr GetParent(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowEnabled(IntPtr window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnableWindow(IntPtr window, bool enable);
 
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessageTimeout(

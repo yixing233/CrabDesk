@@ -9,6 +9,7 @@ public sealed class DesktopHostService : IDesktopHost
     public IntPtr DesktopListView { get; private set; }
     public IntPtr DesktopView { get; private set; }
     public bool IsAvailable => DesktopParent != IntPtr.Zero && NativeMethods.IsWindow(DesktopParent);
+    public bool IsDesktopInputEnabled => IsAvailable && NativeMethods.IsWindowEnabled(DesktopParent);
 
     public bool Refresh()
     {
@@ -23,6 +24,21 @@ public sealed class DesktopHostService : IDesktopHost
         DesktopListView = listView;
         DesktopView = view;
         return changed;
+    }
+
+    public bool EnsureDesktopInputEnabled()
+    {
+        if (!IsAvailable)
+        {
+            return false;
+        }
+        if (NativeMethods.IsWindowEnabled(DesktopParent))
+        {
+            return true;
+        }
+
+        NativeMethods.EnableWindow(DesktopParent, true);
+        return NativeMethods.IsWindowEnabled(DesktopParent);
     }
 
     public static IntPtr FindDesktopView()

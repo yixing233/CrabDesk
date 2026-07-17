@@ -4,6 +4,23 @@ namespace CrabDesk.Tests;
 
 public sealed class LayoutTests
 {
+    [Theory]
+    [InlineData(121.9, 120)]
+    [InlineData(122, 124)]
+    [InlineData(-5.9, -4)]
+    public void LayoutGridUsesFineFourDipSteps(double value, double expected)
+    {
+        Assert.Equal(expected, LayoutGrid.Snap(value));
+    }
+
+    [Theory]
+    [InlineData(180, 180)]
+    [InlineData(181, 184)]
+    public void LayoutGridRoundsMinimumSizesUp(double value, double expected)
+    {
+        Assert.Equal(expected, LayoutGrid.SnapUp(value));
+    }
+
     [Fact]
     public void DefaultStateStartsWithoutDemoBoxes()
     {
@@ -11,7 +28,6 @@ public sealed class LayoutTests
 
         Assert.Empty(state.Boxes);
         Assert.False(state.Settings.TakeOverDesktop);
-        Assert.True(state.Settings.DesktopBehavior.ShowDesktopContextMenu);
     }
 
     [Fact]
@@ -307,7 +323,7 @@ public sealed class LayoutTests
     }
 
     [Fact]
-    public void ManualReorderIgnoresDropOntoSelectionAndNonManualSort()
+    public void ReorderIgnoresDropOntoSelectionAndSwitchesNonManualSortToManual()
     {
         var manual = new DesktopBox
         {
@@ -321,9 +337,46 @@ public sealed class LayoutTests
         };
 
         Assert.False(LayoutCoordinator.ReorderItems(manual, ["A", "B", "C"], ["B"], "B"));
-        Assert.False(LayoutCoordinator.ReorderItems(named, ["A", "B", "C"], ["B"], "A"));
+        Assert.True(LayoutCoordinator.ReorderItems(named, ["A", "B", "C"], ["B"], "A"));
         Assert.Equal(["A", "B", "C"], manual.ItemOrder);
-        Assert.Equal(["A", "B", "C"], named.ItemOrder);
+        Assert.Equal(BoxSortMode.Manual, named.SortMode);
+        Assert.Equal(["B", "A", "C"], named.ItemOrder);
+    }
+
+    [Fact]
+    public void NonManualReorderPreservesVisibleOrderAsManualBaseline()
+    {
+        var box = new DesktopBox
+        {
+            SortMode = BoxSortMode.Modified,
+            ItemOrder = ["old", "order"]
+        };
+
+        var changed = LayoutCoordinator.ReorderItems(
+            box,
+            ["newest", "middle", "oldest"],
+            ["oldest"],
+            "middle");
+
+        Assert.True(changed);
+        Assert.Equal(BoxSortMode.Manual, box.SortMode);
+        Assert.Equal(["newest", "oldest", "middle"], box.ItemOrder);
+    }
+
+    [Fact]
+    public void NonManualNoOpReorderKeepsExistingSortMode()
+    {
+        var box = new DesktopBox { SortMode = BoxSortMode.Type };
+
+        var changed = LayoutCoordinator.ReorderItems(
+            box,
+            ["folder", "document"],
+            ["folder"],
+            "document");
+
+        Assert.False(changed);
+        Assert.Equal(BoxSortMode.Type, box.SortMode);
+        Assert.Empty(box.ItemOrder);
     }
 
     [Theory]

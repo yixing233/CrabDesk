@@ -88,7 +88,7 @@ jobs:
         shell: pwsh
         run: |
           $files = @(
-            "artifacts\publish\win-x64\CrabDesk.App.exe",
+            "artifacts\publish\win-x64\CrabDesk.WinUI.exe",
             "artifacts\publish\win-x64\CrabDesk.IconGuard.exe",
             "artifacts\installer\CrabDesk-Setup-x64.exe"
           )

@@ -37,27 +37,42 @@ public sealed class WindowsIntegrationTests
         }
 
         var keyPath = @"Software\CrabDesk\Tests\ContextMenu\" + Guid.NewGuid().ToString("N");
-        var registration = new DesktopContextMenuRegistration(Registry.CurrentUser, keyPath);
-        var executable = Path.Combine(Path.GetTempPath(), "CrabDesk.App.exe");
+        var submenuClassName = "CrabDesk.Tests.ContextMenu." + Guid.NewGuid().ToString("N");
+        var submenuKeyPath = keyPath + ".Commands";
+        var legacyOrganizeKeyPath = keyPath + ".Organize";
+        var registration = new DesktopContextMenuRegistration(
+            Registry.CurrentUser,
+            keyPath,
+            submenuClassName,
+            submenuKeyPath,
+            legacyOrganizeKeyPath);
+        var executable = Path.Combine(Path.GetTempPath(), "CrabDesk.WinUI.exe");
         try
         {
             registration.SetEnabled(true, executable);
 
             Assert.True(registration.IsEnabled);
             using var key = Registry.CurrentUser.OpenSubKey(keyPath);
-            using var organizeCommand = key?.OpenSubKey(@"shell\Organize\command");
-            using var openCommand = key?.OpenSubKey(@"shell\Open\command");
+            using var submenuKey = Registry.CurrentUser.OpenSubKey(submenuKeyPath);
+            using var createBoxCommand = submenuKey?.OpenSubKey(@"shell\02CreateBox\command");
+            using var organizeCommand = submenuKey?.OpenSubKey(@"shell\03Organize\command");
+            using var openCommand = submenuKey?.OpenSubKey(@"shell\01Open\command");
             Assert.Equal("CrabDesk", key?.GetValue(null));
-            Assert.Equal(string.Empty, key?.GetValue("SubCommands"));
+            Assert.Null(key?.GetValue("SubCommands"));
+            Assert.Equal(submenuClassName, key?.GetValue("ExtendedSubCommandsKey"));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --create-box", createBoxCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --organize", organizeCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\"", openCommand?.GetValue(null));
 
             registration.SetEnabled(false, executable);
             Assert.False(registration.IsEnabled);
+            Assert.Null(Registry.CurrentUser.OpenSubKey(submenuKeyPath));
         }
         finally
         {
             Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
+            Registry.CurrentUser.DeleteSubKeyTree(submenuKeyPath, false);
+            Registry.CurrentUser.DeleteSubKeyTree(legacyOrganizeKeyPath, false);
         }
     }
 
@@ -316,10 +331,13 @@ public sealed class WindowsIntegrationTests
             var unclassified = DesktopIconPositionService.CaptureItemPositions(
                 host.DesktopListView,
                 [unclassifiedStem, unclassifiedStem + ".txt"]).Single();
-            Assert.InRange(first.X, 596, 644);
-            Assert.InRange(first.Y, 386, 434);
-            Assert.InRange(second.X, 766, 814);
-            Assert.InRange(second.Y, 486, 534);
+            var spacing = DesktopIconPositionService.GetItemSpacing(host.DesktopListView);
+            var horizontalTolerance = Math.Max(24, spacing.Width);
+            var verticalTolerance = Math.Max(24, spacing.Height);
+            Assert.InRange(first.X, 620 - horizontalTolerance, 620 + horizontalTolerance);
+            Assert.InRange(first.Y, 410 - verticalTolerance, 410 + verticalTolerance);
+            Assert.InRange(second.X, 790 - horizontalTolerance, 790 + horizontalTolerance);
+            Assert.InRange(second.Y, 510 - verticalTolerance, 510 + verticalTolerance);
             Assert.Equal(originalUnclassified.X, unclassified.X);
             Assert.Equal(originalUnclassified.Y, unclassified.Y);
         }
@@ -333,6 +351,75 @@ public sealed class WindowsIntegrationTests
             {
                 File.Delete(path);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ExplorerRetainsIconInsideExtendedOffscreenWorkArea()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var stem = $"CrabDeskOffscreenTest-{Guid.NewGuid():N}";
+        var path = Path.Combine(desktop, stem + ".txt");
+        await File.WriteAllTextAsync(path, "CrabDesk offscreen position probe");
+        DesktopIconPositionSnapshot? original = null;
+        IReadOnlyList<System.Drawing.Rectangle>? originalWorkAreas = null;
+        var host = new DesktopHostService();
+        try
+        {
+            host.Refresh();
+            for (var attempt = 0; attempt < 20 && original is null; attempt++)
+            {
+                await Task.Delay(250);
+                var captured = DesktopIconPositionService.CaptureItemPositions(
+                    host.DesktopListView,
+                    [stem, stem + ".txt"]).FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(captured.DisplayName))
+                {
+                    original = captured;
+                }
+            }
+            Assert.NotNull(original);
+
+            var bounds = DesktopWindowTools.GetWindowBounds(host.DesktopListView);
+            originalWorkAreas = DesktopIconPositionService.GetWorkAreas(host.DesktopListView);
+            var extendedWorkArea = new System.Drawing.Rectangle(
+                0,
+                0,
+                (int)bounds.Width + 8192,
+                (int)bounds.Height + 8192);
+            Assert.True(DesktopIconPositionService.SetWorkAreas(
+                host.DesktopListView,
+                [extendedWorkArea]));
+            var requestedX = (int)(bounds.X + bounds.Width + 4096);
+            var requestedY = (int)(bounds.Y + bounds.Height + 4096);
+            Assert.Equal(1, DesktopIconPositionService.MoveItemsUnderBox(
+                host.DesktopListView,
+                [new DesktopIconPlacement([stem, stem + ".txt"], requestedX, requestedY)]));
+
+            await Task.Delay(3000);
+            var actual = DesktopIconPositionService.CaptureItemPositions(
+                host.DesktopListView,
+                [stem, stem + ".txt"]).Single();
+            Assert.True(
+                actual.X >= bounds.Width || actual.Y >= bounds.Height,
+                $"Explorer reported ({actual.X}, {actual.Y}) inside {bounds.Width}x{bounds.Height} instead of the requested offscreen position.");
+        }
+        finally
+        {
+            if (original is not null)
+            {
+                DesktopIconPositionService.RestoreItemPositions(host.DesktopListView, [original.Value]);
+            }
+            if (originalWorkAreas is not null)
+            {
+                DesktopIconPositionService.SetWorkAreas(host.DesktopListView, originalWorkAreas);
+            }
+            File.Delete(path);
         }
     }
 
@@ -354,6 +441,7 @@ public sealed class WindowsIntegrationTests
         await File.WriteAllTextAsync(path, "CrabDesk guard recovery test");
 
         DesktopIconPositionSnapshot? original = null;
+        IReadOnlyList<System.Drawing.Rectangle>? originalWorkAreas = null;
         var host = new DesktopHostService();
         try
         {
@@ -371,6 +459,16 @@ public sealed class WindowsIntegrationTests
             }
             Assert.NotNull(original);
 
+            originalWorkAreas = DesktopIconPositionService.GetWorkAreas(host.DesktopListView);
+            var listViewBounds = DesktopWindowTools.GetWindowBounds(host.DesktopListView);
+            Assert.True(DesktopIconPositionService.SetWorkAreas(
+                host.DesktopListView,
+                [new System.Drawing.Rectangle(
+                    0,
+                    0,
+                    (int)listViewBounds.Width + 8192,
+                    (int)listViewBounds.Height + 8192)]));
+
             Assert.True(DesktopIconPositionService.MoveItemsUnderBox(
                 host.DesktopListView,
                 [stem, stem + ".txt"],
@@ -381,7 +479,12 @@ public sealed class WindowsIntegrationTests
             await File.WriteAllTextAsync(marker, JsonSerializer.Serialize(new DesktopRecoveryState
             {
                 PreviousHidden = previousHidden,
-                IconPositions = [original.Value]
+                IconPositions = [original.Value],
+                WorkAreas = originalWorkAreas.Select(area => new DesktopWorkAreaSnapshot(
+                    area.Left,
+                    area.Top,
+                    area.Right,
+                    area.Bottom)).ToList()
             }));
 
             using var guard = Process.Start(new ProcessStartInfo(guardPath)
@@ -400,6 +503,9 @@ public sealed class WindowsIntegrationTests
                 [stem, stem + ".txt"]).Single();
             Assert.Equal(original.Value.X, final.X);
             Assert.Equal(original.Value.Y, final.Y);
+            Assert.Equal(
+                originalWorkAreas,
+                DesktopIconPositionService.GetWorkAreas(host.DesktopListView));
             Assert.False(File.Exists(marker));
         }
         finally
@@ -407,6 +513,10 @@ public sealed class WindowsIntegrationTests
             if (original is not null)
             {
                 DesktopIconPositionService.RestoreItemPositions(host.DesktopListView, [original.Value]);
+            }
+            if (originalWorkAreas is not null)
+            {
+                DesktopIconPositionService.SetWorkAreas(host.DesktopListView, originalWorkAreas);
             }
             File.Delete(path);
             File.Delete(marker);

@@ -144,7 +144,7 @@ switch ($Stage) {
         }
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
         do {
-            $remaining = @(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue)
+            $remaining = @(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue)
             if ($remaining.Count -eq 0) { break }
             Start-Sleep -Milliseconds 500
         } while ([DateTime]::UtcNow -lt $deadline)

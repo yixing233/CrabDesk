@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using System.Windows.Interop;
 using CrabDesk.Core;
+using Forms = System.Windows.Forms;
 
 namespace CrabDesk.Native;
 
@@ -9,21 +9,13 @@ public sealed class GlobalHotkeyService : IHotkeyService
     private const int WmHotkey = 0x0312;
     private const uint ModNoRepeat = 0x4000;
     private const int ErrorHotkeyAlreadyRegistered = 1409;
-    private readonly HwndSource _source;
+    private readonly HotkeyWindow _window = new();
     private readonly Dictionary<HotkeyAction, int> _registered = [];
     private bool _disposed;
 
     public GlobalHotkeyService()
     {
-        var parameters = new HwndSourceParameters("CrabDesk.GlobalHotkeys")
-        {
-            ParentWindow = new IntPtr(-3),
-            WindowStyle = 0,
-            Width = 0,
-            Height = 0
-        };
-        _source = new HwndSource(parameters);
-        _source.AddHook(WindowHook);
+        _window.HotkeyPressed += OnHotkeyPressed;
     }
 
     public event EventHandler<GlobalHotkeyPressedEventArgs>? Pressed;
@@ -43,7 +35,7 @@ public sealed class GlobalHotkeyService : IHotkeyService
 
         var id = 0x5100 + (int)action;
         if (RegisterHotKey(
-                _source.Handle,
+                _window.Handle,
                 id,
                 (uint)binding.Modifiers | ModNoRepeat,
                 (uint)binding.Key))
@@ -61,7 +53,7 @@ public sealed class GlobalHotkeyService : IHotkeyService
     {
         if (_registered.Remove(action, out var id))
         {
-            UnregisterHotKey(_source.Handle, id);
+            UnregisterHotKey(_window.Handle, id);
         }
     }
 
@@ -76,24 +68,17 @@ public sealed class GlobalHotkeyService : IHotkeyService
         {
             Unregister(action);
         }
-        _source.RemoveHook(WindowHook);
-        _source.Dispose();
+        _window.HotkeyPressed -= OnHotkeyPressed;
+        _window.Dispose();
     }
 
-    private IntPtr WindowHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    private void OnHotkeyPressed(int id)
     {
-        if (message != WmHotkey)
-        {
-            return IntPtr.Zero;
-        }
-        var id = wParam.ToInt32();
         var match = _registered.FirstOrDefault(pair => pair.Value == id);
         if (_registered.ContainsKey(match.Key) && match.Value == id)
         {
-            handled = true;
             Pressed?.Invoke(this, new GlobalHotkeyPressedEventArgs(match.Key));
         }
-        return IntPtr.Zero;
     }
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -103,4 +88,29 @@ public sealed class GlobalHotkeyService : IHotkeyService
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+
+    private sealed class HotkeyWindow : Forms.NativeWindow, IDisposable
+    {
+        internal HotkeyWindow()
+        {
+            CreateHandle(new Forms.CreateParams
+            {
+                Caption = "CrabDesk.GlobalHotkeys",
+                Parent = new IntPtr(-3)
+            });
+        }
+
+        internal event Action<int>? HotkeyPressed;
+
+        protected override void WndProc(ref Forms.Message message)
+        {
+            if (message.Msg == WmHotkey)
+            {
+                HotkeyPressed?.Invoke(message.WParam.ToInt32());
+            }
+            base.WndProc(ref message);
+        }
+
+        public void Dispose() => DestroyHandle();
+    }
 }

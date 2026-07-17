@@ -1,5 +1,5 @@
 param(
-    [string]$OutputDirectory = "..\CrabDesk.App\Assets"
+    [string]$OutputDirectory = "..\CrabDesk.WinUI\Assets"
 )
 
 $ErrorActionPreference = "Stop"

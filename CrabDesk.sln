@@ -3,8 +3,6 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.App", "CrabDesk.App\CrabDesk.App.csproj", "{C975205F-87E2-48FE-AB39-0001275B95AD}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.IconGuard", "CrabDesk.IconGuard\CrabDesk.IconGuard.csproj", "{0D2F81EF-77E5-4042-9811-43C4C6DCEC7B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Core", "CrabDesk.Core\CrabDesk.Core.csproj", "{E9900C22-1F0E-4955-AE5B-AFF304FA1F9B}"
@@ -12,6 +10,12 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Native", "CrabDesk.Native\CrabDesk.Native.csproj", "{5AFD6AA1-10AD-4700-B6D2-3D6EDDA0DD6B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Tests", "CrabDesk.Tests\CrabDesk.Tests.csproj", "{869E9B64-EDE3-4B0D-95E1-E2761E10C3D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Runtime", "CrabDesk.Runtime\CrabDesk.Runtime.csproj", "{38D405A2-5993-4AAD-A963-A6488565E8AA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.WinUI", "CrabDesk.WinUI\CrabDesk.WinUI.csproj", "{32369D54-7D29-44CB-83BD-580A241E034D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.WinUI.Tests", "CrabDesk.WinUI.Tests\CrabDesk.WinUI.Tests.csproj", "{CC722987-689F-48C3-BA5B-45190B1C2176}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -22,10 +26,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{C975205F-87E2-48FE-AB39-0001275B95AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C975205F-87E2-48FE-AB39-0001275B95AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C975205F-87E2-48FE-AB39-0001275B95AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C975205F-87E2-48FE-AB39-0001275B95AD}.Release|Any CPU.Build.0 = Release|Any CPU
 		{0D2F81EF-77E5-4042-9811-43C4C6DCEC7B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{0D2F81EF-77E5-4042-9811-43C4C6DCEC7B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0D2F81EF-77E5-4042-9811-43C4C6DCEC7B}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -42,5 +42,17 @@ Global
 		{869E9B64-EDE3-4B0D-95E1-E2761E10C3D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{869E9B64-EDE3-4B0D-95E1-E2761E10C3D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{869E9B64-EDE3-4B0D-95E1-E2761E10C3D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{38D405A2-5993-4AAD-A963-A6488565E8AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38D405A2-5993-4AAD-A963-A6488565E8AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38D405A2-5993-4AAD-A963-A6488565E8AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38D405A2-5993-4AAD-A963-A6488565E8AA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{32369D54-7D29-44CB-83BD-580A241E034D}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{32369D54-7D29-44CB-83BD-580A241E034D}.Debug|Any CPU.Build.0 = Debug|x64
+		{32369D54-7D29-44CB-83BD-580A241E034D}.Release|Any CPU.ActiveCfg = Release|x64
+		{32369D54-7D29-44CB-83BD-580A241E034D}.Release|Any CPU.Build.0 = Release|x64
+		{CC722987-689F-48C3-BA5B-45190B1C2176}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC722987-689F-48C3-BA5B-45190B1C2176}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC722987-689F-48C3-BA5B-45190B1C2176}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC722987-689F-48C3-BA5B-45190B1C2176}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

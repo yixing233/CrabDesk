@@ -32,28 +32,28 @@ if (-not [string]::IsNullOrWhiteSpace($GitHubRepository)) {
     $buildProperties += "-p:CrabDeskGitHubRepository=$GitHubRepository"
 }
 
-dotnet publish (Join-Path $root "CrabDesk.App\CrabDesk.App.csproj") `
+dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
     -c $Configuration -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
     -p:DebugType=None -p:DebugSymbols=false `
     -o $output @buildProperties
 if ($LASTEXITCODE -ne 0) {
-    throw "CrabDesk.App publish failed with exit code $LASTEXITCODE."
+    throw "CrabDesk.WinUI publish failed with exit code $LASTEXITCODE."
 }
 
-Get-ChildItem -LiteralPath $output -Filter "CrabDesk.IconGuard*" | Remove-Item -Force
 Get-ChildItem -LiteralPath $output -Filter "*.pdb" | Remove-Item -Force
 
 dotnet publish (Join-Path $root "CrabDesk.IconGuard\CrabDesk.IconGuard.csproj") `
     -c $Configuration -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:PublishTrimmed=true `
+    -p:PublishTrimmed=false `
     -p:DebugType=None -p:DebugSymbols=false `
     -o $guardOutput
 if ($LASTEXITCODE -ne 0) {
     throw "CrabDesk.IconGuard publish failed with exit code $LASTEXITCODE."
 }
 
-Copy-Item -LiteralPath (Join-Path $guardOutput "CrabDesk.IconGuard.exe") -Destination $output -Force
+Get-ChildItem -LiteralPath $guardOutput -Filter "CrabDesk.IconGuard.*" | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $output -Force
+}
 Remove-Item -LiteralPath $guardOutput -Recurse -Force
 
 Write-Host "CrabDesk published to $output"

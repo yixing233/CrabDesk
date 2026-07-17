@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe",
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
     [string]$OutputPath = "..\artifacts\verification\opacity.png"
 )
 
@@ -14,7 +14,7 @@ else {
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before validating box opacity."
 }
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $output)) | Out-Null
@@ -85,7 +85,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [OpacityVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][OpacityVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -in @("Progman", "WorkerW") -and [OpacityVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW", "SHELLDLL_DefView") -and [OpacityVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }
@@ -175,7 +175,6 @@ $config = @{
             IconSize = 42
             LabelFontSize = 8.5
             ShowItemLabels = $true
-            ShowShortcutBadges = $true
             TitleBarHeight = 48
             TitleAlignment = 0
             TitleColor = "#FFFFFFFF"
@@ -206,7 +205,7 @@ try {
 
     $surface = Find-DesktopSurface $process.Id
     if ($surface -eq [IntPtr]::Zero) {
-        throw "CrabDesk desktop surface was not attached to Progman/WorkerW."
+    throw "CrabDesk desktop surface was not attached to the Explorer desktop hierarchy."
     }
     $boxPixelX = [int][Math]::Round($boxX * $scale)
     $boxPixelY = [int][Math]::Round($boxY * $scale)
@@ -224,8 +223,8 @@ try {
     if (-not ($outsideCandidates | Where-Object { -not (Test-WindowRegionPoint $surface $_.X $_.Y) })) {
         throw "The desktop surface region unexpectedly covered every point around the configured box."
     }
-    if ((Get-ExplorerHideIcons) -ne 1) {
-        throw "Explorer native icons were not hidden during desktop takeover."
+    if ((Get-ExplorerHideIcons) -ne $previousHideIcons) {
+        throw "Opacity rendering changed Explorer's native desktop icon visibility."
     }
 
     Send-WinD

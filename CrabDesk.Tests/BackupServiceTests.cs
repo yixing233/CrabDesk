@@ -24,7 +24,7 @@ public sealed class BackupServiceTests : IDisposable
         var loaded = await service.LoadAsync(backup.Path);
 
         Assert.True(File.Exists(backup.Path));
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
         Assert.True(loaded.Settings.Backup.DailyBackup);
         Assert.Equal("文档", loaded.OrganizationRules[0].Title);
         Assert.Equal(state.Boxes[0].Id, loaded.OrganizationRules[0].TargetBoxId);

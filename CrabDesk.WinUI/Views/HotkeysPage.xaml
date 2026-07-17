@@ -1,0 +1,54 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.HotkeysPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <StackPanel Padding="{StaticResource PagePadding}"
+                    HorizontalAlignment="Stretch" Spacing="24">
+            <StackPanel>
+                <TextBlock Text="全局快捷键" Style="{StaticResource PageTitleStyle}" />
+                <TextBlock Text="在其他窗口中快速显示桌面或执行整理" Style="{StaticResource PageSubtitleStyle}" />
+            </StackPanel>
+
+            <Border Style="{StaticResource SectionCardStyle}">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="显示桌面" FontWeight="SemiBold" />
+                        <TextBlock Text="最小化或恢复普通窗口" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock Text="{Binding ShowDesktopStatus}" Margin="0,6,0,0" Foreground="{ThemeResource AccentBrush}"
+                                   Visibility="{Binding ShowDesktopHasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <ToggleSwitch Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ShowDesktopEnabled, Mode=TwoWay}" AutomationProperties.Name="启用显示桌面快捷键" />
+                        <ComboBox Width="132" ItemsSource="{Binding ModifierOptions}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding ShowDesktopModifiers, Mode=TwoWay}" AutomationProperties.Name="显示桌面修饰键" />
+                        <TextBox Width="84" MaxLength="3" TextAlignment="Center" IsSpellCheckEnabled="False"
+                                 Text="{Binding ShowDesktopKeyText, Mode=TwoWay}"
+                                 ToolTipService.ToolTip="输入 A-Z 或 F1-F12" AutomationProperties.Name="显示桌面按键" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SectionCardStyle}">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="智能整理" FontWeight="SemiBold" />
+                        <TextBlock Text="应用当前启用的整理规则" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock Text="{Binding OrganizeStatus}" Margin="0,6,0,0" Foreground="{ThemeResource AccentBrush}"
+                                   Visibility="{Binding OrganizeHasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <ToggleSwitch Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding OrganizeEnabled, Mode=TwoWay}" AutomationProperties.Name="启用智能整理快捷键" />
+                        <ComboBox Width="132" ItemsSource="{Binding ModifierOptions}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding OrganizeModifiers, Mode=TwoWay}" AutomationProperties.Name="智能整理修饰键" />
+                        <TextBox Width="84" MaxLength="3" TextAlignment="Center" IsSpellCheckEnabled="False"
+                                 Text="{Binding OrganizeKeyText, Mode=TwoWay}"
+                                 ToolTipService.ToolTip="输入 A-Z 或 F1-F12" AutomationProperties.Name="智能整理按键" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

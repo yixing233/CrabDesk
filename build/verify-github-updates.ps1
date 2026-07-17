@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe",
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
     [string]$Repository = "dotnet/runtime",
     [int]$VisualDelaySeconds = 0,
     [switch]$UseBuildMetadata
@@ -10,7 +10,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (Get-Process CrabDesk.App -ErrorAction SilentlyContinue) {
+if (Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue) {
     throw "Close the running CrabDesk instance before the GitHub update verifier."
 }
 

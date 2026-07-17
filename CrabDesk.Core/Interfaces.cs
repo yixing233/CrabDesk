@@ -28,15 +28,28 @@ public interface IDesktopContextMenuRegistration
 
 public interface IDesktopDoubleClickMonitor : IDisposable
 {
+    event EventHandler? EmptyAreaClicked;
     event EventHandler? EmptyAreaDoubleClicked;
+    event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
+    bool DoubleClickEnabled { get; set; }
+}
+
+public sealed class DesktopIconZoomEventArgs(int delta) : EventArgs
+{
+    public int Delta { get; } = delta;
 }
 
 public interface IUpdateService : IDisposable
 {
     Task<UpdateCheckResult> CheckAsync(
         UpdateCheckRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<UpdateDownloadResult> DownloadAsync(
+        UpdateDownloadRequest request,
+        IProgress<UpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default);
 }
 

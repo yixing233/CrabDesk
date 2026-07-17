@@ -27,7 +27,7 @@ if ($Owner -notmatch '^[A-Za-z0-9_.-]+$' -or $Repository -notmatch '^[A-Za-z0-9_
 if ($Tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
     throw "Release tag is invalid: $Tag"
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close CrabDesk before validating the downloaded release installer."
 }
 
@@ -140,7 +140,7 @@ try {
     Expand-Archive -LiteralPath $downloaded["CrabDesk-portable-win-x64.zip"] -DestinationPath $portableRoot -Force
     $signatureTargets = @(
         $downloaded["CrabDesk-Setup-x64.exe"],
-        (Join-Path $portableRoot "CrabDesk.App.exe"),
+        (Join-Path $portableRoot "CrabDesk.WinUI.exe"),
         (Join-Path $portableRoot "CrabDesk.IconGuard.exe")
     )
     foreach ($target in $signatureTargets) {

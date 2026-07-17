@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseSystemDrawing>true</UseSystemDrawing>
+    <RootNamespace>CrabDesk.Runtime</RootNamespace>
+    <AssemblyName>CrabDesk.Runtime</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
+    <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
+  </ItemGroup>
+
+</Project>

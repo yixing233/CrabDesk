@@ -7,12 +7,12 @@ $ErrorActionPreference = "Stop"
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $publishDirectory = Join-Path $root "artifacts\publish\win-x64"
 $scriptPath = Join-Path $root "installer\CrabDesk.iss"
-if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory "CrabDesk.App.exe"))) {
+if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory "CrabDesk.WinUI.exe"))) {
     throw "Published CrabDesk files were not found. Run .\build\publish.ps1 first."
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    [xml]$project = Get-Content -LiteralPath (Join-Path $root "CrabDesk.App\CrabDesk.App.csproj") -Raw -Encoding UTF8
+    [xml]$project = Get-Content -LiteralPath (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") -Raw -Encoding UTF8
     $Version = @($project.Project.PropertyGroup.Version | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })[0]
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {

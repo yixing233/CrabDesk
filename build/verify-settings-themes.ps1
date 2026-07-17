@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe",
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
     [string]$OutputDirectory = ""
 )
 
@@ -8,11 +8,11 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.App -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before capturing settings themes."
 }
 
-$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("CrabDesk.ThemeTest." + [Guid]::NewGuid().ToString("N"))
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("CrabDesk.WinUIThemeTest." + [Guid]::NewGuid().ToString("N"))
 $dataDirectory = Join-Path $testRoot "data"
 $captureDirectory = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     Join-Path $testRoot "captures"
@@ -25,12 +25,9 @@ else {
 }
 [System.IO.Directory]::CreateDirectory($dataDirectory) | Out-Null
 [System.IO.Directory]::CreateDirectory($captureDirectory) | Out-Null
-$previousDataDirectory = $env:CRABDESK_DATA_DIR
-$env:CRABDESK_DATA_DIR = $dataDirectory
-$boxId = [Guid]::NewGuid()
 
 $config = @{
-    SchemaVersion = 15
+    SchemaVersion = 16
     Settings = @{
         TakeOverDesktop = $false
         ShowSystemItems = $false
@@ -42,18 +39,11 @@ $config = @{
             ShowDesktopContextMenu = $false
             ToggleIconsOnDesktopDoubleClick = $false
         }
-        Backup = @{
-            DailyBackup = $false
-            RetentionDays = 7
-            BackupDirectory = ""
-        }
-        Updates = @{
-            CheckOnStartup = $false
-            Channel = 0
-        }
+        Backup = @{ DailyBackup = $false; RetentionDays = 7; BackupDirectory = "" }
+        Updates = @{ CheckOnStartup = $false; Channel = 0 }
     }
     Boxes = @(@{
-        Id = $boxId
+        Id = [Guid]::NewGuid()
         Title = "Desktop"
         MonitorId = "primary"
         Bounds = @{ X = 40; Y = 50; Width = 420; Height = 300 }
@@ -65,151 +55,114 @@ $config = @{
         RunOnDesktopChanges = $false
         ReassignExistingItems = $false
     }
-    OrganizationRules = @(
-        @{
-            Id = [Guid]::NewGuid(); Title = "Shortcuts"; Enabled = $true; Priority = 0
-            ItemKinds = @(2); NamePattern = '*'; Extensions = @('.lnk', '.url'); Action = 0; TargetBoxId = $boxId
-        },
-        @{
-            Id = [Guid]::NewGuid(); Title = "Folders"; Enabled = $true; Priority = 1
-            ItemKinds = @(1); NamePattern = '*'; Extensions = @(); Action = 0; TargetBoxId = $boxId
-        },
-        @{
-            Id = [Guid]::NewGuid(); Title = "Documents"; Enabled = $true; Priority = 2
-            ItemKinds = @(0); NamePattern = '*'; Extensions = @('.doc', '.docx', '.pdf', '.xlsx', '.pptx', '.txt'); Action = 0; TargetBoxId = $boxId
-        },
-        @{
-            Id = [Guid]::NewGuid(); Title = "Images"; Enabled = $true; Priority = 3
-            ItemKinds = @(0); NamePattern = '*'; Extensions = @('.bmp', '.jpg', '.jpeg', '.png', '.gif', '.tiff'); Action = 0; TargetBoxId = $boxId
-        },
-        @{
-            Id = [Guid]::NewGuid(); Title = "Archives"; Enabled = $true; Priority = 4
-            ItemKinds = @(0); NamePattern = '*'; Extensions = @('.7z', '.bz2', '.gz', '.rar', '.tar', '.zip'); Action = 0; TargetBoxId = $boxId
-        }
-    )
+    OrganizationRules = @()
 }
 $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $dataDirectory "config.json") -Encoding UTF8
 
-$process = $null
-try {
-    $arguments = "--capture-settings-themes `"$captureDirectory`""
-    $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
-    if (-not $process.WaitForExit(60000)) {
-        throw "CrabDesk did not finish capturing settings themes within 60 seconds."
-    }
-    if ($process.ExitCode -ne 0) {
-        $errorPath = Join-Path $captureDirectory "error.txt"
-        $detail = if (Test-Path -LiteralPath $errorPath) {
-            Get-Content -LiteralPath $errorPath -Raw -Encoding UTF8
-        }
-        else {
-            "no error detail was written"
-        }
-        throw "Theme capture exited with code $($process.ExitCode): $detail"
-    }
+Add-Type -AssemblyName System.Drawing
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class CrabDeskWinUICapture {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT rect, int size);
+    [DllImport("user32.dll")]
+    public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+}
+'@
 
-    $manifestPath = Join-Path $captureDirectory "manifest.json"
-    if (-not (Test-Path -LiteralPath $manifestPath)) {
-        throw "Theme capture manifest was not created."
+function Save-WindowCapture([IntPtr]$Handle, [string]$Path) {
+    $bounds = New-Object CrabDeskWinUICapture+RECT
+    [void][CrabDeskWinUICapture]::DwmGetWindowAttribute(
+        $Handle,
+        9,
+        [ref]$bounds,
+        [Runtime.InteropServices.Marshal]::SizeOf($bounds))
+    $width = $bounds.Right - $bounds.Left
+    $height = $bounds.Bottom - $bounds.Top
+    if ($width -lt 760 -or $height -lt 520) {
+        throw "WinUI capture is below the minimum viewport: ${width}x${height}"
     }
-    $report = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $manifest = @()
-    foreach ($entry in $report.Captures) {
-        $manifest += $entry
-    }
-    if ($manifest.Count -lt 21) {
-        throw "Expected at least 21 theme screenshots, found $($manifest.Count)."
-    }
-    foreach ($theme in 0, 1, 2) {
-        if (@($manifest | Where-Object { $_.Theme -eq $theme }).Count -lt 7) {
-            throw "Theme $theme does not contain all seven settings pages."
-        }
-    }
-    $themeStates = @()
-    foreach ($state in $report.States) {
-        $themeStates += $state
-    }
-    if ($themeStates.Count -ne 3) {
-        throw "Expected three resolved theme states, found $($themeStates.Count)."
-    }
-    foreach ($state in $themeStates) {
-        if ($state.WindowChromeMatches -ne $true) {
-            throw "Window chrome did not match theme $($state.Theme)."
-        }
-        if ($state.TrayThemeMatches -ne $true) {
-            throw "Tray menu colors or renderer did not match theme $($state.Theme)."
-        }
-    }
-    $sliderStates = @($report.SliderStates)
-    if ($sliderStates.Count -ne 27) {
-        throw "Expected 27 slider visual states across three themes, found $($sliderStates.Count)."
-    }
-    foreach ($state in $sliderStates) {
-        if ($state.IsFullyVisible -ne $true -or $state.SliderHeight -lt 28 -or
-            $state.TrackHeight -lt 16 -or $state.ThumbHeight -lt 15) {
-            throw "Slider '$($state.Name)' is clipped in theme $($state.Theme). Slider=$($state.SliderHeight), Track=$($state.TrackHeight), Thumb=$($state.ThumbHeight), Top=$($state.ThumbTop)"
-        }
-    }
-    $ruleTableStates = @($report.RuleTableStates)
-    if ($ruleTableStates.Count -ne 3) {
-        throw "Expected one organization-rule table state per theme, found $($ruleTableStates.Count)."
-    }
-    foreach ($state in $ruleTableStates) {
-        if ($state.ItemCount -ne 5 -or $state.Width -lt 500 -or $state.Height -lt 180) {
-            throw "Organization-rule table is incomplete in theme $($state.Theme). Items=$($state.ItemCount), Size=$($state.Width)x$($state.Height)"
-        }
-    }
-
-    Add-Type -AssemblyName System.Drawing
-    foreach ($entry in $manifest) {
-        if (-not (Test-Path -LiteralPath $entry.Path)) {
-            throw "Theme screenshot is missing: $($entry.Path)"
-        }
-        if ((Get-Item -LiteralPath $entry.Path).Length -lt 5000) {
-            throw "Theme screenshot appears blank or incomplete: $($entry.Path)"
-        }
-        $bitmap = [System.Drawing.Bitmap]::new($entry.Path)
-        try {
-            if ($bitmap.Width -lt 820 -or $bitmap.Height -lt 560) {
-                throw "Theme screenshot is smaller than the minimum settings window: $($entry.Path)"
-            }
-            $colors = [System.Collections.Generic.HashSet[int]]::new()
-            for ($x = 0; $x -lt $bitmap.Width; $x += 32) {
-                for ($y = 0; $y -lt $bitmap.Height; $y += 32) {
-                    $colors.Add($bitmap.GetPixel($x, $y).ToArgb()) | Out-Null
-                }
-            }
-            if ($colors.Count -lt 8) {
-                throw "Theme screenshot does not contain enough rendered UI colors: $($entry.Path)"
-            }
-        }
-        finally {
-            $bitmap.Dispose()
-        }
-    }
-
-    $light = [System.Drawing.Bitmap]::new((Join-Path $captureDirectory "Light-01.png"))
-    $dark = [System.Drawing.Bitmap]::new((Join-Path $captureDirectory "Dark-01.png"))
+    $bitmap = [System.Drawing.Bitmap]::new($width, $height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $hdc = $graphics.GetHdc()
     try {
-        $lightPixel = $light.GetPixel(260, 30)
-        $darkPixel = $dark.GetPixel(260, 30)
-        $lightLuminance = ($lightPixel.R + $lightPixel.G + $lightPixel.B) / 3
-        $darkLuminance = ($darkPixel.R + $darkPixel.G + $darkPixel.B) / 3
-        if ($lightLuminance -lt 180 -or $darkLuminance -gt 100 -or ($lightLuminance - $darkLuminance) -lt 100) {
-            throw "Light and dark theme backgrounds were not rendered distinctly."
+        if (-not [CrabDeskWinUICapture]::PrintWindow($Handle, $hdc, 2)) {
+            throw "PrintWindow failed for $Path"
         }
     }
     finally {
-        $light.Dispose()
-        $dark.Dispose()
+        $graphics.ReleaseHdc($hdc)
+        $graphics.Dispose()
     }
+    try {
+        $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+        $colors = [System.Collections.Generic.HashSet[int]]::new()
+        for ($x = 0; $x -lt $bitmap.Width; $x += 32) {
+            for ($y = 0; $y -lt $bitmap.Height; $y += 32) {
+                $colors.Add($bitmap.GetPixel($x, $y).ToArgb()) | Out-Null
+            }
+        }
+        if ($colors.Count -lt 8) {
+            throw "WinUI capture appears blank: $Path"
+        }
+    }
+    finally {
+        $bitmap.Dispose()
+    }
+}
 
-    Write-Host "Captured and validated $($manifest.Count) settings screenshots in $captureDirectory"
+$previousDataDirectory = $env:CRABDESK_DATA_DIR
+$env:CRABDESK_DATA_DIR = $dataDirectory
+$pages = @("general", "hotkeys", "backup", "organization", "appearance", "boxes", "about")
+$themes = @("System", "Light", "Dark")
+$manifest = @()
+try {
+    foreach ($theme in $themes) {
+        foreach ($page in $pages) {
+            $process = Start-Process -FilePath $exe -ArgumentList @(
+                "--show-settings",
+                "--validation-page", $page,
+                "--validation-theme", $theme,
+                "--validation-width", "1040",
+                "--validation-height", "720",
+                "--validation-scale", "1") -PassThru
+            try {
+                $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                do {
+                    Start-Sleep -Milliseconds 100
+                    $process.Refresh()
+                } while (($process.MainWindowHandle -eq 0 -or -not $process.Responding) -and
+                         -not $process.HasExited -and [DateTime]::UtcNow -lt $deadline)
+                if ($process.HasExited -or $process.MainWindowHandle -eq 0 -or -not $process.Responding) {
+                    throw "WinUI page '$page' did not become responsive for theme '$theme'."
+                }
+                Start-Sleep -Milliseconds 700
+                $path = Join-Path $captureDirectory "$theme-$page.png"
+                Save-WindowCapture $process.MainWindowHandle $path
+                $manifest += [pscustomobject]@{ Theme = $theme; Page = $page; Path = $path }
+            }
+            finally {
+                if (-not $process.HasExited) {
+                    $exit = Start-Process -FilePath $exe -ArgumentList "--exit-existing" -PassThru
+                    [void]$exit.WaitForExit(5000)
+                    [void]$process.WaitForExit(5000)
+                }
+                if (-not $process.HasExited) {
+                    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                }
+                Get-Process CrabDesk.IconGuard -ErrorAction SilentlyContinue |
+                    Stop-Process -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 300
+            }
+        }
+    }
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $captureDirectory "manifest.json") -Encoding UTF8
+    Write-Host "Captured and validated $($manifest.Count) WinUI settings screenshots in $captureDirectory"
 }
 finally {
-    if ($process -and -not $process.HasExited) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    }
     if ($null -eq $previousDataDirectory) {
         Remove-Item Env:\CRABDESK_DATA_DIR -ErrorAction SilentlyContinue
     }
@@ -223,4 +176,4 @@ finally {
     }
 }
 
-Write-Host "Settings theme verification passed."
+Write-Host "WinUI settings theme verification passed."

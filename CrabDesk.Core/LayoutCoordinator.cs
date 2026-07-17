@@ -16,7 +16,11 @@ public static class LayoutCoordinator
                 string.Equals(candidate.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase)) ?? primary;
             box.MonitorId = monitor.Id;
             var localBounds = new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height);
-            box.Bounds = box.Bounds.Clamp(localBounds);
+            var minimumWidth = DesktopItemLayoutEngine.GetMinimumBoxWidth(
+                box.ViewMode,
+                box.Appearance.IconSize,
+                state.Settings.Appearance.IconHorizontalSpacing);
+            box.Bounds = box.Bounds.Clamp(localBounds, minimumWidth);
         }
     }
 
@@ -26,7 +30,8 @@ public static class LayoutCoordinator
         double screenPixelX,
         double screenPixelY,
         double grabOffsetX,
-        double grabOffsetY)
+        double grabOffsetY,
+        double gridStep = 0)
     {
         var target = monitors.FirstOrDefault(monitor => monitor.PixelBounds.Contains(screenPixelX, screenPixelY));
         if (target is null || string.Equals(target.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase))
@@ -39,8 +44,8 @@ public static class LayoutCoordinator
         var localCursorY = (screenPixelY - target.PixelBounds.Y) / scale;
         box.MonitorId = target.Id;
         box.Bounds = new LayoutRect(
-            localCursorX - grabOffsetX,
-            localCursorY - grabOffsetY,
+            LayoutGrid.Snap(localCursorX - grabOffsetX, gridStep),
+            LayoutGrid.Snap(localCursorY - grabOffsetY, gridStep),
             box.Bounds.Width,
             box.Bounds.Height).Clamp(new LayoutRect(0, 0, target.WorkArea.Width, target.WorkArea.Height));
         return true;
@@ -90,7 +95,7 @@ public static class LayoutCoordinator
         IReadOnlyCollection<string> movingKeys,
         string? beforeKey)
     {
-        if (box.SortMode != BoxSortMode.Manual || currentKeys.Count == 0 || movingKeys.Count == 0)
+        if (currentKeys.Count == 0 || movingKeys.Count == 0)
         {
             return false;
         }
@@ -102,10 +107,12 @@ public static class LayoutCoordinator
             return false;
         }
 
-        var normalized = box.ItemOrder
-            .Where(currentSet.Contains)
-            .Distinct(comparer)
-            .ToList();
+        var normalized = box.SortMode == BoxSortMode.Manual
+            ? box.ItemOrder
+                .Where(currentSet.Contains)
+                .Distinct(comparer)
+                .ToList()
+            : [];
         normalized.AddRange(currentKeys.Where(key => !normalized.Contains(key, comparer)));
         var moving = normalized.Where(movingSet.Contains).ToArray();
         normalized.RemoveAll(key => movingSet.Contains(key));
@@ -117,9 +124,16 @@ public static class LayoutCoordinator
             targetIndex = normalized.Count;
         }
         normalized.InsertRange(targetIndex, moving);
-        var changed = !box.ItemOrder.SequenceEqual(normalized, comparer);
+        var changed = box.SortMode == BoxSortMode.Manual
+            ? !box.ItemOrder.SequenceEqual(normalized, comparer)
+            : !currentKeys.SequenceEqual(normalized, comparer);
+        if (!changed)
+        {
+            return false;
+        }
+        box.SortMode = BoxSortMode.Manual;
         box.ItemOrder = normalized;
-        return changed;
+        return true;
     }
 }
 

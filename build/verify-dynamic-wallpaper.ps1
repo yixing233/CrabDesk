@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe"
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying dynamic wallpaper compatibility."
 }
 $wallpaperProcesses = @(Get-Process wallpaper32,wallpaper64 -ErrorAction SilentlyContinue)
@@ -86,7 +86,7 @@ function Find-CrabDeskSurface([int]$ProcessId) {
             if ($windowProcessId -eq $ProcessId -and [DynamicWallpaperVerifier]::IsWindowVisible($child)) {
                 $parent = [DynamicWallpaperVerifier]::GetParent($child)
                 $parentClass = Get-WindowClass $parent
-                if ($parentClass -in @("Progman", "WorkerW")) {
+                if ($parentClass -in @("Progman", "WorkerW", "SHELLDLL_DefView")) {
                     $script:crabSurface = [pscustomobject]@{
                         Handle = $child
                         Class = Get-WindowClass $child
@@ -173,7 +173,7 @@ try {
     }
     $surface = Find-CrabDeskSurface $process.Id
     if ($null -eq $surface) {
-        throw "CrabDesk did not attach a visible surface below Progman/WorkerW while Wallpaper Engine was active."
+    throw "CrabDesk did not attach a visible surface in the Explorer desktop hierarchy while Wallpaper Engine was active."
     }
     if ($surface.Parent -eq $wallpaper.Parent -or $surface.ParentClass -eq $wallpaper.ParentClass) {
         throw "CrabDesk and Wallpaper Engine were attached to the same desktop layer."

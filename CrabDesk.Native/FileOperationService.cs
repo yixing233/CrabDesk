@@ -3,10 +3,10 @@ using System.IO;
 using System.Runtime.InteropServices;
 using CrabDesk.Core;
 using Microsoft.VisualBasic.FileIO;
-using Clipboard = System.Windows.Clipboard;
-using DataFormats = System.Windows.DataFormats;
-using DataObject = System.Windows.DataObject;
-using WpfDataObject = System.Windows.IDataObject;
+using Clipboard = System.Windows.Forms.Clipboard;
+using DataFormats = System.Windows.Forms.DataFormats;
+using DataObject = System.Windows.Forms.DataObject;
+using ClipboardDataObject = System.Windows.Forms.IDataObject;
 
 namespace CrabDesk.Native;
 
@@ -279,7 +279,7 @@ public static class FileClipboardCodec
         return data;
     }
 
-    public static FileClipboardContent Read(WpfDataObject? data)
+    public static FileClipboardContent Read(ClipboardDataObject? data)
     {
         if (data?.GetDataPresent(DataFormats.FileDrop) != true ||
             data.GetData(DataFormats.FileDrop) is not string[] paths)

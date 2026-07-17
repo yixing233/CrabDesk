@@ -1,0 +1,71 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.OrganizationPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:icons="using:FluentIcons.WinUI">
+    <Grid Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="整理规则" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="按名称、类型和扩展名自动放入目标盒子" Style="{StaticResource PageSubtitleStyle}" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Style="{StaticResource SectionCardStyle}" Margin="0,24,0,12">
+            <StackPanel Spacing="10">
+                <Grid Style="{StaticResource SettingRowGridStyle}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="启用自动整理" VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding OrganizationEnabled, Mode=TwoWay}" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="24">
+                    <CheckBox Content="启动时运行" IsChecked="{Binding RunOnStartup, Mode=TwoWay}" />
+                    <CheckBox Content="桌面变化时运行" IsChecked="{Binding RunRealtime, Mode=TwoWay}" />
+                    <CheckBox Content="重新分配已有项目" IsChecked="{Binding ReassignExisting, Mode=TwoWay}" />
+                </StackPanel>
+                <TextBlock Text="{Binding ConflictText}" Style="{StaticResource SecondaryBodyStyle}" />
+            </StackPanel>
+        </Border>
+
+        <CommandBar Grid.Row="2" DefaultLabelPosition="Collapsed" Background="Transparent">
+            <AppBarButton Label="新建规则" Command="{Binding AddRuleCommand}" ToolTipService.ToolTip="新建规则"><AppBarButton.Icon><icons:FluentIcon Icon="Add" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="编辑规则" Command="{Binding EditRuleCommand}" ToolTipService.ToolTip="编辑规则"><AppBarButton.Icon><icons:FluentIcon Icon="Edit" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="复制规则" Command="{Binding DuplicateRuleCommand}" ToolTipService.ToolTip="复制规则"><AppBarButton.Icon><icons:FluentIcon Icon="DocumentCopy" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="上移" Command="{Binding MoveUpCommand}" ToolTipService.ToolTip="上移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowUp" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="下移" Command="{Binding MoveDownCommand}" ToolTipService.ToolTip="下移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowDown" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="删除" Command="{Binding DeleteRuleCommand}" ToolTipService.ToolTip="删除规则"><AppBarButton.Icon><icons:FluentIcon Icon="Delete" /></AppBarButton.Icon></AppBarButton>
+            <CommandBar.SecondaryCommands>
+                <AppBarButton Label="安装默认规则" Command="{Binding InstallDefaultsCommand}" />
+            </CommandBar.SecondaryCommands>
+        </CommandBar>
+
+        <ListView Grid.Row="3" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule, Mode=TwoWay}"
+                  SelectionMode="Single" DoubleTapped="Rules_OnDoubleTapped" AutomationProperties.Name="整理规则列表">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="8" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="150" /></Grid.ColumnDefinitions>
+                        <ToggleSwitch Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding Enabled, Mode=TwoWay}" Toggled="RuleEnabled_OnToggled" AutomationProperties.Name="启用规则" />
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding NamePattern}" Style="{StaticResource SecondaryBodyStyle}" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="2" Text="{Binding Action}" VerticalAlignment="Center" Foreground="{ThemeResource SecondaryTextBrush}" />
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <Grid Grid.Row="4" Margin="0,12,0,0" ColumnSpacing="8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding ResultText}" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
+            <Button Grid.Column="1" Content="撤销" Command="{Binding UndoCommand}" IsEnabled="{Binding CanUndo}" />
+            <Button Grid.Column="2" Content="立即整理" Command="{Binding ApplyCommand}" />
+        </Grid>
+    </Grid>
+</Page>

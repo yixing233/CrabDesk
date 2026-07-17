@@ -111,7 +111,7 @@ public enum UpdateCheckStatus
 
 public readonly record struct LayoutRect(double X, double Y, double Width, double Height)
 {
-    public LayoutRect Clamp(LayoutRect bounds, double minWidth = 220, double minHeight = 120)
+    public LayoutRect Clamp(LayoutRect bounds, double minWidth = 180, double minHeight = 120)
     {
         var width = Math.Clamp(Width, minWidth, Math.Max(minWidth, bounds.Width));
         var height = Math.Clamp(Height, minHeight, Math.Max(minHeight, bounds.Height));
@@ -135,12 +135,13 @@ public sealed class BoxAppearance
     public string Accent { get; set; } = "#FF4EA1D3";
     public double Opacity { get; set; } = 1;
     public double IconSize { get; set; } = 42;
+    public string LabelFontFamily { get; set; } = "Segoe UI";
     public double LabelFontSize { get; set; } = 8.5;
     public bool ShowItemLabels { get; set; } = true;
-    public bool ShowShortcutBadges { get; set; } = true;
     public double TitleBarHeight { get; set; } = 38;
     public BoxTitleAlignment TitleAlignment { get; set; } = BoxTitleAlignment.Left;
     public string TitleColor { get; set; } = "Auto";
+    public string TitleFontFamily { get; set; } = "Segoe UI";
     public double TitleFontSize { get; set; } = 10;
     public bool TitleFontBold { get; set; } = true;
     public bool ShowCollapseButton { get; set; } = true;
@@ -306,6 +307,31 @@ public sealed record UpdateCheckResult(
     string ETag = "",
     string Message = "");
 
+public sealed record UpdateDownloadRequest(
+    string InstallerUrl,
+    string Sha256Url,
+    string Version,
+    string DestinationDirectory);
+
+public sealed record UpdateDownloadProgress(
+    string Stage,
+    long BytesReceived = 0,
+    long? TotalBytes = null)
+{
+    public double Percentage => TotalBytes is > 0
+        ? Math.Clamp(BytesReceived * 100d / TotalBytes.Value, 0, 100)
+        : 0;
+}
+
+public sealed record UpdateDownloadResult(
+    bool Success,
+    string InstallerPath = "",
+    string Sha256 = "",
+    bool SignatureTrusted = false,
+    string SignerSubject = "",
+    bool IsPrerelease = false,
+    string Message = "");
+
 public sealed class HotkeySettings
 {
     public HotkeyBinding ShowDesktop { get; set; } = new()
@@ -336,7 +362,6 @@ public sealed class DesktopBehaviorSettings
 {
     public bool LaunchToTray { get; set; }
     public bool RefreshAfterRename { get; set; } = true;
-    public bool ShowDesktopContextMenu { get; set; } = true;
     public bool ToggleIconsOnDesktopDoubleClick { get; set; }
     public bool ExpandBoxOnHover { get; set; }
 }
@@ -384,7 +409,7 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 15;
+    public int SchemaVersion { get; set; } = 16;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -402,9 +427,11 @@ public sealed class CrabDeskState
 }
 
 public readonly record struct DesktopIconPositionSnapshot(string DisplayName, int X, int Y);
+public readonly record struct DesktopWorkAreaSnapshot(int Left, int Top, int Right, int Bottom);
 
 public sealed class DesktopRecoveryState
 {
     public bool PreviousHidden { get; set; }
     public List<DesktopIconPositionSnapshot> IconPositions { get; set; } = [];
+    public List<DesktopWorkAreaSnapshot>? WorkAreas { get; set; }
 }

@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe"
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe"
 )
 
 $ErrorActionPreference = "Stop"

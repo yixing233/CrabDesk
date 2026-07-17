@@ -79,7 +79,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 15;
+        state.SchemaVersion = 16;
         state.Settings ??= new AppSettings();
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();
@@ -135,15 +135,8 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Organization ??= new OrganizationSettings();
         state.OrganizationRules ??= [];
 
-        if (previousVersion < 15)
-        {
-            // Older desktop surfaces could trap Explorer input. Upgrades restart in fail-open mode.
-            state.Settings.TakeOverDesktop = false;
-        }
-
         if (previousVersion < 14)
         {
-            state.Settings.DesktopBehavior.ShowDesktopContextMenu = true;
             if (state.Assignments.Count == 0 && state.OrganizationRules.Count == 0 &&
                 state.Boxes.Count == 2 &&
                 state.Boxes.Any(box => box.Title == "常用" && box.Bounds == new LayoutRect(36, 52, 520, 420)) &&
@@ -223,8 +216,10 @@ public sealed class JsonLayoutStore : ILayoutStore
             }
             box.Appearance.Opacity = Math.Clamp(box.Appearance.Opacity, 0.35, 1);
             box.Appearance.IconSize = Math.Clamp(box.Appearance.IconSize, 24, 96);
+            box.Appearance.LabelFontFamily = NormalizeFontFamily(box.Appearance.LabelFontFamily);
             box.Appearance.LabelFontSize = Math.Clamp(box.Appearance.LabelFontSize, 8, 16);
             box.Appearance.TitleBarHeight = Math.Clamp(box.Appearance.TitleBarHeight, 32, 56);
+            box.Appearance.TitleFontFamily = NormalizeFontFamily(box.Appearance.TitleFontFamily);
             box.Appearance.TitleFontSize = Math.Clamp(box.Appearance.TitleFontSize, 8, 20);
             if (string.IsNullOrWhiteSpace(box.Appearance.Background))
             {
@@ -259,6 +254,9 @@ public sealed class JsonLayoutStore : ILayoutStore
         var extension = value.Trim();
         return extension.StartsWith('.') ? extension.ToLowerInvariant() : "." + extension.ToLowerInvariant();
     }
+
+    private static string NormalizeFontFamily(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Segoe UI" : value.Trim();
 
     private static void NormalizeHotkey(HotkeyBinding binding, HotkeyKey defaultKey)
     {

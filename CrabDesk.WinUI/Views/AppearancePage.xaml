@@ -1,0 +1,229 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.AppearancePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    NavigationCacheMode="Enabled">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <StackPanel Padding="{StaticResource PagePadding}"
+                    HorizontalAlignment="Stretch" Spacing="24">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="主题与外观" Style="{StaticResource PageTitleStyle}" />
+                    <TextBlock Text="调整窗口材质、盒子样式和项目布局" Style="{StaticResource PageSubtitleStyle}" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="恢复默认" Command="{Binding ResetCommand}" VerticalAlignment="Bottom" />
+            </Grid>
+
+            <Border Style="{StaticResource SectionCardStyle}" Padding="16,0">
+                <StackPanel>
+                    <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="窗口材质" FontWeight="SemiBold" />
+                                <TextBlock Text="选择设置窗口的 Fluent 背景效果" Style="{StaticResource SecondaryBodyStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1" Width="{StaticResource SettingsControlWidth}"
+                                      ItemsSource="{Binding BackdropKinds}" SelectedItem="{Binding Backdrop, Mode=TwoWay}"
+                                      VerticalAlignment="Center" AutomationProperties.Name="窗口背景材质" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Expander Header="盒子表面" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="背景色" />
+                        <Button Style="{StaticResource ColorPickerButtonStyle}"
+                                AutomationProperties.Name="选择盒子背景色">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="{StaticResource ColorSwatchSize}"
+                                        Height="{StaticResource ColorSwatchSize}"
+                                        CornerRadius="3"
+                                        Background="{Binding Background, Converter={StaticResource HexBrushConverter}}"
+                                        BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                        BorderThickness="1" />
+                                <TextBlock Grid.Column="1" Text="{Binding Background}" VerticalAlignment="Center" />
+                            </Grid>
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedLeft">
+                                    <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                 IsAlphaEnabled="False"
+                                                 IsColorPreviewVisible="True"
+                                                 IsColorSliderVisible="True"
+                                                 IsColorChannelTextInputVisible="True"
+                                                 IsHexInputVisible="True"
+                                                 Color="{Binding Background, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                 AutomationProperties.Name="盒子背景色选择器" />
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                        <TextBlock Text="强调色" />
+                        <Button Style="{StaticResource ColorPickerButtonStyle}"
+                                AutomationProperties.Name="选择盒子强调色">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="{StaticResource ColorSwatchSize}"
+                                        Height="{StaticResource ColorSwatchSize}"
+                                        CornerRadius="3"
+                                        Background="{Binding Accent, Converter={StaticResource HexBrushConverter}}"
+                                        BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                        BorderThickness="1" />
+                                <TextBlock Grid.Column="1" Text="{Binding Accent}" VerticalAlignment="Center" />
+                            </Grid>
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                    <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                 IsAlphaEnabled="False"
+                                                 IsColorPreviewVisible="True"
+                                                 IsColorSliderVisible="True"
+                                                 IsColorChannelTextInputVisible="True"
+                                                 IsHexInputVisible="True"
+                                                 Color="{Binding Accent, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                 AutomationProperties.Name="盒子强调色选择器" />
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1"><TextBlock Text="不透明度" /><Slider Minimum="35" Maximum="100" StepFrequency="1" Value="{Binding Opacity, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1"><TextBlock Text="圆角" /><Slider Minimum="0" Maximum="20" StepFrequency="1" Value="{Binding CornerRadius, Mode=TwoWay}" /></StackPanel>
+                    <ToggleSwitch Grid.Row="2" Header="显示边框" IsOn="{Binding ShowBorder, Mode=TwoWay}" />
+                    <ToggleSwitch Grid.Row="2" Grid.Column="1" Header="允许调整盒子大小" IsOn="{Binding ShowResizeGrip, Mode=TwoWay}" />
+                    <ToggleSwitch Grid.Row="3" Header="悬停高亮" IsOn="{Binding HoverFeedback, Mode=TwoWay}" />
+                    <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+                        <TextBlock Text="选择颜色" />
+                        <Button Style="{StaticResource ColorPickerButtonStyle}"
+                                AutomationProperties.Name="选择项目选中颜色">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="{StaticResource ColorSwatchSize}"
+                                        Height="{StaticResource ColorSwatchSize}"
+                                        CornerRadius="3"
+                                        Background="{Binding SelectionColor, Converter={StaticResource HexBrushConverter}}"
+                                        BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                        BorderThickness="1" />
+                                <TextBlock Grid.Column="1" Text="{Binding SelectionColor}" VerticalAlignment="Center" />
+                            </Grid>
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                    <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                 IsAlphaEnabled="False"
+                                                 IsColorPreviewVisible="True"
+                                                 IsColorSliderVisible="True"
+                                                 IsColorChannelTextInputVisible="True"
+                                                 IsHexInputVisible="True"
+                                                 Color="{Binding SelectionColor, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                 AutomationProperties.Name="项目选中颜色选择器" />
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Expander>
+
+            <Expander Header="标题栏" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <ComboBox Header="盒子名称字体"
+                              ItemsSource="{Binding FontFamilies}"
+                              ItemTemplate="{StaticResource FontFamilyItemTemplate}"
+                              SelectedItem="{Binding TitleFontFamily, Mode=TwoWay}"
+                              AutomationProperties.Name="盒子名称字体" />
+                    <ComboBox Grid.Column="1" Header="标题对齐" ItemsSource="{Binding TitleAlignments}" SelectedItem="{Binding TitleAlignment, Mode=TwoWay}" />
+                    <StackPanel Grid.Row="1"><TextBlock Text="高度" /><Slider Minimum="32" Maximum="56" StepFrequency="1" Value="{Binding TitleBarHeight, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1"><TextBlock Text="字号" /><Slider Minimum="8" Maximum="20" StepFrequency="0.5" Value="{Binding TitleFontSize, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="4">
+                        <TextBlock Text="标题颜色" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Style="{StaticResource ColorPickerButtonStyle}"
+                                    IsEnabled="{Binding IsManualTitleColorEnabled}"
+                                    AutomationProperties.Name="选择标题颜色">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="{StaticResource ColorSwatchSize}"
+                                            Height="{StaticResource ColorSwatchSize}"
+                                            CornerRadius="3"
+                                            Background="{Binding ManualTitleColor, Converter={StaticResource HexBrushConverter}}"
+                                            BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                            BorderThickness="1" />
+                                    <TextBlock Grid.Column="1" Text="{Binding ManualTitleColor}" VerticalAlignment="Center" />
+                                </Grid>
+                                <Button.Flyout>
+                                    <Flyout Placement="BottomEdgeAlignedRight">
+                                        <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                     IsAlphaEnabled="False"
+                                                     IsColorPreviewVisible="True"
+                                                     IsColorSliderVisible="True"
+                                                     IsColorChannelTextInputVisible="True"
+                                                     IsHexInputVisible="True"
+                                                     Color="{Binding ManualTitleColor, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                     AutomationProperties.Name="标题颜色选择器" />
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                            <CheckBox Grid.Column="1"
+                                      Content="自动"
+                                      IsChecked="{Binding UseAutomaticTitleColor, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      AutomationProperties.Name="自动标题颜色" />
+                        </Grid>
+                    </StackPanel>
+                    <ToggleSwitch Grid.Row="3" Header="粗体标题" IsOn="{Binding TitleFontBold, Mode=TwoWay}" />
+                    <ToggleSwitch Grid.Row="3" Grid.Column="1" Header="显示折叠按钮" IsOn="{Binding ShowCollapseButton, Mode=TwoWay}" />
+                </Grid>
+            </Expander>
+
+            <Expander Header="图标与标签" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <StackPanel><TextBlock Text="图标大小" /><Slider Minimum="24" Maximum="96" StepFrequency="1" Value="{Binding IconSize, Mode=TwoWay}" /></StackPanel>
+                    <NumberBox Grid.Column="1"
+                               Header="应用名称字号"
+                               Minimum="8"
+                               Maximum="16"
+                               SmallChange="0.5"
+                               SpinButtonPlacementMode="Compact"
+                               Value="{Binding LabelFontSize, Mode=TwoWay}"
+                               AutomationProperties.Name="应用名称字号" />
+                    <ComboBox Grid.Row="1" Grid.ColumnSpan="2"
+                              Header="应用名称字体"
+                              ItemsSource="{Binding FontFamilies}"
+                              ItemTemplate="{StaticResource FontFamilyItemTemplate}"
+                              SelectedItem="{Binding LabelFontFamily, Mode=TwoWay}"
+                              AutomationProperties.Name="应用名称字体" />
+                    <StackPanel Grid.Row="2"><TextBlock Text="水平间距" /><Slider Minimum="56" Maximum="160" StepFrequency="1" Value="{Binding HorizontalSpacing, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="1"><TextBlock Text="垂直间距" /><Slider Minimum="56" Maximum="180" StepFrequency="1" Value="{Binding VerticalSpacing, Mode=TwoWay}" /></StackPanel>
+                    <ToggleSwitch Grid.Row="3" Header="显示项目标签" IsOn="{Binding ShowItemLabels, Mode=TwoWay}" />
+                    <ComboBox Grid.Row="4" Header="视图" ItemsSource="{Binding ViewModes}" SelectedItem="{Binding ViewMode, Mode=TwoWay}" />
+                    <ComboBox Grid.Row="4" Grid.Column="1" Header="排序" ItemsSource="{Binding SortModes}" SelectedItem="{Binding SortMode, Mode=TwoWay}" />
+                </Grid>
+            </Expander>
+            <Border Height="24" Background="Transparent" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

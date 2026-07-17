@@ -8,6 +8,8 @@ public sealed class DesktopDoubleClickMonitor : IDesktopDoubleClickMonitor
 {
     private const int WhMouseLl = 14;
     private const int WmLButtonDown = 0x0201;
+    private const int WmMouseWheel = 0x020A;
+    private const int VkControl = 0x11;
     private const int SmCxDoubleClick = 36;
     private const int SmCyDoubleClick = 37;
     private readonly LowLevelMouseProc _callback;
@@ -26,10 +28,13 @@ public sealed class DesktopDoubleClickMonitor : IDesktopDoubleClickMonitor
         }
     }
 
+    public event EventHandler? EmptyAreaClicked;
     public event EventHandler? EmptyAreaDoubleClicked;
+    public event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
 
     public IntPtr DesktopListView { get; set; }
     public bool Enabled { get; set; }
+    public bool DoubleClickEnabled { get; set; }
 
     public void Dispose()
     {
@@ -47,22 +52,64 @@ public sealed class DesktopDoubleClickMonitor : IDesktopDoubleClickMonitor
 
     private IntPtr MouseHook(int code, IntPtr message, IntPtr data)
     {
-        if (code >= 0 && message.ToInt32() == WmLButtonDown && Enabled && DesktopListView != IntPtr.Zero)
+        if (code >= 0 && Enabled && DesktopListView != IntPtr.Zero)
         {
             var mouse = Marshal.PtrToStructure<LowLevelMouseHookStruct>(data);
-            var elapsed = mouse.Time - _lastClickTime;
-            var withinTime = _lastClickTime != 0 && elapsed <= GetDoubleClickTime();
-            var withinDistance = Math.Abs(mouse.Point.X - _lastClickPoint.X) <= GetSystemMetrics(SmCxDoubleClick) / 2 &&
-                Math.Abs(mouse.Point.Y - _lastClickPoint.Y) <= GetSystemMetrics(SmCyDoubleClick) / 2;
-            _lastClickTime = mouse.Time;
-            _lastClickPoint = mouse.Point;
-            if (withinTime && withinDistance && IsEmptyDesktopPoint(mouse.Point))
+            if (message.ToInt32() == WmLButtonDown)
             {
-                _lastClickTime = 0;
-                EmptyAreaDoubleClicked?.Invoke(this, EventArgs.Empty);
+                var elapsed = mouse.Time - _lastClickTime;
+                var withinTime = _lastClickTime != 0 && elapsed <= GetDoubleClickTime();
+                var withinDistance = Math.Abs(mouse.Point.X - _lastClickPoint.X) <= GetSystemMetrics(SmCxDoubleClick) / 2 &&
+                    Math.Abs(mouse.Point.Y - _lastClickPoint.Y) <= GetSystemMetrics(SmCyDoubleClick) / 2;
+                _lastClickTime = mouse.Time;
+                _lastClickPoint = mouse.Point;
+                if (IsEmptyDesktopPoint(mouse.Point))
+                {
+                    EmptyAreaClicked?.Invoke(this, EventArgs.Empty);
+                    if (DoubleClickEnabled && withinTime && withinDistance)
+                    {
+                        _lastClickTime = 0;
+                        EmptyAreaDoubleClicked?.Invoke(this, EventArgs.Empty);
+                    }
+                }
+            }
+            else if (message.ToInt32() == WmMouseWheel &&
+                     GetAsyncKeyState(VkControl) < 0 &&
+                     IsDesktopSurfacePoint(mouse.Point))
+            {
+                var delta = unchecked((short)(mouse.MouseData >> 16));
+                if (delta != 0)
+                {
+                    var targetWindow = WindowFromPoint(mouse.Point);
+                    if (IsCurrentProcessWindow(targetWindow))
+                    {
+                        DesktopIconPositionService.ForwardControlMouseWheel(
+                            DesktopListView,
+                            mouse.Point.X,
+                            mouse.Point.Y,
+                            delta);
+                    }
+                    IconZoomRequested?.Invoke(this, new DesktopIconZoomEventArgs(delta));
+                }
             }
         }
         return CallNextHookEx(_hook, code, message, data);
+    }
+
+    private bool IsDesktopSurfacePoint(NativePoint screenPoint)
+    {
+        var window = WindowFromPoint(screenPoint);
+        if (window == DesktopListView ||
+            IsChild(DesktopListView, window) ||
+            IsChild(window, DesktopListView) ||
+            IsDesktopBackgroundWindow(window))
+        {
+            return true;
+        }
+
+        var desktopView = GetParent(DesktopListView);
+        return desktopView != IntPtr.Zero &&
+            (window == desktopView || IsChild(desktopView, window));
     }
 
     private bool IsEmptyDesktopPoint(NativePoint screenPoint)
@@ -95,6 +142,12 @@ public sealed class DesktopDoubleClickMonitor : IDesktopDoubleClickMonitor
         var className = new StringBuilder(64);
         GetClassName(root == IntPtr.Zero ? window : root, className, className.Capacity);
         return className.ToString() is "WorkerW" or "Progman";
+    }
+
+    private static bool IsCurrentProcessWindow(IntPtr window)
+    {
+        GetWindowThreadProcessId(window, out var processId);
+        return processId == Environment.ProcessId;
     }
 
     private delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
@@ -141,6 +194,12 @@ public sealed class DesktopDoubleClickMonitor : IDesktopDoubleClickMonitor
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr window, StringBuilder className, int capacity);

@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe",
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
     [int]$DurationSeconds = 900,
     [int]$SampleIntervalSeconds = 5,
     [int]$FilesPerFolder = 120
@@ -20,7 +20,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.App -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before running the stability test."
 }
 

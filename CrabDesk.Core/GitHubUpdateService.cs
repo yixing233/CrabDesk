@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -9,6 +11,8 @@ public sealed class GitHubUpdateService : IUpdateService
 {
     private const string InstallerAssetName = "CrabDesk-Setup-x64.exe";
     private const string Sha256AssetName = "SHA256SUMS.txt";
+    private const long MaximumInstallerBytes = 512L * 1024 * 1024;
+    private const int MaximumChecksumBytes = 1024 * 1024;
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
 
@@ -149,11 +153,211 @@ public sealed class GitHubUpdateService : IUpdateService
         }
     }
 
+    public async Task<UpdateDownloadResult> DownloadAsync(
+        UpdateDownloadRequest request,
+        IProgress<UpdateDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryGetHttpsUri(request.InstallerUrl, out var installerUri) ||
+            !TryGetHttpsUri(request.Sha256Url, out var sha256Uri))
+        {
+            return new UpdateDownloadResult(false, Message: "更新资源地址无效或不是 HTTPS 地址");
+        }
+
+        var version = SanitizeVersion(request.Version);
+        if (version.Length == 0)
+        {
+            return new UpdateDownloadResult(false, Message: "更新版本号无效");
+        }
+
+        var destinationRoot = Path.GetFullPath(request.DestinationDirectory);
+        var versionDirectory = Path.Combine(destinationRoot, version);
+        var installerPath = Path.Combine(versionDirectory, InstallerAssetName);
+        var partialPath = installerPath + ".part";
+        Directory.CreateDirectory(versionDirectory);
+
+        try
+        {
+            progress?.Report(new UpdateDownloadProgress("正在获取校验文件"));
+            var checksumText = await DownloadChecksumTextAsync(sha256Uri, cancellationToken)
+                .ConfigureAwait(false);
+            var expectedHash = FindExpectedHash(checksumText, InstallerAssetName);
+            if (expectedHash is null)
+            {
+                return new UpdateDownloadResult(false, Message: $"{Sha256AssetName} 中缺少安装包校验值");
+            }
+
+            File.Delete(partialPath);
+            using var httpRequest = CreateDownloadRequest(installerUri);
+            using var response = await _client.SendAsync(
+                httpRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            var totalBytes = response.Content.Headers.ContentLength;
+            if (totalBytes is > MaximumInstallerBytes)
+            {
+                return new UpdateDownloadResult(false, Message: "更新安装包超过 512 MiB 限制");
+            }
+
+            progress?.Report(new UpdateDownloadProgress("正在下载安装包", 0, totalBytes));
+            long received = 0;
+            string actualHash;
+            {
+                await using var source = await response.Content.ReadAsStreamAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                await using var destination = new FileStream(
+                    partialPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    128 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[128 * 1024];
+                long lastReported = 0;
+                while (true)
+                {
+                    var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    received += read;
+                    if (received > MaximumInstallerBytes)
+                    {
+                        throw new InvalidDataException("更新安装包超过 512 MiB 限制");
+                    }
+                    await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    hasher.AppendData(buffer, 0, read);
+                    if (received - lastReported >= 1024 * 1024 || received == totalBytes)
+                    {
+                        progress?.Report(new UpdateDownloadProgress("正在下载安装包", received, totalBytes));
+                        lastReported = received;
+                    }
+                }
+                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+                actualHash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
+            }
+
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(expectedHash),
+                    Convert.FromHexString(actualHash)))
+            {
+                return new UpdateDownloadResult(false, Message: "安装包 SHA-256 校验失败");
+            }
+
+            File.Move(partialPath, installerPath, true);
+            progress?.Report(new UpdateDownloadProgress("安装包下载完成", received, totalBytes ?? received));
+            return new UpdateDownloadResult(true, installerPath, actualHash, Message: "安装包下载并校验完成");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or UnauthorizedAccessException or CryptographicException)
+        {
+            return new UpdateDownloadResult(false, Message: $"下载更新失败：{exception.Message}");
+        }
+        finally
+        {
+            TryDelete(partialPath);
+        }
+    }
+
     public void Dispose()
     {
         if (_ownsClient)
         {
             _client.Dispose();
+        }
+    }
+
+    private async Task<string> DownloadChecksumTextAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        using var request = CreateDownloadRequest(uri);
+        using var response = await _client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is > MaximumChecksumBytes)
+        {
+            throw new InvalidDataException("更新校验文件过大");
+        }
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        if (bytes.Length > MaximumChecksumBytes)
+        {
+            throw new InvalidDataException("更新校验文件过大");
+        }
+        return Encoding.ASCII.GetString(bytes);
+    }
+
+    private static HttpRequestMessage CreateDownloadRequest(Uri uri)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("CrabDesk", "Updater"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+        return request;
+    }
+
+    private static bool TryGetHttpsUri(string value, out Uri uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var candidate) &&
+            candidate.Scheme == Uri.UriSchemeHttps)
+        {
+            uri = candidate;
+            return true;
+        }
+        uri = null!;
+        return false;
+    }
+
+    private static string SanitizeVersion(string value)
+    {
+        var normalized = value.Trim().TrimStart('v', 'V');
+        return normalized.Length <= 64 && normalized.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_')
+            ? normalized
+            : string.Empty;
+    }
+
+    private static string? FindExpectedHash(string text, string fileName)
+    {
+        foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length < 66)
+            {
+                continue;
+            }
+            var separator = trimmed.IndexOfAny([' ', '\t']);
+            if (separator != 64)
+            {
+                continue;
+            }
+            var hash = trimmed[..separator];
+            var asset = trimmed[separator..].TrimStart().TrimStart('*').Trim();
+            if (hash.All(Uri.IsHexDigit) &&
+                asset.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+            {
+                return hash.ToLowerInvariant();
+            }
+        }
+        return null;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 

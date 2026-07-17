@@ -123,7 +123,8 @@ public static class CrabDeskHardwareProbe
                 var parent = GetParent(child);
                 var parentClass = ReadClass(parent);
                 if (!String.Equals(parentClass, "Progman", StringComparison.Ordinal) &&
-                    !String.Equals(parentClass, "WorkerW", StringComparison.Ordinal)) return true;
+                    !String.Equals(parentClass, "WorkerW", StringComparison.Ordinal) &&
+                    !String.Equals(parentClass, "SHELLDLL_DefView", StringComparison.Ordinal)) return true;
                 var numericHandle = child.ToInt64();
                 if (!seen.Add(numericHandle)) return true;
                 Rect rect;
@@ -231,7 +232,7 @@ function Get-CrabDeskHardwareSnapshot {
 
     $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
     do {
-        $processes = @(Get-Process CrabDesk.App -ErrorAction SilentlyContinue)
+        $processes = @(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue)
         if ($processes.Count -eq 1) {
             $process = $processes[0]
             $process.Refresh()
@@ -245,7 +246,7 @@ function Get-CrabDeskHardwareSnapshot {
     } while ([DateTime]::UtcNow -lt $deadline)
 
     if ($processes.Count -ne 1) {
-        throw "Exactly one CrabDesk.App process must be running; found $($processes.Count)."
+        throw "Exactly one CrabDesk.WinUI process must be running; found $($processes.Count)."
     }
     if ($monitors.Count -eq 0) {
         throw "Windows did not report any active monitors."
@@ -304,8 +305,8 @@ function Assert-CrabDeskHardwareSnapshot {
     if ($Snapshot.IconGuardProcessCount -lt 1) {
         throw "IconGuard is not running."
     }
-    if ($Snapshot.HideIcons -ne 1) {
-        throw "Explorer native icons must remain hidden while CrabDesk owns the desktop surface."
+    if ($Snapshot.HideIcons -ne 0) {
+        throw "Explorer native icons must remain visible while CrabDesk hosts desktop boxes."
     }
     if (@($Snapshot.Monitors | Where-Object IsPrimary).Count -ne 1) {
         throw "The active topology must contain exactly one primary monitor."
@@ -323,8 +324,8 @@ function Assert-CrabDeskHardwareSnapshot {
     }
 
     foreach ($surface in $Snapshot.Surfaces) {
-        if (-not $surface.Visible -or $surface.ParentClass -notin @("Progman", "WorkerW")) {
-            throw "Desktop surface $($surface.Handle) is not a visible Progman/WorkerW child."
+        if (-not $surface.Visible -or $surface.ParentClass -notin @("Progman", "WorkerW", "SHELLDLL_DefView")) {
+            throw "Desktop surface $($surface.Handle) is not a visible Explorer desktop child."
         }
         if (($surface.Style -band 0x40000000) -eq 0) {
             throw "Desktop surface $($surface.Handle) does not have WS_CHILD."

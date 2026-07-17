@@ -1,0 +1,95 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.GeneralPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:core="using:CrabDesk.Core">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <StackPanel Padding="{StaticResource PagePadding}"
+                    HorizontalAlignment="Stretch" Spacing="24">
+            <StackPanel>
+                <TextBlock Text="常规" Style="{StaticResource PageTitleStyle}" />
+                <TextBlock Text="桌面接管、启动行为和交互偏好" Style="{StaticResource PageSubtitleStyle}" />
+            </StackPanel>
+
+            <StackPanel>
+                <TextBlock Text="桌面连接" Style="{StaticResource SectionTitleStyle}" />
+                <Border Style="{StaticResource SectionCardStyle}">
+                    <StackPanel Spacing="8">
+                        <Grid MinHeight="44">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <Ellipse Width="8" Height="8"
+                                         Fill="{ThemeResource SuccessBrush}" />
+                                <TextBlock Text="{Binding ConnectionStatus}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="{Binding PauseButtonText}"
+                                    Command="{Binding TogglePauseCommand}" AutomationProperties.Name="切换桌面接管状态" />
+                        </Grid>
+                        <Button Content="重新连接 Explorer 桌面" HorizontalAlignment="Left"
+                                Command="{Binding ReconnectCommand}" AutomationProperties.Name="重新连接 Explorer 桌面" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <StackPanel>
+                <TextBlock Text="偏好" Style="{StaticResource SectionTitleStyle}" />
+                <Border Style="{StaticResource SectionCardStyle}" Padding="16,0">
+                    <StackPanel>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="登录 Windows 后启动" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding StartWithWindows, Mode=TwoWay}" AutomationProperties.Name="登录 Windows 后启动" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="删除盒子前确认" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ConfirmDeleteBox, Mode=TwoWay}" AutomationProperties.Name="删除盒子前确认" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="启动后仅驻留托盘" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding LaunchToTray, Mode=TwoWay}" AutomationProperties.Name="启动后仅驻留托盘" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="显示系统桌面项目" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ShowSystemItems, Mode=TwoWay}" AutomationProperties.Name="显示系统桌面项目" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="双击桌面空白处隐藏图标" />
+                                <TextBlock Text="再次双击恢复桌面与盒子图标" Style="{StaticResource SecondaryBodyStyle}" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ToggleIconsOnDoubleClick, Mode=TwoWay}" AutomationProperties.Name="双击桌面隐藏图标" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="悬停展开折叠盒子" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ExpandBoxOnHover, Mode=TwoWay}" AutomationProperties.Name="悬停展开折叠盒子" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="桌面变化后自动刷新" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding RefreshAfterRename, Mode=TwoWay}" AutomationProperties.Name="桌面变化后自动刷新" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock Text="界面动画" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding AnimationEnabled, Mode=TwoWay}" AutomationProperties.Name="界面动画" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,24">
+                <TextBlock Text="主题" Style="{StaticResource SectionTitleStyle}" />
+                <ComboBox ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding ThemeMode, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch" AutomationProperties.Name="应用主题" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

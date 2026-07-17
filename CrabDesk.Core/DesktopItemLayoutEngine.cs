@@ -7,6 +7,24 @@ public sealed record DesktopItemLayoutResult(
 
 public static class DesktopItemLayoutEngine
 {
+    public static double GetGridCellWidth(double iconSize, double horizontalSpacing)
+    {
+        iconSize = Math.Clamp(iconSize, 24, 96);
+        return Math.Max(Math.Clamp(horizontalSpacing, 56, 160), iconSize + 34);
+    }
+
+    public static double GetMinimumBoxWidth(
+        BoxViewMode viewMode,
+        double iconSize,
+        double horizontalSpacing)
+    {
+        const double titleBarMinimumWidth = 180;
+        const double bodyHorizontalPadding = 16;
+        return viewMode == BoxViewMode.Grid
+            ? Math.Max(titleBarMinimumWidth, bodyHorizontalPadding + GetGridCellWidth(iconSize, horizontalSpacing) * 2)
+            : titleBarMinimumWidth;
+    }
+
     public static DesktopItemLayoutResult Calculate(
         BoxViewMode viewMode,
         LayoutRect body,
@@ -33,7 +51,7 @@ public static class DesktopItemLayoutEngine
             return new DesktopItemLayoutResult(items, scroll, maxScroll);
         }
 
-        var cellWidth = Math.Max(Math.Clamp(horizontalSpacing, 56, 160), iconSize + 34);
+        var cellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
         var cellHeight = Math.Max(Math.Clamp(verticalSpacing, 56, 180), iconSize + 46);
         var columns = Math.Max(1, (int)(body.Width / cellWidth));
         var rows = (int)Math.Ceiling(itemCount / (double)columns);

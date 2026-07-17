@@ -1,8 +1,8 @@
 using System.IO;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media.Imaging;
 
 namespace CrabDesk.Native;
 
@@ -32,9 +32,9 @@ public sealed class ShellIconProvider
         _cacheCapacity = Math.Clamp(cacheCapacity, 8, 4096);
     }
 
-    public BitmapSource? GetIcon(string parsingName) => GetIcon(parsingName, 48);
+    public Bitmap? GetIcon(string parsingName) => GetIcon(parsingName, 48);
 
-    public BitmapSource? GetIcon(string parsingName, int pixelSize)
+    public Bitmap? GetIcon(string parsingName, int pixelSize)
     {
         var key = CreateCacheKey(parsingName, pixelSize);
         lock (_cacheLock)
@@ -67,6 +67,10 @@ public sealed class ShellIconProvider
         lock (_cacheLock)
         {
             var count = _cache.Count;
+            foreach (var entry in _cache.Values)
+            {
+                entry.Image?.Dispose();
+            }
             _cache.Clear();
             return count;
         }
@@ -85,6 +89,7 @@ public sealed class ShellIconProvider
         while (_cache.Count > _cacheCapacity)
         {
             var oldest = _cache.MinBy(entry => entry.Value.LastAccess).Key;
+            _cache[oldest].Image?.Dispose();
             _cache.Remove(oldest);
             _evictions++;
         }
@@ -120,10 +125,10 @@ public sealed class ShellIconProvider
         return new CacheKey(normalizedName, Math.Clamp(pixelSize, 16, 256), modifiedTicks, length);
     }
 
-    private static BitmapSource? LoadImage(string parsingName, int pixelSize) =>
+    private static Bitmap? LoadImage(string parsingName, int pixelSize) =>
         LoadShellItemImage(parsingName, pixelSize) ?? LoadLegacyIcon(parsingName);
 
-    private static BitmapSource? LoadShellItemImage(string parsingName, int pixelSize)
+    private static Bitmap? LoadShellItemImage(string parsingName, int pixelSize)
     {
         var interfaceId = typeof(IShellItemImageFactory).GUID;
         var result = SHCreateItemFromParsingName(parsingName, IntPtr.Zero, ref interfaceId, out var factory);
@@ -137,19 +142,15 @@ public sealed class ShellIconProvider
         {
             result = factory.GetImage(
                 new NativeSize(pixelSize, pixelSize),
-                ShellItemImageFlags.BiggerSizeOk,
+                ShellItemImageFlags.BiggerSizeOk |
+                ShellItemImageFlags.IconOnly |
+                ShellItemImageFlags.ScaleUp,
                 out bitmapHandle);
             if (result != 0 || bitmapHandle == IntPtr.Zero)
             {
                 return null;
             }
-            var image = Imaging.CreateBitmapSourceFromHBitmap(
-                bitmapHandle,
-                IntPtr.Zero,
-                Int32Rect.Empty,
-                BitmapSizeOptions.FromWidthAndHeight(pixelSize, pixelSize));
-            image.Freeze();
-            return image;
+            return CreateAlphaBitmap(bitmapHandle, pixelSize);
         }
         catch (COMException)
         {
@@ -165,7 +166,7 @@ public sealed class ShellIconProvider
         }
     }
 
-    private static BitmapSource? LoadLegacyIcon(string parsingName)
+    private static Bitmap? LoadLegacyIcon(string parsingName)
     {
         IntPtr iconHandle = IntPtr.Zero;
         IntPtr pidl = IntPtr.Zero;
@@ -190,12 +191,8 @@ public sealed class ShellIconProvider
             {
                 return null;
             }
-            var image = Imaging.CreateBitmapSourceFromHIcon(
-                iconHandle,
-                Int32Rect.Empty,
-                BitmapSizeOptions.FromEmptyOptions());
-            image.Freeze();
-            return image;
+            using var icon = (Icon)Icon.FromHandle(iconHandle).Clone();
+            return icon.ToBitmap();
         }
         finally
         {
@@ -245,6 +242,25 @@ public sealed class ShellIconProvider
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeleteObject(IntPtr handle);
 
+    [DllImport("gdi32.dll")]
+    private static extern int GetObject(IntPtr handle, int size, out NativeBitmap bitmap);
+
+    [DllImport("gdi32.dll")]
+    private static extern int GetDIBits(
+        IntPtr deviceContext,
+        IntPtr bitmap,
+        uint startScan,
+        uint scanLines,
+        IntPtr bits,
+        ref BitmapInfo bitmapInfo,
+        uint usage);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDC(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern int ReleaseDC(IntPtr window, IntPtr deviceContext);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr icon);
@@ -261,11 +277,141 @@ public sealed class ShellIconProvider
     [Flags]
     private enum ShellItemImageFlags
     {
-        BiggerSizeOk = 0x1
+        BiggerSizeOk = 0x1,
+        IconOnly = 0x4,
+        ScaleUp = 0x100
+    }
+
+    private static Bitmap? CreateAlphaBitmap(IntPtr bitmapHandle, int pixelSize)
+    {
+        if (GetObject(bitmapHandle, Marshal.SizeOf<NativeBitmap>(), out var native) == 0)
+        {
+            return null;
+        }
+        var width = Math.Abs(native.Width);
+        var height = Math.Abs(native.Height);
+        if (width == 0 || height == 0)
+        {
+            return null;
+        }
+
+        var source = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        var data = source.LockBits(
+            new Rectangle(0, 0, width, height),
+            ImageLockMode.WriteOnly,
+            PixelFormat.Format32bppArgb);
+        var info = new BitmapInfo
+        {
+            Header = new BitmapInfoHeader
+            {
+                Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
+                Width = width,
+                Height = -height,
+                Planes = 1,
+                BitCount = 32,
+                Compression = 0,
+                SizeImage = (uint)(Math.Abs(data.Stride) * height)
+            }
+        };
+        var deviceContext = GetDC(IntPtr.Zero);
+        var copied = 0;
+        try
+        {
+            copied = GetDIBits(
+                deviceContext,
+                bitmapHandle,
+                0,
+                (uint)height,
+                data.Scan0,
+                ref info,
+                0);
+        }
+        finally
+        {
+            if (deviceContext != IntPtr.Zero) ReleaseDC(IntPtr.Zero, deviceContext);
+            source.UnlockBits(data);
+        }
+        if (copied == 0 || !HasAlpha(source))
+        {
+            source.Dispose();
+            return null;
+        }
+        if (width == pixelSize && height == pixelSize)
+        {
+            return source;
+        }
+
+        var scaled = new Bitmap(pixelSize, pixelSize, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(scaled))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(source, new Rectangle(0, 0, pixelSize, pixelSize));
+        }
+        source.Dispose();
+        return scaled;
+    }
+
+    private static bool HasAlpha(Bitmap bitmap)
+    {
+        var data = bitmap.LockBits(
+            new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb);
+        try
+        {
+            var bytes = new byte[Math.Abs(data.Stride) * bitmap.Height];
+            Marshal.Copy(data.Scan0, bytes, 0, bytes.Length);
+            for (var index = 3; index < bytes.Length; index += 4)
+            {
+                if (bytes[index] != 0) return true;
+            }
+            return false;
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct NativeSize(int Width, int Height);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeBitmap
+    {
+        internal int Type;
+        internal int Width;
+        internal int Height;
+        internal int WidthBytes;
+        internal ushort Planes;
+        internal ushort BitsPixel;
+        internal IntPtr Bits;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        internal uint Size;
+        internal int Width;
+        internal int Height;
+        internal ushort Planes;
+        internal ushort BitCount;
+        internal uint Compression;
+        internal uint SizeImage;
+        internal int XPelsPerMeter;
+        internal int YPelsPerMeter;
+        internal uint ClrUsed;
+        internal uint ClrImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo
+    {
+        internal BitmapInfoHeader Header;
+        internal uint Colors;
+    }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ShFileInfo
@@ -287,9 +433,9 @@ public sealed class ShellIconProvider
         long ModifiedTicks,
         long Length);
 
-    private sealed class CacheEntry(BitmapSource? image, long lastAccess)
+    private sealed class CacheEntry(Bitmap? image, long lastAccess)
     {
-        internal BitmapSource? Image { get; } = image;
+        internal Bitmap? Image { get; } = image;
         internal long LastAccess { get; set; } = lastAccess;
     }
 }

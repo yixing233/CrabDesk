@@ -1,5 +1,6 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe"
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
+    [string]$MenuScreenshot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,7 +10,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying the desktop host."
 }
 
@@ -26,6 +27,7 @@ public static class DesktopVerifier {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] public static extern IntPtr GetParent(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder value, int count);
     [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
@@ -65,7 +67,7 @@ function Find-DesktopSurface([int]$ProcessId) {
                 $parent = [DesktopVerifier]::GetParent($child)
                 $className = [System.Text.StringBuilder]::new(128)
                 [void][DesktopVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -in @("Progman", "WorkerW") -and [DesktopVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW", "SHELLDLL_DefView") -and [DesktopVerifier]::IsWindowVisible($child)) {
                     $script:surfaceHandle = $child
                     return $false
                 }
@@ -88,6 +90,44 @@ function Test-IsTopLevelWindow([IntPtr]$Window) {
         return $true
     }, [IntPtr]::Zero) | Out-Null
     return $script:topLevelFound
+}
+
+function Find-VisibleProcessPopup([int]$ProcessId) {
+    $script:processPopup = [IntPtr]::Zero
+    [DesktopVerifier]::EnumWindows({
+        param($candidate, $data)
+        [uint32]$candidateProcessId = 0
+        [void][DesktopVerifier]::GetWindowThreadProcessId($candidate, [ref]$candidateProcessId)
+        if ($candidateProcessId -ne $ProcessId -or -not [DesktopVerifier]::IsWindowVisible($candidate)) {
+            return $true
+        }
+        $className = [System.Text.StringBuilder]::new(128)
+        [void][DesktopVerifier]::GetClassName($candidate, $className, 128)
+        if ($className.ToString().StartsWith("WindowsForms10.Window", [StringComparison]::Ordinal)) {
+            $script:processPopup = $candidate
+            return $false
+        }
+        return $true
+    }, [IntPtr]::Zero) | Out-Null
+    return $script:processPopup
+}
+
+function Find-VisibleTitleEditor([IntPtr]$Surface) {
+    $script:titleEditor = [IntPtr]::Zero
+    [DesktopVerifier]::EnumChildWindows($Surface, {
+        param($candidate, $data)
+        if (-not [DesktopVerifier]::IsWindowVisible($candidate)) {
+            return $true
+        }
+        $className = [System.Text.StringBuilder]::new(128)
+        [void][DesktopVerifier]::GetClassName($candidate, $className, 128)
+        if ($className.ToString().IndexOf("EDIT", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            $script:titleEditor = $candidate
+            return $false
+        }
+        return $true
+    }, [IntPtr]::Zero) | Out-Null
+    return $script:titleEditor
 }
 
 function Test-WindowRegionPoint([IntPtr]$Window, [int]$X, [int]$Y) {
@@ -222,7 +262,7 @@ $config = @{
         ConfirmDeleteBox = $true
         ThemeMode = 0
         DesktopBehavior = @{
-            LaunchToTray = $false
+            LaunchToTray = $true
             RefreshAfterRename = $true
             ShowDesktopContextMenu = $false
             ToggleIconsOnDesktopDoubleClick = $false
@@ -245,7 +285,6 @@ $config = @{
             IconSize = 42
             LabelFontSize = 8.5
             ShowItemLabels = $true
-            ShowShortcutBadges = $true
             TitleBarHeight = $titleHeight
             TitleAlignment = 0
             TitleColor = "Auto"
@@ -286,39 +325,133 @@ try {
     $process = Start-Process -FilePath $exe -PassThru
     Start-Sleep -Seconds 8
     $process.Refresh()
-    $settingsHandle = $process.MainWindowHandle
-    if ($settingsHandle -eq [IntPtr]::Zero) {
-        throw "CrabDesk settings window was not available."
+    if ($process.HasExited) {
+        throw "CrabDesk exited before desktop-host validation."
     }
-    [void][DesktopVerifier]::PostMessage($settingsHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
-    Start-Sleep -Seconds 2
-    $process.Refresh()
-    if ($process.HasExited -or $process.MainWindowHandle -ne [IntPtr]::Zero) {
-        throw "Closing settings did not keep CrabDesk running only in the tray."
+    if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+        [void][DesktopVerifier]::PostMessage($process.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+        Start-Sleep -Seconds 2
+        $process.Refresh()
+        if ($process.HasExited -or $process.MainWindowHandle -ne [IntPtr]::Zero) {
+            throw "CrabDesk did not remain available from the tray after closing settings."
+        }
     }
 
     $surface = Find-DesktopSurface $process.Id
     if ($surface -eq [IntPtr]::Zero) {
-        throw "CrabDesk desktop surface was not attached to Progman/WorkerW."
+        throw "CrabDesk desktop surface was not attached to the Explorer desktop hierarchy."
+    }
+    $desktopParent = [DesktopVerifier]::GetParent($surface)
+    if (-not [DesktopVerifier]::IsWindowEnabled($desktopParent)) {
+        throw "CrabDesk left the Explorer desktop parent disabled during takeover."
     }
     $surfaceStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -16).ToInt64()
     $surfaceExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
     if (($surfaceStyle -band 0x40000000L) -eq 0 -or
+        ($surfaceStyle -band 0x04000000L) -ne 0 -or
         ($surfaceExtendedStyle -band 0x00000080L) -eq 0 -or
         ($surfaceExtendedStyle -band 0x08000000L) -eq 0 -or
         ($surfaceExtendedStyle -band 0x00000008L) -ne 0) {
-        throw "Desktop surface styles do not guarantee direct non-activating child input without topmost. Style=$surfaceStyle, ExStyle=$surfaceExtendedStyle"
+        throw "Desktop surface styles do not guarantee visible, unclipped, non-activating child input. Style=$surfaceStyle, ExStyle=$surfaceExtendedStyle"
     }
     if (Test-IsTopLevelWindow $surface) {
         throw "Desktop surface was enumerated as a top-level window and could enter Alt+Tab or the taskbar."
     }
     $initialSurfaceBounds = [DesktopVerifier+Rect]::new()
     [void][DesktopVerifier]::GetWindowRect($surface, [ref]$initialSurfaceBounds)
-    [void][DesktopVerifier]::SetCursorPos($initialSurfaceBounds.Right - 10, $initialSurfaceBounds.Bottom - 10)
+    $preflightProbe = [DesktopVerifier+Point]::new()
+    $preflightProbe.X = $initialSurfaceBounds.Left + $boxX + 20
+    $preflightProbe.Y = $initialSurfaceBounds.Top + $boxY + 20
+    $preflightHit = [DesktopVerifier]::WindowFromPoint($preflightProbe)
+    if ($preflightHit -ne $surface) {
+        $preflightClass = [System.Text.StringBuilder]::new(128)
+        [void][DesktopVerifier]::GetClassName($preflightHit, $preflightClass, 128)
+        throw "A covering window prevents safe desktop input validation. Close or minimize it first. Hit=$preflightHit/$($preflightClass.ToString())"
+    }
+    $emptyProbe = [DesktopVerifier+Point]::new()
+    $emptyProbe.X = $initialSurfaceBounds.Right - 10
+    $emptyProbe.Y = $initialSurfaceBounds.Bottom - 10
+    [void][DesktopVerifier]::SetCursorPos($emptyProbe.X, $emptyProbe.Y)
     Start-Sleep -Milliseconds 350
-    $emptyAreaExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
-    if (($emptyAreaExtendedStyle -band 0x00000020L) -eq 0) {
-        throw "Desktop surface did not become click-through over an empty desktop area. ExStyle=$emptyAreaExtendedStyle"
+    if ((Test-WindowRegionPoint $surface ($emptyProbe.X - $initialSurfaceBounds.Left) ($emptyProbe.Y - $initialSurfaceBounds.Top)) -or
+        [DesktopVerifier]::WindowFromPoint($emptyProbe) -eq $surface) {
+        throw "Desktop surface captured an empty desktop area outside its interaction region."
+    }
+    $menuProbe = [DesktopVerifier+Point]::new()
+    $menuProbe.X = $initialSurfaceBounds.Left + $boxX + 24
+    $menuProbe.Y = $initialSurfaceBounds.Top + $boxY + 24
+    [void][DesktopVerifier]::SetCursorPos($menuProbe.X, $menuProbe.Y)
+    [DesktopVerifier]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    $boxMenu = Find-VisibleProcessPopup $process.Id
+    if ($boxMenu -eq [IntPtr]::Zero) {
+        throw "The box context menu did not appear."
+    }
+    $boxMenuBounds = [DesktopVerifier+Rect]::new()
+    [void][DesktopVerifier]::GetWindowRect($boxMenu, [ref]$boxMenuBounds)
+    $boxMenuWidth = $boxMenuBounds.Right - $boxMenuBounds.Left
+    if ($boxMenuWidth -lt 105 -or $boxMenuWidth -gt 125) {
+        throw "The box context menu width was not compact: $boxMenuWidth px."
+    }
+    [void][DesktopVerifier]::SetCursorPos($boxMenuBounds.Left + 52, $boxMenuBounds.Top + 20)
+    Start-Sleep -Milliseconds 180
+    if (-not [string]::IsNullOrWhiteSpace($MenuScreenshot)) {
+        $screenshotPath = [System.IO.Path]::GetFullPath($MenuScreenshot)
+        [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($screenshotPath)) | Out-Null
+        $screenshotWidth = $boxMenuBounds.Right - $boxMenuBounds.Left
+        $screenshotHeight = $boxMenuBounds.Bottom - $boxMenuBounds.Top
+        $menuBitmap = [System.Drawing.Bitmap]::new($screenshotWidth, $screenshotHeight)
+        try {
+            $menuGraphics = [System.Drawing.Graphics]::FromImage($menuBitmap)
+            try {
+                $menuGraphics.CopyFromScreen(
+                    $boxMenuBounds.Left,
+                    $boxMenuBounds.Top,
+                    0,
+                    0,
+                    [System.Drawing.Size]::new($screenshotWidth, $screenshotHeight))
+            }
+            finally {
+                $menuGraphics.Dispose()
+            }
+            $menuBitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        finally {
+            $menuBitmap.Dispose()
+        }
+    }
+    [DesktopVerifier]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    $titleEditor = Find-VisibleTitleEditor $surface
+    if ($titleEditor -eq [IntPtr]::Zero) {
+        throw "Choosing Rename did not open the title-bar editor."
+    }
+    [void][DesktopVerifier]::PostMessage($titleEditor, 0x0100, [IntPtr]0x1B, [IntPtr]::Zero)
+    [void][DesktopVerifier]::PostMessage($titleEditor, 0x0101, [IntPtr]0x1B, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    if ([DesktopVerifier]::IsWindowVisible($titleEditor)) {
+        throw "Escape did not close the title-bar editor."
+    }
+    [void][DesktopVerifier]::SetCursorPos($menuProbe.X, $menuProbe.Y)
+    [DesktopVerifier]::mouse_event(0x0008, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0010, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    [void][DesktopVerifier]::SetCursorPos($emptyProbe.X, $emptyProbe.Y)
+    [DesktopVerifier]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    if ((Find-VisibleProcessPopup $process.Id) -ne [IntPtr]::Zero) {
+        throw "The box context menu did not close after clicking outside it."
+    }
+    [void][DesktopVerifier]::SetCursorPos($emptyProbe.X, $emptyProbe.Y)
+    [DesktopVerifier]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 500
+    $process.Refresh()
+    if ($process.HasExited) {
+        throw "Closing a box context menu crashed CrabDesk."
     }
     Send-WinD
     Start-Sleep -Milliseconds 900
@@ -327,8 +460,8 @@ try {
         (Test-WindowRegionPoint $surface ($boxX + 200) ($boxY + $titleHeight + 12))) {
         throw "Collapsed box region did not use the configured 52px title bar."
     }
-    if ((Get-ExplorerHideIcons) -ne 1) {
-        throw "Explorer native icons were not hidden during desktop takeover."
+    if ((Get-ExplorerHideIcons) -ne $previousHideIcons) {
+        throw "CrabDesk changed Explorer's native desktop icon visibility during box hosting."
     }
     $liveConfig = Get-Content -LiteralPath (Join-Path $testRoot "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     if (@($liveConfig.Assignments.PSObject.Properties).Count -ne 1) {
@@ -343,9 +476,16 @@ try {
         $surfaceBounds.Top + $boxY + 20)
     [DesktopVerifier]::mouse_event(0x0001, 10, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 900
-    $contentExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
-    if (($contentExtendedStyle -band 0x00000020L) -ne 0) {
-        throw "Desktop surface remained click-through while the pointer was over box content. ExStyle=$contentExtendedStyle"
+    $contentProbe = [DesktopVerifier+Point]::new()
+    $contentProbe.X = $surfaceBounds.Left + $boxX + 20
+    $contentProbe.Y = $surfaceBounds.Top + $boxY + 20
+    $contentHit = [DesktopVerifier]::WindowFromPoint($contentProbe)
+    if ($contentHit -ne $surface) {
+        $contentHitClass = [System.Text.StringBuilder]::new(128)
+        [void][DesktopVerifier]::GetClassName($contentHit, $contentHitClass, 128)
+        $contentInRegion = Test-WindowRegionPoint $surface ($contentProbe.X - $surfaceBounds.Left) ($contentProbe.Y - $surfaceBounds.Top)
+        $contentExtendedStyle = [DesktopVerifier]::GetWindowLongPtr($surface, -20).ToInt64()
+        throw "Desktop surface did not receive hit testing over visible box content. Hit=$contentHit/$($contentHitClass.ToString()), Surface=$surface, InRegion=$contentInRegion, ExStyle=$contentExtendedStyle"
     }
     $hoverExpandedHeight = Get-BoxRegionHeight $surface ($boxX + 200) $boxY $boxHeight
     if ($hoverExpandedHeight -lt 295) {
@@ -477,6 +617,9 @@ try {
     if ((Get-ExplorerHideIcons) -ne $previousHideIcons) {
         throw "Clean exit did not restore the original Explorer icon visibility."
     }
+    if (-not [DesktopVerifier]::IsWindowEnabled($desktopParent)) {
+        throw "Clean exit left the Explorer desktop parent disabled."
+    }
 
     $forcedProcess = Start-Process -FilePath $exe -PassThru
     Start-Sleep -Seconds 8
@@ -488,6 +631,9 @@ try {
     Start-Sleep -Seconds 5
     if ((Get-ExplorerHideIcons) -ne $previousHideIcons) {
         throw "IconGuard did not restore the original Explorer icon visibility after forced exit."
+    }
+    if (-not [DesktopVerifier]::IsWindowEnabled($desktopParent)) {
+        throw "IconGuard left the Explorer desktop parent disabled after forced exit."
     }
 }
 finally {
@@ -522,4 +668,4 @@ finally {
     }
 }
 
-Write-Host "Desktop host, child/tool-window styles, assigned-icon hiding, real-mouse hover expansion, animated collapse, Win+D, Win+M, Task View, normal/fullscreen coverage, clean exit and IconGuard recovery passed."
+Write-Host "Desktop host, inline title rename, box menu width/lifetime, child/tool-window styles, assigned-icon parking, native Explorer visibility, real-mouse hover expansion, animated collapse, Win+D, Win+M, Task View, normal/fullscreen coverage, clean exit and IconGuard recovery passed."

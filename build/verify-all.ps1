@@ -18,7 +18,7 @@ if (-not $output.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnore
 if ($StabilitySeconds -ne 0 -and $StabilitySeconds -lt 30) {
     throw "StabilitySeconds must be zero or at least 30."
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before starting the full verification suite."
 }
 [System.IO.Directory]::CreateDirectory($output) | Out-Null
@@ -35,7 +35,7 @@ function Get-ExplorerHideIcons {
 function Assert-EnvironmentRestored([int]$ExpectedHideIcons) {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
-        $processes = @(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue)
+        $processes = @(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue)
         $hideIcons = Get-ExplorerHideIcons
         if ($processes.Count -eq 0 -and $hideIcons -eq $ExpectedHideIcons) {
             return

@@ -4,6 +4,23 @@ namespace CrabDesk.Tests;
 
 public sealed class DesktopItemLayoutTests
 {
+    [Theory]
+    [InlineData(BoxViewMode.Grid, 42, 82, 180)]
+    [InlineData(BoxViewMode.Grid, 96, 82, 276)]
+    [InlineData(BoxViewMode.Grid, 42, 160, 336)]
+    [InlineData(BoxViewMode.List, 96, 160, 180)]
+    public void MinimumBoxWidthAlwaysFitsTwoGridCells(
+        BoxViewMode viewMode,
+        double iconSize,
+        double horizontalSpacing,
+        double expected)
+    {
+        Assert.Equal(expected, DesktopItemLayoutEngine.GetMinimumBoxWidth(
+            viewMode,
+            iconSize,
+            horizontalSpacing));
+    }
+
     [Fact]
     public void GridLayoutUsesConfiguredSpacingAndStableColumns()
     {

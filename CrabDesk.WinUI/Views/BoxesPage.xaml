@@ -1,0 +1,90 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.BoxesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:icons="using:FluentIcons.WinUI"
+    NavigationCacheMode="Enabled">
+    <Grid Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="桌面盒子" Style="{StaticResource PageTitleStyle}" />
+            <TextBlock Text="创建、命名和管理普通盒子与映射文件夹" Style="{StaticResource PageSubtitleStyle}" />
+        </StackPanel>
+        <CommandBar Grid.Row="1" Margin="0,18,0,8" Background="Transparent" DefaultLabelPosition="Right" HorizontalAlignment="Left">
+            <AppBarButton Label="创建盒子" Command="{Binding AddCommand}"><AppBarButton.Icon><icons:FluentIcon Icon="Add" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="映射文件夹" Command="{Binding AddMappedCommand}"><AppBarButton.Icon><icons:FluentIcon Icon="FolderAdd" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="删除" Command="{Binding DeleteCommand}"><AppBarButton.Icon><icons:FluentIcon Icon="Delete" /></AppBarButton.Icon></AppBarButton>
+        </CommandBar>
+        <Grid Grid.Row="2" ColumnSpacing="16">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="280" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Border Style="{StaticResource SectionCardStyle}" Padding="0" VerticalAlignment="Top"
+                    MinHeight="220" MaxHeight="420">
+                <ListView ItemsSource="{Binding Boxes}" SelectedItem="{Binding SelectedBox, Mode=TwoWay}"
+                          SelectionMode="Single" AutomationProperties.Name="桌面盒子列表">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Padding="8" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <icons:FluentIcon Icon="Grid" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding MonitorId}" Style="{StaticResource SecondaryBodyStyle}" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+            <StackPanel Grid.Column="1" Spacing="12" VerticalAlignment="Top">
+                <TextBlock Text="盒子详情" Style="{StaticResource SectionTitleStyle}" />
+                <Border Style="{StaticResource SectionCardStyle}" Padding="16,0">
+                    <StackPanel>
+                        <Border Style="{StaticResource SettingRowStyle}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="名称" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1" Width="{StaticResource SettingsControlWidth}"
+                                         Text="{Binding Title, Mode=TwoWay}" IsEnabled="{Binding HasSelection}"
+                                         VerticalAlignment="Center" AutomationProperties.Name="盒子名称" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="类型" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding BoxTypeText}" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource SecondaryTextBrush}" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="所在显示器" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding MonitorId}" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource SectionCardStyle}"
+                        Visibility="{Binding IsMappedFolder, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="映射文件夹" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding MappedFolderPath}" Style="{StaticResource SecondaryBodyStyle}" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <Button Command="{Binding ChangeMappedCommand}" HorizontalAlignment="Left">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <icons:FluentIcon Icon="FolderOpen" />
+                                    <TextBlock Text="更改文件夹" />
+                                </StackPanel>
+                            </Button>
+                            <ToggleSwitch Grid.Column="1" Header="只读" IsOn="{Binding MappedFolderReadOnly, Mode=TwoWay}" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Grid>
+        <TextBlock Grid.Row="3" Text="{Binding Status}" Margin="0,10,0,0" Foreground="{ThemeResource AccentBrush}" />
+    </Grid>
+</Page>

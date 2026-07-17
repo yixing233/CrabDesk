@@ -15,6 +15,7 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Title = "工作";
         state.Boxes[0].Appearance.TitleAlignment = BoxTitleAlignment.Center;
         state.Boxes[0].Appearance.TitleColor = "#FF21A179";
+        state.Boxes[0].Appearance.TitleFontFamily = "Microsoft YaHei UI";
         state.Boxes[0].Appearance.TitleFontSize = 15;
         state.Boxes[0].Appearance.TitleFontBold = false;
         state.Boxes[0].Appearance.ShowCollapseButton = false;
@@ -22,9 +23,9 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.Accent = "#FF31A86D";
         state.Boxes[0].Appearance.Opacity = 0.6;
         state.Boxes[0].Appearance.TitleBarHeight = 80;
+        state.Boxes[0].Appearance.LabelFontFamily = "Consolas";
         state.Boxes[0].Appearance.LabelFontSize = 20;
         state.Boxes[0].Appearance.ShowItemLabels = false;
-        state.Boxes[0].Appearance.ShowShortcutBadges = false;
         state.Assignments["file:123"] = state.Boxes[0].Id;
         state.Settings.ThemeMode = ApplicationThemeMode.Dark;
         state.Settings.Appearance.CornerRadius = 42;
@@ -58,6 +59,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("工作", loaded.Boxes[0].Title);
         Assert.Equal(BoxTitleAlignment.Center, loaded.Boxes[0].Appearance.TitleAlignment);
         Assert.Equal("#FF21A179", loaded.Boxes[0].Appearance.TitleColor);
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
         Assert.Equal(15, loaded.Boxes[0].Appearance.TitleFontSize);
         Assert.False(loaded.Boxes[0].Appearance.TitleFontBold);
         Assert.False(loaded.Boxes[0].Appearance.ShowCollapseButton);
@@ -65,9 +67,9 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("#FF31A86D", loaded.Boxes[0].Appearance.Accent);
         Assert.Equal(0.6, loaded.Boxes[0].Appearance.Opacity);
         Assert.Equal(56, loaded.Boxes[0].Appearance.TitleBarHeight);
+        Assert.Equal("Consolas", loaded.Boxes[0].Appearance.LabelFontFamily);
         Assert.Equal(16, loaded.Boxes[0].Appearance.LabelFontSize);
         Assert.False(loaded.Boxes[0].Appearance.ShowItemLabels);
-        Assert.False(loaded.Boxes[0].Appearance.ShowShortcutBadges);
         Assert.Equal(state.Boxes[0].Id, loaded.Assignments["file:123"]);
         Assert.Equal(ApplicationThemeMode.Dark, loaded.Settings.ThemeMode);
         Assert.Equal(20, loaded.Settings.Appearance.CornerRadius);
@@ -121,7 +123,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -144,7 +146,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -169,19 +171,18 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
-        Assert.True(loaded.Settings.DesktopBehavior.ShowDesktopContextMenu);
     }
 
     [Fact]
-    public async Task VersionFourteenTakeoverRestartsPaused()
+    public async Task VersionFifteenTakeoverPreferenceIsPreserved()
     {
         Directory.CreateDirectory(_root);
         await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
         {
-          "SchemaVersion": 14,
+          "SchemaVersion": 15,
           "Settings": { "TakeOverDesktop": true },
           "Boxes": [],
           "Assignments": {}
@@ -190,8 +191,8 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(15, loaded.SchemaVersion);
-        Assert.False(loaded.Settings.TakeOverDesktop);
+        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
     [Fact]
@@ -250,7 +251,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -274,13 +275,14 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(15, loaded.SchemaVersion);
+        Assert.Equal(16, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);
+        Assert.Equal("Segoe UI", appearance.TitleFontFamily);
+        Assert.Equal("Segoe UI", appearance.LabelFontFamily);
         Assert.Equal(8.5, appearance.LabelFontSize);
         Assert.True(appearance.ShowItemLabels);
-        Assert.True(appearance.ShowShortcutBadges);
     }
 
     [Theory]

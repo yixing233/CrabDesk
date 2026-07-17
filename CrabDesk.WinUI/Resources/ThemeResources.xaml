@@ -1,0 +1,42 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <Color x:Key="CrabDeskAccentColor">#257EA3</Color>
+            <Color x:Key="CrabDeskSuccessColor">#287A50</Color>
+            <Color x:Key="CrabDeskDangerColor">#B43A34</Color>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#F7F9FA" />
+            <SolidColorBrush x:Key="NavigationSurfaceBrush" Color="#F1F4F6" />
+            <SolidColorBrush x:Key="SectionSurfaceBrush" Color="#FCFDFD" />
+            <SolidColorBrush x:Key="SubtleBorderBrush" Color="#D9DEE3" />
+            <SolidColorBrush x:Key="SecondaryTextBrush" Color="#626A73" />
+            <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource CrabDeskAccentColor}" />
+            <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource CrabDeskSuccessColor}" />
+            <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource CrabDeskDangerColor}" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+            <Color x:Key="CrabDeskAccentColor">#58B6D9</Color>
+            <Color x:Key="CrabDeskSuccessColor">#64C48D</Color>
+            <Color x:Key="CrabDeskDangerColor">#FF7B72</Color>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#17191C" />
+            <SolidColorBrush x:Key="NavigationSurfaceBrush" Color="#1D2024" />
+            <SolidColorBrush x:Key="SectionSurfaceBrush" Color="#22262A" />
+            <SolidColorBrush x:Key="SubtleBorderBrush" Color="#353A40" />
+            <SolidColorBrush x:Key="SecondaryTextBrush" Color="#A9B0B8" />
+            <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource CrabDeskAccentColor}" />
+            <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource CrabDeskSuccessColor}" />
+            <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource CrabDeskDangerColor}" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="HighContrast">
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="NavigationSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SectionSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+            <SolidColorBrush x:Key="SubtleBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SecondaryTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="AccentBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SuccessBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="DangerBrush" Color="{ThemeResource SystemColorHotlightColor}" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

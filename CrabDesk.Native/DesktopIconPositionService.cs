@@ -7,6 +7,7 @@ namespace CrabDesk.Native;
 
 public static class DesktopIconPositionService
 {
+    private const string DesktopBagPath = @"Software\Microsoft\Windows\Shell\Bags\1\Desktop";
     private const uint LvmFirst = 0x1000;
     private const uint LvmGetNextItem = LvmFirst + 12;
     private const uint LvmSetItemPosition = LvmFirst + 15;
@@ -15,6 +16,10 @@ public static class DesktopIconPositionService
     private const uint LvmGetItemCount = LvmFirst + 4;
     private const uint LvmGetItemTextW = LvmFirst + 115;
     private const uint LvmSetItemPosition32 = LvmFirst + 49;
+    private const uint LvmGetItemSpacing = LvmFirst + 51;
+    private const uint LvmSetWorkAreas = LvmFirst + 65;
+    private const uint LvmGetWorkAreas = LvmFirst + 70;
+    private const uint LvmGetNumberOfWorkAreas = LvmFirst + 73;
     private const uint LvmHitTest = LvmFirst + 18;
     private const uint ProcessVmOperation = 0x0008;
     private const uint ProcessVmRead = 0x0010;
@@ -25,6 +30,40 @@ public static class DesktopIconPositionService
     private const uint MemRelease = 0x8000;
     private const uint PageReadWrite = 0x04;
     private const int TextBytes = 1024;
+    private const uint MessageTimeoutMilliseconds = 500;
+    private const uint WmMouseWheel = 0x020A;
+    private const uint MkControl = 0x0008;
+
+    public static int? GetDesktopIconSize()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(DesktopBagPath);
+            return key?.GetValue("IconSize") is int value ? Math.Clamp(value, 16, 256) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static bool ForwardControlMouseWheel(IntPtr listView, int screenX, int screenY, int delta)
+    {
+        if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView) || delta == 0)
+        {
+            return false;
+        }
+
+        var wheel = unchecked((uint)(ushort)(short)delta);
+        var keysAndDelta = new IntPtr(unchecked((int)((wheel << 16) | MkControl)));
+        var coordinates = unchecked((uint)(ushort)(short)screenX) |
+            (unchecked((uint)(ushort)(short)screenY) << 16);
+        return NativeMethods.PostMessage(
+            listView,
+            WmMouseWheel,
+            keysAndDelta,
+            new IntPtr(unchecked((int)coordinates)));
+    }
 
     public static void MoveSelectedIcons(IntPtr listView, int screenX, int screenY)
     {
@@ -43,11 +82,16 @@ public static class DesktopIconPositionService
         var offset = 0;
         while (true)
         {
-            index = NativeMethods.SendMessage(
-                listView,
-                LvmGetNextItem,
-                new IntPtr(index),
-                new IntPtr(LvniSelected)).ToInt32();
+            if (!TrySendListViewMessage(
+                    listView,
+                    LvmGetNextItem,
+                    new IntPtr(index),
+                    new IntPtr(LvniSelected),
+                    out var nextItem))
+            {
+                break;
+            }
+            index = nextItem.ToInt32();
             if (index < 0)
             {
                 break;
@@ -56,8 +100,107 @@ public static class DesktopIconPositionService
             var x = Math.Max(0, origin.X + (offset % 5) * 84);
             var y = Math.Max(0, origin.Y + (offset / 5) * 92);
             var packed = new IntPtr((y << 16) | (x & 0xFFFF));
-            NativeMethods.SendMessage(listView, LvmSetItemPosition, new IntPtr(index), packed);
+            if (!TrySendListViewMessage(
+                    listView,
+                    LvmSetItemPosition,
+                    new IntPtr(index),
+                    packed,
+                    out var positioned) ||
+                positioned == IntPtr.Zero)
+            {
+                break;
+            }
             offset++;
+        }
+    }
+
+    public static System.Drawing.Size GetItemSpacing(IntPtr listView)
+    {
+        if (!TrySendListViewMessage(
+                listView,
+                LvmGetItemSpacing,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                out var result))
+        {
+            return new System.Drawing.Size(88, 96);
+        }
+        var packed = result.ToInt64();
+        var horizontal = unchecked((ushort)(packed & 0xffff));
+        var vertical = unchecked((ushort)((packed >> 16) & 0xffff));
+        return new System.Drawing.Size(
+            horizontal > 0 ? horizontal : 88,
+            vertical > 0 ? vertical : 96);
+    }
+
+    public static DesktopGridAlignmentResult AlignItemsToGrid(IntPtr listView)
+    {
+        var spacing = GetItemSpacing(listView);
+        if (!RemoteListViewSession.TryCreate(listView, out var session))
+        {
+            return new DesktopGridAlignmentResult(0, 0, spacing.Width, spacing.Height);
+        }
+
+        using (session)
+        {
+            var entries = new List<(int Index, DesktopIconPositionSnapshot Position)>();
+            for (var index = 0; index < session.ItemCount; index++)
+            {
+                var text = session.ReadText(index);
+                if (text is null || !session.TryGetPosition(index, out var point))
+                {
+                    continue;
+                }
+                entries.Add((index, new DesktopIconPositionSnapshot(text, point.X, point.Y)));
+            }
+
+            var aligned = DesktopIconGridLayout.Align(
+                entries.Select(entry => entry.Position),
+                spacing.Width,
+                spacing.Height);
+            var requested = 0;
+            var applied = 0;
+            for (var index = 0; index < entries.Count; index++)
+            {
+                var current = entries[index];
+                var target = aligned[index];
+                if (current.Position.X == target.X && current.Position.Y == target.Y)
+                {
+                    continue;
+                }
+                requested++;
+                if (session.SetPosition(current.Index, new NativePoint { X = target.X, Y = target.Y }))
+                {
+                    applied++;
+                }
+            }
+            return new DesktopGridAlignmentResult(requested, applied, spacing.Width, spacing.Height);
+        }
+    }
+
+    public static IReadOnlyList<System.Drawing.Rectangle> GetWorkAreas(IntPtr listView)
+    {
+        if (!RemoteListViewSession.TryCreate(listView, out var session))
+        {
+            return [];
+        }
+        using (session)
+        {
+            return session.GetWorkAreas();
+        }
+    }
+
+    public static bool SetWorkAreas(
+        IntPtr listView,
+        IReadOnlyCollection<System.Drawing.Rectangle> workAreas)
+    {
+        if (!RemoteListViewSession.TryCreate(listView, out var session))
+        {
+            return false;
+        }
+        using (session)
+        {
+            return session.SetWorkAreas(workAreas);
         }
     }
 
@@ -95,7 +238,10 @@ public static class DesktopIconPositionService
     {
         var byName = positions
             .GroupBy(position => NormalizeName(position.DisplayName), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<DesktopIconPositionSnapshot>(group),
+                StringComparer.OrdinalIgnoreCase);
         if (byName.Count == 0 || !RemoteListViewSession.TryCreate(listView, out var session))
         {
             return 0;
@@ -107,13 +253,18 @@ public static class DesktopIconPositionService
             for (var index = 0; index < session.ItemCount; index++)
             {
                 var text = session.ReadText(index);
-                if (text is null || !byName.TryGetValue(NormalizeName(text), out var position))
+                if (text is null ||
+                    !byName.TryGetValue(NormalizeName(text), out var queue) ||
+                    queue.Count == 0)
                 {
                     continue;
                 }
 
-                session.SetPosition(index, new NativePoint { X = position.X, Y = position.Y });
-                restored++;
+                var position = queue.Dequeue();
+                if (session.SetPosition(index, new NativePoint { X = position.X, Y = position.Y }))
+                {
+                    restored++;
+                }
             }
             return restored;
         }
@@ -144,12 +295,14 @@ public static class DesktopIconPositionService
                     continue;
                 }
 
-                session.SetPosition(index, new NativePoint
+                if (session.SetPosition(index, new NativePoint
                 {
                     X = Math.Max(0, origin.X + (moved % 5) * 84),
                     Y = Math.Max(0, origin.Y + (moved / 5) * 92)
-                });
-                moved++;
+                }))
+                {
+                    moved++;
+                }
             }
             return moved;
         }
@@ -200,12 +353,14 @@ public static class DesktopIconPositionService
                 {
                     continue;
                 }
-                session.SetPosition(index, new NativePoint
+                if (session.SetPosition(index, new NativePoint
                 {
-                    X = Math.Max(0, point.X),
-                    Y = Math.Max(0, point.Y)
-                });
-                moved++;
+                    X = point.X,
+                    Y = point.Y
+                }))
+                {
+                    moved++;
+                }
             }
             return moved;
         }
@@ -219,9 +374,24 @@ public static class DesktopIconPositionService
         }
         using (session)
         {
-            return session.HitTest(new NativePoint { X = clientX, Y = clientY }) < 0;
+            return session.TryHitTest(new NativePoint { X = clientX, Y = clientY }, out var item) && item < 0;
         }
     }
+
+    private static bool TrySendListViewMessage(
+        IntPtr listView,
+        uint message,
+        IntPtr wParam,
+        IntPtr lParam,
+        out IntPtr result) =>
+        NativeMethods.SendMessageTimeout(
+            listView,
+            message,
+            wParam,
+            lParam,
+            NativeMethods.SmtoAbortIfHung,
+            MessageTimeoutMilliseconds,
+            out result) != IntPtr.Zero;
 
     private static HashSet<string> BuildNameSet(IEnumerable<string> displayNames) => displayNames
         .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -259,6 +429,15 @@ public static class DesktopIconPositionService
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRectangle
+    {
+        internal int Left;
+        internal int Top;
+        internal int Right;
+        internal int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct ListViewHitTestInfo
     {
         internal NativePoint Point;
@@ -275,20 +454,22 @@ public static class DesktopIconPositionService
         private readonly IntPtr _remoteItem;
         private readonly IntPtr _remoteText;
         private readonly IntPtr _remotePoint;
+        private bool _messageFailed;
 
         private RemoteListViewSession(
             IntPtr listView,
             SafeProcessHandle process,
             IntPtr remoteItem,
             IntPtr remoteText,
-            IntPtr remotePoint)
+            IntPtr remotePoint,
+            int itemCount)
         {
             _listView = listView;
             _process = process;
             _remoteItem = remoteItem;
             _remoteText = remoteText;
             _remotePoint = remotePoint;
-            ItemCount = NativeMethods.SendMessage(listView, LvmGetItemCount, IntPtr.Zero, IntPtr.Zero).ToInt32();
+            ItemCount = itemCount;
         }
 
         internal int ItemCount { get; }
@@ -297,6 +478,21 @@ public static class DesktopIconPositionService
         {
             session = null!;
             if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
+            {
+                return false;
+            }
+
+            if (!TrySendListViewMessage(
+                    listView,
+                    LvmGetItemCount,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    out var itemCountResult))
+            {
+                return false;
+            }
+            var itemCount = itemCountResult.ToInt32();
+            if (itemCount < 0)
             {
                 return false;
             }
@@ -334,12 +530,16 @@ public static class DesktopIconPositionService
                 return false;
             }
 
-            session = new RemoteListViewSession(listView, process, remoteItem, remoteText, remotePoint);
+            session = new RemoteListViewSession(listView, process, remoteItem, remoteText, remotePoint, itemCount);
             return true;
         }
 
         internal string? ReadText(int index)
         {
+            if (_messageFailed)
+            {
+                return null;
+            }
             var item = new ListViewItem
             {
                 Item = index,
@@ -347,8 +547,17 @@ public static class DesktopIconPositionService
                 Text = _remoteText,
                 TextMax = TextBytes / 2
             };
-            WriteStructure(_process, _remoteItem, item);
-            NativeMethods.SendMessage(_listView, LvmGetItemTextW, new IntPtr(index), _remoteItem);
+            if (!WriteStructure(_process, _remoteItem, item) ||
+                !TrySendListViewMessage(
+                    _listView,
+                    LvmGetItemTextW,
+                    new IntPtr(index),
+                    _remoteItem,
+                    out _))
+            {
+                _messageFailed = true;
+                return null;
+            }
 
             var textBuffer = new byte[TextBytes];
             if (!ReadProcessMemory(_process, _remoteText, textBuffer, textBuffer.Length, out _))
@@ -364,8 +573,16 @@ public static class DesktopIconPositionService
         internal bool TryGetPosition(int index, out NativePoint point)
         {
             point = default;
-            if (NativeMethods.SendMessage(_listView, LvmGetItemPosition, new IntPtr(index), _remotePoint) == IntPtr.Zero)
+            if (_messageFailed ||
+                !TrySendListViewMessage(
+                    _listView,
+                    LvmGetItemPosition,
+                    new IntPtr(index),
+                    _remotePoint,
+                    out var result) ||
+                result == IntPtr.Zero)
             {
+                _messageFailed = true;
                 return false;
             }
 
@@ -388,16 +605,174 @@ public static class DesktopIconPositionService
             }
         }
 
-        internal void SetPosition(int index, NativePoint point)
+        internal bool SetPosition(int index, NativePoint point)
         {
-            WriteStructure(_process, _remotePoint, point);
-            NativeMethods.SendMessage(_listView, LvmSetItemPosition32, new IntPtr(index), _remotePoint);
+            if (_messageFailed || !WriteStructure(_process, _remotePoint, point) ||
+                !TrySendListViewMessage(
+                    _listView,
+                    LvmSetItemPosition32,
+                    new IntPtr(index),
+                    _remotePoint,
+                    out var result) ||
+                result == IntPtr.Zero)
+            {
+                _messageFailed = true;
+                return false;
+            }
+            return true;
         }
 
-        internal int HitTest(NativePoint point)
+        internal bool TryHitTest(NativePoint point, out int item)
         {
-            WriteStructure(_process, _remoteItem, new ListViewHitTestInfo { Point = point });
-            return NativeMethods.SendMessage(_listView, LvmHitTest, IntPtr.Zero, _remoteItem).ToInt32();
+            item = -1;
+            if (_messageFailed ||
+                !WriteStructure(_process, _remoteItem, new ListViewHitTestInfo { Point = point }) ||
+                !TrySendListViewMessage(
+                    _listView,
+                    LvmHitTest,
+                    IntPtr.Zero,
+                    _remoteItem,
+                    out var result))
+            {
+                _messageFailed = true;
+                return false;
+            }
+            item = result.ToInt32();
+            return true;
+        }
+
+        internal IReadOnlyList<System.Drawing.Rectangle> GetWorkAreas()
+        {
+            if (_messageFailed ||
+                !TrySendListViewMessage(
+                    _listView,
+                    LvmGetNumberOfWorkAreas,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    out var countResult))
+            {
+                _messageFailed = true;
+                return [];
+            }
+            var count = countResult.ToInt32();
+            if (count <= 0)
+            {
+                return [];
+            }
+
+            var size = Marshal.SizeOf<NativeRectangle>();
+            var byteCount = checked(size * count);
+            var remote = VirtualAllocEx(
+                _process,
+                IntPtr.Zero,
+                (nuint)byteCount,
+                MemCommit | MemReserve,
+                PageReadWrite);
+            if (remote == IntPtr.Zero)
+            {
+                return [];
+            }
+            try
+            {
+                if (!TrySendListViewMessage(
+                        _listView,
+                        LvmGetWorkAreas,
+                        new IntPtr(count),
+                        remote,
+                        out _))
+                {
+                    _messageFailed = true;
+                    return [];
+                }
+                var buffer = new byte[byteCount];
+                if (!ReadProcessMemory(_process, remote, buffer, buffer.Length, out var read) ||
+                    read != (nuint)buffer.Length)
+                {
+                    return [];
+                }
+                var result = new List<System.Drawing.Rectangle>(count);
+                var local = Marshal.AllocHGlobal(byteCount);
+                try
+                {
+                    Marshal.Copy(buffer, 0, local, byteCount);
+                    for (var index = 0; index < count; index++)
+                    {
+                        var rectangle = Marshal.PtrToStructure<NativeRectangle>(local + index * size);
+                        result.Add(System.Drawing.Rectangle.FromLTRB(
+                            rectangle.Left,
+                            rectangle.Top,
+                            rectangle.Right,
+                            rectangle.Bottom));
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(local);
+                }
+                return result;
+            }
+            finally
+            {
+                Free(_process, remote);
+            }
+        }
+
+        internal bool SetWorkAreas(IReadOnlyCollection<System.Drawing.Rectangle> workAreas)
+        {
+            if (_messageFailed)
+            {
+                return false;
+            }
+            if (workAreas.Count == 0)
+            {
+                return TrySendListViewMessage(
+                    _listView,
+                    LvmSetWorkAreas,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    out _);
+            }
+
+            var rectangles = workAreas.Select(area => new NativeRectangle
+            {
+                Left = area.Left,
+                Top = area.Top,
+                Right = area.Right,
+                Bottom = area.Bottom
+            }).ToArray();
+            var size = Marshal.SizeOf<NativeRectangle>();
+            var byteCount = checked(size * rectangles.Length);
+            var local = Marshal.AllocHGlobal(byteCount);
+            var remote = IntPtr.Zero;
+            try
+            {
+                for (var index = 0; index < rectangles.Length; index++)
+                {
+                    Marshal.StructureToPtr(rectangles[index], local + index * size, false);
+                }
+                var buffer = new byte[byteCount];
+                Marshal.Copy(local, buffer, 0, byteCount);
+                remote = VirtualAllocEx(
+                    _process,
+                    IntPtr.Zero,
+                    (nuint)byteCount,
+                    MemCommit | MemReserve,
+                    PageReadWrite);
+                return remote != IntPtr.Zero &&
+                    WriteProcessMemory(_process, remote, buffer, buffer.Length, out var written) &&
+                    written == (nuint)buffer.Length &&
+                    TrySendListViewMessage(
+                        _listView,
+                        LvmSetWorkAreas,
+                        new IntPtr(rectangles.Length),
+                        remote,
+                        out _);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(local);
+                Free(_process, remote);
+            }
         }
 
         public void Dispose()
@@ -409,7 +784,7 @@ public static class DesktopIconPositionService
         }
     }
 
-    private static void WriteStructure<T>(SafeProcessHandle process, IntPtr destination, T value)
+    private static bool WriteStructure<T>(SafeProcessHandle process, IntPtr destination, T value)
         where T : struct
     {
         var size = Marshal.SizeOf<T>();
@@ -419,7 +794,8 @@ public static class DesktopIconPositionService
             Marshal.StructureToPtr(value, local, false);
             var buffer = new byte[size];
             Marshal.Copy(local, buffer, 0, size);
-            WriteProcessMemory(process, destination, buffer, buffer.Length, out _);
+            return WriteProcessMemory(process, destination, buffer, buffer.Length, out var written) &&
+                written == (nuint)buffer.Length;
         }
         finally
         {
@@ -476,3 +852,9 @@ public sealed record DesktopIconPlacement(
     IReadOnlyList<string> DisplayNames,
     int ScreenX,
     int ScreenY);
+
+public sealed record DesktopGridAlignmentResult(
+    int Requested,
+    int Applied,
+    int HorizontalSpacing,
+    int VerticalSpacing);

@@ -1,5 +1,5 @@
 param(
-    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.App.exe",
+    [string]$Executable = "..\artifacts\publish\win-x64\CrabDesk.WinUI.exe",
     [switch]$ConfirmExplorerRestart
 )
 
@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $exe)) {
 if (-not $ConfirmExplorerRestart) {
     throw "Explorer restart is disruptive. Re-run with -ConfirmExplorerRestart to execute this test."
 }
-if (@(Get-Process CrabDesk.App,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying Explorer restart recovery."
 }
 
@@ -45,7 +45,7 @@ function Test-CrabDeskSurface {
                 $parent = [ExplorerRestartVerifier]::GetParent($child)
                 $className = New-Object Text.StringBuilder 128
                 [void][ExplorerRestartVerifier]::GetClassName($parent, $className, 128)
-                if ($className.ToString() -in @("Progman", "WorkerW") -and [ExplorerRestartVerifier]::IsWindowVisible($child)) {
+                if ($className.ToString() -in @("Progman", "WorkerW", "SHELLDLL_DefView") -and [ExplorerRestartVerifier]::IsWindowVisible($child)) {
                     $script:surfaceFound = $true
                 }
             }
