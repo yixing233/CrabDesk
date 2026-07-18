@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="CrabDesk.WinUI.Controls.FontPickerControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Spacing="4">
+        <TextBlock Text="{x:Bind Header, Mode=OneWay}" />
+        <AutoSuggestBox x:Name="SearchBox"
+                        PlaceholderText="搜索字体"
+                        HorizontalAlignment="Stretch"
+                        TextChanged="OnTextChanged"
+                        SuggestionChosen="OnSuggestionChosen"
+                        GotFocus="OnGotFocus"
+                        LostFocus="OnLostFocus"
+                        AutomationProperties.Name="字体搜索与选择">
+            <AutoSuggestBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}"
+                               FontFamily="{Binding}"
+                               FontSize="14"
+                               TextTrimming="CharacterEllipsis" />
+                </DataTemplate>
+            </AutoSuggestBox.ItemTemplate>
+        </AutoSuggestBox>
+    </StackPanel>
+</UserControl>

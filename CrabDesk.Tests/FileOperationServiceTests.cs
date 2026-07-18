@@ -50,6 +50,36 @@ public sealed class FileOperationServiceTests : IDisposable
             control));
     }
 
+    [Theory]
+    [InlineData(true, false, false, false, false, true)]
+    [InlineData(false, false, false, false, false, false)]
+    [InlineData(true, true, false, false, false, false)]
+    [InlineData(true, false, true, false, false, false)]
+    [InlineData(true, false, false, true, false, false)]
+    [InlineData(true, false, false, false, true, false)]
+    public void DragCompletionOnlyUnassignsCommittedDropOutsideEveryBox(
+        bool committed,
+        bool cancelled,
+        bool handledByBox,
+        bool sourceMapped,
+        bool pointerOverBox,
+        bool expected)
+    {
+        Assert.Equal(expected, BoxDragCompletionPolicy.ShouldUnassign(
+            committed,
+            cancelled,
+            handledByBox,
+            sourceMapped,
+            pointerOverBox));
+    }
+
+    [Fact]
+    public void OnlyMappedFolderDragExposesNativeFileDropFormat()
+    {
+        Assert.False(BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped: false));
+        Assert.True(BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped: true));
+    }
+
     [Fact]
     public async Task RenamePreservesExistingExtensionWithoutDuplicatingIt()
     {

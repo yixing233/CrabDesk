@@ -232,6 +232,28 @@ public static class DesktopIconPositionService
         }
     }
 
+    public static IReadOnlyList<DesktopIconPositionSnapshot> CaptureAllItemPositions(IntPtr listView)
+    {
+        if (!RemoteListViewSession.TryCreate(listView, out var session))
+        {
+            return [];
+        }
+
+        using (session)
+        {
+            var positions = new List<DesktopIconPositionSnapshot>(session.ItemCount);
+            for (var index = 0; index < session.ItemCount; index++)
+            {
+                var text = session.ReadText(index);
+                if (text is not null && session.TryGetPosition(index, out var point))
+                {
+                    positions.Add(new DesktopIconPositionSnapshot(text, point.X, point.Y));
+                }
+            }
+            return positions;
+        }
+    }
+
     public static int RestoreItemPositions(
         IntPtr listView,
         IEnumerable<DesktopIconPositionSnapshot> positions)

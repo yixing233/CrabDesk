@@ -110,9 +110,17 @@ public interface IOrganizationRuleEngine
 public interface IBackupService
 {
     string BackupDirectory { get; }
-    Task<LayoutBackupInfo> CreateAsync(CrabDeskState state, CancellationToken cancellationToken = default);
-    Task ExportAsync(CrabDeskState state, string destinationPath, CancellationToken cancellationToken = default);
+    Task<LayoutBackupInfo> CreateAsync(
+        CrabDeskState state,
+        DesktopBackupCapture? desktopCapture = null,
+        CancellationToken cancellationToken = default);
+    Task ExportAsync(
+        CrabDeskState state,
+        string destinationPath,
+        DesktopBackupCapture? desktopCapture = null,
+        CancellationToken cancellationToken = default);
     Task<CrabDeskState> LoadAsync(string path, CancellationToken cancellationToken = default);
+    Task<LayoutBackupDocument> LoadDocumentAsync(string path, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<LayoutBackupInfo>> GetBackupsAsync(CancellationToken cancellationToken = default);
     Task DeleteAsync(string path, CancellationToken cancellationToken = default);
     Task CleanupAsync(int retentionDays, CancellationToken cancellationToken = default);

@@ -18,6 +18,9 @@ public sealed partial class MainWindow : Window
     private readonly IBackdropService _backdropService;
     private readonly CrabDeskRuntime _runtime;
     private readonly IFilePickerService _filePickerService;
+    private readonly IInfoBarService _infoBarService;
+    private CancellationTokenSource? _infoBarDismissal;
+    private Storyboard? _infoBarAnimation;
     private bool? _validationPaneOpen;
     private bool? _paneTransitionOpen;
 
@@ -26,14 +29,17 @@ public sealed partial class MainWindow : Window
         IDialogService dialogService,
         IBackdropService backdropService,
         IFilePickerService filePickerService,
-        CrabDeskRuntime runtime)
+        CrabDeskRuntime runtime,
+        IInfoBarService infoBarService)
     {
         _themeService = themeService;
         _dialogService = dialogService;
         _backdropService = backdropService;
         _filePickerService = filePickerService;
         _runtime = runtime;
+        _infoBarService = infoBarService;
         InitializeComponent();
+        _infoBarService.Requested += OnInfoBarRequested;
 
         Title = "CrabDesk 设置";
         ExtendsContentIntoTitleBar = true;
@@ -42,7 +48,10 @@ public sealed partial class MainWindow : Window
         AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
         AppWindow.Changed += OnAppWindowChanged;
         AppWindow.Closing += OnAppWindowClosing;
-        _backdropService.Apply(this, BackdropKind.Mica);
+        var backdrop = Enum.TryParse<BackdropKind>(_runtime.State.Settings.WindowBackdrop, true, out var configuredBackdrop)
+            ? configuredBackdrop
+            : BackdropKind.Mica;
+        _backdropService.Apply(this, backdrop);
 
         RootGrid.Loaded += OnRootLoaded;
         Navigation.SelectedItem = Navigation.MenuItems[0];
@@ -61,6 +70,104 @@ public sealed partial class MainWindow : Window
         {
             Navigate(typeof(GeneralPage));
         }
+    }
+
+    private void OnInfoBarRequested(object? sender, InfoBarNotification notification)
+    {
+        DispatcherQueue.TryEnqueue(() => ShowInfoBar(notification));
+    }
+
+    private void ShowInfoBar(InfoBarNotification notification)
+    {
+        _infoBarDismissal?.Cancel();
+        _infoBarDismissal?.Dispose();
+        _infoBarDismissal = new CancellationTokenSource();
+        _infoBarAnimation?.Stop();
+        GlobalInfoBarHost.Visibility = Visibility.Visible;
+        GlobalInfoBar.Message = notification.Message;
+        GlobalInfoBar.Severity = notification.Severity;
+        GlobalInfoBar.IsOpen = true;
+        AnimateInfoBar(32, 0, 0, 1);
+
+        var duration = notification.Duration ??
+            (notification.Severity == InfoBarSeverity.Error
+                ? TimeSpan.FromSeconds(6)
+                : TimeSpan.FromSeconds(4));
+        _ = DismissInfoBarAsync(duration, _infoBarDismissal.Token);
+    }
+
+    private async Task DismissInfoBarAsync(TimeSpan duration, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(duration, cancellationToken);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    CloseInfoBar();
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void GlobalInfoBar_OnClosed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        _infoBarDismissal?.Cancel();
+        GlobalInfoBarHost.Visibility = Visibility.Collapsed;
+        GlobalInfoBarHost.Opacity = 0;
+    }
+
+    private void CloseInfoBar()
+    {
+        if (!GlobalInfoBar.IsOpen)
+        {
+            return;
+        }
+
+        _infoBarAnimation?.Stop();
+        AnimateInfoBar(0, 32, 1, 0, () => GlobalInfoBar.IsOpen = false);
+    }
+
+    private void AnimateInfoBar(
+        double fromX,
+        double toX,
+        double fromOpacity,
+        double toOpacity,
+        Action? completed = null)
+    {
+        _infoBarAnimation?.Stop();
+        GlobalInfoBarTransform.X = fromX;
+        GlobalInfoBarHost.Opacity = fromOpacity;
+        var storyboard = new Storyboard();
+        var slide = new DoubleAnimation
+        {
+            From = fromX,
+            To = toX,
+            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+            EnableDependentAnimation = true
+        };
+        var fade = new DoubleAnimation
+        {
+            From = fromOpacity,
+            To = toOpacity,
+            Duration = new Duration(TimeSpan.FromMilliseconds(180))
+        };
+        Storyboard.SetTarget(slide, GlobalInfoBarTransform);
+        Storyboard.SetTargetProperty(slide, "X");
+        Storyboard.SetTarget(fade, GlobalInfoBarHost);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
+        if (completed is not null)
+        {
+            storyboard.Completed += (_, _) => completed();
+        }
+        _infoBarAnimation = storyboard;
+        storyboard.Begin();
     }
 
     private void Navigation_OnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -109,7 +216,8 @@ public sealed partial class MainWindow : Window
 
     private void Navigate(Type pageType)
     {
-        var animationsEnabled = new UISettings().AnimationsEnabled;
+        var animationsEnabled = _runtime.State.Settings.Appearance.AnimationEnabled &&
+                                new UISettings().AnimationsEnabled;
         NavigationTransitionInfo transition = animationsEnabled
             ? new EntranceNavigationTransitionInfo()
             : new SuppressNavigationTransitionInfo();

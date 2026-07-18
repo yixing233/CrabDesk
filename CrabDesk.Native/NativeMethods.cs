@@ -25,7 +25,21 @@ internal static class NativeMethods
     internal const int SwpShowWindow = 0x0040;
     internal const int SwpNoOwnerZOrder = 0x0200;
     internal const uint GwHwndNext = 2;
+    internal const uint WmSetRedraw = 0x000B;
+    internal const uint LvmGetImageList = 0x1002;
+    internal const int LvsilNormal = 0;
+    internal const int LvsilSmall = 1;
     internal const int RgnOr = 2;
+    internal const int RgnDiff = 4;
+    internal const uint RdwInvalidate = 0x0001;
+    internal const uint RdwErase = 0x0004;
+    internal const uint RdwNoChildren = 0x0040;
+    internal const uint RdwAllChildren = 0x0080;
+    internal const uint RdwUpdateNow = 0x0100;
+    internal const uint ShcneAssocChanged = 0x08000000;
+    internal const uint ShcneUpdatedir = 0x00001000;
+    internal const uint ShcnfIdList = 0x0000;
+    internal const uint ShcnfPathW = 0x0005;
     internal static readonly IntPtr HwndTop = IntPtr.Zero;
 
     internal delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -91,6 +105,13 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("shell32.dll")]
+    internal static extern void SHChangeNotify(
+        uint eventId,
+        uint flags,
+        IntPtr item1,
+        IntPtr item2);
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
@@ -119,9 +140,16 @@ internal static class NativeMethods
     [DllImport("gdi32.dll", SetLastError = true)]
     internal static extern int CombineRgn(IntPtr destination, IntPtr source1, IntPtr source2, int mode);
 
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int OffsetRgn(IntPtr region, int x, int y);
+
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DeleteObject(IntPtr handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool RedrawWindow(IntPtr hwnd, IntPtr updateRect, IntPtr updateRegion, uint flags);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

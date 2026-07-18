@@ -1,0 +1,22 @@
+<UserControl
+    x:Class="CrabDesk.WinUI.Controls.DesktopSnapshotView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+    <Border Background="{ThemeResource AppSurfaceBrush}"
+            BorderBrush="{ThemeResource SubtleBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="7"
+            Padding="5">
+        <Grid>
+            <Image x:Name="SnapshotWallpaper"
+                   Stretch="UniformToFill"
+                   Opacity="0.34" />
+            <Canvas x:Name="SnapshotCanvas" SizeChanged="SnapshotCanvas_OnSizeChanged" />
+            <Border Height="3"
+                    VerticalAlignment="Bottom"
+                    Background="{ThemeResource NavigationSurfaceBrush}"
+                    CornerRadius="1.5" />
+        </Grid>
+    </Border>
+</UserControl>

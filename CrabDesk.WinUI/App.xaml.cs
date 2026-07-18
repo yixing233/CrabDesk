@@ -152,6 +152,7 @@ public partial class App : Application
         services.AddSingleton(_ => new CrabDeskRuntime(action =>
             dispatcher.TryEnqueue(() => action())));
         services.AddSingleton<ICrabDeskService, CrabDeskService>();
+        services.AddSingleton<IInfoBarService, InfoBarService>();
         services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton<IBackdropService, BackdropService>();
         services.AddSingleton<IDialogService, DialogService>();

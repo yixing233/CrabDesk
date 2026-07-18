@@ -28,6 +28,7 @@ try
     var recovery = ReadRecoveryState(markerPath, previousHidden);
     var inputRestored = ExplorerIcons.EnsureDesktopInputEnabled();
     var workAreasRestored = recovery.WorkAreas is null || ExplorerIcons.RestoreWorkAreas(recovery.WorkAreas);
+    var attributesRestored = ExplorerIcons.RestoreFileAttributes(recovery.FileAttributes);
     var positionsRestored = recovery.IconPositions.Count == 0;
     if (recovery.IconPositions.Count > 0)
     {
@@ -42,7 +43,7 @@ try
         }
     }
     var visibilityRestored = ExplorerIcons.SetHidden(recovery.PreviousHidden);
-    recoveryCompleted = workAreasRestored && positionsRestored && visibilityRestored && inputRestored;
+    recoveryCompleted = attributesRestored && workAreasRestored && positionsRestored && visibilityRestored && inputRestored;
 }
 catch
 {
@@ -78,10 +79,12 @@ internal sealed class RecoveryState
     public bool PreviousHidden { get; set; }
     public List<RecoveryIconPosition> IconPositions { get; set; } = [];
     public List<RecoveryWorkArea>? WorkAreas { get; set; }
+    public List<RecoveryFileAttribute> FileAttributes { get; set; } = [];
 }
 
 internal readonly record struct RecoveryIconPosition(string DisplayName, int X, int Y);
 internal readonly record struct RecoveryWorkArea(int Left, int Top, int Right, int Bottom);
+internal readonly record struct RecoveryFileAttribute(string Path, int Attributes);
 
 [JsonSerializable(typeof(RecoveryState))]
 internal partial class GuardJsonContext : JsonSerializerContext;
@@ -223,6 +226,30 @@ internal static class ExplorerIcons
             Free(process, remoteText);
             Free(process, remotePoint);
         }
+    }
+
+    internal static bool RestoreFileAttributes(IReadOnlyList<RecoveryFileAttribute> snapshots)
+    {
+        var complete = true;
+        foreach (var snapshot in snapshots)
+        {
+            try
+            {
+                if (File.Exists(snapshot.Path) || Directory.Exists(snapshot.Path))
+                {
+                    File.SetAttributes(snapshot.Path, (FileAttributes)snapshot.Attributes);
+                }
+            }
+            catch (IOException)
+            {
+                complete = false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                complete = false;
+            }
+        }
+        return complete;
     }
 
     internal static bool RestoreWorkAreas(IReadOnlyList<RecoveryWorkArea> workAreas)

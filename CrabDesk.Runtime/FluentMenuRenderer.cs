@@ -78,7 +78,10 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
     {
         var checkArea = eventArgs.ImageRectangle;
         var centerX = checkArea.IsEmpty ? 14 : checkArea.Left + checkArea.Width / 2f;
-        var centerY = checkArea.IsEmpty ? eventArgs.Item.Height / 2f : checkArea.Top + checkArea.Height / 2f;
+        // ToolStrip keeps the image rectangle at its preferred-size position
+        // after our menu metrics raise the row to 32 px. Center against the
+        // actual row so the checkmark shares the same baseline as the text.
+        var centerY = eventArgs.Item.Height / 2f;
         var color = eventArgs.Item.Enabled
             ? (_isDark ? Color.FromArgb(96, 205, 255) : Color.FromArgb(0, 95, 184))
             : (_isDark ? Color.FromArgb(125, 130, 138) : Color.FromArgb(145, 150, 158));

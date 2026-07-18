@@ -19,6 +19,7 @@ public interface ICrabDeskService
     HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action);
     void SetPaused(bool paused);
     Task ReconnectDesktopAsync();
+    Task<bool> RepairDesktopIconsAsync();
     void SetStartWithWindows(bool enabled);
     Task SetShowSystemItemsAsync(bool enabled);
     void SetConfirmDeleteBox(bool enabled);
@@ -28,6 +29,7 @@ public interface ICrabDeskService
     void SetRefreshAfterRename(bool enabled);
     void SetAnimationEnabled(bool enabled);
     void SetThemeMode(ApplicationThemeMode mode);
+    void SetWindowBackdrop(string backdrop);
     void SetCheckUpdatesOnStartup(bool enabled);
     void SetUpdateChannel(UpdateChannel channel);
     Task<UpdateCheckResult> CheckForUpdatesAsync(bool manual = true);
@@ -72,6 +74,7 @@ public interface ICrabDeskService
     void SetIconSpacing(double horizontal, double vertical);
     void SetSelectionColor(string value);
     void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment);
+    void SetBoxMaterial(Guid? boxId, BoxMaterialKind material);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);
     void SetBoxOpacity(Guid? boxId, double value);

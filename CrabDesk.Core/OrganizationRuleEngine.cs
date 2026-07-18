@@ -109,6 +109,13 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
         {
             for (var second = first + 1; second < rules.Length; second++)
             {
+                if ((BuiltInOrganizationRules.IsFallback(rules[first]) &&
+                        rules[first].Priority > rules[second].Priority) ||
+                    (BuiltInOrganizationRules.IsFallback(rules[second]) &&
+                        rules[second].Priority > rules[first].Priority))
+                {
+                    continue;
+                }
                 if (!MayOverlap(rules[first], rules[second]))
                 {
                     continue;

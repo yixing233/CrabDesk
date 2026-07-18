@@ -22,6 +22,33 @@ public sealed class DesktopItemLayoutTests
     }
 
     [Fact]
+    public void GridBoxWidthSnapsToWholeColumns()
+    {
+        var width = DesktopItemLayoutEngine.SnapBoxWidth(BoxViewMode.Grid, 310, 42, 76);
+
+        Assert.Equal(320, width);
+        Assert.Equal(4, (int)((width - 16) / 76));
+    }
+
+    [Fact]
+    public void GridBoxHeightSnapsToWholeRows()
+    {
+        var height = DesktopItemLayoutEngine.SnapBoxHeight(BoxViewMode.Grid, 270, 36, 42, 80);
+
+        Assert.Equal(292, height);
+        Assert.Equal(3, (int)((height - 36 - 16) / 80));
+    }
+
+    [Fact]
+    public void ListBoxHeightSnapsToWholeRows()
+    {
+        var height = DesktopItemLayoutEngine.SnapBoxHeight(BoxViewMode.List, 180, 36, 42, 80);
+
+        Assert.Equal(160, height);
+        Assert.Equal(2, (int)((height - 36 - 16) / 54));
+    }
+
+    [Fact]
     public void GridLayoutUsesConfiguredSpacingAndStableColumns()
     {
         var result = DesktopItemLayoutEngine.Calculate(
@@ -38,6 +65,23 @@ public sealed class DesktopItemLayoutTests
         Assert.Equal(new LayoutRect(174, 20, 82, 88), result.Items[2]);
         Assert.Equal(new LayoutRect(10, 108, 82, 88), result.Items[3]);
         Assert.Equal(0, result.MaxScroll);
+    }
+
+    [Fact]
+    public void CompactDefaultGridKeepsTwoLineLabelsWithoutLooseRows()
+    {
+        var result = DesktopItemLayoutEngine.Calculate(
+            BoxViewMode.Grid,
+            new LayoutRect(0, 0, 304, 200),
+            8,
+            42,
+            76,
+            80,
+            0);
+
+        Assert.Equal(76, result.Items[0].Width);
+        Assert.Equal(80, result.Items[0].Height);
+        Assert.Equal(80, result.Items[4].Y);
     }
 
     [Fact]
@@ -89,6 +133,39 @@ public sealed class DesktopItemLayoutTests
         Assert.Empty(result.Items);
         Assert.Equal(0, result.ScrollOffset);
         Assert.Equal(0, result.MaxScroll);
+    }
+
+    [Fact]
+    public void VisibleGridLayoutDoesNotAllocateGeometryForOffscreenItems()
+    {
+        var result = DesktopItemLayoutEngine.CalculateVisible(
+            BoxViewMode.Grid,
+            new LayoutRect(0, 0, 328, 176),
+            10_000,
+            42,
+            82,
+            88,
+            8_800);
+
+        Assert.Equal(12, result.Items.Count);
+        Assert.Equal(400, result.Items[0].Index);
+        Assert.Equal(411, result.Items[^1].Index);
+        Assert.True(result.MaxScroll > result.ScrollOffset);
+    }
+
+    [Fact]
+    public void VisibleListLayoutReturnsOnlyRowsAroundViewport()
+    {
+        var result = DesktopItemLayoutEngine.CalculateVisible(
+            BoxViewMode.List,
+            new LayoutRect(0, 0, 300, 100),
+            10_000,
+            42,
+            82,
+            88,
+            540);
+
+        Assert.Equal([10, 11, 12], result.Items.Select(item => item.Index));
     }
 
     [Fact]

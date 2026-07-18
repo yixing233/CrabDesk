@@ -41,13 +41,14 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
-    public async Task StableChannelUsesLatestReleaseAndSelectsFixedAssets()
+    public async Task UnifiedReleaseStreamSelectsFixedAssets()
     {
         HttpRequestMessage? captured = null;
         using var client = new HttpClient(new StubHandler(request =>
         {
             captured = request;
             var response = JsonResponse("""
+            [
             {
               "tag_name": "v0.7.0",
               "name": "CrabDesk 0.7.0",
@@ -61,6 +62,7 @@ public sealed class UpdateServiceTests
                 { "name": "SHA256SUMS.txt", "browser_download_url": "https://download/sha256.txt" }
               ]
             }
+            ]
             """);
             response.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"release-7\"");
             return response;
@@ -74,12 +76,12 @@ public sealed class UpdateServiceTests
         Assert.Equal("https://download/setup.exe", result.InstallerUrl);
         Assert.Equal("https://download/sha256.txt", result.Sha256Url);
         Assert.Equal("\"release-7\"", result.ETag);
-        Assert.Equal("/repos/acme/CrabDesk/releases/latest", captured!.RequestUri!.PathAndQuery);
+        Assert.Equal("/repos/acme/CrabDesk/releases?per_page=20", captured!.RequestUri!.PathAndQuery);
         Assert.Contains("CrabDesk/0.6.0", captured.Headers.UserAgent.ToString());
     }
 
     [Fact]
-    public async Task PreviewChannelChoosesHighestNonDraftSemanticVersion()
+    public async Task UnifiedReleaseStreamChoosesHighestNonDraftSemanticVersion()
     {
         using var client = new HttpClient(new StubHandler(_ => JsonResponse("""
         [
@@ -90,11 +92,41 @@ public sealed class UpdateServiceTests
         """))) { BaseAddress = new Uri("https://api.github.test") };
         using var service = new GitHubUpdateService(client);
 
-        var result = await service.CheckAsync(Request(UpdateChannel.Preview));
+        var result = await service.CheckAsync(Request());
 
         Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
         Assert.Equal("0.7.0-beta.2", result.LatestVersion);
         Assert.True(result.IsPrerelease);
+    }
+
+    [Fact]
+    public async Task UpdateSelectsInstallerMatchingInstalledPackageKind()
+    {
+        using var client = new HttpClient(new StubHandler(_ => JsonResponse("""
+        [
+          {
+            "tag_name": "v0.7.0",
+            "name": "CrabDesk 0.7.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+              { "name": "CrabDesk-Setup-Web-x64.exe", "browser_download_url": "https://download/web.exe" },
+              { "name": "CrabDesk-Setup-Full-x64.exe", "browser_download_url": "https://download/full.exe" },
+              { "name": "SHA256SUMS.txt", "browser_download_url": "https://download/sha256.txt" }
+            ]
+          }
+        ]
+        """))) { BaseAddress = new Uri("https://api.github.test") };
+        using var service = new GitHubUpdateService(client);
+
+        var result = await service.CheckAsync(Request() with
+        {
+            InstallerAssetName = "CrabDesk-Setup-Web-x64.exe"
+        });
+
+        Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
+        Assert.Equal("https://download/web.exe", result.InstallerUrl);
+        Assert.Equal("CrabDesk-Setup-Web-x64.exe", result.InstallerAssetName);
     }
 
     [Fact]
@@ -143,6 +175,23 @@ public sealed class UpdateServiceTests
 
         Assert.Equal(UpdateCheckStatus.RateLimited, rateResult.Status);
         Assert.Equal(UpdateCheckStatus.Offline, offlineResult.Status);
+    }
+
+    [Fact]
+    public async Task MissingReleaseHasClearMessage()
+    {
+        using var client = new HttpClient(new StubHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.NotFound)))
+        {
+            BaseAddress = new Uri("https://api.github.test")
+        };
+        using var service = new GitHubUpdateService(client);
+
+        var result = await service.CheckAsync(Request());
+
+        Assert.Equal(UpdateCheckStatus.Failed, result.Status);
+        Assert.Contains("暂无可用的 Release", result.Message);
+        Assert.DoesNotContain("HTTP 404", result.Message);
     }
 
     [Fact]

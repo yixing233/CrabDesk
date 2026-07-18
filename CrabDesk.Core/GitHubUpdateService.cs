@@ -9,7 +9,9 @@ namespace CrabDesk.Core;
 
 public sealed class GitHubUpdateService : IUpdateService
 {
-    private const string InstallerAssetName = "CrabDesk-Setup-x64.exe";
+    private const string LegacyInstallerAssetName = "CrabDesk-Setup-x64.exe";
+    private const string WebInstallerAssetName = "CrabDesk-Setup-Web-x64.exe";
+    private const string FullInstallerAssetName = "CrabDesk-Setup-Full-x64.exe";
     private const string Sha256AssetName = "SHA256SUMS.txt";
     private const long MaximumInstallerBytes = 512L * 1024 * 1024;
     private const int MaximumChecksumBytes = 1024 * 1024;
@@ -48,9 +50,11 @@ public sealed class GitHubUpdateService : IUpdateService
 
         var owner = Uri.EscapeDataString(request.RepositoryOwner.Trim());
         var repository = Uri.EscapeDataString(request.RepositoryName.Trim());
-        var endpoint = request.Channel == UpdateChannel.Stable
-            ? $"/repos/{owner}/{repository}/releases/latest"
-            : $"/repos/{owner}/{repository}/releases?per_page=20";
+        // Use one release stream for all users. GitHub's /releases/latest
+        // excludes prereleases and returns 404 when a repository has only a
+        // prerelease, which made the update experience depend on a hidden
+        // channel setting.
+        var endpoint = $"/repos/{owner}/{repository}/releases?per_page=20";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Get, endpoint);
         httpRequest.Headers.UserAgent.Add(new ProductInfoHeaderValue("CrabDesk", currentVersion.ToString()));
         httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
@@ -71,15 +75,26 @@ public sealed class GitHubUpdateService : IUpdateService
             {
                 return BuildCachedResult(request, currentVersion);
             }
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new UpdateCheckResult(
+                    UpdateCheckStatus.Failed,
+                    request.CurrentVersion,
+                    Message: "GitHub 中暂无可用的 Release");
+            }
             if ((response.StatusCode == HttpStatusCode.Forbidden ||
                  response.StatusCode == HttpStatusCode.TooManyRequests) &&
                 (!response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) ||
                  remaining.FirstOrDefault() == "0"))
             {
+                var retryMessage = response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) &&
+                                   long.TryParse(resetValues.FirstOrDefault(), out var resetSeconds)
+                    ? $"，预计 {DateTimeOffset.FromUnixTimeSeconds(resetSeconds).ToLocalTime():HH:mm} 后恢复"
+                    : "，请稍后重试";
                 return new UpdateCheckResult(
                     UpdateCheckStatus.RateLimited,
                     request.CurrentVersion,
-                    Message: "GitHub API 请求频率已达上限，请稍后重试");
+                    Message: $"GitHub API 请求频率已达上限{retryMessage}");
             }
             if (!response.IsSuccessStatusCode)
             {
@@ -90,12 +105,9 @@ public sealed class GitHubUpdateService : IUpdateService
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            var releases = request.Channel == UpdateChannel.Stable
-                ? await ReadStableReleaseAsync(stream, cancellationToken).ConfigureAwait(false)
-                : await ReadPreviewReleasesAsync(stream, cancellationToken).ConfigureAwait(false);
+            var releases = await ReadReleasesAsync(stream, cancellationToken).ConfigureAwait(false);
             var selected = releases
-                .Where(release => !release.Draft &&
-                    (request.Channel == UpdateChannel.Preview || !release.Prerelease))
+                .Where(release => !release.Draft)
                 .Select(release => new { Release = release, Parsed = ParseVersion(release.TagName) })
                 .Where(candidate => candidate.Parsed is not null)
                 .OrderByDescending(candidate => candidate.Parsed)
@@ -111,8 +123,16 @@ public sealed class GitHubUpdateService : IUpdateService
             var release = selected.Release;
             var latestVersion = selected.Parsed!;
             var assets = release.Assets ?? [];
-            var installerUrl = assets.FirstOrDefault(asset =>
-                asset.Name.Equals(InstallerAssetName, StringComparison.OrdinalIgnoreCase))?.BrowserDownloadUrl ?? string.Empty;
+            var installerAssetName = NormalizeInstallerAssetName(request.InstallerAssetName);
+            var installerAsset = assets.FirstOrDefault(asset =>
+                asset.Name.Equals(installerAssetName, StringComparison.OrdinalIgnoreCase));
+            if (installerAsset is null && !installerAssetName.Equals(LegacyInstallerAssetName, StringComparison.OrdinalIgnoreCase))
+            {
+                installerAssetName = LegacyInstallerAssetName;
+                installerAsset = assets.FirstOrDefault(asset =>
+                    asset.Name.Equals(installerAssetName, StringComparison.OrdinalIgnoreCase));
+            }
+            var installerUrl = installerAsset?.BrowserDownloadUrl ?? string.Empty;
             var sha256Url = assets.FirstOrDefault(asset =>
                 asset.Name.Equals(Sha256AssetName, StringComparison.OrdinalIgnoreCase))?.BrowserDownloadUrl ?? string.Empty;
             return new UpdateCheckResult(
@@ -128,7 +148,8 @@ public sealed class GitHubUpdateService : IUpdateService
                 installerUrl,
                 sha256Url,
                 release.Prerelease,
-                response.Headers.ETag?.ToString() ?? string.Empty);
+                response.Headers.ETag?.ToString() ?? string.Empty,
+                InstallerAssetName: installerAssetName);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -172,7 +193,8 @@ public sealed class GitHubUpdateService : IUpdateService
 
         var destinationRoot = Path.GetFullPath(request.DestinationDirectory);
         var versionDirectory = Path.Combine(destinationRoot, version);
-        var installerPath = Path.Combine(versionDirectory, InstallerAssetName);
+        var installerAssetName = NormalizeInstallerAssetName(request.InstallerAssetName);
+        var installerPath = Path.Combine(versionDirectory, installerAssetName);
         var partialPath = installerPath + ".part";
         Directory.CreateDirectory(versionDirectory);
 
@@ -181,7 +203,7 @@ public sealed class GitHubUpdateService : IUpdateService
             progress?.Report(new UpdateDownloadProgress("正在获取校验文件"));
             var checksumText = await DownloadChecksumTextAsync(sha256Uri, cancellationToken)
                 .ConfigureAwait(false);
-            var expectedHash = FindExpectedHash(checksumText, InstallerAssetName);
+            var expectedHash = FindExpectedHash(checksumText, installerAssetName);
             if (expectedHash is null)
             {
                 return new UpdateDownloadResult(false, Message: $"{Sha256AssetName} 中缺少安装包校验值");
@@ -361,17 +383,7 @@ public sealed class GitHubUpdateService : IUpdateService
         }
     }
 
-    private static async Task<IReadOnlyList<GitHubRelease>> ReadStableReleaseAsync(
-        Stream stream,
-        CancellationToken cancellationToken)
-    {
-        var release = await JsonSerializer.DeserializeAsync<GitHubRelease>(
-            stream,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-        return release is null ? [] : [release];
-    }
-
-    private static async Task<IReadOnlyList<GitHubRelease>> ReadPreviewReleasesAsync(
+    private static async Task<IReadOnlyList<GitHubRelease>> ReadReleasesAsync(
         Stream stream,
         CancellationToken cancellationToken) =>
         await JsonSerializer.DeserializeAsync<List<GitHubRelease>>(
@@ -380,6 +392,11 @@ public sealed class GitHubUpdateService : IUpdateService
 
     private static SemanticVersion? ParseVersion(string value) =>
         SemanticVersion.TryParse(value, out var version) ? version : null;
+
+    private static string NormalizeInstallerAssetName(string value) =>
+        value.Equals(WebInstallerAssetName, StringComparison.OrdinalIgnoreCase) ? WebInstallerAssetName :
+        value.Equals(FullInstallerAssetName, StringComparison.OrdinalIgnoreCase) ? FullInstallerAssetName :
+        LegacyInstallerAssetName;
 
     private static UpdateCheckResult BuildCachedResult(
         UpdateCheckRequest request,
@@ -405,7 +422,8 @@ public sealed class GitHubUpdateService : IUpdateService
             request.CachedInstallerUrl,
             request.CachedSha256Url,
             request.CachedIsPrerelease,
-            request.CachedETag);
+            request.CachedETag,
+            InstallerAssetName: NormalizeInstallerAssetName(request.InstallerAssetName));
     }
 
     private sealed class GitHubRelease

@@ -9,31 +9,57 @@ namespace CrabDesk.Runtime;
 
 internal sealed class DesktopBoxForm : Forms.Form
 {
+    // Explorer-hosted child HWNDs currently composite the backdrop above the
+    // GDI content even when DesktopWindowTarget is created as non-topmost.
+    // Keep the proven preview renderer active until a separate content layer
+    // is introduced for the live backdrop.
+    private const bool EnableLiveCompositionBackdrop = false;
     private const string ItemKeysFormat = "CrabDesk.DesktopItemKeys";
     private const string SourceBoxFormat = "CrabDesk.SourceBoxId";
+    private const string DragSessionFormat = "CrabDesk.InternalDragSession";
     private const int WmNcHitTest = 0x0084;
     private const int WmMouseActivate = 0x0021;
     private const int WmContextMenu = 0x007B;
     private const int WsClipSiblings = 0x04000000;
     private static readonly IntPtr HtTransparent = new(-1);
     private static readonly IntPtr MaNoActivate = new(3);
+    private static readonly (string Name, string Hex)[] AccentPalette =
+    [
+        ("海蓝", "#FF4EA1D3"),
+        ("青绿", "#FF2AA198"),
+        ("草绿", "#FF4CAF72"),
+        ("明黄", "#FFF2B84B"),
+        ("暖橙", "#FFF28C48"),
+        ("珊瑚红", "#FFE46464"),
+        ("薰衣草紫", "#FF8B72D6"),
+        ("莓果粉", "#FFE66AA2"),
+        ("雾灰", "#FF7B8794")
+    ];
     private readonly CrabDeskRuntime _runtime;
     private readonly DesktopHostService _desktopHost;
     private readonly MonitorLayout _monitor;
     private readonly double _scale;
+    private Bitmap? _backdropSnapshot;
+    private CompositionBoxBackdropHost? _compositionBackdrop;
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
     private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
     private readonly CancellationTokenSource _iconLoadCancellation = new();
     private readonly SemaphoreSlim _iconLoadGate = new(2, 2);
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _hoverExpandedBoxes = [];
+    private readonly HoverExpansionController _hoverExpansion = new(
+        TimeSpan.FromMilliseconds(280),
+        TimeSpan.FromMilliseconds(220));
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, double> _scrollOffsets = [];
+    private readonly Dictionary<Guid, IReadOnlyList<DesktopItemRef>> _boxItems = [];
     private readonly Dictionary<Guid, BoxHeightAnimation> _heightAnimations = [];
     private readonly List<BoxGeometry> _boxes = [];
     private readonly List<ItemGeometry> _items = [];
+    private IReadOnlyList<LayoutRect> _lastWindowRegionRectangles = [];
     private readonly Forms.Timer _animationTimer;
     private readonly Forms.Timer _hoverTimer;
+    private readonly Forms.ToolTip _headerToolTip;
     private readonly Forms.TextBox _titleEditor;
     private ShellContextMenuSession? _shellContextMenu;
     private DesktopBox? _editingBox;
@@ -41,6 +67,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private Font? _titleEditorFont;
     private DesktopBox? _movingBox;
     private DesktopBox? _resizingBox;
+    private ResizeEdges _resizeEdges;
     private DesktopItemRef? _pressedItem;
     private DesktopBox? _selectionBox;
     private Guid? _pressedBoxId;
@@ -49,7 +76,10 @@ internal sealed class DesktopBoxForm : Forms.Form
     private PointF _selectionStart;
     private RectangleF _selectionRectangle;
     private bool _dragStarted;
+    private bool _dragDropCommitted;
+    private bool _dragCancelled;
     private string? _hoveredItemKey;
+    private Guid? _hoveredAutoExpandBoxId;
     private string? _lastRegionDiagnostic;
     private int _iconCacheVersion;
     private int _paintCount;
@@ -85,7 +115,13 @@ internal sealed class DesktopBoxForm : Forms.Form
         _hoverTimer = new Forms.Timer { Interval = 50 };
         _hoverTimer.Tick += OnHoverTimer;
         _hoverTimer.Start();
-
+        _headerToolTip = new Forms.ToolTip
+        {
+            InitialDelay = 450,
+            ReshowDelay = 100,
+            AutoPopDelay = 4000,
+            ShowAlways = true
+        };
         _titleEditor = new Forms.TextBox
         {
             Visible = false,
@@ -97,6 +133,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         _titleEditor.KeyDown += OnTitleEditorKeyDown;
         _titleEditor.LostFocus += (_, _) => FinishTitleEdit(!_cancelTitleEdit);
         Controls.Add(_titleEditor);
+        _backdropSnapshot = CaptureBackdropSnapshot();
 
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
@@ -107,9 +144,27 @@ internal sealed class DesktopBoxForm : Forms.Form
         DragEnter += OnDragOver;
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
+        QueryContinueDrag += OnQueryContinueDrag;
     }
 
     protected override bool ShowWithoutActivation => true;
+
+    protected override void OnHandleCreated(EventArgs eventArgs)
+    {
+        base.OnHandleCreated(eventArgs);
+        _compositionBackdrop = EnableLiveCompositionBackdrop
+            ? CompositionBoxBackdropHost.TryCreate(Handle)
+            : null;
+        DiagnosticLog.Info(
+            $"Composition backdrop monitor={_monitor.Id} available={_compositionBackdrop?.IsAvailable == true}");
+    }
+
+    protected override void OnHandleDestroyed(EventArgs eventArgs)
+    {
+        _compositionBackdrop?.Dispose();
+        _compositionBackdrop = null;
+        base.OnHandleDestroyed(eventArgs);
+    }
 
     protected override Forms.CreateParams CreateParams
     {
@@ -165,19 +220,32 @@ internal sealed class DesktopBoxForm : Forms.Form
     private IEnumerable<DesktopBox> DesktopBoxes => _runtime.State.Boxes.Where(box =>
         string.Equals(box.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase));
 
+    private void RebuildBoxItemCache()
+    {
+        _boxItems.Clear();
+        foreach (var box in DesktopBoxes)
+        {
+            _boxItems[box.Id] = _runtime.GetItemsForBox(box.Id);
+        }
+    }
+
+    private IReadOnlyList<DesktopItemRef> GetCachedItemsForBox(Guid boxId) =>
+        _boxItems.GetValueOrDefault(boxId) ?? [];
+
     internal void RefreshWorkspace()
     {
-        if (!_runtime.State.Settings.DesktopBehavior.ExpandBoxOnHover)
+        RebuildBoxItemCache();
+        if (!DesktopBoxes.Any(box => box.ExpandOnHover))
         {
-            _hoverExpandedBoxes.Clear();
+            ClearHoverState();
         }
         else
         {
             var activeBoxIds = DesktopBoxes.Select(box => box.Id).ToHashSet();
             _hoverExpandedBoxes.RemoveWhere(id => !activeBoxIds.Contains(id));
         }
-        var visibleKeys = DesktopBoxes
-            .SelectMany(box => _runtime.GetItemsForBox(box.Id))
+        var visibleKeys = _boxItems.Values
+            .SelectMany(items => items)
             .Select(item => item.Key.ToString())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         _selection.RemoveWhere(key => !visibleKeys.Contains(key));
@@ -206,6 +274,16 @@ internal sealed class DesktopBoxForm : Forms.Form
         graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
         graphics.ScaleTransform((float)_scale, (float)_scale);
         RebuildGeometry();
+        _compositionBackdrop?.Update(
+            _boxes.Select(box => (
+                box.Box.Id,
+                new LayoutRect(box.Bounds.X, box.Bounds.Y, box.Bounds.Width, box.Bounds.Height),
+                box.Box.Appearance.Material,
+                box.Box.Appearance.Background,
+                box.Box.Appearance.Opacity)),
+            _scale,
+            _runtime.State.Settings.Appearance.CornerRadius,
+            _runtime.IsDarkTheme);
         var clipBounds = new RectangleF(
             (float)(eventArgs.ClipRectangle.X / _scale),
             (float)(eventArgs.ClipRectangle.Y / _scale),
@@ -214,7 +292,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         clipBounds.Inflate(8, 8);
         foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
         {
-            DrawBox(graphics, box);
+            DrawBox(graphics, box, clipBounds);
         }
         graphics.ResetTransform();
     }
@@ -243,7 +321,10 @@ internal sealed class DesktopBoxForm : Forms.Form
             _shellContextMenu = null;
             _titleEditorFont?.Dispose();
             _titleEditorFont = null;
+            _backdropSnapshot?.Dispose();
+            _backdropSnapshot = null;
             _titleEditor.Dispose();
+            _headerToolTip.Dispose();
             Region?.Dispose();
         }
         base.Dispose(disposing);
@@ -275,21 +356,29 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void UpdateWindowRegion()
     {
-        var region = new Region(new Rectangle(0, 0, 0, 0));
         var desktopBoxes = DesktopBoxes.ToArray();
-        foreach (var box in desktopBoxes)
+        var currentRectangles = desktopBoxes.Select(box => new LayoutRect(
+            box.Bounds.X,
+            box.Bounds.Y,
+            box.Bounds.Width,
+            GetVisualBoxHeight(box))).ToArray();
+        if (IsHandleCreated)
         {
-            var height = GetVisualBoxHeight(box);
-            var bounds = new Rectangle(
-                ToPixel(box.Bounds.X),
-                ToPixel(box.Bounds.Y),
-                Math.Max(1, ToPixel(box.Bounds.Width)),
-                Math.Max(1, ToPixel(height)));
-            region.Union(bounds);
+            DesktopWindowTools.ApplyRegion(
+                Handle,
+                currentRectangles,
+                _scale,
+                redraw: true);
+            if (_lastWindowRegionRectangles.Count > 0)
+            {
+                DesktopWindowTools.RedrawExposedParentArea(
+                    Handle,
+                    _lastWindowRegionRectangles,
+                    currentRectangles,
+                    _scale);
+            }
         }
-        var previous = Region;
-        Region = region;
-        previous?.Dispose();
+        _lastWindowRegionRectangles = currentRectangles;
 
         var diagnostic = $"{desktopBoxes.Length}:{_runtime.AreDesktopItemsHidden}";
         if (!string.Equals(diagnostic, _lastRegionDiagnostic, StringComparison.Ordinal))
@@ -316,6 +405,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                 bounds,
                 new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight),
                 new RectangleF(bounds.X + 8, bounds.Y + titleBarHeight + 8, bounds.Width - 16, Math.Max(0, bounds.Height - titleBarHeight - 16)),
+                new RectangleF(bounds.Right - (box.Appearance.ShowCollapseButton ? 92 : 62), bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
                 new RectangleF(bounds.Right - 62, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
                 new RectangleF(bounds.Right - 32, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
                 new RectangleF(bounds.Right - 18, bounds.Bottom - 18, 18, 18));
@@ -333,9 +423,9 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return;
         }
-        var items = _runtime.GetItemsForBox(geometry.Box.Id);
+        var items = GetCachedItemsForBox(geometry.Box.Id);
         var appearance = _runtime.State.Settings.Appearance;
-        var layout = DesktopItemLayoutEngine.Calculate(
+        var layout = DesktopItemLayoutEngine.CalculateVisible(
             geometry.Box.ViewMode,
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
             items.Count,
@@ -344,9 +434,9 @@ internal sealed class DesktopBoxForm : Forms.Form
             appearance.IconVerticalSpacing,
             _scrollOffsets.GetValueOrDefault(geometry.Box.Id));
         _scrollOffsets[geometry.Box.Id] = layout.ScrollOffset;
-        for (var index = 0; index < layout.Items.Count; index++)
+        foreach (var entry in layout.Items)
         {
-            var itemBounds = layout.Items[index];
+            var itemBounds = entry.Bounds;
             var bounds = new RectangleF(
                 (float)itemBounds.X,
                 (float)itemBounds.Y,
@@ -354,12 +444,12 @@ internal sealed class DesktopBoxForm : Forms.Form
                 (float)itemBounds.Height);
             if (bounds.Bottom >= geometry.Body.Top && bounds.Top <= geometry.Body.Bottom)
             {
-                _items.Add(new ItemGeometry(geometry.Box, items[index], bounds));
+                _items.Add(new ItemGeometry(geometry.Box, items[entry.Index], bounds));
             }
         }
     }
 
-    private void DrawBox(Graphics graphics, BoxGeometry geometry)
+    private void DrawBox(Graphics graphics, BoxGeometry geometry, RectangleF clipBounds)
     {
         var isDark = _runtime.IsDarkTheme;
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
@@ -373,17 +463,26 @@ internal sealed class DesktopBoxForm : Forms.Form
         using var path = RoundedRectangle(
             paintedBounds,
             (float)_runtime.State.Settings.Appearance.CornerRadius);
-        using var fill = new SolidBrush(boxColor);
         using var border = new Pen(borderColor, 1);
-        graphics.FillPath(fill, path);
-
-        var headerState = graphics.Save();
-        graphics.SetClip(path);
-        using var headerFill = new SolidBrush(ApplyOpacity(isDark
-            ? Color.FromArgb(24, 27, 31)
-            : Color.FromArgb(239, 242, 245), opacity));
-        graphics.FillRectangle(headerFill, geometry.Header);
-        graphics.Restore(headerState);
+        var backdropSnapshot = _backdropSnapshot;
+        var hasBackdrop = geometry.Box.Appearance.Material == BoxMaterialKind.AcrylicPreview &&
+            backdropSnapshot is not null;
+        if (hasBackdrop && backdropSnapshot is not null)
+        {
+            var backdropState = graphics.Save();
+            graphics.SetClip(path);
+            graphics.DrawImage(
+                backdropSnapshot,
+                new RectangleF(0, 0, backdropSnapshot.Width, backdropSnapshot.Height));
+            graphics.Restore(backdropState);
+        }
+        BoxMaterialRenderer.Get(geometry.Box.Appearance.Material).Fill(new BoxMaterialPaint(
+            graphics,
+            path,
+            paintedBounds,
+            boxColor,
+            isDark,
+            hasBackdrop));
 
         using var separator = new Pen(ApplyOpacity(isDark
             ? Color.FromArgb(58, 65, 74)
@@ -414,7 +513,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             Trimming = StringTrimming.EllipsisCharacter,
             FormatFlags = StringFormatFlags.NoWrap
         };
-        var titleRightPadding = geometry.Box.Appearance.ShowCollapseButton ? 92 : 62;
+        var titleRightPadding = GetTitleRightPadding(geometry.Box);
         if (_editingBox?.Id != geometry.Box.Id)
         {
             graphics.DrawString(geometry.Box.Title, titleFont, titleBrush,
@@ -424,6 +523,14 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             DrawChevron(graphics, geometry.Collapse, geometry.IsCollapsed, textColor);
         }
+        DrawAutoExpandButton(
+            graphics,
+            geometry.AutoExpand,
+            geometry.Box.ExpandOnHover,
+            _hoveredAutoExpandBoxId == geometry.Box.Id,
+            ParseOpaqueColor(geometry.Box.Appearance.Accent),
+            textColor,
+            isDark);
         DrawMenuIcon(graphics, geometry.Menu, textColor);
 
         if (geometry.IsCollapsed)
@@ -433,9 +540,23 @@ internal sealed class DesktopBoxForm : Forms.Form
 
         var state = graphics.Save();
         graphics.SetClip(geometry.Body);
-        foreach (var item in _items.Where(item => item.Box.Id == geometry.Box.Id))
+        using var itemFont = geometry.Box.Appearance.ShowItemLabels
+            ? CreateFont(
+                geometry.Box.Appearance.LabelFontFamily,
+                (float)geometry.Box.Appearance.LabelFontSize,
+                FontStyle.Regular,
+                GraphicsUnit.Point)
+            : null;
+        using var itemBrush = geometry.Box.Appearance.ShowItemLabels
+            ? new SolidBrush(_runtime.IsDarkTheme ? Color.White : Color.FromArgb(31, 35, 41))
+            : null;
+        using var itemFormat = geometry.Box.Appearance.ShowItemLabels
+            ? CreateItemTextFormat(geometry.Box.ViewMode)
+            : null;
+        foreach (var item in _items.Where(item =>
+                     item.Box.Id == geometry.Box.Id && item.Bounds.IntersectsWith(clipBounds)))
         {
-            DrawItem(graphics, item);
+            DrawItem(graphics, item, itemFont, itemBrush, itemFormat);
         }
         if (!_runtime.AreDesktopItemsHidden && geometry.Box.IsMappedFolder &&
             !_items.Any(item => item.Box.Id == geometry.Box.Id))
@@ -495,7 +616,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         graphics.DrawString(message, font, brush, geometry.Body, format);
     }
 
-    private void DrawItem(Graphics graphics, ItemGeometry item)
+    private void DrawItem(
+        Graphics graphics,
+        ItemGeometry item,
+        Font? labelFont,
+        Brush? labelBrush,
+        StringFormat? labelFormat)
     {
         var itemKey = item.Item.Key.ToString();
         var isSelected = _selection.Contains(itemKey);
@@ -544,21 +670,9 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return;
         }
-        using var font = CreateFont(
-            item.Box.Appearance.LabelFontFamily,
-            (float)item.Box.Appearance.LabelFontSize,
-            FontStyle.Regular,
-            GraphicsUnit.Point);
-        using var brush = new SolidBrush(_runtime.IsDarkTheme
-            ? Color.White
-            : Color.FromArgb(31, 35, 41));
-        using var format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter };
         RectangleF textBounds;
         if (item.Box.ViewMode == BoxViewMode.List)
         {
-            format.Alignment = StringAlignment.Near;
-            format.LineAlignment = StringAlignment.Center;
-            format.FormatFlags = StringFormatFlags.NoWrap;
             textBounds = new RectangleF(
                 iconBounds.Right + 10,
                 item.Bounds.Y,
@@ -567,16 +681,65 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         else
         {
-            format.Alignment = StringAlignment.Center;
-            format.LineAlignment = StringAlignment.Near;
             textBounds = new RectangleF(
                 item.Bounds.X + 2,
                 iconBounds.Bottom + 3,
                 item.Bounds.Width - 4,
                 item.Bounds.Height - iconSize - 8);
         }
-        graphics.DrawString(item.Item.DisplayName, font, brush, textBounds, format);
+        graphics.DrawString(item.Item.DisplayName, labelFont!, labelBrush!, textBounds, labelFormat!);
     }
+
+    private Bitmap? CaptureBackdropSnapshot()
+    {
+        try
+        {
+            var pixelWidth = Math.Max(1, (int)Math.Round(_monitor.PixelBounds.Width));
+            var pixelHeight = Math.Max(1, (int)Math.Round(_monitor.PixelBounds.Height));
+            var logicalWidth = Math.Max(1, (int)Math.Round(pixelWidth / _scale));
+            var logicalHeight = Math.Max(1, (int)Math.Round(pixelHeight / _scale));
+            using var source = new Bitmap(pixelWidth, pixelHeight);
+            using (var capture = Graphics.FromImage(source))
+            {
+                capture.CopyFromScreen(
+                    (int)Math.Round(_monitor.PixelBounds.X),
+                    (int)Math.Round(_monitor.PixelBounds.Y),
+                    0,
+                    0,
+                    new Size(pixelWidth, pixelHeight),
+                    CopyPixelOperation.SourceCopy);
+            }
+
+            var thumbnailWidth = Math.Max(1, logicalWidth / 8);
+            var thumbnailHeight = Math.Max(1, logicalHeight / 8);
+            using var thumbnail = new Bitmap(thumbnailWidth, thumbnailHeight);
+            using (var downsample = Graphics.FromImage(thumbnail))
+            {
+                downsample.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                downsample.DrawImage(source, new Rectangle(0, 0, thumbnailWidth, thumbnailHeight));
+            }
+
+            var result = new Bitmap(logicalWidth, logicalHeight);
+            using (var upscale = Graphics.FromImage(result))
+            {
+                upscale.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                upscale.DrawImage(thumbnail, new Rectangle(0, 0, logicalWidth, logicalHeight));
+            }
+            return result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static StringFormat CreateItemTextFormat(BoxViewMode viewMode) => new()
+    {
+        Alignment = viewMode == BoxViewMode.List ? StringAlignment.Near : StringAlignment.Center,
+        LineAlignment = viewMode == BoxViewMode.List ? StringAlignment.Center : StringAlignment.Near,
+        Trimming = StringTrimming.EllipsisCharacter,
+        FormatFlags = viewMode == BoxViewMode.List ? StringFormatFlags.NoWrap : 0
+    };
 
     private Bitmap? GetIconBitmap(DesktopItemRef item, float iconSize)
     {
@@ -645,7 +808,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                     return;
                 }
                 _iconCache[key] = bitmap;
-                Invalidate();
+                InvalidateIcon(key);
             }));
         }
         catch (InvalidOperationException)
@@ -661,7 +824,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         var activeKeys = DesktopBoxes
-            .SelectMany(box => _runtime.GetItemsForBox(box.Id)
+            .SelectMany(box => GetCachedItemsForBox(box.Id)
                 .Select(item => CreateIconBitmapKey(item, (float)box.Appearance.IconSize)))
             .ToHashSet();
         foreach (var key in _iconCache.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
@@ -673,28 +836,39 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private IconBitmapKey CreateIconBitmapKey(DesktopItemRef item, float iconSize)
     {
-        long modifiedTicks = 0;
-        long length = 0;
-        try
-        {
-            if (item.FileSystemPath is { } path && File.Exists(path))
-            {
-                var info = new FileInfo(path);
-                modifiedTicks = info.LastWriteTimeUtc.Ticks;
-                length = info.Length;
-            }
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
         return new IconBitmapKey(
             item.ParsingName,
             Math.Clamp((int)Math.Round(iconSize * _scale), 16, 256),
-            modifiedTicks,
-            length);
+            item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
+            0);
+    }
+
+    private void InvalidateIcon(IconBitmapKey key)
+    {
+        foreach (var item in _items.Where(candidate =>
+                     string.Equals(candidate.Item.ParsingName, key.ParsingName, StringComparison.OrdinalIgnoreCase) &&
+                     Math.Clamp((int)Math.Round(candidate.Box.Appearance.IconSize * _scale), 16, 256) == key.PixelSize))
+        {
+            InvalidateDip(item.Bounds);
+        }
+    }
+
+    private void InvalidateItem(ItemGeometry? item)
+    {
+        if (item is not null)
+        {
+            InvalidateDip(item.Bounds);
+        }
+    }
+
+    private void InvalidateDip(RectangleF bounds)
+    {
+        bounds.Inflate(4, 4);
+        Invalidate(new Rectangle(
+            ToPixel(bounds.X),
+            ToPixel(bounds.Y),
+            Math.Max(1, ToPixel(bounds.Width)),
+            Math.Max(1, ToPixel(bounds.Height))));
     }
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
@@ -729,6 +903,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         _pressPoint = point;
         _dragStarted = false;
+        _resizeEdges = ResizeEdges.None;
         if (item is not null)
         {
             var key = item.Item.Key.ToString();
@@ -755,6 +930,11 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         _startBounds = box.Box.Bounds;
+        if (box.AutoExpand.Contains(point))
+        {
+            ToggleAutoExpand(box.Box);
+            return;
+        }
         if (box.Box.Appearance.ShowCollapseButton && box.Collapse.Contains(point))
         {
             ToggleBoxCollapsed(box.Box);
@@ -765,11 +945,13 @@ internal sealed class DesktopBoxForm : Forms.Form
             BuildBoxMenu(box.Box).Show(this, eventArgs.Location);
             return;
         }
+        var resizeEdges = GetResizeEdges(box, point);
         if (_runtime.State.Settings.Appearance.ShowResizeGrip &&
-            !box.IsCollapsed && box.Resize.Contains(point))
+            !box.IsCollapsed && resizeEdges != ResizeEdges.None)
         {
             PrepareBoxTransform(box.Box);
             _resizingBox = box.Box;
+            _resizeEdges = resizeEdges;
         }
         else if (box.Header.Contains(point))
         {
@@ -849,20 +1031,68 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return;
         }
-        var selected = _runtime.GetItemsForBox(sourceBoxId)
+        var selected = GetCachedItemsForBox(sourceBoxId)
             .Where(candidate => _selection.Contains(candidate.Key.ToString()))
             .ToArray();
         var data = new Forms.DataObject();
-        data.SetData(ItemKeysFormat, selected.Select(candidate => candidate.Key.ToString()).ToArray());
+        var itemKeys = selected.Select(candidate => candidate.Key.ToString()).ToArray();
+        var dragSession = new InternalDragSession();
+        data.SetData(ItemKeysFormat, itemKeys);
         data.SetData(SourceBoxFormat, sourceBoxId.ToString("D"));
+        data.SetData(DragSessionFormat, false, dragSession);
+        var sourceMapped = _runtime.State.Boxes.FirstOrDefault(box => box.Id == sourceBoxId)?.IsMappedFolder == true;
         var paths = selected.Where(candidate => candidate.FileSystemPath is not null).Select(candidate => candidate.FileSystemPath!).ToArray();
-        if (paths.Length > 0)
+        if (paths.Length > 0 && BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped))
         {
             var collection = new StringCollection();
             collection.AddRange(paths);
             data.SetFileDropList(collection);
         }
+        _dragDropCommitted = false;
+        _dragCancelled = false;
         DoDragDrop(data, Forms.DragDropEffects.Move | Forms.DragDropEffects.Copy);
+        if (BoxDragCompletionPolicy.ShouldUnassign(
+                _dragDropCommitted,
+                _dragCancelled,
+                dragSession.HandledByBox,
+                sourceMapped,
+                IsPointerOverAnyBox(Forms.Cursor.Position)))
+        {
+            _runtime.UnassignItems(itemKeys);
+        }
+    }
+
+    private void OnQueryContinueDrag(object? sender, Forms.QueryContinueDragEventArgs eventArgs)
+    {
+        if (eventArgs.EscapePressed || eventArgs.Action == Forms.DragAction.Cancel)
+        {
+            _dragCancelled = true;
+        }
+        else if (eventArgs.Action == Forms.DragAction.Drop)
+        {
+            _dragDropCommitted = true;
+        }
+    }
+
+    private bool IsPointerOverAnyBox(Point screenPoint)
+    {
+        foreach (var monitor in _runtime.Monitors)
+        {
+            if (!monitor.PixelBounds.Contains(screenPoint.X, screenPoint.Y))
+            {
+                continue;
+            }
+            var x = (screenPoint.X - monitor.PixelBounds.X) / monitor.DpiScale;
+            var y = (screenPoint.Y - monitor.PixelBounds.Y) / monitor.DpiScale;
+            return _runtime.State.Boxes.Any(box =>
+                string.Equals(box.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase) &&
+                new LayoutRect(
+                    box.Bounds.X,
+                    box.Bounds.Y,
+                    box.Bounds.Width,
+                    box.IsCollapsed ? box.Appearance.TitleBarHeight : box.Bounds.Height).Contains(x, y));
+        }
+        return false;
     }
 
     private void OnMouseLeave(object? sender, EventArgs eventArgs)
@@ -872,14 +1102,54 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         Cursor = Forms.Cursors.Default;
-        ClearHoverState();
+        ClearAutoExpandHover();
+        if (_hoveredItemKey is not null)
+        {
+            var previousHoveredItem = _items.LastOrDefault(candidate => string.Equals(
+                candidate.Item.Key.ToString(),
+                _hoveredItemKey,
+                StringComparison.OrdinalIgnoreCase));
+            _hoveredItemKey = null;
+            InvalidateItem(previousHoveredItem);
+        }
     }
 
     private void UpdatePointerCursor(PointF point)
     {
-        var canResize = _runtime.State.Settings.Appearance.ShowResizeGrip &&
-            _boxes.LastOrDefault(box => !box.IsCollapsed && box.Resize.Contains(point)) is not null;
-        Cursor = canResize ? Forms.Cursors.SizeNWSE : Forms.Cursors.Default;
+        var autoExpandBoxId = _boxes.LastOrDefault(box => box.AutoExpand.Contains(point))?.Box.Id;
+        if (_hoveredAutoExpandBoxId != autoExpandBoxId)
+        {
+            var previous = _hoveredAutoExpandBoxId;
+            _hoveredAutoExpandBoxId = autoExpandBoxId;
+            _headerToolTip.SetToolTip(this, null);
+            InvalidateHeaderButton(previous, box => box.AutoExpand);
+            InvalidateHeaderButton(autoExpandBoxId, box => box.AutoExpand);
+            if (autoExpandBoxId is not null)
+            {
+                var enabled = _boxes.FirstOrDefault(box => box.Box.Id == autoExpandBoxId)?.Box.ExpandOnHover == true;
+                _headerToolTip.SetToolTip(
+                    this,
+                    enabled ? "关闭悬停自动展开" : "开启悬停自动展开");
+            }
+        }
+        var resizeEdges = ResizeEdges.None;
+        if (_runtime.State.Settings.Appearance.ShowResizeGrip &&
+            _boxes.LastOrDefault(box => !box.IsCollapsed && GetResizeEdges(box, point) != ResizeEdges.None) is { } resizeBox)
+        {
+            resizeEdges = GetResizeEdges(resizeBox, point);
+        }
+        var isHeaderButton = _boxes.LastOrDefault(box =>
+            box.AutoExpand.Contains(point) ||
+            box.Menu.Contains(point) ||
+            (box.Box.Appearance.ShowCollapseButton && box.Collapse.Contains(point))) is not null;
+        Cursor = resizeEdges switch
+        {
+            ResizeEdges.Left or ResizeEdges.Right => Forms.Cursors.SizeWE,
+            ResizeEdges.Top or ResizeEdges.Bottom => Forms.Cursors.SizeNS,
+            ResizeEdges.TopLeft or ResizeEdges.BottomRight => Forms.Cursors.SizeNWSE,
+            ResizeEdges.TopRight or ResizeEdges.BottomLeft => Forms.Cursors.SizeNESW,
+            _ => isHeaderButton ? Forms.Cursors.Hand : Forms.Cursors.Default
+        };
     }
 
     private void OnHoverTimer(object? sender, EventArgs eventArgs)
@@ -890,7 +1160,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             {
                 return;
             }
-            if (!_runtime.State.Settings.DesktopBehavior.ExpandBoxOnHover && _hoverExpandedBoxes.Count == 0)
+            if (!DesktopBoxes.Any(box => box.ExpandOnHover) && _hoverExpandedBoxes.Count == 0)
             {
                 return;
             }
@@ -901,7 +1171,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                 ClearHoverState();
                 return;
             }
-            UpdateHoverState(ToDip(clientPoint));
+            UpdateHoverState(ToDip(clientPoint), updateItemHover: false);
         }
         catch
         {
@@ -911,9 +1181,11 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private bool IsInteractivePoint(PointF point)
     {
-        RebuildGeometry();
-        return _boxes.Any(box => box.Bounds.Contains(point)) ||
-            _items.Any(item => item.Bounds.Contains(point));
+        return DesktopBoxes.Any(box => new LayoutRect(
+            box.Bounds.X,
+            box.Bounds.Y,
+            box.Bounds.Width,
+            GetVisualBoxHeight(box)).Contains(point.X, point.Y));
     }
 
     private bool IsInteractivePointSafe(PointF point)
@@ -930,47 +1202,89 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void ClearHoverState()
     {
-        var changed = _hoveredItemKey is not null || _hoverExpandedBoxes.Count > 0;
+        var previousHoveredItem = _hoveredItemKey is null
+            ? null
+            : _items.LastOrDefault(candidate => string.Equals(
+                candidate.Item.Key.ToString(),
+                _hoveredItemKey,
+                StringComparison.OrdinalIgnoreCase));
+        var expandedBoxIds = _hoverExpandedBoxes.ToArray();
         _hoveredItemKey = null;
-        _hoverExpandedBoxes.Clear();
-        if (changed)
+        ClearAutoExpandHover();
+        var expandedBoxId = _hoverExpansion.Reset();
+        if (expandedBoxId is { } id)
+        {
+            CollapseHoverExpandedBox(id);
+        }
+        else
+        {
+            _hoverExpandedBoxes.Clear();
+        }
+        InvalidateItem(previousHoveredItem);
+        if (expandedBoxIds.Length > 0)
         {
             UpdateWindowRegion();
-            Invalidate();
+            foreach (var boxId in expandedBoxIds)
+            {
+                InvalidateBoxVisualArea(boxId);
+            }
         }
     }
 
-    private void UpdateHoverState(PointF point)
+    private void UpdateHoverState(PointF point, bool updateItemHover = true)
     {
-        RebuildGeometry();
-        var hoveredItem = _items.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-        var itemKey = hoveredItem?.Item.Key.ToString();
-        var changed = !string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
-        _hoveredItemKey = itemKey;
+        var hoverChanged = false;
+        ItemGeometry? previousHoveredItem = null;
+        ItemGeometry? hoveredItem = null;
+        if (updateItemHover)
+        {
+            previousHoveredItem = _hoveredItemKey is null
+                ? null
+                : _items.LastOrDefault(candidate => string.Equals(
+                    candidate.Item.Key.ToString(),
+                    _hoveredItemKey,
+                    StringComparison.OrdinalIgnoreCase));
+            hoveredItem = _items.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+            var itemKey = hoveredItem?.Item.Key.ToString();
+            hoverChanged = !string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
+            _hoveredItemKey = itemKey;
+        }
 
-        Guid? expandedBoxId = null;
-        if (_runtime.State.Settings.DesktopBehavior.ExpandBoxOnHover &&
-            _movingBox is null && _resizingBox is null)
+        var structureChanged = false;
+        var collapsedHeaderBoxId = _boxes.LastOrDefault(box =>
+            box.Box.IsCollapsed &&
+            box.Box.ExpandOnHover &&
+            box.Header.Contains(point) &&
+            !box.AutoExpand.Contains(point) &&
+            !box.Menu.Contains(point) &&
+            !(box.Box.Appearance.ShowCollapseButton && box.Collapse.Contains(point)))?.Box.Id;
+        var pointerInsideExpandedBox = _hoverExpansion.ExpandedBoxId is { } expandedBoxId &&
+            _boxes.LastOrDefault(box => box.Box.Id == expandedBoxId)?.Bounds.Contains(point) == true;
+        var autoExpandEnabled = _hoverExpansion.ExpandedBoxId is not null ||
+            collapsedHeaderBoxId is not null;
+        var transition = autoExpandEnabled &&
+            _movingBox is null && _resizingBox is null
+            ? _hoverExpansion.Update(collapsedHeaderBoxId, pointerInsideExpandedBox, DateTimeOffset.UtcNow)
+            : new HoverExpansionTransition(null, _hoverExpansion.Reset());
+        if (transition.CollapsedBoxId is { } collapsedBoxId)
         {
-            var candidate = _boxes.LastOrDefault(box =>
-                box.Box.IsCollapsed &&
-                (box.Header.Contains(point) || (_hoverExpandedBoxes.Contains(box.Box.Id) && box.Bounds.Contains(point))));
-            expandedBoxId = candidate?.Box.Id;
+            CollapseHoverExpandedBox(collapsedBoxId);
+            structureChanged = true;
         }
-        if (_hoverExpandedBoxes.Count != (expandedBoxId.HasValue ? 1 : 0) ||
-            (expandedBoxId.HasValue && !_hoverExpandedBoxes.Contains(expandedBoxId.Value)))
+        if (transition.ExpandedBoxId is { } boxId)
         {
-            _hoverExpandedBoxes.Clear();
-            if (expandedBoxId.HasValue)
-            {
-                _hoverExpandedBoxes.Add(expandedBoxId.Value);
-            }
-            UpdateWindowRegion();
-            changed = true;
+            ExpandHoveredBox(boxId);
+            structureChanged = true;
         }
-        if (changed)
+        if (structureChanged)
         {
-            Invalidate();
+            InvalidateBoxVisualArea(transition.CollapsedBoxId);
+            InvalidateBoxVisualArea(transition.ExpandedBoxId);
+        }
+        else if (hoverChanged)
+        {
+            InvalidateItem(previousHoveredItem);
+            InvalidateItem(hoveredItem);
         }
     }
 
@@ -1002,6 +1316,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         var grabOffsetY = _pressPoint.Y - _startBounds.Y;
         _movingBox = null;
         _resizingBox = null;
+        _resizeEdges = ResizeEdges.None;
         _pressedItem = null;
         _pressedBoxId = null;
         Capture = false;
@@ -1038,14 +1353,111 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void UpdateResizingBox(DesktopBox box, PointF point)
     {
-        var nextBounds = new LayoutRect(
-            _startBounds.X,
-            _startBounds.Y,
-            SnapDipToPixel(LayoutGrid.Snap(_startBounds.Width + point.X - _pressPoint.X)),
-            SnapDipToPixel(LayoutGrid.Snap(_startBounds.Height + point.Y - _pressPoint.Y))).Clamp(
-                new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height),
-                LayoutGrid.SnapUp(GetMinimumBoxWidth(box)));
+        var deltaX = point.X - _pressPoint.X;
+        var deltaY = point.Y - _pressPoint.Y;
+        var startRight = _startBounds.X + _startBounds.Width;
+        var startBottom = _startBounds.Y + _startBounds.Height;
+        var left = _startBounds.X;
+        var top = _startBounds.Y;
+        var right = startRight;
+        var bottom = startBottom;
+        if (_resizeEdges.HasFlag(ResizeEdges.Left))
+        {
+            left += deltaX;
+        }
+        if (_resizeEdges.HasFlag(ResizeEdges.Right))
+        {
+            right += deltaX;
+        }
+        if (_resizeEdges.HasFlag(ResizeEdges.Top))
+        {
+            top += deltaY;
+        }
+        if (_resizeEdges.HasFlag(ResizeEdges.Bottom))
+        {
+            bottom += deltaY;
+        }
+
+        var workArea = new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height);
+        var minWidth = LayoutGrid.SnapUp(GetMinimumBoxWidth(box));
+        const double minHeight = 120;
+        if (_resizeEdges.HasFlag(ResizeEdges.Left))
+        {
+            left = Math.Clamp(left, workArea.X, startRight - minWidth);
+        }
+        else
+        {
+            right = Math.Clamp(right, _startBounds.X + minWidth, workArea.X + workArea.Width);
+        }
+        if (_resizeEdges.HasFlag(ResizeEdges.Top))
+        {
+            top = Math.Clamp(top, workArea.Y, startBottom - minHeight);
+        }
+        else
+        {
+            bottom = Math.Clamp(bottom, _startBounds.Y + minHeight, workArea.Y + workArea.Height);
+        }
+
+        var requestedWidth = right - left;
+        var requestedHeight = bottom - top;
+        var widthSlot = DesktopItemLayoutEngine.SnapBoxWidth(
+            box.ViewMode,
+            requestedWidth,
+            box.Appearance.IconSize,
+            _runtime.State.Settings.Appearance.IconHorizontalSpacing);
+        var heightSlot = DesktopItemLayoutEngine.SnapBoxHeight(
+            box.ViewMode,
+            requestedHeight,
+            box.Appearance.TitleBarHeight,
+            box.Appearance.IconSize,
+            _runtime.State.Settings.Appearance.IconVerticalSpacing);
+        const double snapThreshold = 14;
+        if (Math.Abs(requestedWidth - widthSlot) <= snapThreshold)
+        {
+            if (_resizeEdges.HasFlag(ResizeEdges.Left))
+            {
+                left = startRight - widthSlot;
+            }
+            else
+            {
+                right = _startBounds.X + widthSlot;
+            }
+        }
+        if (Math.Abs(requestedHeight - heightSlot) <= snapThreshold)
+        {
+            if (_resizeEdges.HasFlag(ResizeEdges.Top))
+            {
+                top = startBottom - heightSlot;
+            }
+            else
+            {
+                bottom = _startBounds.Y + heightSlot;
+            }
+        }
+        var nextBounds = new LayoutRect(left, top, right - left, bottom - top).Clamp(
+            workArea,
+            minWidth,
+            minHeight);
         ApplyBoxTransform(box, nextBounds);
+    }
+
+    private static ResizeEdges GetResizeEdges(BoxGeometry geometry, PointF point)
+    {
+        const float tolerance = 9;
+        var nearLeft = Math.Abs(point.X - geometry.Bounds.Left) <= tolerance;
+        var nearRight = Math.Abs(point.X - geometry.Bounds.Right) <= tolerance;
+        var nearTop = Math.Abs(point.Y - geometry.Bounds.Top) <= tolerance;
+        var nearBottom = Math.Abs(point.Y - geometry.Bounds.Bottom) <= tolerance;
+        var horizontal = point.Y >= geometry.Bounds.Top - tolerance &&
+            point.Y <= geometry.Bounds.Bottom + tolerance;
+        var vertical = point.X >= geometry.Bounds.Left - tolerance &&
+            point.X <= geometry.Bounds.Right + tolerance;
+        var edges = ResizeEdges.None;
+        if (horizontal && nearLeft) edges |= ResizeEdges.Left;
+        if (horizontal && nearRight) edges |= ResizeEdges.Right;
+        if (vertical && nearTop) edges |= ResizeEdges.Top;
+        if (vertical && nearBottom) edges |= ResizeEdges.Bottom;
+        return edges;
     }
 
     private void ApplyBoxTransform(DesktopBox box, LayoutRect nextBounds)
@@ -1078,6 +1490,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         if (box is not null &&
             box.Header.Contains(point) &&
             !box.Menu.Contains(point) &&
+            !box.AutoExpand.Contains(point) &&
             !(box.Box.Appearance.ShowCollapseButton && box.Collapse.Contains(point)))
         {
             BeginTitleEdit(box.Box);
@@ -1138,6 +1551,11 @@ internal sealed class DesktopBoxForm : Forms.Form
             eventArgs.Data.GetData(SourceBoxFormat) is string sourceValue &&
             Guid.TryParse(sourceValue, out var sourceBoxId))
         {
+            if (eventArgs.Data.GetDataPresent(DragSessionFormat) &&
+                eventArgs.Data.GetData(DragSessionFormat) is InternalDragSession dragSession)
+            {
+                dragSession.HandledByBox = true;
+            }
             if (sourceBoxId == box.Box.Id)
             {
                 var beforeKey = _items.LastOrDefault(candidate =>
@@ -1272,6 +1690,19 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             ToggleBoxCollapsed(box);
         });
+        var accentMenu = new Forms.ToolStripMenuItem("颜色条颜色");
+        foreach (var (name, hex) in AccentPalette)
+        {
+            AddMenuChoice(
+                accentMenu,
+                name,
+                string.Equals(box.Appearance.Accent, hex, StringComparison.OrdinalIgnoreCase),
+                () => _runtime.SetBoxAccent(box.Id, hex));
+        }
+        accentMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
+        accentMenu.DropDownItems.Add("自定义颜色…", null, (_, _) => ShowAccentColorDialog(box));
+        menu.Items.Add(accentMenu);
+
         var viewMenu = new Forms.ToolStripMenuItem("视图");
         AddMenuChoice(viewMenu, "图标", box.ViewMode == BoxViewMode.Grid,
             () => _runtime.SetBoxViewMode(box.Id, BoxViewMode.Grid));
@@ -1309,9 +1740,27 @@ internal sealed class DesktopBoxForm : Forms.Form
         return menu;
     }
 
+    private void ShowAccentColorDialog(DesktopBox box)
+    {
+        using var dialog = new Forms.ColorDialog
+        {
+            Color = ParseOpaqueColor(box.Appearance.Accent),
+            AnyColor = true,
+            FullOpen = true,
+            SolidColorOnly = true
+        };
+        if (dialog.ShowDialog(this) != Forms.DialogResult.OK)
+        {
+            return;
+        }
+
+        var color = dialog.Color;
+        _runtime.SetBoxAccent(box.Id, $"#FF{color.R:X2}{color.G:X2}{color.B:X2}");
+    }
+
     private void ShowItemContextMenu(DesktopBox box, DesktopItemRef item, Point location)
     {
-        var selectedItems = _runtime.GetItemsForBox(box.Id)
+        var selectedItems = GetCachedItemsForBox(box.Id)
             .Where(candidate => _selection.Contains(candidate.Key.ToString()))
             .ToArray();
         if (selectedItems.Length == 0)
@@ -1410,6 +1859,66 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
+    private static void DrawAutoExpandButton(
+        Graphics graphics,
+        RectangleF bounds,
+        bool enabled,
+        bool hovered,
+        Color accent,
+        Color textColor,
+        bool isDark)
+    {
+        if (enabled || hovered)
+        {
+            var fillColor = enabled
+                ? Color.FromArgb(isDark ? 76 : 48, accent)
+                : Color.FromArgb(isDark ? 36 : 24, textColor);
+            using var fill = new SolidBrush(fillColor);
+            using var path = RoundedRectangle(RectangleF.Inflate(bounds, -2, -2), 4);
+            graphics.FillPath(fill, path);
+            if (enabled)
+            {
+                using var border = new Pen(Color.FromArgb(isDark ? 150 : 120, accent), 1);
+                graphics.DrawPath(border, path);
+            }
+        }
+
+        var iconColor = enabled ? accent : textColor;
+        // Keep the hit target at 26x28 DIP, but render the glyph at the
+        // compact Fluent icon size used by the other header buttons.
+        var scale = Math.Min(bounds.Width, bounds.Height) / 20f * 0.72f;
+        var originX = bounds.Left + (bounds.Width - 20 * scale) / 2;
+        var originY = bounds.Top + (bounds.Height - 20 * scale) / 2;
+        PointF Point(float x, float y) => new(originX + x * scale, originY + y * scale);
+        using var iconPen = new Pen(iconColor, Math.Max(1, scale))
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+            LineJoin = LineJoin.Round
+        };
+        using var bracket = new GraphicsPath();
+        bracket.AddLine(Point(9.5f, 3.5f), Point(5, 3.5f));
+        bracket.AddBezier(Point(5, 3.5f), Point(4.17f, 3.5f), Point(3.5f, 4.17f), Point(3.5f, 5));
+        bracket.AddLine(Point(3.5f, 5), Point(3.5f, 15));
+        bracket.AddBezier(Point(3.5f, 15), Point(3.5f, 15.83f), Point(4.17f, 16.5f), Point(5, 16.5f));
+        bracket.AddLine(Point(5, 16.5f), Point(9.5f, 16.5f));
+        graphics.DrawPath(iconPen, bracket);
+        graphics.DrawLines(iconPen,
+        [
+            Point(12.5f, 4.5f),
+            Point(14.5f, 2.5f),
+            Point(16.5f, 4.5f)
+        ]);
+        graphics.DrawLine(iconPen, Point(14.5f, 2.75f), Point(14.5f, 7.5f));
+        graphics.DrawLine(iconPen, Point(14.5f, 12.5f), Point(14.5f, 17.25f));
+        graphics.DrawLines(iconPen,
+        [
+            Point(12.5f, 15.5f),
+            Point(14.5f, 17.5f),
+            Point(16.5f, 15.5f)
+        ]);
+    }
+
     private static void DrawChevron(Graphics graphics, RectangleF bounds, bool pointsDown, Color color)
     {
         var centerX = bounds.Left + bounds.Width / 2;
@@ -1455,11 +1964,75 @@ internal sealed class DesktopBoxForm : Forms.Form
     private bool IsEffectivelyCollapsed(DesktopBox box) =>
         box.IsCollapsed && !_hoverExpandedBoxes.Contains(box.Id);
 
+    private void ExpandHoveredBox(Guid boxId)
+    {
+        var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == boxId);
+        if (box is null || _hoverExpandedBoxes.Contains(boxId))
+        {
+            return;
+        }
+        var fromHeight = GetVisualBoxHeight(box);
+        _hoverExpandedBoxes.Clear();
+        _hoverExpandedBoxes.Add(boxId);
+        StartBoxHeightAnimation(box, fromHeight);
+        UpdateWindowRegion();
+    }
+
+    private void CollapseHoverExpandedBox(Guid boxId)
+    {
+        var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == boxId);
+        if (box is null || !_hoverExpandedBoxes.Contains(boxId))
+        {
+            _hoverExpandedBoxes.Remove(boxId);
+            return;
+        }
+        var fromHeight = GetVisualBoxHeight(box);
+        _hoverExpandedBoxes.Remove(boxId);
+        StartBoxHeightAnimation(box, fromHeight);
+        UpdateWindowRegion();
+    }
+
     private double GetMinimumBoxWidth(DesktopBox box) =>
         DesktopItemLayoutEngine.GetMinimumBoxWidth(
             box.ViewMode,
             box.Appearance.IconSize,
             _runtime.State.Settings.Appearance.IconHorizontalSpacing);
+
+    private static float GetTitleRightPadding(DesktopBox box) =>
+        box.Appearance.ShowCollapseButton ? 122 : 92;
+
+    private void InvalidateHeaderButton(Guid? boxId, Func<BoxGeometry, RectangleF> getBounds)
+    {
+        if (boxId is not { } id || _boxes.FirstOrDefault(box => box.Box.Id == id) is not { } geometry)
+        {
+            return;
+        }
+        InvalidateDip(getBounds(geometry));
+    }
+
+    private void InvalidateBoxVisualArea(Guid? boxId)
+    {
+        if (boxId is not { } id || DesktopBoxes.FirstOrDefault(box => box.Id == id) is not { } box)
+        {
+            return;
+        }
+        InvalidateDip(new RectangleF(
+            (float)box.Bounds.X,
+            (float)box.Bounds.Y,
+            (float)box.Bounds.Width,
+            (float)Math.Max(box.Bounds.Height, box.Appearance.TitleBarHeight)));
+    }
+
+    private void ClearAutoExpandHover()
+    {
+        if (_hoveredAutoExpandBoxId is not { } id)
+        {
+            return;
+        }
+        _hoveredAutoExpandBoxId = null;
+        _headerToolTip.SetToolTip(this, null);
+        InvalidateHeaderButton(id, box => box.AutoExpand);
+    }
 
     private void BeginTitleEdit(DesktopBox box)
     {
@@ -1490,7 +2063,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             ? Color.FromArgb(24, 27, 31)
             : Color.FromArgb(239, 242, 245);
         _titleEditor.ForeColor = ResolveTitleColor(box.Appearance.TitleColor, _runtime.IsDarkTheme);
-        var rightPadding = box.Appearance.ShowCollapseButton ? 92 : 62;
+        var rightPadding = GetTitleRightPadding(box);
         var editorHeight = _titleEditor.PreferredHeight;
         _titleEditor.Bounds = new Rectangle(
             ToPixel(geometry.Header.X + 20),
@@ -1547,9 +2120,37 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         var fromHeight = GetVisualBoxHeight(box);
         box.IsCollapsed = !box.IsCollapsed;
+        _hoverExpansion.Reset();
         _hoverExpandedBoxes.Remove(box.Id);
         StartBoxHeightAnimation(box, fromHeight);
         _runtime.BoxChanged(box);
+    }
+
+    private void ToggleAutoExpand(DesktopBox sourceBox)
+    {
+        FinishTitleEdit(true);
+        var enabled = !sourceBox.ExpandOnHover;
+        sourceBox.ExpandOnHover = enabled;
+        if (enabled)
+        {
+            if (!sourceBox.IsCollapsed)
+            {
+                var fromHeight = GetVisualBoxHeight(sourceBox);
+                sourceBox.IsCollapsed = true;
+                _hoverExpansion.Reset();
+                _hoverExpandedBoxes.Clear();
+                _hoverExpansion.AdoptExpanded(sourceBox.Id);
+                _hoverExpandedBoxes.Add(sourceBox.Id);
+                StartBoxHeightAnimation(sourceBox, fromHeight);
+                UpdateWindowRegion();
+            }
+        }
+        else if (_hoverExpandedBoxes.Contains(sourceBox.Id))
+        {
+            CollapseHoverExpandedBox(sourceBox.Id);
+        }
+        _runtime.BoxChanged(sourceBox);
+        InvalidateBoxVisualArea(sourceBox.Id);
     }
 
     private void PrepareBoxTransform(DesktopBox box)
@@ -1608,6 +2209,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private void OnAnimationTick(object? sender, EventArgs eventArgs)
     {
         var now = DateTimeOffset.UtcNow;
+        var animatedBoxIds = _heightAnimations.Keys.ToArray();
         foreach (var id in _heightAnimations
             .Where(pair => now - pair.Value.StartedAt >= pair.Value.Duration)
             .Select(pair => pair.Key)
@@ -1620,7 +2222,10 @@ internal sealed class DesktopBoxForm : Forms.Form
             _animationTimer.Stop();
         }
         UpdateWindowRegion();
-        Invalidate();
+        foreach (var id in animatedBoxIds)
+        {
+            InvalidateBoxVisualArea(id);
+        }
     }
 
     private static RectangleF RectangleFromPoints(PointF first, PointF second) => new(
@@ -1713,11 +2318,31 @@ internal sealed class DesktopBoxForm : Forms.Form
         RectangleF Bounds,
         RectangleF Header,
         RectangleF Body,
+        RectangleF AutoExpand,
         RectangleF Collapse,
         RectangleF Menu,
         RectangleF Resize);
 
+    [Flags]
+    private enum ResizeEdges
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+        Top = 4,
+        Bottom = 8,
+        TopLeft = Top | Left,
+        TopRight = Top | Right,
+        BottomLeft = Bottom | Left,
+        BottomRight = Bottom | Right
+    }
+
     private sealed record ItemGeometry(DesktopBox Box, DesktopItemRef Item, RectangleF Bounds);
+
+    private sealed class InternalDragSession
+    {
+        public bool HandledByBox { get; set; }
+    }
 
     private readonly record struct IconBitmapKey(
         string ParsingName,

@@ -32,6 +32,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action) => _runtime.GetHotkeyStatus(action);
     public void SetPaused(bool paused) => _runtime.SetPaused(paused);
     public Task ReconnectDesktopAsync() => _runtime.ReconnectDesktopAsync();
+    public Task<bool> RepairDesktopIconsAsync() => _runtime.RepairDesktopIconsAsync();
     public void SetStartWithWindows(bool enabled) => _runtime.SetStartWithWindows(enabled);
     public Task SetShowSystemItemsAsync(bool enabled) => _runtime.SetShowSystemItemsAsync(enabled);
     public void SetConfirmDeleteBox(bool enabled) => _runtime.SetConfirmDeleteBox(enabled);
@@ -41,6 +42,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetRefreshAfterRename(bool enabled) => _runtime.SetRefreshAfterRename(enabled);
     public void SetAnimationEnabled(bool enabled) => _runtime.SetAnimationEnabled(enabled);
     public void SetThemeMode(ApplicationThemeMode mode) => _runtime.SetThemeMode(mode);
+    public void SetWindowBackdrop(string backdrop) => _runtime.SetWindowBackdrop(backdrop);
     public void SetCheckUpdatesOnStartup(bool enabled) => _runtime.SetCheckUpdatesOnStartup(enabled);
     public void SetUpdateChannel(UpdateChannel channel) => _runtime.SetUpdateChannel(channel);
     public Task<UpdateCheckResult> CheckForUpdatesAsync(bool manual = true) => _runtime.CheckForUpdatesAsync(manual);
@@ -86,6 +88,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetIconSpacing(double horizontal, double vertical) => _runtime.SetIconSpacing(horizontal, vertical);
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment) => _runtime.SetBoxTitleAlignment(boxId, alignment);
+    public void SetBoxMaterial(Guid? boxId, BoxMaterialKind material) => _runtime.SetBoxMaterial(boxId, material);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);
     public void SetBoxOpacity(Guid? boxId, double value) => _runtime.SetBoxOpacity(boxId, value);

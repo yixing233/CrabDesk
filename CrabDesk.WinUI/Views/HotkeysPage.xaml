@@ -5,11 +5,6 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
         <StackPanel Padding="{StaticResource PagePadding}"
                     HorizontalAlignment="Stretch" Spacing="24">
-            <StackPanel>
-                <TextBlock Text="全局快捷键" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="在其他窗口中快速显示桌面或执行整理" Style="{StaticResource PageSubtitleStyle}" />
-            </StackPanel>
-
             <Border Style="{StaticResource SectionCardStyle}">
                 <Grid ColumnSpacing="20">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

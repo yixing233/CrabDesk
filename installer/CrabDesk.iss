@@ -4,6 +4,16 @@
 #endif
 #define MyAppPublisher "CrabDesk"
 #define MyAppExeName "CrabDesk.WinUI.exe"
+#ifndef MyPackageKind
+  #define MyPackageKind "Full"
+#endif
+#if MyPackageKind == "Web"
+  #define MyOutputSuffix "-Web"
+  #define MyPublishPath "..\artifacts\publish\win-x64-web"
+#else
+  #define MyOutputSuffix ""
+  #define MyPublishPath "..\artifacts\publish\win-x64"
+#endif
 
 [Setup]
 AppId={{8AF9FCA9-D889-4ED7-B5A2-AC052B94016D}
@@ -14,7 +24,7 @@ DefaultDirName={autopf}\CrabDesk
 DefaultGroupName=CrabDesk
 DisableProgramGroupPage=yes
 OutputDir=..\artifacts\installer
-OutputBaseFilename=CrabDesk-Setup-x64
+OutputBaseFilename=CrabDesk-Setup{#MyOutputSuffix}-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -24,7 +34,7 @@ PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyPublishPath}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\CrabDesk"; Filename: "{app}\{#MyAppExeName}"

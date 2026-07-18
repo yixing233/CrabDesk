@@ -1,11 +1,14 @@
 param(
     [string]$Version = "",
-    [string]$IsccPath = ""
+    [string]$IsccPath = "",
+    [ValidateSet("Full", "Web")]
+    [string]$PackageKind = "Full"
 )
 
 $ErrorActionPreference = "Stop"
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
-$publishDirectory = Join-Path $root "artifacts\publish\win-x64"
+$publishName = if ($PackageKind -eq "Web") { "win-x64-web" } else { "win-x64" }
+$publishDirectory = Join-Path $root "artifacts\publish\$publishName"
 $scriptPath = Join-Path $root "installer\CrabDesk.iss"
 if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory "CrabDesk.WinUI.exe"))) {
     throw "Published CrabDesk files were not found. Run .\build\publish.ps1 first."
@@ -32,12 +35,13 @@ if (-not $iscc) {
     throw "Inno Setup 6 ISCC.exe was not found."
 }
 
-& $iscc "/DMyAppVersion=$Version" $scriptPath
+& $iscc "/DMyAppVersion=$Version" "/DMyPackageKind=$PackageKind" $scriptPath
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$installer = Join-Path $root "artifacts\installer\CrabDesk-Setup-x64.exe"
+$installerName = if ($PackageKind -eq "Web") { "CrabDesk-Setup-Web-x64.exe" } else { "CrabDesk-Setup-x64.exe" }
+$installer = Join-Path $root "artifacts\installer\$installerName"
 if (-not (Test-Path -LiteralPath $installer)) {
     throw "Inno Setup did not produce the expected installer: $installer"
 }

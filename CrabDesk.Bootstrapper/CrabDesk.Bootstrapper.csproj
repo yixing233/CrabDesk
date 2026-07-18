@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>true</PublishAot>
+    <StripSymbols>true</StripSymbols>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version Condition="'$(Version)' == ''">0.6.0</Version>
+    <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
+    <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="GitHubRepositoryOwner" Value="$(CrabDeskGitHubOwner)" />
+    <AssemblyMetadata Include="GitHubRepositoryName" Value="$(CrabDeskGitHubRepository)" />
+    <AssemblyMetadata Include="ReleaseVersion" Value="$(Version)" />
+  </ItemGroup>
+</Project>

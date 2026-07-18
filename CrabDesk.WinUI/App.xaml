@@ -14,6 +14,10 @@
             <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:HexColorConverter x:Key="HexColorConverter" />
             <converters:HexBrushConverter x:Key="HexBrushConverter" />
+            <converters:EnumDisplayConverter x:Key="EnumDisplayConverter" />
+            <DataTemplate x:Key="LocalizedEnumItemTemplate">
+                <TextBlock Text="{Binding Converter={StaticResource EnumDisplayConverter}}" />
+            </DataTemplate>
             <DataTemplate x:Key="FontFamilyItemTemplate">
                 <TextBlock Text="{Binding}" FontFamily="{Binding}" />
             </DataTemplate>

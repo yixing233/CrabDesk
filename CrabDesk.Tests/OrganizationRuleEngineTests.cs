@@ -152,6 +152,44 @@ public sealed class OrganizationRuleEngineTests
         Assert.All(conflicts, conflict => Assert.Equal("所有文件", conflict.FirstRuleTitle));
     }
 
+    [Fact]
+    public void BuiltInFallbackOnlyHandlesItemsNotMatchedByEarlierRules()
+    {
+        var state = JsonLayoutStore.CreateDefaultState();
+        foreach (var rule in state.OrganizationRules)
+        {
+            var box = new DesktopBox { Title = rule.Title };
+            state.Boxes.Add(box);
+            rule.TargetBoxId = box.Id;
+        }
+
+        var decisions = _engine.Preview(state,
+        [
+            Item("report.pdf", DesktopItemKind.File),
+            Item("tool.exe", DesktopItemKind.File),
+            Item("Projects", DesktopItemKind.Folder)
+        ]);
+
+        Assert.Equal(3, decisions.Count);
+        Assert.Equal("文档", decisions.Single(decision => decision.ItemName == "report.pdf").RuleTitle);
+        Assert.Equal("其它", decisions.Single(decision => decision.ItemName == "tool.exe").RuleTitle);
+        Assert.Equal("目录", decisions.Single(decision => decision.ItemName == "Projects").RuleTitle);
+        Assert.Empty(_engine.FindConflicts(state));
+    }
+
+    [Fact]
+    public void MovingRuleRewritesPrioritiesInSwappedOrder()
+    {
+        var rules = BuiltInOrganizationRules.CreateDefaults();
+        var directory = rules.Single(rule => rule.BuiltInId == BuiltInOrganizationRules.DirectoryId);
+
+        var moved = OrganizationRuleOrdering.Move(rules, directory.Id, 1);
+
+        Assert.True(moved);
+        Assert.Equal(["文档", "目录", "图片", "压缩", "其它"], rules.Select(rule => rule.Title));
+        Assert.Equal([10, 20, 30, 40, 50], rules.Select(rule => rule.Priority));
+    }
+
     private static DesktopItemRef Item(string name, DesktopItemKind kind) => new()
     {
         Key = new DesktopItemKey("test", Guid.NewGuid().ToString("N")),

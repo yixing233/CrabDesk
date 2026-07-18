@@ -21,6 +21,7 @@
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
     <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
     <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
+    <CrabDeskPackageKind Condition="'$(CrabDeskPackageKind)' == ''">Full</CrabDeskPackageKind>
   </PropertyGroup>
 
   <ItemGroup>
@@ -48,6 +49,7 @@
   <ItemGroup>
     <AssemblyMetadata Include="GitHubRepositoryOwner" Value="$(CrabDeskGitHubOwner)" />
     <AssemblyMetadata Include="GitHubRepositoryName" Value="$(CrabDeskGitHubRepository)" />
+    <AssemblyMetadata Include="CrabDeskPackageKind" Value="$(CrabDeskPackageKind)" />
   </ItemGroup>
 
   <Target Name="CopyIconGuard" AfterTargets="Build">

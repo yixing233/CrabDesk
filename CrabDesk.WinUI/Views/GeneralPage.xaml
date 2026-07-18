@@ -7,11 +7,6 @@
         <StackPanel Padding="{StaticResource PagePadding}"
                     HorizontalAlignment="Stretch" Spacing="24">
             <StackPanel>
-                <TextBlock Text="常规" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="桌面接管、启动行为和交互偏好" Style="{StaticResource PageSubtitleStyle}" />
-            </StackPanel>
-
-            <StackPanel>
                 <TextBlock Text="桌面连接" Style="{StaticResource SectionTitleStyle}" />
                 <Border Style="{StaticResource SectionCardStyle}">
                     <StackPanel Spacing="8">
@@ -28,8 +23,14 @@
                             <Button Grid.Column="1" Content="{Binding PauseButtonText}"
                                     Command="{Binding TogglePauseCommand}" AutomationProperties.Name="切换桌面接管状态" />
                         </Grid>
-                        <Button Content="重新连接 Explorer 桌面" HorizontalAlignment="Left"
-                                Command="{Binding ReconnectCommand}" AutomationProperties.Name="重新连接 Explorer 桌面" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="重新连接 Explorer 桌面"
+                                    Command="{Binding ReconnectCommand}"
+                                    AutomationProperties.Name="重新连接 Explorer 桌面" />
+                            <Button Content="修复桌面图标"
+                                    Command="{Binding RepairDesktopIconsCommand}"
+                                    AutomationProperties.Name="修复桌面图标" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>
@@ -60,16 +61,8 @@
                         </Grid>
                         <Grid Style="{StaticResource SettingRowGridStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="双击桌面空白处隐藏图标" />
-                                <TextBlock Text="再次双击恢复桌面与盒子图标" Style="{StaticResource SecondaryBodyStyle}" />
-                            </StackPanel>
+                            <TextBlock Text="双击桌面空白处隐藏图标" VerticalAlignment="Center" />
                             <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ToggleIconsOnDoubleClick, Mode=TwoWay}" AutomationProperties.Name="双击桌面隐藏图标" />
-                        </Grid>
-                        <Grid Style="{StaticResource SettingRowGridStyle}">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock Text="悬停展开折叠盒子" VerticalAlignment="Center" />
-                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ExpandBoxOnHover, Mode=TwoWay}" AutomationProperties.Name="悬停展开折叠盒子" />
                         </Grid>
                         <Grid Style="{StaticResource SettingRowGridStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -87,7 +80,9 @@
 
             <StackPanel Margin="0,0,0,24">
                 <TextBlock Text="主题" Style="{StaticResource SectionTitleStyle}" />
-                <ComboBox ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding ThemeMode, Mode=TwoWay}"
+                <ComboBox ItemsSource="{Binding ThemeModes}"
+                          ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
+                          SelectedItem="{Binding ThemeMode, Mode=TwoWay}"
                           HorizontalAlignment="Stretch" AutomationProperties.Name="应用主题" />
             </StackPanel>
         </StackPanel>

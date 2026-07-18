@@ -10,4 +10,9 @@ public sealed partial class AppearancePage : Page
         InitializeComponent();
         DataContext = App.GetService<AppearanceViewModel>();
     }
+
+    private void OnLoaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() => PageScrollViewer.Focus(Microsoft.UI.Xaml.FocusState.Programmatic));
+    }
 }

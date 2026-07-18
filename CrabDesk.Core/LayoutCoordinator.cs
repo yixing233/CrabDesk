@@ -157,3 +157,20 @@ public static class BoxTransferPolicy
         return shiftPressed ? BoxTransferEffect.MoveFiles : BoxTransferEffect.CopyFiles;
     }
 }
+
+public static class BoxDragCompletionPolicy
+{
+    public static bool ShouldExposeFileDrop(bool sourceMapped) => sourceMapped;
+
+    public static bool ShouldUnassign(
+        bool dropCommitted,
+        bool cancelled,
+        bool handledByBox,
+        bool sourceMapped,
+        bool pointerOverBox) =>
+        dropCommitted &&
+        !cancelled &&
+        !handledByBox &&
+        !sourceMapped &&
+        !pointerOverBox;
+}

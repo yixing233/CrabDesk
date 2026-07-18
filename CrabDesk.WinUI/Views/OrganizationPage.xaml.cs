@@ -1,4 +1,3 @@
-using CrabDesk.Core;
 using CrabDesk.WinUI.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,9 +17,9 @@ public sealed partial class OrganizationPage : Page
 
     private void RuleEnabled_OnToggled(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is ToggleSwitch { DataContext: OrganizationRule rule } toggle)
+        if (sender is ToggleSwitch { DataContext: OrganizationRuleListItem item } toggle)
         {
-            ViewModel.SetRuleEnabled(rule, toggle.IsOn);
+            ViewModel.SetRuleEnabled(item, toggle.IsOn);
         }
     }
 

@@ -2,21 +2,20 @@
     x:Class="CrabDesk.WinUI.Views.BackupPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CrabDesk.WinUI.Controls"
     xmlns:icons="using:FluentIcons.WinUI">
-    <Grid Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch">
+        <Grid Padding="{StaticResource PagePadding}" HorizontalAlignment="Stretch">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <StackPanel>
-            <TextBlock Text="布局备份" Style="{StaticResource PageTitleStyle}" />
-            <TextBlock Text="创建、导入、导出和恢复桌面布局" Style="{StaticResource PageSubtitleStyle}" />
-        </StackPanel>
 
-        <Border Grid.Row="1" Style="{StaticResource SectionCardStyle}" Padding="16,0" Margin="0,24,0,20">
+        <Border Grid.Row="0" Style="{StaticResource SectionCardStyle}" Padding="16,0" Margin="0,0,0,20">
             <StackPanel>
                 <Border Style="{StaticResource SettingRowStyle}">
                     <Grid ColumnSpacing="16">
@@ -57,11 +56,11 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="2" ColumnSpacing="12" Margin="0,0,0,8">
+        <Grid Grid.Row="1" ColumnSpacing="12" Margin="0,0,0,8">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <TextBlock Text="备份记录" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" Margin="0" />
             <CommandBar Grid.Column="1" DefaultLabelPosition="Collapsed" Background="Transparent" HorizontalAlignment="Right">
-                <AppBarButton Label="创建备份" Command="{Binding CreateCommand}" ToolTipService.ToolTip="创建备份"><AppBarButton.Icon><icons:FluentIcon Icon="Save" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="创建备份" Command="{Binding CreateCommand}" ToolTipService.ToolTip="创建备份"><AppBarButton.Icon><icons:FluentIcon Icon="AlbumAdd" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="导出布局" Command="{Binding ExportCommand}" ToolTipService.ToolTip="导出布局"><AppBarButton.Icon><icons:FluentIcon Icon="SaveCopy" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="导入布局" Command="{Binding ImportCommand}" ToolTipService.ToolTip="导入布局"><AppBarButton.Icon><icons:FluentIcon Icon="DocumentArrowUp" /></AppBarButton.Icon></AppBarButton>
                 <AppBarSeparator />
@@ -73,23 +72,60 @@
             </CommandBar>
         </Grid>
 
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="2">
             <ListView ItemsSource="{Binding Backups}" SelectedItem="{Binding SelectedBackup, Mode=TwoWay}"
                       SelectionMode="Single" Visibility="{Binding HasBackups, Converter={StaticResource BooleanToVisibilityConverter}}"
+                      HorizontalContentAlignment="Stretch"
                       AutomationProperties.Name="布局备份列表">
                 <ListView.ItemTemplate>
                     <DataTemplate>
-                        <Grid Padding="8" ColumnSpacing="16">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="{Binding CreatedAt}" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Path}" Style="{StaticResource SecondaryBodyStyle}" TextTrimming="CharacterEllipsis" />
+                        <Grid Padding="10" MinHeight="112" ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="168" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <controls:DesktopSnapshotView Width="168"
+                                                          Height="94"
+                                                          Snapshot="{Binding Snapshot}"
+                                                          AutomationProperties.Name="备份桌面快照" />
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                                <TextBlock Text="{Binding CreatedAtText}"
+                                           FontFamily="Segoe UI Variable Text"
+                                           FontSize="14"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding FileName}"
+                                           Style="{StaticResource SecondaryBodyStyle}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTipService.ToolTip="{Binding Path}" />
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <TextBlock Text="{Binding BoxCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="个盒子" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="{Binding RuleCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="条规则" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="{Binding MonitorCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="块屏幕" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="{Binding IconCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="个图标" Style="{StaticResource SecondaryBodyStyle}" />
+                                </StackPanel>
                             </StackPanel>
-                            <TextBlock Grid.Column="1" Text="{Binding SchemaVersion}" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding BoxCount}" />
-                                <TextBlock Text="个盒子" Foreground="{ThemeResource SecondaryTextBrush}" />
-                            </StackPanel>
+
+                            <Border Grid.Column="2"
+                                    Padding="8,3"
+                                    Background="{ThemeResource NavigationSurfaceBrush}"
+                                    CornerRadius="10"
+                                    VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="1">
+                                    <TextBlock Text="v" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
+                                    <TextBlock Text="{Binding SchemaVersion}" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
@@ -97,12 +133,12 @@
             <Border Style="{StaticResource SectionCardStyle}" MinHeight="150"
                     Visibility="{Binding HasNoBackups, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-                    <icons:FluentIcon Icon="Save" FontSize="28" Foreground="{ThemeResource SecondaryTextBrush}" />
+                    <icons:FluentIcon Icon="Album" FontSize="28" Foreground="{ThemeResource SecondaryTextBrush}" />
                     <TextBlock Text="还没有布局备份" FontWeight="SemiBold" HorizontalAlignment="Center" />
                     <TextBlock Text="创建备份后，可随时恢复当前桌面布局" Style="{StaticResource SecondaryBodyStyle}" />
                 </StackPanel>
             </Border>
         </Grid>
-        <TextBlock Grid.Row="4" Text="{Binding Status}" Margin="0,10,0,0" Foreground="{ThemeResource AccentBrush}" />
-    </Grid>
+        </Grid>
+    </ScrollViewer>
 </Page>

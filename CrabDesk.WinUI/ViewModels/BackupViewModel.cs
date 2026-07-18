@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CrabDesk.Core;
 using CrabDesk.WinUI.Services;
+using Microsoft.UI.Xaml.Controls;
 
 namespace CrabDesk.WinUI.ViewModels;
 
@@ -15,18 +16,26 @@ public partial class BackupViewModel : ObservableObject
     [ObservableProperty] private LayoutBackupInfo? _selectedBackup;
     [ObservableProperty] private string _status = string.Empty;
     [ObservableProperty] private bool _isBusy;
+    [ObservableProperty] private InfoBarSeverity _statusSeverity = InfoBarSeverity.Informational;
+    private readonly IInfoBarService? _notifications;
 
-    public BackupViewModel(ICrabDeskService service, IFilePickerService pickers, IDialogService dialogs)
+    public BackupViewModel(
+        ICrabDeskService service,
+        IFilePickerService pickers,
+        IDialogService dialogs,
+        IInfoBarService? notifications = null)
     {
         _service = service;
         _pickers = pickers;
         _dialogs = dialogs;
+        _notifications = notifications;
         _ = RefreshAsync();
     }
 
     public ObservableCollection<LayoutBackupInfo> Backups { get; } = [];
     public bool HasBackups => Backups.Count > 0;
     public bool HasNoBackups => !HasBackups;
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
     public string BackupDirectory => _service.BackupDirectory;
     public bool DailyBackup
     {
@@ -111,6 +120,8 @@ public partial class BackupViewModel : ObservableObject
         DeleteCommand.NotifyCanExecuteChanged();
     }
 
+    partial void OnStatusChanged(string value) => OnPropertyChanged(nameof(HasStatus));
+
     private bool HasSelection() => SelectedBackup is not null && !IsBusy;
 
     private async Task RefreshAsync(string? selectedPath)
@@ -131,10 +142,17 @@ public partial class BackupViewModel : ObservableObject
         {
             IsBusy = true;
             await operation();
+            if (HasStatus)
+            {
+                StatusSeverity = InfoBarSeverity.Success;
+                _notifications?.Show(Status, StatusSeverity);
+            }
         }
         catch (Exception exception)
         {
+            StatusSeverity = InfoBarSeverity.Error;
             Status = exception.Message;
+            _notifications?.Show(Status, StatusSeverity);
         }
         finally
         {

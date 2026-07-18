@@ -4,6 +4,63 @@ namespace CrabDesk.Tests;
 
 public sealed class LayoutTests
 {
+    [Fact]
+    public void HoverExpansionWaitsBeforeOpeningCollapsedBox()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(280),
+            TimeSpan.FromMilliseconds(220));
+        var boxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+
+        Assert.False(controller.Update(boxId, false, started).Changed);
+        Assert.False(controller.Update(boxId, false, started.AddMilliseconds(279)).Changed);
+        var transition = controller.Update(boxId, false, started.AddMilliseconds(280));
+
+        Assert.Equal(boxId, transition.ExpandedBoxId);
+        Assert.Null(transition.CollapsedBoxId);
+    }
+
+    [Fact]
+    public void HoverExpansionClosesAfterPointerLeavesExpandedBox()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(280),
+            TimeSpan.FromMilliseconds(220));
+        var boxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+        controller.Update(boxId, false, started);
+        controller.Update(boxId, false, started.AddMilliseconds(280));
+
+        Assert.False(controller.Update(null, true, started.AddMilliseconds(400)).Changed);
+        Assert.False(controller.Update(null, false, started.AddMilliseconds(500)).Changed);
+        Assert.False(controller.Update(null, false, started.AddMilliseconds(719)).Changed);
+        var transition = controller.Update(null, false, started.AddMilliseconds(720));
+
+        Assert.Null(transition.ExpandedBoxId);
+        Assert.Equal(boxId, transition.CollapsedBoxId);
+    }
+
+    [Fact]
+    public void HoverExpansionCanAdoptAnAlreadyOpenBoxAndCloseItAfterPointerLeaves()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(280),
+            TimeSpan.FromMilliseconds(220));
+        var boxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+
+        controller.AdoptExpanded(boxId);
+
+        Assert.Equal(boxId, controller.ExpandedBoxId);
+        Assert.False(controller.Update(null, true, started).Changed);
+        Assert.False(controller.Update(null, false, started.AddMilliseconds(1)).Changed);
+        var transition = controller.Update(null, false, started.AddMilliseconds(221));
+
+        Assert.Equal(boxId, transition.CollapsedBoxId);
+        Assert.Null(controller.ExpandedBoxId);
+    }
+
     [Theory]
     [InlineData(121.9, 120)]
     [InlineData(122, 124)]
@@ -298,8 +355,9 @@ public sealed class LayoutTests
         Assert.Equal(1, disabled);
         Assert.Empty(state.Boxes);
         Assert.Empty(state.Assignments);
-        Assert.False(state.OrganizationRules[0].Enabled);
-        Assert.Null(state.OrganizationRules[0].TargetBoxId);
+        var removedTargetRule = Assert.Single(state.OrganizationRules.Where(rule => rule.Title == "旧目标"));
+        Assert.False(removedTargetRule.Enabled);
+        Assert.Null(removedTargetRule.TargetBoxId);
         Assert.Equal(ApplicationThemeMode.Dark, state.Settings.ThemeMode);
     }
 

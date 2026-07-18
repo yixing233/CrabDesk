@@ -51,7 +51,14 @@ public sealed class JsonLayoutStore : ILayoutStore
         File.Move(tempPath, StatePath, true);
     }
 
-    public static CrabDeskState CreateDefaultState(string monitorId = "primary") => new();
+    public static CrabDeskState CreateDefaultState(string monitorId = "primary")
+    {
+        _ = monitorId;
+        return new CrabDeskState
+        {
+            OrganizationRules = BuiltInOrganizationRules.CreateDefaults()
+        };
+    }
 
     private static async Task<CrabDeskState?> TryReadAsync(string path, CancellationToken cancellationToken)
     {
@@ -79,8 +86,9 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 16;
+        state.SchemaVersion = 18;
         state.Settings ??= new AppSettings();
+        state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();
         state.Settings.Backup ??= new BackupSettings();
@@ -118,6 +126,17 @@ public sealed class JsonLayoutStore : ILayoutStore
         NormalizeHotkey(state.Settings.Hotkeys.OrganizeDesktop, HotkeyKey.O);
         state.Settings.Backup.RetentionDays = Math.Clamp(state.Settings.Backup.RetentionDays, 1, 365);
         state.Settings.Appearance.CornerRadius = Math.Clamp(state.Settings.Appearance.CornerRadius, 0, 20);
+        if (previousVersion < 18)
+        {
+            if (Math.Abs(state.Settings.Appearance.IconHorizontalSpacing - 82) < 0.001)
+            {
+                state.Settings.Appearance.IconHorizontalSpacing = 76;
+            }
+            if (Math.Abs(state.Settings.Appearance.IconVerticalSpacing - 88) < 0.001)
+            {
+                state.Settings.Appearance.IconVerticalSpacing = 80;
+            }
+        }
         state.Settings.Appearance.IconHorizontalSpacing = Math.Clamp(
             state.Settings.Appearance.IconHorizontalSpacing,
             56,
@@ -148,6 +167,7 @@ public sealed class JsonLayoutStore : ILayoutStore
 
         foreach (var (rule, index) in state.OrganizationRules.Select((rule, index) => (rule, index)))
         {
+            rule.BuiltInId = rule.BuiltInId?.Trim() ?? string.Empty;
             rule.Title = string.IsNullOrWhiteSpace(rule.Title) ? "未命名规则" : rule.Title.Trim();
             rule.NamePattern = string.IsNullOrWhiteSpace(rule.NamePattern) ? "*" : rule.NamePattern.Trim();
             rule.ItemKinds ??= [];
@@ -197,6 +217,11 @@ public sealed class JsonLayoutStore : ILayoutStore
             }
         }
 
+        if (previousVersion < 17)
+        {
+            BuiltInOrganizationRules.EnsureRules(state, adoptLegacyDefaults: true);
+        }
+
         if (state.Boxes.Count == 0)
         {
             state.Boxes.AddRange(CreateDefaultState().Boxes);
@@ -206,6 +231,10 @@ public sealed class JsonLayoutStore : ILayoutStore
         {
             box.Title = string.IsNullOrWhiteSpace(box.Title) ? "未命名盒子" : box.Title.Trim();
             box.Appearance ??= new BoxAppearance();
+            if (!Enum.IsDefined(box.Appearance.Material))
+            {
+                box.Appearance.Material = BoxMaterialKind.Solid;
+            }
             if (previousVersion < 12 && Math.Abs(box.Appearance.Opacity - 0.88) < 0.001)
             {
                 box.Appearance.Opacity = 1;
@@ -248,6 +277,14 @@ public sealed class JsonLayoutStore : ILayoutStore
             state.Assignments.Remove(key);
         }
     }
+
+    private static string NormalizeWindowBackdrop(string? value) =>
+        value?.Trim() switch
+        {
+            "MicaAlt" => "MicaAlt",
+            "Acrylic" => "Acrylic",
+            _ => "Mica"
+        };
 
     private static string NormalizeExtension(string value)
     {

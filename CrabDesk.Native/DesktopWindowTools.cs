@@ -170,7 +170,11 @@ public static class DesktopWindowTools
             NativeMethods.SwpNoActivate | NativeMethods.SwpNoOwnerZOrder | NativeMethods.SwpShowWindow);
     }
 
-    public static void ApplyRegion(IntPtr hwnd, IEnumerable<LayoutRect> rectangles, double scale)
+    public static void ApplyRegion(
+        IntPtr hwnd,
+        IEnumerable<LayoutRect> rectangles,
+        double scale,
+        bool redraw = true)
     {
         var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
         try
@@ -192,7 +196,7 @@ public static class DesktopWindowTools
                 }
             }
 
-            if (NativeMethods.SetWindowRgn(hwnd, destination, true) != 0)
+            if (NativeMethods.SetWindowRgn(hwnd, destination, redraw) != 0)
             {
                 destination = IntPtr.Zero;
             }
@@ -204,6 +208,110 @@ public static class DesktopWindowTools
                 NativeMethods.DeleteObject(destination);
             }
         }
+    }
+
+    public static bool RedrawExposedParentArea(
+        IntPtr childWindow,
+        IEnumerable<LayoutRect> previousRectangles,
+        IEnumerable<LayoutRect> currentRectangles,
+        double scale)
+    {
+        var parent = NativeMethods.GetParent(childWindow);
+        if (parent == IntPtr.Zero ||
+            !NativeMethods.GetWindowRect(childWindow, out var childBounds) ||
+            !NativeMethods.GetWindowRect(parent, out _))
+        {
+            return false;
+        }
+
+        var redrawTarget = parent;
+        for (var ancestor = NativeMethods.GetParent(redrawTarget);
+             ancestor != IntPtr.Zero;
+             ancestor = NativeMethods.GetParent(redrawTarget))
+        {
+            redrawTarget = ancestor;
+        }
+        if (!NativeMethods.GetWindowRect(redrawTarget, out var redrawTargetBounds))
+        {
+            return false;
+        }
+
+        var previous = CreateRegion(previousRectangles, scale);
+        var current = CreateRegion(currentRectangles, scale);
+        var exposed = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        try
+        {
+            if (previous == IntPtr.Zero || current == IntPtr.Zero || exposed == IntPtr.Zero)
+            {
+                return false;
+            }
+            var regionType = NativeMethods.CombineRgn(
+                exposed,
+                previous,
+                current,
+                NativeMethods.RgnDiff);
+            if (regionType <= 1)
+            {
+                return true;
+            }
+
+            NativeMethods.OffsetRgn(
+                exposed,
+                childBounds.Left - redrawTargetBounds.Left,
+                childBounds.Top - redrawTargetBounds.Top);
+            return NativeMethods.RedrawWindow(
+                redrawTarget,
+                IntPtr.Zero,
+                exposed,
+                NativeMethods.RdwInvalidate |
+                NativeMethods.RdwErase |
+                NativeMethods.RdwAllChildren);
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(previous);
+            }
+            if (current != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(current);
+            }
+            if (exposed != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(exposed);
+            }
+        }
+    }
+
+    private static IntPtr CreateRegion(IEnumerable<LayoutRect> rectangles, double scale)
+    {
+        var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        if (destination == IntPtr.Zero)
+        {
+            return IntPtr.Zero;
+        }
+        foreach (var rectangle in rectangles)
+        {
+            var source = NativeMethods.CreateRectRgn(
+                (int)Math.Floor(rectangle.X * scale),
+                (int)Math.Floor(rectangle.Y * scale),
+                (int)Math.Ceiling((rectangle.X + rectangle.Width) * scale),
+                (int)Math.Ceiling((rectangle.Y + rectangle.Height) * scale));
+            if (source == IntPtr.Zero)
+            {
+                continue;
+            }
+            try
+            {
+                NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnOr);
+            }
+            finally
+            {
+                NativeMethods.DeleteObject(source);
+            }
+        }
+        return destination;
     }
 
     public static LayoutRect GetWindowBounds(IntPtr hwnd)

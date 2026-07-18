@@ -2,13 +2,16 @@ param(
     [string]$Configuration = "Release",
     [string]$Version = "",
     [string]$GitHubOwner = $env:CRABDESK_GITHUB_OWNER,
-    [string]$GitHubRepository = $env:CRABDESK_GITHUB_REPOSITORY_NAME
+    [string]$GitHubRepository = $env:CRABDESK_GITHUB_REPOSITORY_NAME,
+    [ValidateSet("Full", "Web")]
+    [string]$PackageKind = "Full"
 )
 
 $ErrorActionPreference = "Stop"
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $artifacts = [System.IO.Path]::GetFullPath((Join-Path $root "artifacts"))
-$output = [System.IO.Path]::GetFullPath((Join-Path $artifacts "publish\win-x64"))
+$publishName = if ($PackageKind -eq "Web") { "win-x64-web" } else { "win-x64" }
+$output = [System.IO.Path]::GetFullPath((Join-Path $artifacts "publish\$publishName"))
 $guardOutput = [System.IO.Path]::GetFullPath((Join-Path $artifacts "publish\guard"))
 
 if (-not $output.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnoreCase) -or
@@ -31,22 +34,41 @@ if (-not [string]::IsNullOrWhiteSpace($GitHubOwner)) {
 if (-not [string]::IsNullOrWhiteSpace($GitHubRepository)) {
     $buildProperties += "-p:CrabDeskGitHubRepository=$GitHubRepository"
 }
+$buildProperties += "-p:CrabDeskPackageKind=$PackageKind"
 
-dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
-    -c $Configuration -r win-x64 --self-contained true `
-    -p:DebugType=None -p:DebugSymbols=false `
-    -o $output @buildProperties
+if ($PackageKind -eq "Web") {
+    dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
+        -c $Configuration -r win-x64 --self-contained false `
+        -p:SelfContained=false -p:WindowsAppSDKSelfContained=false -p:PublishTrimmed=false `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $output @buildProperties
+}
+else {
+    dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
+        -c $Configuration -r win-x64 --self-contained true `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $output @buildProperties
+}
 if ($LASTEXITCODE -ne 0) {
     throw "CrabDesk.WinUI publish failed with exit code $LASTEXITCODE."
 }
 
 Get-ChildItem -LiteralPath $output -Filter "*.pdb" | Remove-Item -Force
 
-dotnet publish (Join-Path $root "CrabDesk.IconGuard\CrabDesk.IconGuard.csproj") `
-    -c $Configuration -r win-x64 --self-contained true `
-    -p:PublishTrimmed=false `
-    -p:DebugType=None -p:DebugSymbols=false `
-    -o $guardOutput
+if ($PackageKind -eq "Web") {
+    dotnet publish (Join-Path $root "CrabDesk.IconGuard\CrabDesk.IconGuard.csproj") `
+        -c $Configuration -r win-x64 --self-contained false `
+        -p:SelfContained=false -p:PublishTrimmed=false `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $guardOutput
+}
+else {
+    dotnet publish (Join-Path $root "CrabDesk.IconGuard\CrabDesk.IconGuard.csproj") `
+        -c $Configuration -r win-x64 --self-contained true `
+        -p:PublishTrimmed=false `
+        -p:DebugType=None -p:DebugSymbols=false `
+        -o $guardOutput
+}
 if ($LASTEXITCODE -ne 0) {
     throw "CrabDesk.IconGuard publish failed with exit code $LASTEXITCODE."
 }

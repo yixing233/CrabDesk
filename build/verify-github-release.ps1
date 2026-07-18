@@ -41,14 +41,18 @@ if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
 }
 $requiredAssets = @(
     "CrabDesk-Setup-x64.exe",
+    "CrabDesk-Setup-Web-x64.exe",
     "CrabDesk-portable-win-x64.zip",
+    "CrabDesk-portable-web-win-x64.zip",
     "SHA256SUMS.txt"
 )
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("CrabDesk.ReleaseValidation." + [Guid]::NewGuid().ToString("N"))
 $downloadRoot = Join-Path $tempRoot "downloads"
 $portableRoot = Join-Path $tempRoot "portable"
+$webPortableRoot = Join-Path $tempRoot "portable-web"
 [System.IO.Directory]::CreateDirectory($downloadRoot) | Out-Null
 [System.IO.Directory]::CreateDirectory($portableRoot) | Out-Null
+[System.IO.Directory]::CreateDirectory($webPortableRoot) | Out-Null
 
 function Normalize-ReleaseNotes([string]$Value) {
     return (($Value -replace "`r`n", "`n").Trim())
@@ -138,10 +142,14 @@ try {
     }
 
     Expand-Archive -LiteralPath $downloaded["CrabDesk-portable-win-x64.zip"] -DestinationPath $portableRoot -Force
+    Expand-Archive -LiteralPath $downloaded["CrabDesk-portable-web-win-x64.zip"] -DestinationPath $webPortableRoot -Force
     $signatureTargets = @(
         $downloaded["CrabDesk-Setup-x64.exe"],
+        $downloaded["CrabDesk-Setup-Web-x64.exe"],
         (Join-Path $portableRoot "CrabDesk.WinUI.exe"),
-        (Join-Path $portableRoot "CrabDesk.IconGuard.exe")
+        (Join-Path $portableRoot "CrabDesk.IconGuard.exe"),
+        (Join-Path $webPortableRoot "CrabDesk.WinUI.exe"),
+        (Join-Path $webPortableRoot "CrabDesk.IconGuard.exe")
     )
     foreach ($target in $signatureTargets) {
         if (-not (Test-Path -LiteralPath $target)) {

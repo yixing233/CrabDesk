@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using CrabDesk.Core;
+using CrabDesk.WinUI.Converters;
 
 namespace CrabDesk.WinUI.Services;
 
@@ -17,6 +18,8 @@ public interface IDialogService
 
 public sealed class DialogService : IDialogService
 {
+    private sealed record DialogOption<T>(string Label, T Value);
+
     private XamlRoot? _xamlRoot;
 
     public void RegisterXamlRoot(XamlRoot root) => _xamlRoot = root;
@@ -74,11 +77,15 @@ public sealed class DialogService : IDialogService
         var folder = new CheckBox { Content = "文件夹", IsChecked = source.ItemKinds.Contains(DesktopItemKind.Folder) };
         var shortcut = new CheckBox { Content = "快捷方式", IsChecked = source.ItemKinds.Contains(DesktopItemKind.Shortcut) };
         var shell = new CheckBox { Content = "系统项目", IsChecked = source.ItemKinds.Contains(DesktopItemKind.Shell) };
+        var actionOptions = Enum.GetValues<OrganizationRuleAction>()
+            .Select(value => new DialogOption<OrganizationRuleAction>(EnumDisplayConverter.GetLabel(value), value))
+            .ToArray();
         var action = new ComboBox
         {
             Header = "操作",
-            ItemsSource = Enum.GetValues<OrganizationRuleAction>(),
-            SelectedItem = source.Action,
+            ItemsSource = actionOptions,
+            DisplayMemberPath = nameof(DialogOption<OrganizationRuleAction>.Label),
+            SelectedItem = actionOptions.First(option => option.Value == source.Action),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         var target = new ComboBox
@@ -113,12 +120,13 @@ public sealed class DialogService : IDialogService
             return null;
         }
 
-        var selectedAction = action.SelectedItem is OrganizationRuleAction value
-            ? value
+        var selectedAction = action.SelectedItem is DialogOption<OrganizationRuleAction> option
+            ? option.Value
             : OrganizationRuleAction.AssignToBox;
         return new OrganizationRule
         {
             Id = source.Id,
+            BuiltInId = source.BuiltInId,
             Title = title.Text.Trim(),
             Enabled = enabled.IsOn,
             Priority = source.Priority,
@@ -158,6 +166,7 @@ public sealed class DialogService : IDialogService
     private static OrganizationRule CloneRule(OrganizationRule source) => new()
     {
         Id = source.Id,
+        BuiltInId = source.BuiltInId,
         Title = source.Title,
         Enabled = source.Enabled,
         Priority = source.Priority,

@@ -24,10 +24,17 @@ public sealed class BackupServiceTests : IDisposable
         var loaded = await service.LoadAsync(backup.Path);
 
         Assert.True(File.Exists(backup.Path));
-        Assert.Equal(16, loaded.SchemaVersion);
+        var snapshotBox = Assert.Single(backup.Snapshot.Boxes);
+        Assert.Equal(state.Boxes[0].Title, snapshotBox.Title);
+        Assert.Equal(state.Boxes[0].Bounds, snapshotBox.Bounds);
+        Assert.True(backup.Snapshot.DesktopBounds.Width >= 1920);
+        Assert.True(backup.Snapshot.DesktopBounds.Height >= 1080);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.True(loaded.Settings.Backup.DailyBackup);
-        Assert.Equal("文档", loaded.OrganizationRules[0].Title);
-        Assert.Equal(state.Boxes[0].Id, loaded.OrganizationRules[0].TargetBoxId);
+        var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>
+            string.IsNullOrEmpty(rule.BuiltInId)));
+        Assert.Equal("文档", customRule.Title);
+        Assert.Equal(state.Boxes[0].Id, customRule.TargetBoxId);
     }
 
     [Fact]
@@ -45,6 +52,29 @@ public sealed class BackupServiceTests : IDisposable
 
         Assert.Equal("更新后的布局", loaded.Boxes[0].Title);
         Assert.False(File.Exists(destination + ".tmp"));
+    }
+
+    [Fact]
+    public async Task DesktopSnapshotPreservesIconPositionsAndWallpaper()
+    {
+        var service = new JsonBackupService(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        var capture = new DesktopBackupCapture(
+            [
+                new DesktopIconPositionSnapshot("Chrome", 24, 48),
+                new DesktopIconPositionSnapshot("Notes", 180, 126)
+            ],
+            @"C:\Wallpapers\desk.jpg");
+
+        var backup = await service.CreateAsync(state, capture);
+        var document = await service.LoadDocumentAsync(backup.Path);
+
+        Assert.Equal(capture.IconPositions, document.Snapshot.IconPositions);
+        Assert.Equal(capture.WallpaperPath, document.Snapshot.WallpaperPath);
+        Assert.Equal(2, backup.IconCount);
+        Assert.True(backup.HasWallpaper);
+        Assert.True(document.Snapshot.DesktopBounds.Width >= 276);
+        Assert.True(document.Snapshot.DesktopBounds.Height >= 222);
     }
 
     [Fact]

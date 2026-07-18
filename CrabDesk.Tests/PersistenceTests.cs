@@ -19,6 +19,7 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.TitleFontSize = 15;
         state.Boxes[0].Appearance.TitleFontBold = false;
         state.Boxes[0].Appearance.ShowCollapseButton = false;
+        state.Boxes[0].Appearance.Material = BoxMaterialKind.Solid;
         state.Boxes[0].Appearance.Background = "#FF162A3A";
         state.Boxes[0].Appearance.Accent = "#FF31A86D";
         state.Boxes[0].Appearance.Opacity = 0.6;
@@ -26,8 +27,10 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.LabelFontFamily = "Consolas";
         state.Boxes[0].Appearance.LabelFontSize = 20;
         state.Boxes[0].Appearance.ShowItemLabels = false;
+        state.Boxes[0].ExpandOnHover = true;
         state.Assignments["file:123"] = state.Boxes[0].Id;
         state.Settings.ThemeMode = ApplicationThemeMode.Dark;
+        state.Settings.WindowBackdrop = "Acrylic";
         state.Settings.Appearance.CornerRadius = 42;
         state.Settings.Hotkeys.ShowDesktop = new HotkeyBinding
         {
@@ -63,6 +66,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(15, loaded.Boxes[0].Appearance.TitleFontSize);
         Assert.False(loaded.Boxes[0].Appearance.TitleFontBold);
         Assert.False(loaded.Boxes[0].Appearance.ShowCollapseButton);
+        Assert.Equal(BoxMaterialKind.Solid, loaded.Boxes[0].Appearance.Material);
         Assert.Equal("#FF162A3A", loaded.Boxes[0].Appearance.Background);
         Assert.Equal("#FF31A86D", loaded.Boxes[0].Appearance.Accent);
         Assert.Equal(0.6, loaded.Boxes[0].Appearance.Opacity);
@@ -70,8 +74,10 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("Consolas", loaded.Boxes[0].Appearance.LabelFontFamily);
         Assert.Equal(16, loaded.Boxes[0].Appearance.LabelFontSize);
         Assert.False(loaded.Boxes[0].Appearance.ShowItemLabels);
+        Assert.True(loaded.Boxes[0].ExpandOnHover);
         Assert.Equal(state.Boxes[0].Id, loaded.Assignments["file:123"]);
         Assert.Equal(ApplicationThemeMode.Dark, loaded.Settings.ThemeMode);
+        Assert.Equal("Acrylic", loaded.Settings.WindowBackdrop);
         Assert.Equal(20, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.Hotkeys.ShowDesktop.Enabled);
         Assert.Equal(HotkeyModifiers.Control | HotkeyModifiers.Shift, loaded.Settings.Hotkeys.ShowDesktop.Modifiers);
@@ -87,9 +93,183 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("0.6.1-beta.1", loaded.Settings.Updates.LatestKnownVersion);
         Assert.Equal(UpdateCheckStatus.UpdateAvailable, loaded.Settings.Updates.LastStatus);
         Assert.Equal("cached", loaded.Settings.Updates.LastMessage);
-        Assert.Equal("文档", loaded.OrganizationRules[0].Title);
-        Assert.Equal([".pdf"], loaded.OrganizationRules[0].Extensions);
+        var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>
+            string.IsNullOrEmpty(rule.BuiltInId)));
+        Assert.Equal("文档", customRule.Title);
+        Assert.Equal([".pdf"], customRule.Extensions);
         Assert.True(File.Exists(store.StatePath));
+    }
+
+    [Fact]
+    public void DefaultStateContainsBuiltInOrganizationRules()
+    {
+        var rules = JsonLayoutStore.CreateDefaultState().OrganizationRules
+            .OrderBy(rule => rule.Priority)
+            .ToArray();
+
+        Assert.Equal(5, rules.Length);
+        Assert.Equal(["目录", "文档", "图片", "压缩", "其它"], rules.Select(rule => rule.Title));
+        Assert.Equal(5, rules.Select(rule => rule.BuiltInId).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(rules, rule => Assert.False(string.IsNullOrWhiteSpace(rule.BuiltInId)));
+        Assert.Equal(BuiltInOrganizationRules.OtherId, rules[^1].BuiltInId);
+        Assert.Equal([".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"],
+            rules.Single(rule => rule.BuiltInId == BuiltInOrganizationRules.ArchivesId).Extensions);
+    }
+
+    [Fact]
+    public async Task VersionSixteenAddsBuiltInsOnceWithoutChangingUserRule()
+    {
+        Directory.CreateDirectory(_root);
+        var customRuleId = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 16,
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": [{
+            "Id": "{{customRuleId}}",
+            "Title": "文档",
+            "Priority": 7,
+            "ItemKinds": [0],
+            "NamePattern": "Report-*",
+            "Extensions": ["custom"]
+          }]
+        }
+        """);
+        var store = new JsonLayoutStore(_root);
+
+        var first = await store.LoadAsync();
+        await store.SaveAsync(first);
+        var second = await store.LoadAsync();
+
+        var custom = Assert.Single(second.OrganizationRules.Where(rule => rule.Id == customRuleId));
+        Assert.Equal("文档", custom.Title);
+        Assert.Equal(7, custom.Priority);
+        Assert.Equal("Report-*", custom.NamePattern);
+        Assert.Equal([".custom"], custom.Extensions);
+        Assert.Equal(5, second.OrganizationRules.Count(rule => !string.IsNullOrWhiteSpace(rule.BuiltInId)));
+        Assert.Equal(5, second.OrganizationRules.Select(rule => rule.BuiltInId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count());
+    }
+
+    [Fact]
+    public async Task VersionSixteenAdoptsUneditedGeneratedRuleWithoutDuplicatingIt()
+    {
+        Directory.CreateDirectory(_root);
+        var boxId = Guid.NewGuid();
+        var ruleId = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 16,
+          "Boxes": [{
+            "Id": "{{boxId}}",
+            "Title": "文档",
+            "MonitorId": "primary",
+            "IsAutoGenerated": true
+          }],
+          "Assignments": { "file:kept": "{{boxId}}" },
+          "OrganizationRules": [{
+            "Id": "{{ruleId}}",
+            "Title": "文档",
+            "Priority": 30,
+            "ItemKinds": [0],
+            "NamePattern": "*",
+            "Extensions": ["doc", "docx", "pdf", "rtf", "txt", "xls", "xlsx", "ppt", "pptx", "md"],
+            "TargetBoxId": "{{boxId}}"
+          }]
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal(5, loaded.OrganizationRules.Count);
+        var documents = Assert.Single(loaded.OrganizationRules.Where(rule =>
+            rule.BuiltInId == BuiltInOrganizationRules.DocumentsId));
+        Assert.Equal(ruleId, documents.Id);
+        Assert.Equal(boxId, documents.TargetBoxId);
+    }
+
+    [Fact]
+    public async Task VersionSeventeenPreservesEditedAndDeletedBuiltIns()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 17,
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": [{
+            "BuiltInId": "documents",
+            "Title": "我的资料",
+            "Priority": 90,
+            "ItemKinds": [0],
+            "NamePattern": "Work-*",
+            "Extensions": ["work"]
+          }]
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        var rule = Assert.Single(loaded.OrganizationRules);
+        Assert.Equal(BuiltInOrganizationRules.DocumentsId, rule.BuiltInId);
+        Assert.Equal("我的资料", rule.Title);
+        Assert.Equal(90, rule.Priority);
+        Assert.Equal("Work-*", rule.NamePattern);
+        Assert.Equal([".work"], rule.Extensions);
+    }
+
+    [Fact]
+    public async Task VersionSeventeenMigratesOldDefaultIconSpacingToCompactGrid()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 17,
+          "Settings": {
+            "Appearance": {
+              "IconHorizontalSpacing": 82,
+              "IconVerticalSpacing": 88
+            }
+          },
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": []
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(76, loaded.Settings.Appearance.IconHorizontalSpacing);
+        Assert.Equal(80, loaded.Settings.Appearance.IconVerticalSpacing);
+    }
+
+    [Fact]
+    public async Task VersionSeventeenPreservesCustomizedIconSpacing()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 17,
+          "Settings": {
+            "Appearance": {
+              "IconHorizontalSpacing": 91,
+              "IconVerticalSpacing": 103
+            }
+          },
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": []
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal(91, loaded.Settings.Appearance.IconHorizontalSpacing);
+        Assert.Equal(103, loaded.Settings.Appearance.IconVerticalSpacing);
     }
 
     [Fact]
@@ -123,7 +303,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -146,7 +326,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -171,7 +351,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
     }
@@ -191,7 +371,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
@@ -222,7 +402,8 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
         Assert.Empty(loaded.Boxes);
-        Assert.Empty(loaded.OrganizationRules);
+        Assert.Equal(5, loaded.OrganizationRules.Count);
+        Assert.All(loaded.OrganizationRules, rule => Assert.False(string.IsNullOrWhiteSpace(rule.BuiltInId)));
     }
 
     [Fact]
@@ -251,7 +432,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -275,7 +456,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(16, loaded.SchemaVersion);
+        Assert.Equal(18, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);

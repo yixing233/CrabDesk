@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CrabDesk.Core;
 using CrabDesk.WinUI.Services;
+using Microsoft.UI.Xaml.Controls;
 
 namespace CrabDesk.WinUI.ViewModels;
 
@@ -14,18 +15,26 @@ public partial class BoxesViewModel : ObservableObject
 
     [ObservableProperty] private DesktopBox? _selectedBox;
     [ObservableProperty] private string _status = string.Empty;
+    [ObservableProperty] private InfoBarSeverity _statusSeverity = InfoBarSeverity.Success;
+    private readonly IInfoBarService? _notifications;
 
-    public BoxesViewModel(ICrabDeskService service, IDialogService dialogs, IFilePickerService pickers)
+    public BoxesViewModel(
+        ICrabDeskService service,
+        IDialogService dialogs,
+        IFilePickerService pickers,
+        IInfoBarService? notifications = null)
     {
         _service = service;
         _dialogs = dialogs;
         _pickers = pickers;
+        _notifications = notifications;
         _service.Changed += (_, _) => Refresh();
         Refresh();
     }
 
     public ObservableCollection<DesktopBox> Boxes { get; } = [];
     public bool HasSelection => SelectedBox is not null;
+    public bool HasStatus => !string.IsNullOrWhiteSpace(Status);
     public bool IsMappedFolder => SelectedBox?.IsMappedFolder == true;
     public string BoxTypeText => IsMappedFolder ? "映射文件夹" : "普通盒子";
     public string MonitorId => SelectedBox?.MonitorId ?? string.Empty;
@@ -70,13 +79,19 @@ public partial class BoxesViewModel : ObservableObject
         var path = await _pickers.PickFolderAsync();
         if (path is null) return;
         await _service.UpdateMappedFolderAsync(SelectedBox, path);
+        _notifications?.Show("映射文件夹已更新", InfoBarSeverity.Success);
         Status = "映射文件夹已更新";
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedBox))]
     private async Task DeleteAsync()
     {
-        if (SelectedBox is null || !await _dialogs.ConfirmAsync("删除盒子", $"删除“{SelectedBox.Title}”？盒子内文件不会被删除。", "删除")) return;
+        if (SelectedBox is null) return;
+        if (_service.State.Settings.ConfirmDeleteBox &&
+            !await _dialogs.ConfirmAsync("删除盒子", $"删除“{SelectedBox.Title}”？盒子内文件不会被删除。", "删除"))
+        {
+            return;
+        }
         _service.DeleteBox(SelectedBox);
     }
 
@@ -91,6 +106,8 @@ public partial class BoxesViewModel : ObservableObject
         OnPropertyChanged(nameof(MappedFolderReadOnly));
         DeleteCommand.NotifyCanExecuteChanged();
     }
+
+    partial void OnStatusChanged(string value) => OnPropertyChanged(nameof(HasStatus));
 
     private bool HasSelectedBox() => SelectedBox is not null;
 

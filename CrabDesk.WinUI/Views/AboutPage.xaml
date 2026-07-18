@@ -7,11 +7,6 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
         <StackPanel Padding="{StaticResource PagePadding}"
                     HorizontalAlignment="Stretch" Spacing="24">
-            <StackPanel>
-                <TextBlock Text="关于" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="版本、更新、本地数据和桌面诊断" Style="{StaticResource PageSubtitleStyle}" />
-            </StackPanel>
-
             <StackPanel Orientation="Horizontal" Spacing="16">
                 <Image Source="/Assets/CrabDesk-256.png" Width="64" Height="64" />
                 <StackPanel VerticalAlignment="Center">
@@ -29,23 +24,10 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="自动检查" FontWeight="SemiBold" />
-                                    <TextBlock Text="CrabDesk 启动后检查所选通道的新版本" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="CrabDesk 启动后检查 GitHub 上的最新版本" Style="{StaticResource SecondaryBodyStyle}" />
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding CheckUpdatesOnStartup, Mode=TwoWay}"
                                               VerticalAlignment="Center" AutomationProperties.Name="启动时检查更新" />
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource SettingRowStyle}">
-                            <Grid ColumnSpacing="16">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="发布通道" FontWeight="SemiBold" />
-                                    <TextBlock Text="稳定版优先可靠性，预览版包含较新的功能" Style="{StaticResource SecondaryBodyStyle}" />
-                                </StackPanel>
-                                <ComboBox Grid.Column="1" Width="{StaticResource CompactSettingsControlWidth}"
-                                          ItemsSource="{Binding UpdateChannels}"
-                                          SelectedItem="{Binding UpdateChannel, Mode=TwoWay}"
-                                          VerticalAlignment="Center" AutomationProperties.Name="更新通道" />
                             </Grid>
                         </Border>
                         <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
@@ -53,11 +35,22 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="更新状态" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding UpdateStatus}" TextWrapping="Wrap" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <ProgressBar Margin="0,8,0,0" Width="280" HorizontalAlignment="Left"
-                                                 Minimum="0" Maximum="100" Value="{Binding UpdateProgress}"
-                                                 IsIndeterminate="{Binding IsUpdateProgressIndeterminate}"
-                                                 Visibility="{Binding IsUpdateBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <TextBlock Margin="0,8,0,0"
+                                               Text="{Binding UpdateStatus}"
+                                               TextWrapping="Wrap"
+                                               Style="{StaticResource SecondaryBodyStyle}" />
+                                    <Grid Margin="0,10,0,0" Width="320" HorizontalAlignment="Left"
+                                          Visibility="{Binding IsUpdateBusy, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding UpdateProgress}"
+                                                     IsIndeterminate="{Binding IsUpdateProgressIndeterminate}" />
+                                        <TextBlock Grid.Row="1" Margin="0,5,0,0"
+                                                   Text="{Binding UpdateProgressText}"
+                                                   Style="{StaticResource SecondaryBodyStyle}" />
+                                    </Grid>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                     <Button Command="{Binding DownloadAndInstallUpdateCommand}"
@@ -114,7 +107,6 @@
                         <StackPanel>
                             <TextBlock Text="重置桌面布局" />
                             <TextBlock Text="重建默认盒子，当前布局会先自动备份" Style="{StaticResource SecondaryBodyStyle}" />
-                            <TextBlock Text="{Binding MaintenanceStatus}" Margin="0,8,0,0" Foreground="{ThemeResource AccentBrush}" />
                         </StackPanel>
                         <Button Grid.Column="1" Content="重置布局" Command="{Binding ResetLayoutCommand}" />
                     </Grid>

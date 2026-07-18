@@ -27,21 +27,26 @@ public partial class AppearanceViewModel : ObservableObject
 
     public IReadOnlyList<BackdropKind> BackdropKinds { get; } = Enum.GetValues<BackdropKind>();
     public IReadOnlyList<BoxTitleAlignment> TitleAlignments { get; } = Enum.GetValues<BoxTitleAlignment>();
+    public IReadOnlyList<BoxMaterialKind> BoxMaterials { get; } = Enum.GetValues<BoxMaterialKind>();
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();
     public IReadOnlyList<string> FontFamilies { get; }
     public BackdropKind Backdrop
     {
-        get => _backdrops.Current;
+        get => Enum.TryParse<BackdropKind>(_service.State.Settings.WindowBackdrop, true, out var backdrop)
+            ? backdrop
+            : BackdropKind.Mica;
         set
         {
-            if (value == _backdrops.Current) return;
+            if (value == Backdrop) return;
             _backdrops.Apply(App.GetService<MainWindow>(), value);
+            _service.SetWindowBackdrop(value.ToString());
             OnPropertyChanged();
         }
     }
     private DesktopBox CurrentBox => _service.Boxes.First();
 
+    public BoxMaterialKind BoxMaterial { get => CurrentBox.Appearance.Material; set => _service.SetBoxMaterial(null, value); }
     public string Background { get => CurrentBox.Appearance.Background; set { if (IsColor(value)) _service.SetBoxBackground(null, value); } }
     public string Accent { get => CurrentBox.Appearance.Accent; set { if (IsColor(value)) _service.SetBoxAccent(null, value); } }
     public double Opacity { get => CurrentBox.Appearance.Opacity * 100; set => _service.SetBoxOpacity(null, value / 100); }

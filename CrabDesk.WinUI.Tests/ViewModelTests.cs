@@ -16,11 +16,28 @@ public sealed class ViewModelTests
         var state = CreateState();
         var service = CreateService(state);
         var theme = new Mock<IThemeService>();
-        var viewModel = new GeneralViewModel(service.Object, theme.Object);
+        var viewModel = new GeneralViewModel(service.Object, theme.Object, Mock.Of<IDialogService>());
 
         viewModel.StartWithWindows = true;
 
         service.Verify(item => item.SetStartWithWindows(true), Times.Once);
+    }
+
+    [Fact]
+    public async Task GeneralViewModelRepairsDesktopIconsAfterConfirmation()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.RepairDesktopIconsAsync()).ReturnsAsync(true);
+        var dialogs = new Mock<IDialogService>();
+        dialogs.Setup(item => item.ConfirmAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(true);
+        var viewModel = new GeneralViewModel(service.Object, Mock.Of<IThemeService>(), dialogs.Object);
+
+        await viewModel.RepairDesktopIconsCommand.ExecuteAsync(null);
+
+        service.Verify(item => item.RepairDesktopIconsAsync(), Times.Once);
+        Assert.Equal("桌面图标已修复", viewModel.DesktopIconRepairStatus);
     }
 
     [Fact]
@@ -78,6 +95,22 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public async Task BoxesViewModelHonorsDeleteConfirmationSetting()
+    {
+        var state = CreateState();
+        state.Settings.ConfirmDeleteBox = false;
+        var service = CreateService(state);
+        var dialogs = new Mock<IDialogService>();
+        var viewModel = new BoxesViewModel(service.Object, dialogs.Object, Mock.Of<IFilePickerService>());
+
+        await viewModel.DeleteCommand.ExecuteAsync(null);
+
+        dialogs.Verify(item => item.ConfirmAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        service.Verify(item => item.DeleteBox(viewModel.SelectedBox!), Times.Once);
+    }
+
+    [Fact]
     public void AppearanceViewModelPreservesBoxSizeWhenChangingColor()
     {
         var state = CreateState();
@@ -103,6 +136,38 @@ public sealed class ViewModelTests
         var output = converter.ConvertBack(color, typeof(string), null!, string.Empty);
 
         Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void UserFacingEnumsHaveChineseLabels()
+    {
+        object[] values =
+        [
+            ApplicationThemeMode.System,
+            ApplicationThemeMode.Light,
+            ApplicationThemeMode.Dark,
+            OrganizationRuleAction.AssignToBox,
+            OrganizationRuleAction.KeepUnassigned,
+            OrganizationRuleAction.Ignore,
+            BackdropKind.Mica,
+            BackdropKind.MicaAlt,
+            BackdropKind.Acrylic,
+            BoxTitleAlignment.Left,
+            BoxTitleAlignment.Center,
+            BoxViewMode.Grid,
+            BoxViewMode.List,
+            BoxSortMode.Manual,
+            BoxSortMode.Name,
+            BoxSortMode.Type,
+            BoxSortMode.Modified,
+            UpdateChannel.Stable,
+            UpdateChannel.Preview
+        ];
+
+        Assert.All(values, value =>
+            Assert.NotEqual(value.ToString(), EnumDisplayConverter.GetLabel(value)));
+        Assert.Equal("跟随系统", EnumDisplayConverter.GetLabel(ApplicationThemeMode.System));
+        Assert.Equal("放入盒子", EnumDisplayConverter.GetLabel(OrganizationRuleAction.AssignToBox));
     }
 
     [Fact]
@@ -158,10 +223,44 @@ public sealed class ViewModelTests
         viewModel.TitleFontFamily = "Microsoft YaHei UI";
         viewModel.LabelFontFamily = "Microsoft YaHei UI";
         viewModel.LabelFontSize = 12.5;
+        viewModel.BoxMaterial = BoxMaterialKind.AcrylicPreview;
 
         service.Verify(item => item.SetBoxTitleFontFamily(null, "Microsoft YaHei UI"), Times.Once);
         service.Verify(item => item.SetBoxLabelFontFamily(null, "Microsoft YaHei UI"), Times.Once);
         service.Verify(item => item.SetBoxLabelFontSize(null, 12.5), Times.Once);
+        service.Verify(item => item.SetBoxMaterial(null, BoxMaterialKind.AcrylicPreview), Times.Once);
+    }
+
+    [Fact]
+    public void OrganizationRuleListItemDescribesExtensionsAndAutomaticTarget()
+    {
+        var rule = BuiltInOrganizationRules.CreateDefaults().Single(candidate =>
+            candidate.BuiltInId == BuiltInOrganizationRules.DocumentsId);
+
+        var item = new OrganizationRuleListItem(rule, []);
+
+        Assert.Contains("扩展名", item.CriteriaText);
+        Assert.Contains(".docx", item.CriteriaText);
+        Assert.Contains(".pdf", item.CriteriaText);
+        Assert.Equal("整理时创建「文档」", item.DestinationText);
+    }
+
+    [Fact]
+    public void OrganizationRuleListItemUsesTargetBoxTitleInsteadOfInternalActionName()
+    {
+        var box = new DesktopBox { Title = "资料" };
+        var rule = new OrganizationRule
+        {
+            Title = "报告",
+            ItemKinds = [DesktopItemKind.File],
+            Extensions = [".pdf"],
+            TargetBoxId = box.Id
+        };
+
+        var item = new OrganizationRuleListItem(rule, [box]);
+
+        Assert.Equal("放入「资料」", item.DestinationText);
+        Assert.DoesNotContain(nameof(OrganizationRuleAction.AssignToBox), item.DestinationText);
     }
 
     [Fact]

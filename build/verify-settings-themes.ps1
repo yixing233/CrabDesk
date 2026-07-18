@@ -27,7 +27,7 @@ else {
 [System.IO.Directory]::CreateDirectory($captureDirectory) | Out-Null
 
 $config = @{
-    SchemaVersion = 16
+    SchemaVersion = 18
     Settings = @{
         TakeOverDesktop = $false
         ShowSystemItems = $false
