@@ -39,8 +39,6 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly Dictionary<string, DesktopIconPositionSnapshot> _originalIconPositions = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<System.Drawing.Rectangle>? _originalDesktopWorkAreas;
     private IntPtr _parkingWorkAreaListView;
-    private DateTimeOffset _lastParkHealthCheckAt;
-    private DateTimeOffset _lastIconImageListCheckAt;
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
@@ -2573,32 +2571,10 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
             }
-            // Explorer can pull parked icons back into the visible work area
-            // after a refresh or a layout change. Detect that drift and
-            // re-park periodically so assigned items never reappear behind a
-            // half-transparent box or at a stale position.
-            if (DateTimeOffset.UtcNow - _lastParkHealthCheckAt >= TimeSpan.FromSeconds(60))
-            {
-                _lastParkHealthCheckAt = DateTimeOffset.UtcNow;
-                if (AssignedDesktopItemsNeedParking())
-                {
-                    ParkAssignedDesktopItems("health check");
-                }
-            }
-            // Explorer's desktop ListView can lose its icon image list after
-            // a Shell refresh or a damaged icon cache. Items then render as
-            // text-only labels. Detect the missing image list and repair it
-            // so desktop icons reappear automatically.
-            if (DateTimeOffset.UtcNow - _lastIconImageListCheckAt >= TimeSpan.FromSeconds(30))
-            {
-                _lastIconImageListCheckAt = DateTimeOffset.UtcNow;
-                var iconState = _desktopHost.GetIconImageListState();
-                if (iconState.IsDesktopListViewAvailable && !iconState.HasImageList)
-                {
-                    DiagnosticLog.Info("Desktop icon image list is missing; repairing.");
-                    await _desktopHost.RepairIconImageListAsync();
-                }
-            }
+            // No periodic icon operations: every touch of Explorer's desktop
+            // ListView from this timer proved to be a source of icon loss.
+            // Icons are parked/restored only on explicit actions, and the
+            // user can repair the desktop with the dedicated button.
             var monitors = _monitorService.GetMonitors();
             var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
                 .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
