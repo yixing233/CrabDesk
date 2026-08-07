@@ -99,8 +99,10 @@ public sealed class DesktopHostService : IDesktopHost
 
     /// <summary>
     /// Restarts the Explorer process that owns the current desktop view.
-    /// Windows relaunches that shell itself; this method deliberately never
-    /// starts explorer.exe, which would create an extra File Explorer window.
+    /// Windows usually relaunches that shell itself, but not always; if no
+    /// explorer process appears shortly after the kill, one is started
+    /// explicitly. With no shell running it becomes the new shell instead
+    /// of opening an extra File Explorer window.
     /// </summary>
     public async Task<bool> RestartExplorerShellAsync(CancellationToken cancellationToken = default)
     {
@@ -143,10 +145,43 @@ public sealed class DesktopHostService : IDesktopHost
             return false;
         }
 
+        if (!await WaitForExplorerProcessAsync(cancellationToken))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe") { UseShellExecute = true });
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                return false;
+            }
+        }
+
         DesktopParent = IntPtr.Zero;
         DesktopView = IntPtr.Zero;
         DesktopListView = IntPtr.Zero;
         return await WaitForDesktopShellAsync(cancellationToken);
+    }
+
+    private static async Task<bool> WaitForExplorerProcessAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (Process.GetProcessesByName("explorer").Length > 0)
+                {
+                    return true;
+                }
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+            }
+            await Task.Delay(ExplorerPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+        return false;
     }
 
     public DesktopIconImageListState GetIconImageListState()
