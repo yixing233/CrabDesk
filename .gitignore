@@ -4,6 +4,12 @@
 artifacts/
 TestResults/
 
+# Local development scratch output (dev-run dumps, WinUI verification)
+build/dev-run-*
+build/obj-winui/
+build/verify-winui/
+build/desktop-current*.png
+
 # IDE and user state
 .vs/
 .vscode/
