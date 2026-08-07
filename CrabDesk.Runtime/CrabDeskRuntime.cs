@@ -40,6 +40,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private IReadOnlyList<System.Drawing.Rectangle>? _originalDesktopWorkAreas;
     private IntPtr _parkingWorkAreaListView;
     private DateTimeOffset _lastParkHealthCheckAt;
+    private DateTimeOffset _lastIconImageListCheckAt;
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
@@ -2582,6 +2583,20 @@ public sealed class CrabDeskRuntime : IDisposable
                 if (AssignedDesktopItemsNeedParking())
                 {
                     ParkAssignedDesktopItems("health check");
+                }
+            }
+            // Explorer's desktop ListView can lose its icon image list after
+            // a Shell refresh or a damaged icon cache. Items then render as
+            // text-only labels. Detect the missing image list and repair it
+            // so desktop icons reappear automatically.
+            if (DateTimeOffset.UtcNow - _lastIconImageListCheckAt >= TimeSpan.FromSeconds(30))
+            {
+                _lastIconImageListCheckAt = DateTimeOffset.UtcNow;
+                var iconState = _desktopHost.GetIconImageListState();
+                if (iconState.IsDesktopListViewAvailable && !iconState.HasImageList)
+                {
+                    DiagnosticLog.Info("Desktop icon image list is missing; repairing.");
+                    await _desktopHost.RepairIconImageListAsync();
                 }
             }
             var monitors = _monitorService.GetMonitors();

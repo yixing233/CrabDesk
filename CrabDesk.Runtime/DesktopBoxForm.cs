@@ -715,6 +715,11 @@ internal sealed class DesktopBoxForm : Forms.Form
                 {
                     bitmap = new Bitmap(source);
                 }
+                else if (!_iconLoadRetries.ContainsKey(key))
+                {
+                    DiagnosticLog.Info(
+                        $"Icon load returned no image parsingName={key.ParsingName} pixelSize={key.PixelSize}");
+                }
             }
             finally
             {
