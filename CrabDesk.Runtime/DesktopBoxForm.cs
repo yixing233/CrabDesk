@@ -1709,15 +1709,12 @@ internal sealed class DesktopBoxForm : Forms.Form
             .Where(item => item.FileSystemPath is not null)
             .ToDictionary(item => Path.GetFullPath(item.FileSystemPath!), StringComparer.OrdinalIgnoreCase);
         var external = new List<string>();
-        var nativeNames = new List<string>();
         foreach (var path in paths)
         {
             var fullPath = Path.GetFullPath(path);
             if (desktopPaths.TryGetValue(fullPath, out var item))
             {
                 _runtime.AssignItem(item.Key.ToString(), box.Box.Id);
-                nativeNames.Add(item.DisplayName);
-                nativeNames.Add(Path.GetFileName(fullPath));
             }
             else
             {
@@ -1730,14 +1727,9 @@ internal sealed class DesktopBoxForm : Forms.Form
                 external,
                 box.Box.Id,
                 transferEffect == BoxTransferEffect.MoveFiles);
-            nativeNames.AddRange(external.Select(Path.GetFileName).OfType<string>().Where(name => !string.IsNullOrEmpty(name)));
         }
-
-        DesktopIconPositionService.MoveItemsUnderBox(
-            _desktopHost.DesktopListView,
-            nativeNames,
-            (int)(_monitor.PixelBounds.X + (box.Box.Bounds.X + 24) * _scale),
-            (int)(_monitor.PixelBounds.Y + (box.Box.Bounds.Y + 64) * _scale));
+        // Assigned desktop icons are parked outside the visible work area by
+        // the runtime; no per-drop Explorer move is needed here.
     }
 
     private BoxTransferEffect ResolveTransferEffect(Forms.DragEventArgs eventArgs, DesktopBox target)

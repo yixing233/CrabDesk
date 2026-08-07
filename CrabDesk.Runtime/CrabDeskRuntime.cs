@@ -36,6 +36,10 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly SemaphoreSlim _updateLock = new(1, 1);
     private readonly CancellationTokenSource _updateCancellation = new();
     private readonly Dictionary<Guid, MappedFolderSnapshot> _mappedFolderSnapshots = [];
+    private readonly Dictionary<string, DesktopIconPositionSnapshot> _originalIconPositions = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<System.Drawing.Rectangle>? _originalDesktopWorkAreas;
+    private IntPtr _parkingWorkAreaListView;
+    private DateTimeOffset _lastParkHealthCheckAt;
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
@@ -265,6 +269,7 @@ public sealed class CrabDeskRuntime : IDisposable
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         await RefreshItemsAsync(false);
         await RunScheduledBackupIfNeededAsync();
+        RepairHiddenAssignedItemAttributes();
         if (State.Organization.Enabled && State.Organization.RunOnStartup)
         {
             ApplyOrganizationRules();
@@ -440,6 +445,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         State.Assignments[itemKey] = boxId;
         MoveItemOrderKey(itemKey, boxId);
+        ParkAssignedDesktopItems("assign item");
         NotifyWorkspaceChanged(true);
     }
 
@@ -467,6 +473,206 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    // Assigned items are parked outside the visible desktop work area while
+    // their original Explorer coordinates are kept. Unassigning restores the
+    // native icon to its original place instead of leaving it behind a box or
+    // at a stale captured position, which users experienced as "icons
+    // disappearing".
+    public int ParkAssignedDesktopItems(string context)
+    {
+        if (_disposed || IsPaused || _desktopHost.DesktopListView == IntPtr.Zero)
+        {
+            return 0;
+        }
+        var assignedItems = GetAssignedDesktopItems();
+        if (assignedItems.Count == 0)
+        {
+            RestoreDesktopWorkAreas(true);
+            return 0;
+        }
+        CaptureOriginalIconPositions(assignedItems);
+        if (!EnsureExtendedParkingWorkArea())
+        {
+            DiagnosticLog.Info($"Assigned desktop icon parking work area unavailable context={context}");
+            return 0;
+        }
+        var listViewBounds = DesktopWindowTools.GetWindowBounds(_desktopHost.DesktopListView);
+        var parkingX = (int)Math.Round(listViewBounds.X + listViewBounds.Width + 4096);
+        var parkingY = (int)Math.Round(listViewBounds.Y + listViewBounds.Height + 4096);
+        var placements = assignedItems.Select(item => new DesktopIconPlacement(
+            GetExplorerNames(item).ToArray(),
+            parkingX,
+            parkingY)).ToArray();
+        var moved = DesktopIconPositionService.MoveItemsUnderBox(
+            _desktopHost.DesktopListView,
+            placements);
+        DiagnosticLog.Info(
+            $"Assigned desktop icons parked context={context} requested={placements.Length} moved={moved} " +
+            $"items={string.Join(",", assignedItems.Select(item => item.DisplayName))}");
+        return moved;
+    }
+
+    private bool EnsureExtendedParkingWorkArea()
+    {
+        var listView = _desktopHost.DesktopListView;
+        if (listView == IntPtr.Zero)
+        {
+            return false;
+        }
+        if (_parkingWorkAreaListView != listView)
+        {
+            _parkingWorkAreaListView = listView;
+            _originalDesktopWorkAreas = DesktopIconPositionService.GetWorkAreas(listView);
+        }
+
+        var bounds = DesktopWindowTools.GetWindowBounds(listView);
+        var extended = new System.Drawing.Rectangle(
+            0,
+            0,
+            Math.Max(1, (int)Math.Ceiling(bounds.Width) + 8192),
+            Math.Max(1, (int)Math.Ceiling(bounds.Height) + 8192));
+        return DesktopIconPositionService.SetWorkAreas(listView, [extended]);
+    }
+
+    private bool RestoreDesktopWorkAreas(bool clear)
+    {
+        if (_originalDesktopWorkAreas is null)
+        {
+            return true;
+        }
+        var restored = DesktopIconPositionService.SetWorkAreas(
+            _parkingWorkAreaListView,
+            _originalDesktopWorkAreas);
+        if (restored && clear)
+        {
+            _originalDesktopWorkAreas = null;
+            _parkingWorkAreaListView = IntPtr.Zero;
+        }
+        return restored;
+    }
+
+    private bool AssignedDesktopItemsNeedParking()
+    {
+        if (_disposed || IsPaused || _desktopHost.DesktopListView == IntPtr.Zero)
+        {
+            return false;
+        }
+        var assignedItems = GetAssignedDesktopItems();
+        if (assignedItems.Count == 0)
+        {
+            return false;
+        }
+        var positions = DesktopIconPositionService.CaptureItemPositions(
+            _desktopHost.DesktopListView,
+            assignedItems.SelectMany(GetExplorerNames));
+        var bounds = DesktopWindowTools.GetWindowBounds(_desktopHost.DesktopListView);
+        var visible = positions.Count(position =>
+            position.X >= 0 && position.X < bounds.Width &&
+            position.Y >= 0 && position.Y < bounds.Height);
+        var needsParking = positions.Count < assignedItems.Count || visible > 0;
+        if (needsParking)
+        {
+            DiagnosticLog.Info(
+                $"Assigned desktop icon parking drift detected assigned={assignedItems.Count} captured={positions.Count} visible={visible}");
+        }
+        return needsParking;
+    }
+
+    private int CaptureOriginalIconPositions(IEnumerable<DesktopItemRef> items)
+    {
+        if (_desktopHost.DesktopListView == IntPtr.Zero)
+        {
+            return 0;
+        }
+        var uncaptured = items
+            .Where(item => !_originalIconPositions.ContainsKey(item.Key.ToString()))
+            .Select(item => new
+            {
+                Item = item,
+                Names = GetExplorerNames(item)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(NormalizeExplorerName)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            })
+            .Where(entry => entry.Names.Length > 0)
+            .ToArray();
+        if (uncaptured.Length == 0)
+        {
+            return 0;
+        }
+        var captured = DesktopIconPositionService.CaptureItemPositions(
+            _desktopHost.DesktopListView,
+            uncaptured.SelectMany(entry => entry.Names));
+        if (captured.Count == 0)
+        {
+            var lvItems = DesktopIconPositionService
+                .CaptureAllItemPositions(_desktopHost.DesktopListView)
+                .Select(position => position.DisplayName);
+            DiagnosticLog.Info(
+                $"Assigned icon positions not found for names={string.Join(",", uncaptured.SelectMany(entry => entry.Names))} " +
+                $"lvItems={string.Join(",", lvItems)}");
+        }
+        var positionsByName = captured
+            .GroupBy(position => NormalizeExplorerName(position.DisplayName), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<DesktopIconPositionSnapshot>(group),
+                StringComparer.OrdinalIgnoreCase);
+        var capturedCount = 0;
+        foreach (var entry in uncaptured)
+        {
+            DesktopIconPositionSnapshot? position = null;
+            foreach (var name in entry.Names)
+            {
+                if (positionsByName.TryGetValue(name, out var queue) && queue.Count > 0)
+                {
+                    position = queue.Dequeue();
+                    break;
+                }
+            }
+            if (position is not { } capturedPosition)
+            {
+                continue;
+            }
+            _originalIconPositions[entry.Item.Key.ToString()] = capturedPosition;
+            capturedCount++;
+        }
+        return capturedCount;
+    }
+
+    private bool RestoreOriginalIconPositions(bool clear)
+    {
+        if (_originalIconPositions.Count == 0)
+        {
+            return true;
+        }
+        if (_desktopHost.DesktopListView == IntPtr.Zero)
+        {
+            return false;
+        }
+        var restored = DesktopIconPositionService.RestoreItemPositions(
+            _desktopHost.DesktopListView,
+            _originalIconPositions.Values);
+        var complete = restored >= _originalIconPositions.Count;
+        if (clear && complete)
+        {
+            _originalIconPositions.Clear();
+        }
+        return complete;
+    }
+
+    private static IEnumerable<string> GetExplorerNames(DesktopItemRef item)
+    {
+        yield return item.DisplayName;
+        if (item.FileSystemPath is not null)
+        {
+            yield return Path.GetFileName(item.FileSystemPath);
+        }
+    }
+
+    private static string NormalizeExplorerName(string value) => value.Trim().TrimEnd('.');
+
     public void BoxChanged(DesktopBox box, bool rebuild = false)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
@@ -493,6 +699,7 @@ public sealed class CrabDeskRuntime : IDisposable
             State.Assignments[item.Key.ToString()] = boxId;
             MoveItemOrderKey(item.Key.ToString(), boxId);
         }
+        ParkAssignedDesktopItems("import files");
         NotifyWorkspaceChanged(true);
     }
 
@@ -692,6 +899,44 @@ public sealed class CrabDeskRuntime : IDisposable
         ScheduleSave();
     }
 
+    private void RepairHiddenAssignedItemAttributes()
+    {
+        // A legacy mechanism (removed) hid assigned desktop items by
+        // stamping Hidden+System attributes on them. Explorer hides such
+        // items, which users experienced as "icons disappearing" while the
+        // box still listed the file. Restore those attributes so the icons
+        // reappear; the current design parks icons instead of hiding files.
+        var repaired = new List<string>();
+        foreach (var item in GetAssignedDesktopItems())
+        {
+            if (item.FileSystemPath is not { } path)
+            {
+                continue;
+            }
+            try
+            {
+                var attributes = File.GetAttributes(path);
+                if ((attributes & (FileAttributes.Hidden | FileAttributes.System)) ==
+                    (FileAttributes.Hidden | FileAttributes.System))
+                {
+                    File.SetAttributes(path, attributes & ~(FileAttributes.Hidden | FileAttributes.System));
+                    repaired.Add(path);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+        if (repaired.Count > 0)
+        {
+            _desktopHost.NotifyItemAttributesChanged(repaired);
+            DiagnosticLog.Info($"Restored hidden attributes on {repaired.Count} assigned desktop items");
+        }
+    }
+
     public void SetPaused(bool paused)
     {
         if (paused == IsPaused)
@@ -705,6 +950,8 @@ public sealed class CrabDeskRuntime : IDisposable
         if (paused)
         {
             AreDesktopItemsHidden = false;
+            RestoreDesktopWorkAreas(true);
+            RestoreOriginalIconPositions(true);
             if (_desktopInputMonitor is not null)
             {
                 _desktopInputMonitor.Enabled = false;
@@ -724,6 +971,7 @@ public sealed class CrabDeskRuntime : IDisposable
             ConfigureDesktopInputMonitor();
             AreDesktopItemsHidden = false;
             ActivateDesktopSurfaces("resume");
+            ParkAssignedDesktopItems("resume");
         }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
@@ -1444,6 +1692,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         if (applied > 0 || createdBoxes > 0)
         {
+            ParkAssignedDesktopItems("ai classification");
             if (IsPaused)
             {
                 SetPaused(false);
@@ -1516,9 +1765,9 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         var result = new OrganizationApplyResult(assigned, unassigned, ignored, invalidTargets, decisions);
-        if (assigned > 0)
+        if (assigned > 0 || unassigned > 0)
         {
-            SynchronizeAssignedItemsToBoxes(decisions);
+            ParkAssignedDesktopItems("organization");
         }
         if (notify)
         {
@@ -1531,62 +1780,9 @@ public sealed class CrabDeskRuntime : IDisposable
         return result;
     }
 
-    // Rule-driven assignment must mirror the drag/drop path: move each newly
-    // assigned item's native Explorer icon underneath its target box so the
-    // desktop does not show a duplicate of the same item.
-    private void SynchronizeAssignedItemsToBoxes(IReadOnlyList<OrganizationDecision> decisions)
-    {
-        try
-        {
-            var listView = _desktopHost.DesktopListView;
-            if (listView == IntPtr.Zero)
-            {
-                return;
-            }
-            var byBox = decisions
-                .Where(decision => decision.Action == OrganizationRuleAction.AssignToBox && decision.TargetBoxId is { })
-                .GroupBy(decision => decision.TargetBoxId!.Value)
-                .ToArray();
-            foreach (var group in byBox)
-            {
-                var box = State.Boxes.FirstOrDefault(candidate => candidate.Id == group.Key);
-                if (box is null || box.IsMappedFolder)
-                {
-                    continue;
-                }
-                var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
-                    ?? Monitors.FirstOrDefault(candidate => candidate.IsPrimary)
-                    ?? Monitors.First();
-                var names = group
-                    .Select(decision => Items.FirstOrDefault(item =>
-                        item.Key.ToString().Equals(decision.ItemKey, StringComparison.OrdinalIgnoreCase)))
-                    .Where(item => item is not null)
-                    // Match both display names without extension and full file
-                    // names because Explorer may show extensions depending on
-                    // the user's "HideFileExt" setting.
-                    .SelectMany(item => new[]
-                    {
-                        item!.DisplayName,
-                        Path.GetFileName(item.FileSystemPath ?? string.Empty)
-                    })
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                if (names.Length == 0)
-                {
-                    continue;
-                }
-                var screenX = (int)(monitor.PixelBounds.X + (box.Bounds.X + 24) * monitor.DpiScale);
-                var screenY = (int)(monitor.PixelBounds.Y + (box.Bounds.Y + 64) * monitor.DpiScale);
-                DesktopIconPositionService.MoveItemsUnderBox(listView, names, screenX, screenY);
-            }
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Failed to synchronize assigned icon positions", exception);
-        }
-    }
-
+    // Rule-driven assignment parks each newly assigned item's native
+    // Explorer icon outside the visible desktop so the desktop does not
+    // show a duplicate of the same item.
     public OrganizationApplyResult SmartOrganize()
     {
         var currentKeys = Items.Select(item => item.Key.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1953,6 +2149,8 @@ public sealed class CrabDeskRuntime : IDisposable
         finally
         {
             _surfaceManager = null;
+            RestoreDesktopWorkAreas(true);
+            RestoreOriginalIconPositions(true);
             EnsureDesktopInput("dispose");
         }
         _itemProvider.Dispose();
@@ -2364,15 +2562,38 @@ public sealed class CrabDeskRuntime : IDisposable
             var hostChanged = _desktopHost.Refresh();
             if (hostChanged)
             {
+                DiagnosticLog.Info(
+                    $"Host refresh detected parent=0x{_desktopHost.DesktopParent.ToInt64():X} " +
+                    $"view=0x{_desktopHost.DesktopView.ToInt64():X} " +
+                    $"listView=0x{_desktopHost.DesktopListView.ToInt64():X}");
                 EnsureDesktopInput("host refresh");
             }
             if (_desktopInputMonitor is not null)
             {
                 _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
             }
+            // Explorer can pull parked icons back into the visible work area
+            // after a refresh or a layout change. Detect that drift and
+            // re-park periodically so assigned items never reappear behind a
+            // half-transparent box or at a stale position.
+            if (DateTimeOffset.UtcNow - _lastParkHealthCheckAt >= TimeSpan.FromSeconds(60))
+            {
+                _lastParkHealthCheckAt = DateTimeOffset.UtcNow;
+                if (AssignedDesktopItemsNeedParking())
+                {
+                    ParkAssignedDesktopItems("health check");
+                }
+            }
             var monitors = _monitorService.GetMonitors();
             var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
                 .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
+            if (topologyChanged)
+            {
+                DiagnosticLog.Info(
+                    $"Monitor topology changed new={monitors.Count} " +
+                    $"old={Monitors.Count} " +
+                    string.Join("|", monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}:{monitor.PixelWorkArea}")));
+            }
             if (!hostChanged && !topologyChanged)
             {
                 // This timer only checks HWND/topology health. Do not touch
@@ -2966,6 +3187,10 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void UnassignItemCore(string itemKey)
     {
+        if (_originalIconPositions.TryGetValue(itemKey, out var position))
+        {
+            DesktopIconPositionService.RestoreItemPositions(_desktopHost.DesktopListView, [position]);
+        }
         State.Assignments.Remove(itemKey);
         MoveItemOrderKey(itemKey, null);
     }
