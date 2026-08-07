@@ -75,9 +75,10 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 
 | 安装包 | 说明 |
 | --- | --- |
-| `CrabDesk-Setup-x64.exe` | 完整安装包，包含全部运行组件 |
-| `CrabDesk-Setup-Web-x64.exe` | 在线安装包，体积小，首次启动时联网补齐组件 |
-| `CrabDesk-portable-win-x64.zip` | 便携版，解压即用 |
+| `CrabDesk-Setup-x64.exe` | 完整安装包，包含全部运行组件，离线可用 |
+| `CrabDesk-Setup-Web-x64.exe` | 轻量在线引导器（约 5 MB）：自动检测并补齐缺失的 .NET / Windows App SDK 运行时，再从 GitHub 下载应用本体 |
+| `CrabDesk-portable-win-x64.zip` | 完整便携版，自带运行时，解压即用 |
+| `CrabDesk-portable-web-win-x64.zip` | 精简便携版，不含运行时，需系统已安装 .NET Desktop Runtime 与 Windows App SDK 1.8 |
 
 每个 Release 都附带 `SHA256SUMS.txt` 校验文件，应用内更新也会在安装前自动校验。
 
