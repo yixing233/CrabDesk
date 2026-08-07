@@ -71,7 +71,12 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 
 **系统要求**：Windows 10 / 11（64 位）
 
-从 [GitHub Releases](https://github.com/yixing233/CrabDesk/releases) 下载 `CrabDesk-Setup-x64.exe` 安装包（包含全部运行组件，离线可用）。
+从 [GitHub Releases](https://github.com/yixing233/CrabDesk/releases) 下载：
+
+| 安装包 | 说明 |
+| --- | --- |
+| `CrabDesk-Setup-x64.exe` | 完整安装包，包含全部运行组件，离线可用 |
+| `CrabDesk-Setup-Web-x64.exe` | 轻量在线引导器（约 5 MB）：自动检测并补齐缺失的 .NET / Windows App SDK 运行时，再从 GitHub 下载应用本体 |
 
 每个 Release 都附带 `SHA256SUMS.txt` 校验文件，应用内更新也会在安装前自动校验。
 
