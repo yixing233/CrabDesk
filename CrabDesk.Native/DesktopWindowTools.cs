@@ -179,6 +179,9 @@ public static class DesktopWindowTools
         }
     }
 
+    public static long GetSurfaceExtendedStyle(IntPtr hwnd) =>
+        NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+
     public static string GetDesktopSurfaceDiagnostics(IntPtr hwnd, IntPtr desktopView)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();

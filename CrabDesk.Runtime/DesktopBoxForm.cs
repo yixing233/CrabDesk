@@ -289,6 +289,13 @@ internal sealed class DesktopBoxForm : Forms.Form
     internal bool EnsureRendered()
     {
         Refresh();
+        if (IsHandleCreated)
+        {
+            var ex = DesktopWindowTools.GetSurfaceExtendedStyle(Handle);
+            DiagnosticLog.Info(
+                $"Surface exstyle=0x{ex:X} " +
+                $"layered={(ex & 0x80000) != 0} transparent={(ex & 0x20) != 0}");
+        }
         return IsHandleCreated && Visible && Enabled && _paintCount > 0;
     }
 
