@@ -70,11 +70,6 @@ public partial class GeneralViewModel : ObservableObject
         }
     }
 
-    public bool ToggleIconsOnDoubleClick
-    {
-        get => _service.State.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick;
-        set { if (value != ToggleIconsOnDoubleClick) { _service.SetToggleIconsOnDesktopDoubleClick(value); OnPropertyChanged(); } }
-    }
 
     public bool RefreshAfterRename
     {
@@ -114,8 +109,8 @@ public partial class GeneralViewModel : ObservableObject
     {
         if (IsRepairingDesktopIcons || !await _dialogs.ConfirmAsync(
                 "修复桌面图标",
-                "修复过程会重启 Windows 资源管理器，任务栏和桌面将短暂刷新。CrabDesk 会自动恢复桌面接管。",
-                "开始修复"))
+                "CrabDesk 会暂时撤下接管层，重启当前桌面 Shell 的 Explorer 进程并等待桌面恢复，然后重新接管。任务栏和桌面会短暂闪动；不会启动额外的文件管理器窗口。",
+                "重启并修复"))
         {
             return;
         }
@@ -123,7 +118,7 @@ public partial class GeneralViewModel : ObservableObject
         IsRepairingDesktopIcons = true;
         DesktopIconRepairSeverity = InfoBarSeverity.Informational;
         _notifications?.Show("正在修复桌面图标", DesktopIconRepairSeverity);
-        DesktopIconRepairStatus = "正在重启 Explorer 并恢复桌面图标…";
+        DesktopIconRepairStatus = "正在重启 Explorer 桌面 Shell 并重建接管层…";
         RepairDesktopIconsCommand.NotifyCanExecuteChanged();
         try
         {
@@ -131,7 +126,7 @@ public partial class GeneralViewModel : ObservableObject
             DesktopIconRepairSeverity = repaired ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
             DesktopIconRepairStatus = repaired
                 ? "桌面图标已修复"
-                : "Explorer 恢复超时，CrabDesk 已保持暂停，可稍后再次修复";
+                : "Explorer 桌面没有在等待时间内恢复；未启动额外的文件管理器窗口，可稍后再次修复";
         }
         catch (Exception exception)
         {

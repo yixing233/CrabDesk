@@ -1,5 +1,6 @@
 using System.Threading;
 using CrabDesk.Core;
+using CrabDesk.Native;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Services;
 using CrabDesk.WinUI.ViewModels;
@@ -17,7 +18,9 @@ public partial class App : Application
     private EventWaitHandle? _activateEvent;
     private EventWaitHandle? _exitEvent;
     private EventWaitHandle? _organizeEvent;
+    private EventWaitHandle? _aiOrganizeEvent;
     private EventWaitHandle? _createBoxEvent;
+    private EventWaitHandle? _settingsEvent;
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
 
@@ -48,6 +51,7 @@ public partial class App : Application
         var commandLine = Environment.GetCommandLineArgs();
         var exitExisting = commandLine.Any(argument => string.Equals(argument, "--exit-existing", StringComparison.OrdinalIgnoreCase));
         var organize = commandLine.Any(argument => string.Equals(argument, "--organize", StringComparison.OrdinalIgnoreCase));
+        var aiOrganize = commandLine.Any(argument => string.Equals(argument, "--ai-organize", StringComparison.OrdinalIgnoreCase));
         var createBox = commandLine.Any(argument => string.Equals(argument, "--create-box", StringComparison.OrdinalIgnoreCase));
         var undoOrganization = commandLine.Any(argument => string.Equals(argument, "--undo-organization", StringComparison.OrdinalIgnoreCase));
         var showSettings = commandLine.Any(argument => string.Equals(argument, "--show-settings", StringComparison.OrdinalIgnoreCase));
@@ -61,15 +65,13 @@ public partial class App : Application
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
         {
-            SignalExistingInstance(exitExisting
-                ? @"Local\CrabDesk.Exit"
-                : organize
-                    ? @"Local\CrabDesk.Organize"
-                    : createBox
-                        ? @"Local\CrabDesk.CreateBox"
-                        : undoOrganization
-                            ? @"Local\CrabDesk.UndoOrganization"
-                            : @"Local\CrabDesk.Activate");
+            SignalExistingInstance(GetCommandEventName(
+                exitExisting,
+                organize,
+                aiOrganize,
+                createBox,
+                showSettings,
+                undoOrganization));
             Exit();
             return;
         }
@@ -83,7 +85,9 @@ public partial class App : Application
         _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Activate");
         _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Exit");
         _organizeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Organize");
+        _aiOrganizeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.AiOrganize");
         _createBoxEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.CreateBox");
+        _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Settings");
         _undoOrganizationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.UndoOrganization");
 
         var runtime = GetService<CrabDeskRuntime>();
@@ -120,6 +124,7 @@ public partial class App : Application
         StartCommandListeners(runtime, _window.DispatcherQueue);
 
         if (organize) runtime.SmartOrganize();
+        if (aiOrganize) _ = RunAiOrganizationAsync(runtime);
         if (createBox) runtime.AddBox();
         if (undoOrganization) runtime.UndoLastOrganization();
 
@@ -127,6 +132,10 @@ public partial class App : Application
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
         if (showSettings || (!background && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
         {
+            if (showSettings)
+            {
+                _window.NavigateTo("general");
+            }
             _window.Activate();
             AppDiagnostic.Info("MainWindow activated");
         }
@@ -165,6 +174,7 @@ public partial class App : Application
         services.AddTransient<HotkeysViewModel>();
         services.AddTransient<BackupViewModel>();
         services.AddTransient<OrganizationViewModel>();
+        services.AddTransient<AiClassificationViewModel>();
         services.AddTransient<AppearanceViewModel>();
         services.AddTransient<BoxesViewModel>();
     }
@@ -174,8 +184,34 @@ public partial class App : Application
         StartListener(_activateEvent!, dispatcher, ActivateWindow);
         StartListener(_exitEvent!, dispatcher, Shutdown);
         StartListener(_organizeEvent!, dispatcher, () => runtime.SmartOrganize());
+        StartListener(_aiOrganizeEvent!, dispatcher, () => _ = RunAiOrganizationAsync(runtime));
         StartListener(_createBoxEvent!, dispatcher, () => runtime.AddBox());
+        StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
         StartListener(_undoOrganizationEvent!, dispatcher, runtime.UndoLastOrganization);
+    }
+
+    private async Task RunAiOrganizationAsync(CrabDeskRuntime runtime)
+    {
+        var notifications = GetService<IInfoBarService>();
+        try
+        {
+            var result = await runtime.ApplyAiClassificationAsync();
+            notifications.Show(
+                result.Requested == 0
+                    ? "没有需要 AI 整理的桌面图标"
+                    : $"AI 整理完成：{result.Applied}/{result.Requested} 项",
+                Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
+                TimeSpan.FromSeconds(6));
+        }
+        catch (Exception exception)
+        {
+            AppDiagnostic.Error("Desktop context-menu AI organization failed", exception);
+            notifications.Show(
+                $"AI 整理失败：{exception.Message}",
+                Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error,
+                TimeSpan.FromSeconds(8));
+            runtime.RequestShowSettings("ai");
+        }
     }
 
     private static void StartListener(EventWaitHandle handle, DispatcherQueue dispatcher, Action action)
@@ -201,6 +237,23 @@ public partial class App : Application
         }
     }
 
+    private static string GetCommandEventName(
+        bool exitExisting,
+        bool organize,
+        bool aiOrganize,
+        bool createBox,
+        bool showSettings,
+        bool undoOrganization)
+    {
+        if (exitExisting) return @"Local\CrabDesk.Exit";
+        if (organize) return @"Local\CrabDesk.Organize";
+        if (aiOrganize) return @"Local\CrabDesk.AiOrganize";
+        if (createBox) return @"Local\CrabDesk.CreateBox";
+        if (showSettings) return @"Local\CrabDesk.Settings";
+        if (undoOrganization) return @"Local\CrabDesk.UndoOrganization";
+        return @"Local\CrabDesk.Activate";
+    }
+
     private static string? GetArgumentValue(IReadOnlyList<string> arguments, string name)
     {
         for (var index = 0; index < arguments.Count - 1; index++)
@@ -218,7 +271,9 @@ public partial class App : Application
         _activateEvent?.Dispose();
         _exitEvent?.Dispose();
         _organizeEvent?.Dispose();
+        _aiOrganizeEvent?.Dispose();
         _createBoxEvent?.Dispose();
+        _settingsEvent?.Dispose();
         _undoOrganizationEvent?.Dispose();
         if (_ownsSingleInstanceMutex)
         {

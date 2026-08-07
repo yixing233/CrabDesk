@@ -42,6 +42,17 @@ public partial class BackupViewModel : ObservableObject
         get => _service.State.Settings.Backup.DailyBackup;
         set { if (value != DailyBackup) { _service.SetDailyBackup(value); OnPropertyChanged(); } }
     }
+    public double BackupIntervalHours
+    {
+        get => _service.State.Settings.Backup.IntervalHours;
+        set
+        {
+            var hours = (int)Math.Round(value);
+            if (hours == _service.State.Settings.Backup.IntervalHours) return;
+            _service.SetBackupIntervalHours(hours);
+            OnPropertyChanged();
+        }
+    }
     public double RetentionDays
     {
         get => _service.State.Settings.Backup.RetentionDays;
@@ -52,6 +63,19 @@ public partial class BackupViewModel : ObservableObject
             _ = _service.SetBackupRetentionDaysAsync(days);
             OnPropertyChanged();
         }
+    }
+
+    [RelayCommand]
+    private async Task ChangeBackupDirectoryAsync()
+    {
+        var path = await _pickers.PickFolderAsync();
+        if (path is null) return;
+        await RunAsync(async () =>
+        {
+            _service.SetBackupDirectory(path);
+            await RefreshAsync();
+            Status = "备份位置已更新";
+        });
     }
 
     [RelayCommand]

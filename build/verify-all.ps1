@@ -121,9 +121,6 @@ try {
     Invoke-VerificationStep "Organization stress and undo" {
         & (Join-Path $PSScriptRoot "verify-organization-stress.ps1")
     }
-    Invoke-VerificationStep "Desktop double-click" {
-        & (Join-Path $PSScriptRoot "verify-desktop-double-click.ps1")
-    }
     Invoke-VerificationStep "Settings themes" {
         & (Join-Path $PSScriptRoot "verify-settings-themes.ps1") -OutputDirectory (Join-Path $output "themes")
     }

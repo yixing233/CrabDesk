@@ -33,7 +33,7 @@ Views and ViewModels communicate with it through the application facade.
 - Explorer desktop-host discovery and icon visibility/position services.
 - File operations and clipboard codec.
 - Monitor topology, global hotkeys, shell icons, context-menu registration, and
-  double-click monitoring.
+  desktop input monitoring.
 
 These implementations stay behind interfaces or an application facade. Views
 and ViewModels do not call Win32, registry, Shell, or Explorer APIs directly.

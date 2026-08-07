@@ -6,8 +6,8 @@ namespace CrabDesk.Native;
 internal static class NativeMethods
 {
     internal const uint WmCommand = 0x0111;
+    internal const uint WmSetRedraw = 0x000B;
     internal const uint SmtoAbortIfHung = 0x0002;
-    internal const int DesktopToggleIconsCommand = 0x7402;
     internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
     internal const int WsChild = 0x40000000;
@@ -25,20 +25,23 @@ internal static class NativeMethods
     internal const int SwpShowWindow = 0x0040;
     internal const int SwpNoOwnerZOrder = 0x0200;
     internal const uint GwHwndNext = 2;
-    internal const uint WmSetRedraw = 0x000B;
     internal const uint LvmGetImageList = 0x1002;
+    internal const uint LvmGetItemCount = 0x1004;
+    internal const uint LvmUpdate = 0x102A;
     internal const int LvsilNormal = 0;
     internal const int LvsilSmall = 1;
     internal const int RgnOr = 2;
     internal const int RgnDiff = 4;
+    internal const int Error = 0;
+    internal const int NullRegion = 1;
+    internal const int SimpleRegion = 2;
+    internal const int ComplexRegion = 3;
     internal const uint RdwInvalidate = 0x0001;
     internal const uint RdwErase = 0x0004;
     internal const uint RdwNoChildren = 0x0040;
     internal const uint RdwAllChildren = 0x0080;
     internal const uint RdwUpdateNow = 0x0100;
-    internal const uint ShcneAssocChanged = 0x08000000;
-    internal const uint ShcneUpdatedir = 0x00001000;
-    internal const uint ShcnfIdList = 0x0000;
+    internal const uint ShcneUpdateItem = 0x00002000;
     internal const uint ShcnfPathW = 0x0005;
     internal static readonly IntPtr HwndTop = IntPtr.Zero;
 
@@ -60,6 +63,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetParent(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetTopWindow(IntPtr hwnd);
@@ -112,6 +118,7 @@ internal static class NativeMethods
         IntPtr item1,
         IntPtr item2);
 
+
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
@@ -133,6 +140,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern int SetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern int GetWindowRgnBox(IntPtr hwnd, out Rect rectangle);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     internal static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);

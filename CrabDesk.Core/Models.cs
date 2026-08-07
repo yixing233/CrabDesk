@@ -38,12 +38,6 @@ public enum BoxTitleAlignment
     Center
 }
 
-public enum BoxMaterialKind
-{
-    Solid,
-    AcrylicPreview
-}
-
 public enum ApplicationThemeMode
 {
     System,
@@ -137,7 +131,6 @@ public readonly record struct LayoutRect(double X, double Y, double Width, doubl
 
 public sealed class BoxAppearance
 {
-    public BoxMaterialKind Material { get; set; } = BoxMaterialKind.AcrylicPreview;
     public string Background { get; set; } = "#FF2A2D32";
     public string Accent { get; set; } = "#FF4EA1D3";
     public double Opacity { get; set; } = 1;
@@ -247,6 +240,16 @@ public sealed record DesktopHostDiagnostics(
 
 public sealed record LayoutResetResult(LayoutBackupInfo Backup, int DisabledRuleCount);
 
+public sealed record AiClassificationAssignment(string ItemKey, string ItemName, string Label);
+
+public sealed record AiClassificationApplyResult(
+    int Requested,
+    int Classified,
+    int Applied,
+    int CreatedBoxes,
+    int Unmatched,
+    IReadOnlyList<AiClassificationAssignment> Assignments);
+
 public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move)
 {
     public bool HasFiles => Paths.Count > 0;
@@ -263,9 +266,22 @@ public sealed class AppSettings
     public DesktopBehaviorSettings DesktopBehavior { get; set; } = new();
     public GlobalAppearanceSettings Appearance { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
+    public AiClassificationSettings AiClassification { get; set; } = new();
     public HotkeySettings Hotkeys { get; set; } = new();
     public UpdateSettings Updates { get; set; } = new();
     public string Language { get; set; } = "zh-CN";
+}
+
+public sealed class AiClassificationSettings
+{
+    public string BaseUrl { get; set; } = string.Empty;
+    [JsonIgnore]
+    public string ApiKey { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string CategoryLabels { get; set; } = string.Empty;
+    public string CustomPrompt { get; set; } =
+        "请仅根据桌面图标的名称判断用途，并将每个图标归入最合适的分类标签。";
+    public bool ReassignExistingItems { get; set; }
 }
 
 public sealed class UpdateSettings
@@ -375,7 +391,6 @@ public sealed class DesktopBehaviorSettings
 {
     public bool LaunchToTray { get; set; }
     public bool RefreshAfterRename { get; set; } = true;
-    public bool ToggleIconsOnDesktopDoubleClick { get; set; }
     public bool ExpandBoxOnHover { get; set; }
 }
 
@@ -394,6 +409,7 @@ public sealed class GlobalAppearanceSettings
 public sealed class BackupSettings
 {
     public bool DailyBackup { get; set; }
+    public int IntervalHours { get; set; } = 24;
     public int RetentionDays { get; set; } = 7;
     public string BackupDirectory { get; set; } = string.Empty;
     public DateTimeOffset? LastBackupAt { get; set; }
@@ -446,7 +462,6 @@ public readonly record struct DesktopFileAttributeSnapshot(string Path, int Attr
 
 public sealed class DesktopRecoveryState
 {
-    public bool PreviousHidden { get; set; }
     public List<DesktopIconPositionSnapshot> IconPositions { get; set; } = [];
     public List<DesktopWorkAreaSnapshot>? WorkAreas { get; set; }
     public List<DesktopFileAttributeSnapshot> FileAttributes { get; set; } = [];

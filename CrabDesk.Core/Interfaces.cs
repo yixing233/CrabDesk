@@ -26,14 +26,12 @@ public interface IDesktopContextMenuRegistration
     void SetEnabled(bool enabled, string executablePath);
 }
 
-public interface IDesktopDoubleClickMonitor : IDisposable
+public interface IDesktopInputMonitor : IDisposable
 {
     event EventHandler? EmptyAreaClicked;
-    event EventHandler? EmptyAreaDoubleClicked;
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
-    bool DoubleClickEnabled { get; set; }
 }
 
 public sealed class DesktopIconZoomEventArgs(int delta) : EventArgs
@@ -51,12 +49,6 @@ public interface IUpdateService : IDisposable
         UpdateDownloadRequest request,
         IProgress<UpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default);
-}
-
-public interface IExplorerIconVisibility
-{
-    bool GetIconsHidden();
-    void SetIconsHidden(bool hidden);
 }
 
 public interface IFileOperationService

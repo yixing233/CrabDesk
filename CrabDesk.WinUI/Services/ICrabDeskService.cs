@@ -24,7 +24,6 @@ public interface ICrabDeskService
     Task SetShowSystemItemsAsync(bool enabled);
     void SetConfirmDeleteBox(bool enabled);
     void SetLaunchToTray(bool enabled);
-    void SetToggleIconsOnDesktopDoubleClick(bool enabled);
     void SetExpandBoxOnHover(bool enabled);
     void SetRefreshAfterRename(bool enabled);
     void SetAnimationEnabled(bool enabled);
@@ -52,12 +51,24 @@ public interface ICrabDeskService
     Task ExportBackupAsync(string path);
     Task RestoreBackupAsync(string path);
     Task DeleteBackupAsync(string path);
+    void SetBackupDirectory(string path);
     void SetDailyBackup(bool enabled);
+    void SetBackupIntervalHours(int hours);
     Task SetBackupRetentionDaysAsync(int days);
     void SetOrganizationEnabled(bool enabled);
     void SetRunRulesOnStartup(bool enabled);
     void SetRunRulesOnDesktopChanges(bool enabled);
     void SetReassignExistingItems(bool enabled);
+    void ConfigureAiClassification(
+        string baseUrl,
+        string apiKey,
+        string model,
+        string categoryLabels,
+        string customPrompt,
+        bool reassignExistingItems);
+    Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default);
+    Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default);
+    Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default);
     OrganizationApplyResult ApplyOrganizationRules(bool notify = true);
     void UndoLastOrganization();
     void InstallDefaultOrganizationRules();
@@ -74,7 +85,6 @@ public interface ICrabDeskService
     void SetIconSpacing(double horizontal, double vertical);
     void SetSelectionColor(string value);
     void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment);
-    void SetBoxMaterial(Guid? boxId, BoxMaterialKind material);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);
     void SetBoxOpacity(Guid? boxId, double value);

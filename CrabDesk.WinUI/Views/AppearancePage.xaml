@@ -38,7 +38,7 @@
             <Expander Header="盒子表面" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                     <StackPanel Spacing="4">
                         <TextBlock Text="背景色" />
                         <Button Style="{StaticResource ColorPickerButtonStyle}"
@@ -70,8 +70,34 @@
                             </Button.Flyout>
                         </Button>
                     </StackPanel>
-                    <StackPanel Grid.Column="1"><TextBlock Text="不透明度" /><Slider Minimum="35" Maximum="100" StepFrequency="1" Value="{Binding Opacity, Mode=TwoWay}" /></StackPanel>
-                    <StackPanel Grid.Row="1"><TextBlock Text="圆角" /><Slider Minimum="0" Maximum="20" StepFrequency="1" Value="{Binding CornerRadius, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <Grid>
+                            <TextBlock Text="不透明度" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=OpacitySlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text="%" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="OpacitySlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="35" Maximum="100" StepFrequency="1"
+                                Value="{Binding Opacity, Mode=TwoWay}"
+                                AutomationProperties.Name="不透明度" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1">
+                        <Grid>
+                            <TextBlock Text="圆角" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=CornerRadiusSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="CornerRadiusSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="0" Maximum="20" StepFrequency="1"
+                                Value="{Binding CornerRadius, Mode=TwoWay}"
+                                AutomationProperties.Name="圆角" />
+                    </StackPanel>
                     <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
                         <TextBlock Text="选择颜色" />
                         <Button Style="{StaticResource ColorPickerButtonStyle}"
@@ -106,13 +132,6 @@
                     <ToggleSwitch Grid.Row="2" Header="显示边框" IsOn="{Binding ShowBorder, Mode=TwoWay}" />
                     <ToggleSwitch Grid.Row="2" Grid.Column="1" Header="允许调整盒子大小" IsOn="{Binding ShowResizeGrip, Mode=TwoWay}" />
                     <ToggleSwitch Grid.Row="3" Header="悬停高亮" IsOn="{Binding HoverFeedback, Mode=TwoWay}" />
-                    <ComboBox Grid.Row="4"
-                              Grid.ColumnSpan="2"
-                              Header="盒子材质"
-                              ItemsSource="{Binding BoxMaterials}"
-                              ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
-                              SelectedItem="{Binding BoxMaterial, Mode=TwoWay}"
-                              AutomationProperties.Name="盒子材质" />
                 </Grid>
             </Expander>
 
@@ -128,8 +147,34 @@
                               ItemsSource="{Binding TitleAlignments}"
                               ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
                               SelectedItem="{Binding TitleAlignment, Mode=TwoWay}" />
-                    <StackPanel Grid.Row="1"><TextBlock Text="高度" /><Slider Minimum="32" Maximum="56" StepFrequency="1" Value="{Binding TitleBarHeight, Mode=TwoWay}" /></StackPanel>
-                    <StackPanel Grid.Row="1" Grid.Column="1"><TextBlock Text="字号" /><Slider Minimum="8" Maximum="20" StepFrequency="0.5" Value="{Binding TitleFontSize, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="1">
+                        <Grid>
+                            <TextBlock Text="高度" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=TitleBarHeightSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="TitleBarHeightSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="32" Maximum="56" StepFrequency="1"
+                                Value="{Binding TitleBarHeight, Mode=TwoWay}"
+                                AutomationProperties.Name="标题栏高度" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1">
+                        <Grid>
+                            <TextBlock Text="字号" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=TitleFontSizeSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="TitleFontSizeSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="8" Maximum="20" StepFrequency="0.5"
+                                Value="{Binding TitleFontSize, Mode=TwoWay}"
+                                AutomationProperties.Name="标题字号" />
+                    </StackPanel>
                     <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="4">
                         <TextBlock Text="标题颜色" />
                         <Grid ColumnSpacing="8">
@@ -182,7 +227,20 @@
                 <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <StackPanel><TextBlock Text="图标大小" /><Slider Minimum="24" Maximum="96" StepFrequency="1" Value="{Binding IconSize, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock Text="图标大小" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=IconSizeSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="IconSizeSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="24" Maximum="96" StepFrequency="1"
+                                Value="{Binding IconSize, Mode=TwoWay}"
+                                AutomationProperties.Name="图标大小" />
+                    </StackPanel>
                     <NumberBox Grid.Column="1"
                                Header="应用名称字号"
                                Minimum="8"
@@ -197,8 +255,34 @@
                                                 FontFamilies="{Binding FontFamilies}"
                                                 SelectedFont="{Binding LabelFontFamily, Mode=TwoWay}"
                                                 AutomationProperties.Name="应用名称字体" />
-                    <StackPanel Grid.Row="2"><TextBlock Text="水平间距" /><Slider Minimum="56" Maximum="160" StepFrequency="1" Value="{Binding HorizontalSpacing, Mode=TwoWay}" /></StackPanel>
-                    <StackPanel Grid.Row="2" Grid.Column="1"><TextBlock Text="垂直间距" /><Slider Minimum="56" Maximum="180" StepFrequency="1" Value="{Binding VerticalSpacing, Mode=TwoWay}" /></StackPanel>
+                    <StackPanel Grid.Row="2">
+                        <Grid>
+                            <TextBlock Text="水平间距" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=HorizontalSpacingSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="HorizontalSpacingSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="56" Maximum="160" StepFrequency="1"
+                                Value="{Binding HorizontalSpacing, Mode=TwoWay}"
+                                AutomationProperties.Name="图标水平间距" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="1">
+                        <Grid>
+                            <TextBlock Text="垂直间距" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                                <TextBlock Text="{Binding Value, ElementName=VerticalSpacingSlider}" Style="{StaticResource ParameterValueTextStyle}" />
+                                <TextBlock Text=" px" Style="{StaticResource ParameterValueTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                        <Slider x:Name="VerticalSpacingSlider"
+                                Style="{StaticResource ParameterSliderStyle}"
+                                Minimum="56" Maximum="180" StepFrequency="1"
+                                Value="{Binding VerticalSpacing, Mode=TwoWay}"
+                                AutomationProperties.Name="图标垂直间距" />
+                    </StackPanel>
                     <ToggleSwitch Grid.Row="3" Header="显示项目标签" IsOn="{Binding ShowItemLabels, Mode=TwoWay}" />
                     <ComboBox Grid.Row="4" Header="视图"
                               ItemsSource="{Binding ViewModes}"

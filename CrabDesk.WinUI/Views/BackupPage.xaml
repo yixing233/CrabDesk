@@ -24,8 +24,16 @@
                             <TextBlock Text="备份位置" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding BackupDirectory}" Style="{StaticResource SecondaryBodyStyle}" />
                         </StackPanel>
-                        <icons:FluentIcon Grid.Column="1" Icon="Folder" VerticalAlignment="Center"
-                                          Foreground="{ThemeResource SecondaryTextBrush}" />
+                        <Button Grid.Column="1"
+                                Command="{Binding ChangeBackupDirectoryCommand}"
+                                VerticalAlignment="Center"
+                                ToolTipService.ToolTip="选择备份文件夹"
+                                AutomationProperties.Name="更改备份位置">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <icons:FluentIcon Icon="FolderOpen" />
+                                <TextBlock Text="更改位置" />
+                            </StackPanel>
+                        </Button>
                     </Grid>
                 </Border>
                 <Border Style="{StaticResource SettingRowStyle}">
@@ -46,11 +54,26 @@
                     <Grid ColumnSpacing="16">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="每日自动备份" FontWeight="SemiBold" />
-                            <TextBlock Text="每天保留一份当前桌面布局快照" Style="{StaticResource SecondaryBodyStyle}" />
+                            <TextBlock Text="自动备份" FontWeight="SemiBold" />
+                            <TextBlock Text="按设定间隔保存当前桌面布局快照" Style="{StaticResource SecondaryBodyStyle}" />
                         </StackPanel>
                         <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding DailyBackup, Mode=TwoWay}"
-                                      VerticalAlignment="Center" AutomationProperties.Name="每日自动备份" />
+                                      VerticalAlignment="Center" AutomationProperties.Name="自动备份" />
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="自动备份间隔" FontWeight="SemiBold" />
+                            <TextBlock Text="最小间隔为 1 小时" Style="{StaticResource SecondaryBodyStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <NumberBox Width="{StaticResource NumericSettingsControlWidth}" Minimum="1" Maximum="8760" SmallChange="1" SpinButtonPlacementMode="Inline"
+                                       IsEnabled="{Binding DailyBackup}" Value="{Binding BackupIntervalHours, Mode=TwoWay}"
+                                       AutomationProperties.Name="自动备份间隔小时数" />
+                            <TextBlock Text="小时" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Grid>
                 </Border>
             </StackPanel>

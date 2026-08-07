@@ -56,8 +56,14 @@ public sealed class ShellIconProvider
                 cached.LastAccess = ++_accessSequence;
                 return cached.Image;
             }
-            _cache[key] = new CacheEntry(image, ++_accessSequence);
-            TrimCache();
+            // A missing Shell image is often transient while Explorer is
+            // rebuilding its image list. Do not turn that one failed lookup
+            // into a permanent blank icon for the lifetime of the process.
+            if (image is not null)
+            {
+                _cache[key] = new CacheEntry(image, ++_accessSequence);
+                TrimCache();
+            }
             return image;
         }
     }

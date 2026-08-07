@@ -59,12 +59,24 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         key.SetValue("Icon", $"\"{normalizedExecutable}\",0", RegistryValueKind.String);
         key.SetValue("Position", "Bottom", RegistryValueKind.String);
         key.SetValue("ExtendedSubCommandsKey", _submenuClassName, RegistryValueKind.String);
+        // Keep the root item executable as well as exposing the cascading
+        // commands.  Explorer does not invoke a root that only contains
+        // ExtendedSubCommandsKey on all desktop-shell builds; the direct
+        // command makes a click on "CrabDesk" launch/activate the settings
+        // window even when no instance is currently running (including when
+        // the user's normal startup mode is tray-only).
+        using (var rootCommand = key.CreateSubKey("command", true)
+               ?? throw new InvalidOperationException("Unable to create the CrabDesk root command."))
+        {
+            rootCommand.SetValue(null, $"\"{normalizedExecutable}\" --show-settings", RegistryValueKind.String);
+        }
 
         using var submenu = _root.CreateSubKey(_submenuKeyPath, true)
             ?? throw new InvalidOperationException("Unable to create the CrabDesk submenu command store.");
-        WriteCommand(submenu, "01Open", "\u6253\u5F00\u8BBE\u7F6E", normalizedExecutable, null);
-        WriteCommand(submenu, "02CreateBox", "\u521B\u5EFA\u76D2\u5B50", normalizedExecutable, "--create-box");
-        WriteCommand(submenu, "03Organize", "\u667A\u80FD\u6574\u7406", normalizedExecutable, "--organize");
+        WriteCommand(submenu, "01CreateBox", "\u521B\u5EFA\u76D2\u5B50", normalizedExecutable, "--create-box");
+        WriteCommand(submenu, "02Settings", "\u8BBE\u7F6E\u4E2D\u5FC3", normalizedExecutable, "--show-settings");
+        WriteCommand(submenu, "03RuleOrganize", "\u89C4\u5219\u6574\u7406", normalizedExecutable, "--organize");
+        WriteCommand(submenu, "04AiOrganize", "AI \u6574\u7406", normalizedExecutable, "--ai-organize");
     }
 
     private static void WriteCommand(

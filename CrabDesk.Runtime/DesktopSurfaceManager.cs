@@ -25,7 +25,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 var surface = new DesktopBoxForm(runtime, host, monitor);
                 try
                 {
-                    surface.Show();
                     DesktopWindowTools.AttachAsDesktopChild(surface.Handle, parentHandle);
                     DesktopWindowTools.PositionAboveDesktop(
                         surface.Handle,
@@ -34,6 +33,15 @@ internal sealed class DesktopSurfaceManager : IDisposable
                         (int)(monitor.PixelBounds.Y - parentBounds.Y),
                         (int)monitor.PixelBounds.Width,
                         (int)monitor.PixelBounds.Height);
+                    if (!surface.RefreshWorkspace() || !surface.ValidateWindowRegion())
+                    {
+                        throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified.");
+                    }
+                    surface.Show();
+                    if (!surface.UpdateInteractionRegion() || !surface.ValidateWindowRegion())
+                    {
+                        throw new InvalidOperationException("The CrabDesk desktop surface region was lost while showing.");
+                    }
                     _surfaces.Add(surface);
                 }
                 catch
@@ -56,7 +64,35 @@ internal sealed class DesktopSurfaceManager : IDisposable
     {
         foreach (var surface in _surfaces)
         {
-            surface.RefreshWorkspace();
+            if (!surface.RefreshWorkspace() || !surface.ValidateWindowRegion())
+            {
+                throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified.");
+            }
+            DesktopWindowTools.RestoreAboveDesktop(surface.Handle, _host.DesktopListView);
+        }
+    }
+
+    internal void SetVisible(bool visible)
+    {
+        foreach (var surface in _surfaces)
+        {
+            if (visible)
+            {
+                if (!surface.UpdateInteractionRegion() || !surface.ValidateWindowRegion())
+                {
+                    throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified before showing.");
+                }
+                surface.Show();
+                if (!surface.ValidateWindowRegion())
+                {
+                    surface.Hide();
+                    throw new InvalidOperationException("The CrabDesk desktop surface region was lost while showing.");
+                }
+            }
+            else
+            {
+                surface.Hide();
+            }
         }
     }
 
@@ -67,10 +103,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
             DesktopWindowTools.NormalizeDesktopSurfaceStyles(surface.Handle);
             var rendered = surface.EnsureRendered();
             var ready = DesktopWindowTools.IsDesktopSurfaceReady(surface.Handle, _host.DesktopListView);
-            if (!ready || !rendered)
+            var regionValid = surface.ValidateWindowRegion();
+            if (!ready || !rendered || !regionValid)
             {
                 throw new InvalidOperationException(
-                    $"The CrabDesk desktop surface is not ready. rendered={rendered} paints={surface.PaintCount} " +
+                    $"The CrabDesk desktop surface is not ready. rendered={rendered} regionValid={regionValid} paints={surface.PaintCount} " +
                     DesktopWindowTools.GetDesktopSurfaceDiagnostics(surface.Handle, _host.DesktopListView));
             }
         }
@@ -80,7 +117,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
     {
         foreach (var surface in _surfaces)
         {
-            surface.UpdateInteractionRegion();
+            if (!surface.UpdateInteractionRegion() || !surface.ValidateWindowRegion())
+            {
+                throw new InvalidOperationException("The CrabDesk desktop surface region could not be updated.");
+            }
         }
     }
 

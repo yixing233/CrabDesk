@@ -1,15 +1,14 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
-if (args.Length < 3 || !int.TryParse(args[0], out var processId) || !bool.TryParse(args[1], out var previousHidden))
+if (args.Length < 2 || !int.TryParse(args[0], out var processId))
 {
     return;
 }
 
-var markerPath = args[2];
+var markerPath = args[1];
 try
 {
     using var process = System.Diagnostics.Process.GetProcessById(processId);
@@ -25,7 +24,14 @@ catch (InvalidOperationException)
 var recoveryCompleted = false;
 try
 {
-    var recovery = ReadRecoveryState(markerPath, previousHidden);
+    var recovery = ReadRecoveryState(markerPath);
+    if (recovery is null)
+    {
+        // A marker can be observed while CrabDesk is atomically replacing it.
+        // Keep it for the next startup instead of treating an unreadable
+        // marker as an empty successful recovery.
+        return;
+    }
     var inputRestored = ExplorerIcons.EnsureDesktopInputEnabled();
     var workAreasRestored = recovery.WorkAreas is null || ExplorerIcons.RestoreWorkAreas(recovery.WorkAreas);
     var attributesRestored = ExplorerIcons.RestoreFileAttributes(recovery.FileAttributes);
@@ -42,8 +48,7 @@ try
             Thread.Sleep(500);
         }
     }
-    var visibilityRestored = ExplorerIcons.SetHidden(recovery.PreviousHidden);
-    recoveryCompleted = attributesRestored && workAreasRestored && positionsRestored && visibilityRestored && inputRestored;
+    recoveryCompleted = attributesRestored && workAreasRestored && positionsRestored && inputRestored;
 }
 catch
 {
@@ -61,22 +66,21 @@ catch
 {
 }
 
-static RecoveryState ReadRecoveryState(string path, bool fallbackHidden)
+static RecoveryState? ReadRecoveryState(string path)
 {
     try
     {
         return JsonSerializer.Deserialize(File.ReadAllText(path), GuardJsonContext.Default.RecoveryState)
-            ?? new RecoveryState { PreviousHidden = fallbackHidden };
+            ?? new RecoveryState();
     }
     catch
     {
-        return new RecoveryState { PreviousHidden = fallbackHidden };
+        return null;
     }
 }
 
 internal sealed class RecoveryState
 {
-    public bool PreviousHidden { get; set; }
     public List<RecoveryIconPosition> IconPositions { get; set; } = [];
     public List<RecoveryWorkArea>? WorkAreas { get; set; }
     public List<RecoveryFileAttribute> FileAttributes { get; set; } = [];
@@ -91,10 +95,7 @@ internal partial class GuardJsonContext : JsonSerializerContext;
 
 internal static class ExplorerIcons
 {
-    private const string AdvancedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-    private const uint WmCommand = 0x0111;
     private const uint SmtoAbortIfHung = 0x0002;
-    private const int ToggleIconsCommand = 0x7402;
     private const uint LvmFirst = 0x1000;
     private const uint LvmGetItemCount = LvmFirst + 4;
     private const uint LvmGetItemTextW = LvmFirst + 115;
@@ -321,27 +322,6 @@ internal static class ExplorerIcons
         }
     }
 
-    internal static bool SetHidden(bool hidden)
-    {
-        if (GetHidden() == hidden)
-        {
-            return true;
-        }
-
-        var view = FindDesktopView();
-        if (view != IntPtr.Zero)
-        {
-            SendMessageTimeout(view, WmCommand, new IntPtr(ToggleIconsCommand), IntPtr.Zero, SmtoAbortIfHung, 1500, out _);
-        }
-
-        if (GetHidden() != hidden)
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(AdvancedKey);
-            key.SetValue("HideIcons", hidden ? 1 : 0, RegistryValueKind.DWord);
-        }
-        return GetHidden() == hidden;
-    }
-
     internal static bool EnsureDesktopInputEnabled()
     {
         var view = FindDesktopView();
@@ -373,12 +353,6 @@ internal static class ExplorerIcons
             SmtoAbortIfHung,
             MessageTimeoutMilliseconds,
             out result) != IntPtr.Zero;
-
-    private static bool GetHidden()
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(AdvancedKey);
-        return Convert.ToInt32(key?.GetValue("HideIcons", 0) ?? 0) != 0;
-    }
 
     private static string NormalizeName(string value) => value.Trim().TrimEnd('.');
 

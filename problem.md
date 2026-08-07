@@ -746,6 +746,21 @@ Update checks now use a six-hour startup cache window, and a rate-limit result
 uses a one-hour retry backoff for both automatic and manual checks. The status
 also includes GitHub's reset time when the response provides it.
 
+### 51. Desktop connection card had unnecessary layout nesting
+
+The connection area used several nested StackPanels and split its controls over
+two rows, leaving a large unused area on the right of the second row. It now
+uses one compact Grid row: connection status stays on the left, while reconnect,
+repair, and pause/resume actions form one aligned group on the right.
+
+### 52. Backup location was read-only
+
+The Backup page displayed the active directory but exposed no command for
+changing it, even though the persisted backup model already supported a custom
+directory. The location row now opens the native folder picker, validates and
+creates the selected path, persists it, and immediately refreshes the backup
+list from the new directory. Existing files remain in their original folder.
+
 ## Missing Regression Coverage
 
 - Repeated close/dispose, pause, host reconnect, topology rebuild, and exit.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Runtime.InteropServices;
 using CrabDesk.Core;
@@ -6,6 +7,10 @@ namespace CrabDesk.Native;
 
 public sealed class DesktopHostService : IDesktopHost
 {
+    private static readonly TimeSpan ExplorerExitTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ExplorerStartTimeout = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan ExplorerPollInterval = TimeSpan.FromMilliseconds(150);
+
     public IntPtr DesktopParent { get; private set; }
     public IntPtr DesktopListView { get; private set; }
     public IntPtr DesktopView { get; private set; }
@@ -24,24 +29,119 @@ public sealed class DesktopHostService : IDesktopHost
         DesktopParent = parent;
         DesktopListView = listView;
         DesktopView = view;
-        if (changed && listView != IntPtr.Zero)
-        {
-            RefreshIconImageList();
-        }
         return changed;
     }
 
     /// <summary>
-    /// Repairs the Explorer desktop ListView when its rows remain but its
-    /// image list has been dropped. This is the characteristic state where
-    /// desktop names remain visible while every icon is blank.
+    /// Updates only the affected desktop rows after a real file-attribute
+    /// change. SHCNE_ATTRIBUTES makes the desktop ListView drop every row's
+    /// image index on some Windows builds; SHCNE_UPDATEITEM preserves them.
     /// </summary>
-    public bool RefreshIconImageList()
+    public int NotifyItemAttributesChanged(IEnumerable<string> paths)
+    {
+        var notified = 0;
+        foreach (var itemPath in paths
+                     .Where(path => !string.IsNullOrWhiteSpace(path))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var path = Marshal.StringToCoTaskMemUni(itemPath);
+            try
+            {
+                NativeMethods.SHChangeNotify(
+                    NativeMethods.ShcneUpdateItem,
+                    NativeMethods.ShcnfPathW,
+                    path,
+                    IntPtr.Zero);
+                notified++;
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(path);
+            }
+        }
+        return notified;
+    }
+
+    /// <summary>
+    /// Refreshes every existing Explorer desktop row and repaints the desktop
+    /// view without broadcasting a Shell-wide association or directory
+    /// change. Those notifications are for real Shell state changes and must
+    /// not be used as a redraw command.
+    /// </summary>
+    public Task<bool> RepairIconImageListAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var before = GetIconImageListState();
+        if (!before.IsDesktopListViewAvailable)
+        {
+            return Task.FromResult(false);
+        }
+
+        var rowsUpdated = UpdateDesktopListViewRows(cancellationToken);
+        RedrawDesktopListView();
+        RedrawDesktopView();
+        var after = GetIconImageListState();
+        return Task.FromResult(rowsUpdated && after.HasImageList);
+    }
+
+    /// <summary>
+    /// Restarts the Explorer process that owns the current desktop view.
+    /// Windows relaunches that shell itself; this method deliberately never
+    /// starts explorer.exe, which would create an extra File Explorer window.
+    /// </summary>
+    public async Task<bool> RestartExplorerShellAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var desktopView = DesktopView != IntPtr.Zero ? DesktopView : FindDesktopView();
+        if (desktopView == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(desktopView, out var processId);
+        if (processId == 0 || processId == Environment.ProcessId)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var explorer = Process.GetProcessById((int)processId);
+            if (!string.Equals(explorer.ProcessName, "explorer", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            explorer.Kill();
+            if (!await WaitForExplorerExitAsync(explorer, cancellationToken))
+            {
+                return false;
+            }
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+
+        DesktopParent = IntPtr.Zero;
+        DesktopView = IntPtr.Zero;
+        DesktopListView = IntPtr.Zero;
+        return await WaitForDesktopShellAsync(cancellationToken);
+    }
+
+    public DesktopIconImageListState GetIconImageListState()
     {
         var listView = DesktopListView;
         if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
         {
-            return false;
+            return new DesktopIconImageListState(false, IntPtr.Zero, IntPtr.Zero);
         }
 
         NativeMethods.SendMessageTimeout(
@@ -51,7 +151,7 @@ public sealed class DesktopHostService : IDesktopHost
             IntPtr.Zero,
             NativeMethods.SmtoAbortIfHung,
             500,
-            out var before);
+            out var normal);
         NativeMethods.SendMessageTimeout(
             listView,
             NativeMethods.LvmGetImageList,
@@ -59,35 +159,16 @@ public sealed class DesktopHostService : IDesktopHost
             IntPtr.Zero,
             NativeMethods.SmtoAbortIfHung,
             500,
-            out var smallBefore);
-        // File attribute changes only require a desktop-directory refresh.
-        // Flushing the global association cache while Explorer still has a
-        // healthy image list can detach that list and leave labels visible
-        // with every icon blank. Reserve the heavier refresh for recovery.
-        if (before == IntPtr.Zero && smallBefore == IntPtr.Zero)
+            out var small);
+        return new DesktopIconImageListState(true, normal, small);
+    }
+
+    private void RedrawDesktopListView()
+    {
+        var listView = DesktopListView;
+        if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
         {
-            NativeMethods.SHChangeNotify(
-                NativeMethods.ShcneAssocChanged,
-                NativeMethods.ShcnfIdList,
-                IntPtr.Zero,
-                IntPtr.Zero);
-        }
-        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        if (!string.IsNullOrWhiteSpace(desktopPath))
-        {
-            var path = Marshal.StringToCoTaskMemUni(desktopPath);
-            try
-            {
-                NativeMethods.SHChangeNotify(
-                    NativeMethods.ShcneUpdatedir,
-                    NativeMethods.ShcnfPathW,
-                    path,
-                    IntPtr.Zero);
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(path);
-            }
+            return;
         }
 
         NativeMethods.SendMessageTimeout(
@@ -114,56 +195,92 @@ public sealed class DesktopHostService : IDesktopHost
             NativeMethods.RdwErase |
             NativeMethods.RdwAllChildren |
             NativeMethods.RdwUpdateNow);
-
-        NativeMethods.SendMessageTimeout(
-            listView,
-            NativeMethods.LvmGetImageList,
-            new IntPtr(NativeMethods.LvsilNormal),
-            IntPtr.Zero,
-            NativeMethods.SmtoAbortIfHung,
-            500,
-            out var after);
-        NativeMethods.SendMessageTimeout(
-            listView,
-            NativeMethods.LvmGetImageList,
-            new IntPtr(NativeMethods.LvsilSmall),
-            IntPtr.Zero,
-            NativeMethods.SmtoAbortIfHung,
-            500,
-            out var smallAfter);
-        return before != IntPtr.Zero || smallBefore != IntPtr.Zero ||
-            after != IntPtr.Zero || smallAfter != IntPtr.Zero;
     }
 
-    /// <summary>
-    /// Performs the inexpensive health check used by the host timer. Explorer
-    /// can lose its image list without changing any of the desktop HWNDs.
-    /// </summary>
-    public bool EnsureIconImageList()
+    private async Task<bool> WaitForExplorerExitAsync(Process explorer, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + ExplorerExitTimeout;
+        while (!explorer.HasExited && DateTimeOffset.UtcNow < deadline)
+        {
+            await Task.Delay(ExplorerPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+        return explorer.HasExited;
+    }
+
+    private async Task<bool> WaitForDesktopShellAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + ExplorerStartTimeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Refresh();
+            if (IsAvailable && DesktopView != IntPtr.Zero && DesktopListView != IntPtr.Zero)
+            {
+                return true;
+            }
+            await Task.Delay(ExplorerPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    private bool UpdateDesktopListViewRows(CancellationToken cancellationToken)
     {
         var listView = DesktopListView;
-        if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
+        if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView) ||
+            NativeMethods.SendMessageTimeout(
+                listView,
+                NativeMethods.LvmGetItemCount,
+                IntPtr.Zero,
+                IntPtr.Zero,
+                NativeMethods.SmtoAbortIfHung,
+                500,
+                out var itemCountResult) == IntPtr.Zero)
         {
             return false;
         }
 
-        NativeMethods.SendMessageTimeout(
-            listView,
-            NativeMethods.LvmGetImageList,
-            new IntPtr(NativeMethods.LvsilNormal),
+        var itemCount = itemCountResult.ToInt32();
+        if (itemCount < 0)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < itemCount; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (NativeMethods.SendMessageTimeout(
+                    listView,
+                    NativeMethods.LvmUpdate,
+                    new IntPtr(index),
+                    IntPtr.Zero,
+                    NativeMethods.SmtoAbortIfHung,
+                    500,
+                    out var updated) == IntPtr.Zero ||
+                updated == IntPtr.Zero)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void RedrawDesktopView()
+    {
+        var view = DesktopView;
+        if (view == IntPtr.Zero || !NativeMethods.IsWindow(view))
+        {
+            return;
+        }
+
+        NativeMethods.RedrawWindow(
+            view,
             IntPtr.Zero,
-            NativeMethods.SmtoAbortIfHung,
-            250,
-            out var normal);
-        NativeMethods.SendMessageTimeout(
-            listView,
-            NativeMethods.LvmGetImageList,
-            new IntPtr(NativeMethods.LvsilSmall),
             IntPtr.Zero,
-            NativeMethods.SmtoAbortIfHung,
-            250,
-            out var small);
-        return normal != IntPtr.Zero || small != IntPtr.Zero || RefreshIconImageList();
+            NativeMethods.RdwInvalidate |
+            NativeMethods.RdwErase |
+            NativeMethods.RdwAllChildren |
+            NativeMethods.RdwUpdateNow);
     }
 
     public bool EnsureDesktopInputEnabled()
@@ -211,4 +328,12 @@ public sealed class DesktopHostService : IDesktopHost
         NativeMethods.GetClassName(hwnd, builder, builder.Capacity);
         return builder.ToString();
     }
+}
+
+public readonly record struct DesktopIconImageListState(
+    bool IsDesktopListViewAvailable,
+    IntPtr Normal,
+    IntPtr Small)
+{
+    public bool HasImageList => Normal != IntPtr.Zero || Small != IntPtr.Zero;
 }

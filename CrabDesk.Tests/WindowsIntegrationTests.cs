@@ -54,15 +54,19 @@ public sealed class WindowsIntegrationTests
             Assert.True(registration.IsEnabled);
             using var key = Registry.CurrentUser.OpenSubKey(keyPath);
             using var submenuKey = Registry.CurrentUser.OpenSubKey(submenuKeyPath);
-            using var createBoxCommand = submenuKey?.OpenSubKey(@"shell\02CreateBox\command");
-            using var organizeCommand = submenuKey?.OpenSubKey(@"shell\03Organize\command");
-            using var openCommand = submenuKey?.OpenSubKey(@"shell\01Open\command");
+            using var rootCommand = key?.OpenSubKey("command");
+            using var createBoxCommand = submenuKey?.OpenSubKey(@"shell\01CreateBox\command");
+            using var settingsCommand = submenuKey?.OpenSubKey(@"shell\02Settings\command");
+            using var organizeCommand = submenuKey?.OpenSubKey(@"shell\03RuleOrganize\command");
+            using var aiOrganizeCommand = submenuKey?.OpenSubKey(@"shell\04AiOrganize\command");
             Assert.Equal("CrabDesk", key?.GetValue(null));
             Assert.Null(key?.GetValue("SubCommands"));
             Assert.Equal(submenuClassName, key?.GetValue("ExtendedSubCommandsKey"));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", rootCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --create-box", createBoxCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", settingsCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --organize", organizeCommand?.GetValue(null));
-            Assert.Equal($"\"{Path.GetFullPath(executable)}\"", openCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --ai-organize", aiOrganizeCommand?.GetValue(null));
 
             registration.SetEnabled(false, executable);
             Assert.False(registration.IsEnabled);
@@ -475,10 +479,8 @@ public sealed class WindowsIntegrationTests
                 720,
                 500) > 0);
 
-            var previousHidden = new ExplorerIconVisibility().GetIconsHidden();
             await File.WriteAllTextAsync(marker, JsonSerializer.Serialize(new DesktopRecoveryState
             {
-                PreviousHidden = previousHidden,
                 IconPositions = [original.Value],
                 WorkAreas = originalWorkAreas.Select(area => new DesktopWorkAreaSnapshot(
                     area.Left,
@@ -491,7 +493,7 @@ public sealed class WindowsIntegrationTests
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                Arguments = $"{int.MaxValue} {previousHidden} \"{marker}\""
+                Arguments = $"{int.MaxValue} \"{marker}\""
             });
             Assert.NotNull(guard);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));

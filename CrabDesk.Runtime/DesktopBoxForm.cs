@@ -9,11 +9,6 @@ namespace CrabDesk.Runtime;
 
 internal sealed class DesktopBoxForm : Forms.Form
 {
-    // Explorer-hosted child HWNDs currently composite the backdrop above the
-    // GDI content even when DesktopWindowTarget is created as non-topmost.
-    // Keep the proven preview renderer active until a separate content layer
-    // is introduced for the live backdrop.
-    private const bool EnableLiveCompositionBackdrop = false;
     private const string ItemKeysFormat = "CrabDesk.DesktopItemKeys";
     private const string SourceBoxFormat = "CrabDesk.SourceBoxId";
     private const string DragSessionFormat = "CrabDesk.InternalDragSession";
@@ -21,6 +16,12 @@ internal sealed class DesktopBoxForm : Forms.Form
     private const int WmMouseActivate = 0x0021;
     private const int WmContextMenu = 0x007B;
     private const int WsClipSiblings = 0x04000000;
+    private const int ExplorerHoverFillAlpha = 32;
+    private const int ExplorerHoverBorderAlpha = 52;
+    private const int HoverExpansionDelayMilliseconds = 120;
+    private const int HoverCollapseDelayMilliseconds = 180;
+    private const int HoverPollingIntervalMilliseconds = 25;
+    private const int BoxHeightAnimationMilliseconds = 140;
     private static readonly IntPtr HtTransparent = new(-1);
     private static readonly IntPtr MaNoActivate = new(3);
     private static readonly (string Name, string Hex)[] AccentPalette =
@@ -39,17 +40,16 @@ internal sealed class DesktopBoxForm : Forms.Form
     private readonly DesktopHostService _desktopHost;
     private readonly MonitorLayout _monitor;
     private readonly double _scale;
-    private Bitmap? _backdropSnapshot;
-    private CompositionBoxBackdropHost? _compositionBackdrop;
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
     private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
+    private readonly Dictionary<IconBitmapKey, IconLoadRetry> _iconLoadRetries = [];
     private readonly CancellationTokenSource _iconLoadCancellation = new();
     private readonly SemaphoreSlim _iconLoadGate = new(2, 2);
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _hoverExpandedBoxes = [];
     private readonly HoverExpansionController _hoverExpansion = new(
-        TimeSpan.FromMilliseconds(280),
-        TimeSpan.FromMilliseconds(220));
+        TimeSpan.FromMilliseconds(HoverExpansionDelayMilliseconds),
+        TimeSpan.FromMilliseconds(HoverCollapseDelayMilliseconds));
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, double> _scrollOffsets = [];
     private readonly Dictionary<Guid, IReadOnlyList<DesktopItemRef>> _boxItems = [];
@@ -80,10 +80,12 @@ internal sealed class DesktopBoxForm : Forms.Form
     private bool _dragCancelled;
     private string? _hoveredItemKey;
     private Guid? _hoveredAutoExpandBoxId;
+    private LayoutRect? _transformDirtyBounds;
     private string? _lastRegionDiagnostic;
     private int _iconCacheVersion;
     private int _paintCount;
     private bool _resourcesDisposed;
+    private bool _regionFailureHandled;
 
     internal DesktopBoxForm(
         CrabDeskRuntime runtime,
@@ -112,7 +114,7 @@ internal sealed class DesktopBoxForm : Forms.Form
 
         _animationTimer = new Forms.Timer { Interval = 15 };
         _animationTimer.Tick += OnAnimationTick;
-        _hoverTimer = new Forms.Timer { Interval = 50 };
+        _hoverTimer = new Forms.Timer { Interval = HoverPollingIntervalMilliseconds };
         _hoverTimer.Tick += OnHoverTimer;
         _hoverTimer.Start();
         _headerToolTip = new Forms.ToolTip
@@ -133,7 +135,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         _titleEditor.KeyDown += OnTitleEditorKeyDown;
         _titleEditor.LostFocus += (_, _) => FinishTitleEdit(!_cancelTitleEdit);
         Controls.Add(_titleEditor);
-        _backdropSnapshot = CaptureBackdropSnapshot();
 
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
@@ -148,23 +149,6 @@ internal sealed class DesktopBoxForm : Forms.Form
     }
 
     protected override bool ShowWithoutActivation => true;
-
-    protected override void OnHandleCreated(EventArgs eventArgs)
-    {
-        base.OnHandleCreated(eventArgs);
-        _compositionBackdrop = EnableLiveCompositionBackdrop
-            ? CompositionBoxBackdropHost.TryCreate(Handle)
-            : null;
-        DiagnosticLog.Info(
-            $"Composition backdrop monitor={_monitor.Id} available={_compositionBackdrop?.IsAvailable == true}");
-    }
-
-    protected override void OnHandleDestroyed(EventArgs eventArgs)
-    {
-        _compositionBackdrop?.Dispose();
-        _compositionBackdrop = null;
-        base.OnHandleDestroyed(eventArgs);
-    }
 
     protected override Forms.CreateParams CreateParams
     {
@@ -232,7 +216,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private IReadOnlyList<DesktopItemRef> GetCachedItemsForBox(Guid boxId) =>
         _boxItems.GetValueOrDefault(boxId) ?? [];
 
-    internal void RefreshWorkspace()
+    internal bool RefreshWorkspace()
     {
         RebuildBoxItemCache();
         if (!DesktopBoxes.Any(box => box.ExpandOnHover))
@@ -250,15 +234,30 @@ internal sealed class DesktopBoxForm : Forms.Form
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         _selection.RemoveWhere(key => !visibleKeys.Contains(key));
         PruneIconCache();
-        UpdateWindowRegion();
+        if (!UpdateWindowRegion())
+        {
+            return false;
+        }
         Invalidate();
+        return true;
     }
 
-    internal void UpdateInteractionRegion()
+    internal bool UpdateInteractionRegion()
     {
-        UpdateWindowRegion();
+        if (!UpdateWindowRegion())
+        {
+            return false;
+        }
         Invalidate();
+        return true;
     }
+
+    internal bool ValidateWindowRegion() =>
+        IsHandleCreated && DesktopWindowTools.VerifyRegion(
+            Handle,
+            _lastWindowRegionRectangles,
+            _scale,
+            out _);
 
     protected override void OnPaintBackground(Forms.PaintEventArgs eventArgs)
     {
@@ -274,16 +273,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
         graphics.ScaleTransform((float)_scale, (float)_scale);
         RebuildGeometry();
-        _compositionBackdrop?.Update(
-            _boxes.Select(box => (
-                box.Box.Id,
-                new LayoutRect(box.Bounds.X, box.Bounds.Y, box.Bounds.Width, box.Bounds.Height),
-                box.Box.Appearance.Material,
-                box.Box.Appearance.Background,
-                box.Box.Appearance.Opacity)),
-            _scale,
-            _runtime.State.Settings.Appearance.CornerRadius,
-            _runtime.IsDarkTheme);
         var clipBounds = new RectangleF(
             (float)(eventArgs.ClipRectangle.X / _scale),
             (float)(eventArgs.ClipRectangle.Y / _scale),
@@ -321,8 +310,6 @@ internal sealed class DesktopBoxForm : Forms.Form
             _shellContextMenu = null;
             _titleEditorFont?.Dispose();
             _titleEditorFont = null;
-            _backdropSnapshot?.Dispose();
-            _backdropSnapshot = null;
             _titleEditor.Dispose();
             _headerToolTip.Dispose();
             Region?.Dispose();
@@ -334,6 +321,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         _iconCacheVersion++;
         _pendingIconLoads.Clear();
+        _iconLoadRetries.Clear();
         var count = _iconCache.Count;
         foreach (var bitmap in _iconCache.Values)
         {
@@ -354,7 +342,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         Invalidate();
     }
 
-    private void UpdateWindowRegion()
+    private bool UpdateWindowRegion()
     {
         var desktopBoxes = DesktopBoxes.ToArray();
         var currentRectangles = desktopBoxes.Select(box => new LayoutRect(
@@ -364,11 +352,16 @@ internal sealed class DesktopBoxForm : Forms.Form
             GetVisualBoxHeight(box))).ToArray();
         if (IsHandleCreated)
         {
-            DesktopWindowTools.ApplyRegion(
+            if (!DesktopWindowTools.ApplyRegion(
                 Handle,
                 currentRectangles,
                 _scale,
-                redraw: true);
+                out var regionDiagnostic,
+                redraw: true))
+            {
+                HandleRegionFailure(regionDiagnostic);
+                return false;
+            }
             if (_lastWindowRegionRectangles.Count > 0)
             {
                 DesktopWindowTools.RedrawExposedParentArea(
@@ -387,6 +380,29 @@ internal sealed class DesktopBoxForm : Forms.Form
             DiagnosticLog.Info(
                 $"Surface region monitor={_monitor.Id} boxes={desktopBoxes.Length} hidden={_runtime.AreDesktopItemsHidden}");
         }
+        return true;
+    }
+
+    private void HandleRegionFailure(string diagnostic)
+    {
+        if (_regionFailureHandled || IsDisposed)
+        {
+            return;
+        }
+
+        _regionFailureHandled = true;
+        _animationTimer.Stop();
+        _hoverTimer.Stop();
+        try
+        {
+            Hide();
+        }
+        catch
+        {
+        }
+        DiagnosticLog.Error(
+            $"Desktop surface region verification failed monitor={_monitor.Id}: {diagnostic}",
+            new InvalidOperationException(diagnostic));
     }
 
     private void RebuildGeometry()
@@ -455,49 +471,19 @@ internal sealed class DesktopBoxForm : Forms.Form
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
         var opacity = Math.Clamp(geometry.Box.Appearance.Opacity, 0.35, 1);
         var boxColor = ApplyOpacity(isDark ? baseColor : Blend(baseColor, Color.White, 0.88f), opacity);
-        var borderColor = ApplyOpacity(
-            isDark ? Color.FromArgb(82, 90, 101) : Color.FromArgb(190, 198, 207),
-            opacity);
         var textColor = isDark ? Color.White : Color.FromArgb(31, 35, 41);
         var paintedBounds = RectangleF.Inflate(geometry.Bounds, -0.5f, -0.5f);
         using var path = RoundedRectangle(
             paintedBounds,
             (float)_runtime.State.Settings.Appearance.CornerRadius);
-        using var border = new Pen(borderColor, 1);
-        var backdropSnapshot = _backdropSnapshot;
-        var hasBackdrop = geometry.Box.Appearance.Material == BoxMaterialKind.AcrylicPreview &&
-            backdropSnapshot is not null;
-        if (hasBackdrop && backdropSnapshot is not null)
-        {
-            var backdropState = graphics.Save();
-            graphics.SetClip(path);
-            graphics.DrawImage(
-                backdropSnapshot,
-                new RectangleF(0, 0, backdropSnapshot.Width, backdropSnapshot.Height));
-            graphics.Restore(backdropState);
-        }
-        BoxMaterialRenderer.Get(geometry.Box.Appearance.Material).Fill(new BoxMaterialPaint(
-            graphics,
-            path,
-            paintedBounds,
-            boxColor,
-            isDark,
-            hasBackdrop));
+        using var fill = new SolidBrush(boxColor);
+        graphics.FillPath(fill, path);
 
-        using var separator = new Pen(ApplyOpacity(isDark
-            ? Color.FromArgb(58, 65, 74)
-            : Color.FromArgb(211, 217, 223), opacity), 1);
-        graphics.DrawLine(separator, geometry.Header.Left, geometry.Header.Bottom, geometry.Header.Right, geometry.Header.Bottom);
         using var accentPath = RoundedRectangle(
             new RectangleF(geometry.Header.X + 8, geometry.Header.Y + 9, 4, geometry.Header.Height - 18),
             2);
         using var accent = new SolidBrush(ParseOpaqueColor(geometry.Box.Appearance.Accent));
         graphics.FillPath(accent, accentPath);
-        if (_runtime.State.Settings.Appearance.ShowBorder)
-        {
-            graphics.DrawPath(border, path);
-        }
-
         using var titleFont = CreateFont(
             geometry.Box.Appearance.TitleFontFamily,
             (float)geometry.Box.Appearance.TitleFontSize,
@@ -637,14 +623,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         else if (_runtime.State.Settings.Appearance.HoverFeedback &&
             string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase))
         {
-            var configuredHover = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
-            using var hovered = new SolidBrush(Color.FromArgb(
-                _runtime.IsDarkTheme ? 58 : 40,
-                configuredHover));
-            using var hoverBorder = new Pen(Color.FromArgb(
-                _runtime.IsDarkTheme ? 145 : 105,
-                configuredHover), 1);
-            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(item.Bounds, -2, -2), 4);
+            // Explorer uses a neutral translucent white hot-track surface on
+            // desktop items. Keep the configured accent for selection only so
+            // icons inside and outside a box share the same hover treatment.
+            using var hovered = new SolidBrush(Color.FromArgb(ExplorerHoverFillAlpha, Color.White));
+            using var hoverBorder = new Pen(Color.FromArgb(ExplorerHoverBorderAlpha, Color.White), 1);
+            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(item.Bounds, -1, -1), 4);
             graphics.FillPath(hovered, hoveredPath);
             graphics.DrawPath(hoverBorder, hoveredPath);
         }
@@ -690,49 +674,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         graphics.DrawString(item.Item.DisplayName, labelFont!, labelBrush!, textBounds, labelFormat!);
     }
 
-    private Bitmap? CaptureBackdropSnapshot()
-    {
-        try
-        {
-            var pixelWidth = Math.Max(1, (int)Math.Round(_monitor.PixelBounds.Width));
-            var pixelHeight = Math.Max(1, (int)Math.Round(_monitor.PixelBounds.Height));
-            var logicalWidth = Math.Max(1, (int)Math.Round(pixelWidth / _scale));
-            var logicalHeight = Math.Max(1, (int)Math.Round(pixelHeight / _scale));
-            using var source = new Bitmap(pixelWidth, pixelHeight);
-            using (var capture = Graphics.FromImage(source))
-            {
-                capture.CopyFromScreen(
-                    (int)Math.Round(_monitor.PixelBounds.X),
-                    (int)Math.Round(_monitor.PixelBounds.Y),
-                    0,
-                    0,
-                    new Size(pixelWidth, pixelHeight),
-                    CopyPixelOperation.SourceCopy);
-            }
-
-            var thumbnailWidth = Math.Max(1, logicalWidth / 8);
-            var thumbnailHeight = Math.Max(1, logicalHeight / 8);
-            using var thumbnail = new Bitmap(thumbnailWidth, thumbnailHeight);
-            using (var downsample = Graphics.FromImage(thumbnail))
-            {
-                downsample.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                downsample.DrawImage(source, new Rectangle(0, 0, thumbnailWidth, thumbnailHeight));
-            }
-
-            var result = new Bitmap(logicalWidth, logicalHeight);
-            using (var upscale = Graphics.FromImage(result))
-            {
-                upscale.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                upscale.DrawImage(thumbnail, new Rectangle(0, 0, logicalWidth, logicalHeight));
-            }
-            return result;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     private static StringFormat CreateItemTextFormat(BoxViewMode viewMode) => new()
     {
         Alignment = viewMode == BoxViewMode.List ? StringAlignment.Near : StringAlignment.Center,
@@ -747,6 +688,11 @@ internal sealed class DesktopBoxForm : Forms.Form
         if (_iconCache.TryGetValue(key, out var bitmap))
         {
             return bitmap;
+        }
+        if (_iconLoadRetries.TryGetValue(key, out var retry) &&
+            DateTimeOffset.UtcNow < retry.RetryAfter)
+        {
+            return null;
         }
         if (_pendingIconLoads.Add(key))
         {
@@ -807,6 +753,12 @@ internal sealed class DesktopBoxForm : Forms.Form
                     bitmap?.Dispose();
                     return;
                 }
+                if (bitmap is null)
+                {
+                    ScheduleIconLoadRetry(key);
+                    return;
+                }
+                _iconLoadRetries.Remove(key);
                 _iconCache[key] = bitmap;
                 InvalidateIcon(key);
             }));
@@ -817,12 +769,45 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
+    private void ScheduleIconLoadRetry(IconBitmapKey key)
+    {
+        var attempt = _iconLoadRetries.GetValueOrDefault(key).Attempt + 1;
+        var delay = TimeSpan.FromMilliseconds(Math.Min(30000, 500 * Math.Pow(2, Math.Min(attempt - 1, 6))));
+        _iconLoadRetries[key] = new IconLoadRetry(attempt, DateTimeOffset.UtcNow + delay);
+        _ = RetryIconLoadAsync(key, delay, _iconCacheVersion);
+    }
+
+    private async Task RetryIconLoadAsync(IconBitmapKey key, TimeSpan delay, int cacheVersion)
+    {
+        try
+        {
+            await Task.Delay(delay, _iconLoadCancellation.Token).ConfigureAwait(false);
+            if (_iconLoadCancellation.IsCancellationRequested || IsDisposed || !IsHandleCreated)
+            {
+                return;
+            }
+            BeginInvoke((Action)(() =>
+            {
+                if (!IsDisposed && cacheVersion == _iconCacheVersion && !_iconCache.ContainsKey(key))
+                {
+                    if (_iconLoadRetries.TryGetValue(key, out var retry))
+                    {
+                        _iconLoadRetries[key] = retry with { RetryAfter = DateTimeOffset.MinValue };
+                    }
+                    InvalidateIcon(key);
+                }
+            }));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+
     private void PruneIconCache()
     {
-        if (_iconCache.Count == 0)
-        {
-            return;
-        }
         var activeKeys = DesktopBoxes
             .SelectMany(box => GetCachedItemsForBox(box.Id)
                 .Select(item => CreateIconBitmapKey(item, (float)box.Appearance.IconSize)))
@@ -831,6 +816,10 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             _iconCache[key]?.Dispose();
             _iconCache.Remove(key);
+        }
+        foreach (var key in _iconLoadRetries.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+        {
+            _iconLoadRetries.Remove(key);
         }
     }
 
@@ -1314,13 +1303,53 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         var grabOffsetX = _pressPoint.X - _startBounds.X;
         var grabOffsetY = _pressPoint.Y - _startBounds.Y;
+        CompleteBoxTransform(movingBox, resizingBox, grabOffsetX, grabOffsetY, true);
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs eventArgs)
+    {
+        base.OnMouseCaptureChanged(eventArgs);
+        if (Capture)
+        {
+            return;
+        }
+        if (_selectionBox is not null)
+        {
+            _selectionBox = null;
+            _selectionBase.Clear();
+            _selectionRectangle = RectangleF.Empty;
+            Invalidate();
+        }
+        if (_movingBox is null && _resizingBox is null)
+        {
+            return;
+        }
+
+        // Capture can be stolen by Explorer, Alt+Tab, or a shell popup before
+        // MouseUp arrives. Always commit the last rendered bounds and flush the
+        // swept area so a half-finished drag cannot leave pixels behind.
+        var grabOffsetX = _pressPoint.X - _startBounds.X;
+        var grabOffsetY = _pressPoint.Y - _startBounds.Y;
+        CompleteBoxTransform(_movingBox, _resizingBox, grabOffsetX, grabOffsetY, false);
+    }
+
+    private void CompleteBoxTransform(
+        DesktopBox? movingBox,
+        DesktopBox? resizingBox,
+        double grabOffsetX,
+        double grabOffsetY,
+        bool allowMonitorTransfer)
+    {
         _movingBox = null;
         _resizingBox = null;
         _resizeEdges = ResizeEdges.None;
         _pressedItem = null;
         _pressedBoxId = null;
-        Capture = false;
-        if (movingBox is not null)
+        if (Capture)
+        {
+            Capture = false;
+        }
+        if (movingBox is not null && allowMonitorTransfer)
         {
             var cursor = Forms.Cursor.Position;
             LayoutCoordinator.TryMoveBoxToMonitor(
@@ -1331,6 +1360,12 @@ internal sealed class DesktopBoxForm : Forms.Form
                 grabOffsetX,
                 grabOffsetY,
                 LayoutGrid.DefaultStep);
+        }
+
+        UpdateWindowRegion();
+        FlushTransformTrail();
+        if (movingBox is not null)
+        {
             _runtime.BoxChanged(movingBox, true);
         }
         else if (resizingBox is not null)
@@ -1466,9 +1501,48 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return;
         }
+        AccumulateTransformDirtyBounds(ToVisualBounds(box, box.Bounds));
         box.Bounds = nextBounds;
+        AccumulateTransformDirtyBounds(ToVisualBounds(box, nextBounds));
         UpdateWindowRegion();
         Invalidate();
+    }
+
+    private LayoutRect ToVisualBounds(DesktopBox box, LayoutRect bounds) => new(
+        bounds.X,
+        bounds.Y,
+        bounds.Width,
+        IsEffectivelyCollapsed(box) ? box.Appearance.TitleBarHeight : bounds.Height);
+
+    private void AccumulateTransformDirtyBounds(LayoutRect bounds)
+    {
+        if (_transformDirtyBounds is not { } dirty)
+        {
+            _transformDirtyBounds = bounds;
+            return;
+        }
+        var left = Math.Min(dirty.X, bounds.X);
+        var top = Math.Min(dirty.Y, bounds.Y);
+        var right = Math.Max(dirty.X + dirty.Width, bounds.X + bounds.Width);
+        var bottom = Math.Max(dirty.Y + dirty.Height, bounds.Y + bounds.Height);
+        _transformDirtyBounds = new LayoutRect(left, top, right - left, bottom - top);
+    }
+
+    private void FlushTransformTrail()
+    {
+        if (_transformDirtyBounds is not { } dirty || !IsHandleCreated)
+        {
+            _transformDirtyBounds = null;
+            return;
+        }
+        _transformDirtyBounds = null;
+        DesktopWindowTools.RedrawExposedParentArea(
+            Handle,
+            [dirty],
+            _lastWindowRegionRectangles,
+            _scale,
+            updateNow: true);
+        Update();
     }
 
     private void OnMouseDoubleClick(object? sender, Forms.MouseEventArgs eventArgs)
@@ -1728,11 +1802,12 @@ internal sealed class DesktopBoxForm : Forms.Form
             var detail = box.IsMappedFolder
                 ? "不会删除映射文件夹或其中的文件。"
                 : "盒子中的文件仍保留在桌面。";
-            if (!_runtime.State.Settings.ConfirmDeleteBox || Forms.MessageBox.Show(
-                    $"删除“{box.Title}”？{detail}",
-                    "CrabDesk",
-                    Forms.MessageBoxButtons.YesNo,
-                    Forms.MessageBoxIcon.Question) == Forms.DialogResult.Yes)
+            if (!_runtime.State.Settings.ConfirmDeleteBox || DesktopConfirmationDialog.Show(
+                    this,
+                    _runtime.IsDarkTheme,
+                    $"删除“{box.Title}”？",
+                    detail,
+                    "删除盒子"))
             {
                 _runtime.DeleteBox(box);
             }
@@ -2155,6 +2230,7 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void PrepareBoxTransform(DesktopBox box)
     {
+        _transformDirtyBounds = ToVisualBounds(box, box.Bounds);
         _heightAnimations.Remove(box.Id);
         if (_heightAnimations.Count == 0)
         {
@@ -2176,7 +2252,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             fromHeight,
             targetHeight,
             DateTimeOffset.UtcNow,
-            TimeSpan.FromMilliseconds(180));
+            TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds));
         _animationTimer.Start();
     }
 
@@ -2355,4 +2431,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         double ToHeight,
         DateTimeOffset StartedAt,
         TimeSpan Duration);
+
+    private readonly record struct IconLoadRetry(int Attempt, DateTimeOffset RetryAfter);
 }

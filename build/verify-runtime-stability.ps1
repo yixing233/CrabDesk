@@ -74,7 +74,6 @@ $config = @{
             LaunchToTray = $true
             RefreshAfterRename = $true
             ShowDesktopContextMenu = $false
-            ToggleIconsOnDesktopDoubleClick = $false
         }
         Backup = @{
             DailyBackup = $false

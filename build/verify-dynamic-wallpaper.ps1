@@ -141,7 +141,6 @@ $config = @{
             LaunchToTray = $true
             RefreshAfterRename = $true
             ShowDesktopContextMenu = $false
-            ToggleIconsOnDesktopDoubleClick = $false
         }
         Backup = @{ DailyBackup = $false; RetentionDays = 7; BackupDirectory = "" }
         Updates = @{ CheckOnStartup = $false; Channel = 0 }

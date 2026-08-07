@@ -5,6 +5,23 @@ namespace CrabDesk.Tests;
 public sealed class ShellIconProviderTests
 {
     [Fact]
+    public void FailedShellLookupsAreNotCachedAsPermanentBlankIcons()
+    {
+        var missingPath = Path.Combine(
+            Path.GetTempPath(),
+            $"CrabDeskMissing-{Guid.NewGuid():N}",
+            "missing.no-such-extension");
+        var provider = new ShellIconProvider();
+
+        Assert.Null(provider.GetIcon(missingPath, 48));
+        Assert.Null(provider.GetIcon(missingPath, 48));
+
+        var statistics = provider.GetCacheStatistics();
+        Assert.Equal(0, statistics.Count);
+        Assert.Equal(2, statistics.Misses);
+    }
+
+    [Fact]
     public void ShellIconsRetainTransparentPixels()
     {
         var path = Path.Combine(Path.GetTempPath(), $"CrabDeskIcon-{Guid.NewGuid():N}.txt");

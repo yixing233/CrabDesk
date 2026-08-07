@@ -19,7 +19,6 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.TitleFontSize = 15;
         state.Boxes[0].Appearance.TitleFontBold = false;
         state.Boxes[0].Appearance.ShowCollapseButton = false;
-        state.Boxes[0].Appearance.Material = BoxMaterialKind.Solid;
         state.Boxes[0].Appearance.Background = "#FF162A3A";
         state.Boxes[0].Appearance.Accent = "#FF31A86D";
         state.Boxes[0].Appearance.Opacity = 0.6;
@@ -38,7 +37,6 @@ public sealed class PersistenceTests : IDisposable
             Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Shift,
             Key = HotkeyKey.F9
         };
-        state.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick = true;
         state.Settings.DesktopBehavior.ExpandBoxOnHover = true;
         state.Settings.DesktopBehavior.RefreshAfterRename = false;
         state.Settings.Appearance.HoverFeedback = false;
@@ -66,7 +64,6 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(15, loaded.Boxes[0].Appearance.TitleFontSize);
         Assert.False(loaded.Boxes[0].Appearance.TitleFontBold);
         Assert.False(loaded.Boxes[0].Appearance.ShowCollapseButton);
-        Assert.Equal(BoxMaterialKind.Solid, loaded.Boxes[0].Appearance.Material);
         Assert.Equal("#FF162A3A", loaded.Boxes[0].Appearance.Background);
         Assert.Equal("#FF31A86D", loaded.Boxes[0].Appearance.Accent);
         Assert.Equal(0.6, loaded.Boxes[0].Appearance.Opacity);
@@ -82,7 +79,6 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(loaded.Settings.Hotkeys.ShowDesktop.Enabled);
         Assert.Equal(HotkeyModifiers.Control | HotkeyModifiers.Shift, loaded.Settings.Hotkeys.ShowDesktop.Modifiers);
         Assert.Equal(HotkeyKey.F9, loaded.Settings.Hotkeys.ShowDesktop.Key);
-        Assert.True(loaded.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick);
         Assert.True(loaded.Settings.DesktopBehavior.ExpandBoxOnHover);
         Assert.False(loaded.Settings.DesktopBehavior.RefreshAfterRename);
         Assert.False(loaded.Settings.Appearance.HoverFeedback);

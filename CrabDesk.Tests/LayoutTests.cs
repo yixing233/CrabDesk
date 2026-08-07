@@ -8,14 +8,14 @@ public sealed class LayoutTests
     public void HoverExpansionWaitsBeforeOpeningCollapsedBox()
     {
         var controller = new HoverExpansionController(
-            TimeSpan.FromMilliseconds(280),
-            TimeSpan.FromMilliseconds(220));
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
         var boxId = Guid.NewGuid();
         var started = DateTimeOffset.UtcNow;
 
         Assert.False(controller.Update(boxId, false, started).Changed);
-        Assert.False(controller.Update(boxId, false, started.AddMilliseconds(279)).Changed);
-        var transition = controller.Update(boxId, false, started.AddMilliseconds(280));
+        Assert.False(controller.Update(boxId, false, started.AddMilliseconds(119)).Changed);
+        var transition = controller.Update(boxId, false, started.AddMilliseconds(120));
 
         Assert.Equal(boxId, transition.ExpandedBoxId);
         Assert.Null(transition.CollapsedBoxId);
@@ -25,17 +25,17 @@ public sealed class LayoutTests
     public void HoverExpansionClosesAfterPointerLeavesExpandedBox()
     {
         var controller = new HoverExpansionController(
-            TimeSpan.FromMilliseconds(280),
-            TimeSpan.FromMilliseconds(220));
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
         var boxId = Guid.NewGuid();
         var started = DateTimeOffset.UtcNow;
         controller.Update(boxId, false, started);
-        controller.Update(boxId, false, started.AddMilliseconds(280));
+        controller.Update(boxId, false, started.AddMilliseconds(120));
 
-        Assert.False(controller.Update(null, true, started.AddMilliseconds(400)).Changed);
-        Assert.False(controller.Update(null, false, started.AddMilliseconds(500)).Changed);
-        Assert.False(controller.Update(null, false, started.AddMilliseconds(719)).Changed);
-        var transition = controller.Update(null, false, started.AddMilliseconds(720));
+        Assert.False(controller.Update(null, true, started.AddMilliseconds(200)).Changed);
+        Assert.False(controller.Update(null, false, started.AddMilliseconds(300)).Changed);
+        Assert.False(controller.Update(null, false, started.AddMilliseconds(479)).Changed);
+        var transition = controller.Update(null, false, started.AddMilliseconds(480));
 
         Assert.Null(transition.ExpandedBoxId);
         Assert.Equal(boxId, transition.CollapsedBoxId);
@@ -45,8 +45,8 @@ public sealed class LayoutTests
     public void HoverExpansionCanAdoptAnAlreadyOpenBoxAndCloseItAfterPointerLeaves()
     {
         var controller = new HoverExpansionController(
-            TimeSpan.FromMilliseconds(280),
-            TimeSpan.FromMilliseconds(220));
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
         var boxId = Guid.NewGuid();
         var started = DateTimeOffset.UtcNow;
 
@@ -55,7 +55,7 @@ public sealed class LayoutTests
         Assert.Equal(boxId, controller.ExpandedBoxId);
         Assert.False(controller.Update(null, true, started).Changed);
         Assert.False(controller.Update(null, false, started.AddMilliseconds(1)).Changed);
-        var transition = controller.Update(null, false, started.AddMilliseconds(221));
+        var transition = controller.Update(null, false, started.AddMilliseconds(181));
 
         Assert.Equal(boxId, transition.CollapsedBoxId);
         Assert.Null(controller.ExpandedBoxId);

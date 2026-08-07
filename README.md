@@ -35,7 +35,6 @@ CrabDesk 是一个面向 Windows 10/11 的桌面盒子整理工具。盒子与�
 - 支持可配置的“显示桌面”和“立即整理”全局快捷键，并实时提示注册冲突
 - 关于页提供 Explorer 桌面宿主、显示器/DPI 和桌面表面诊断，可复制完整诊断信息
 - 支持重置默认布局，操作前自动备份并恢复被盒子占用的 Explorer 原生图标位置
-- 可选双击桌面空白区域隐藏或恢复 Explorer 与盒子中的项目图标
 - 已验证与 Wallpaper Engine 的 WorkerW 动态壁纸层级兼容
 - 使用 Shell 缩略图并按尺寸与文件状态缓存，缓存有容量上限且可在“关于”页手动清理
 - 通过 GitHub Releases 手动或启动时检查更新，支持稳定版/测试版通道、ETag 缓存、应用内下载、SHA-256/Authenticode 校验和安装程序启动
@@ -54,7 +53,6 @@ dotnet run --project CrabDesk.WinUI\CrabDesk.WinUI.csproj -c Debug
 .\build\verify-opacity.ps1
 .\build\verify-mapped-folders.ps1
 .\build\verify-organization-stress.ps1
-.\build\verify-desktop-double-click.ps1
 .\build\verify-github-updates.ps1
 .\build\verify-release-workflow.ps1
 .\build\verify-backup-restore-ui.ps1

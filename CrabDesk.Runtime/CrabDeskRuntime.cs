@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -19,14 +18,14 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly ILayoutStore _layoutStore = new JsonLayoutStore();
     private readonly IMonitorTopologyService _monitorService = new MonitorTopologyService();
     private readonly DesktopHostService _desktopHost = new();
-    private readonly IExplorerIconVisibility _iconVisibility = new ExplorerIconVisibility();
     private readonly IDesktopItemProvider _itemProvider = new DesktopItemProvider();
     private readonly IMappedFolderProvider _mappedFolderProvider = new MappedFolderProvider();
     private readonly IFileOperationService _fileOperations = new FileOperationService();
     private readonly IHotkeyService _hotkeyService = new GlobalHotkeyService();
     private readonly IDesktopContextMenuRegistration _desktopContextMenu = new DesktopContextMenuRegistration();
-    private IDesktopDoubleClickMonitor? _desktopDoubleClickMonitor;
+    private IDesktopInputMonitor? _desktopInputMonitor;
     private readonly IOrganizationRuleEngine _organizationRuleEngine = new OrganizationRuleEngine();
+    private readonly AiClassificationService _aiClassificationService = new();
     private readonly IUpdateService _updateService = new GitHubUpdateService();
     private readonly ShellIconProvider _iconProvider = new();
     private readonly RuntimeTimer _hostTimer;
@@ -38,10 +37,6 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly CancellationTokenSource _updateCancellation = new();
     private readonly Dictionary<Guid, MappedFolderSnapshot> _mappedFolderSnapshots = [];
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
-    private readonly Dictionary<string, DesktopIconPositionSnapshot> _originalIconPositions =
-        new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, FileAttributes> _originalFileAttributes =
-        new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
     private DesktopSurfaceManager? _surfaceManager;
@@ -56,10 +51,6 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly System.Drawing.Font _menuFont = new("Segoe UI", 10, System.Drawing.FontStyle.Regular);
     private System.Drawing.Icon? _applicationIcon;
     private bool _trayHintShown;
-    private bool _originalIconsHidden;
-    private bool _originalIconStateCaptured;
-    private string? _recoveryMarker;
-    private bool _guardStarted;
     private bool _disposed;
     private bool _hostCheckInProgress;
     private DateTimeOffset _lastMappedHealthCheckAt;
@@ -199,6 +190,7 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         DiagnosticLog.Info("Runtime initialization started");
         State = await _layoutStore.LoadAsync();
+        State.Settings.AiClassification.ApiKey = AiApiKeyStore.Load(GetAiApiKeyPath());
         MigrateGlobalHoverExpansionSetting();
         SynchronizeBoxStyles();
         DiagnosticLog.Info($"State loaded schema={State.SchemaVersion} takeover={State.Settings.TakeOverDesktop} boxes={State.Boxes.Count}");
@@ -211,6 +203,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         var cachedUpdate = State.Settings.Updates;
         var cachedStatus = cachedUpdate.LastStatus;
+        var cachedMessage = cachedUpdate.LastMessage;
         if (SemanticVersion.TryParse(CurrentVersion, out var currentSemanticVersion) &&
             SemanticVersion.TryParse(cachedUpdate.LatestKnownVersion, out var cachedSemanticVersion) &&
             cachedStatus is UpdateCheckStatus.UpToDate or UpdateCheckStatus.UpdateAvailable)
@@ -218,6 +211,17 @@ public sealed class CrabDeskRuntime : IDisposable
             cachedStatus = cachedSemanticVersion.CompareTo(currentSemanticVersion) > 0
                 ? UpdateCheckStatus.UpdateAvailable
                 : UpdateCheckStatus.UpToDate;
+        }
+        // A stale failed check (for example a legacy 404 from an older build)
+        // must not surface as the current state on startup. Degrade it to
+        // NotChecked so the user is invited to re-check instead of reading an
+        // outdated error forever.
+        if (cachedStatus == UpdateCheckStatus.Failed &&
+            cachedUpdate.LastCheckedAt is { } lastCheckedAt &&
+            DateTimeOffset.Now - lastCheckedAt > TimeSpan.FromHours(6))
+        {
+            cachedStatus = UpdateCheckStatus.NotChecked;
+            cachedMessage = "上次检查更新失败，请点击重新检查";
         }
         LastUpdateCheck = new UpdateCheckResult(
             cachedStatus,
@@ -233,15 +237,15 @@ public sealed class CrabDeskRuntime : IDisposable
             cachedUpdate.CachedSha256Url,
             cachedUpdate.CachedIsPrerelease,
             cachedUpdate.CachedETag,
-            cachedUpdate.LastMessage);
+            cachedMessage);
         State.Settings.StartWithWindows = StartupRegistration.IsEnabled();
         ApplyHotkeys();
-        // CrabDesk keeps Explorer's desktop context menu untouched. Disable and
-        // remove any entry installed by an earlier version during startup.
+        // Expose one desktop-level CrabDesk entry whose secondary commands are
+        // handled by the application's single-instance command channel.
         try
         {
             _desktopContextMenu.SetEnabled(
-                false,
+                true,
                 Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "CrabDesk.WinUI.exe"));
         }
         catch
@@ -252,27 +256,18 @@ public sealed class CrabDeskRuntime : IDisposable
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         _desktopHost.Refresh();
         EnsureDesktopInput("startup");
-        ConfigureDesktopDoubleClickMonitor(State.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick);
-        RecoverStaleIconState();
+        if (State.Settings.TakeOverDesktop)
+        {
+            ConfigureDesktopInputMonitor();
+        }
         Monitors = _monitorService.GetMonitors();
         NormalizeMonitorIds();
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         await RefreshItemsAsync(false);
-        await RunDailyBackupIfNeededAsync();
+        await RunScheduledBackupIfNeededAsync();
         if (State.Organization.Enabled && State.Organization.RunOnStartup)
         {
             ApplyOrganizationRules();
-        }
-
-        var assignedItems = GetAssignedDesktopItems();
-        for (var attempt = 1; attempt <= 6 && assignedItems.Any(item =>
-                 !_originalIconPositions.ContainsKey(item.Key.ToString())); attempt++)
-        {
-            await Task.Delay(250);
-            _desktopHost.Refresh();
-            var captured = CaptureOriginalIconPositions(assignedItems);
-            DiagnosticLog.Info(
-                $"Assigned icon startup capture retry={attempt} captured={captured} total={_originalIconPositions.Count}/{assignedItems.Count}");
         }
 
         if (State.Settings.TakeOverDesktop)
@@ -336,6 +331,20 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public DesktopBox AddBox(string title = "新盒子")
     {
+        var box = CreateBoxCore(title);
+        if (IsPaused)
+        {
+            SetPaused(false);
+        }
+        else
+        {
+            NotifyWorkspaceChanged(true);
+        }
+        return box;
+    }
+
+    private DesktopBox CreateBoxCore(string title)
+    {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
         var shared = State.Boxes.FirstOrDefault();
         var box = new DesktopBox
@@ -348,14 +357,6 @@ public sealed class CrabDeskRuntime : IDisposable
             Appearance = CloneAppearance(shared?.Appearance)
         };
         State.Boxes.Add(box);
-        if (IsPaused)
-        {
-            SetPaused(false);
-        }
-        else
-        {
-            NotifyWorkspaceChanged(true);
-        }
         return box;
     }
 
@@ -437,7 +438,6 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             return;
         }
-        CaptureOriginalIconPositions([item]);
         State.Assignments[itemKey] = boxId;
         MoveItemOrderKey(itemKey, boxId);
         NotifyWorkspaceChanged(true);
@@ -490,7 +490,6 @@ public sealed class CrabDeskRuntime : IDisposable
         var importedSet = imported.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var item in Items.Where(item => item.FileSystemPath is not null && importedSet.Contains(Path.GetFullPath(item.FileSystemPath))))
         {
-            CaptureOriginalIconPositions([item]);
             State.Assignments[item.Key.ToString()] = boxId;
             MoveItemOrderKey(item.Key.ToString(), boxId);
         }
@@ -638,13 +637,7 @@ public sealed class CrabDeskRuntime : IDisposable
     public async Task RenameItemAsync(DesktopItemRef item, string newName, Guid boxId)
     {
         var oldKey = item.Key.ToString();
-        var oldPath = item.FileSystemPath is null ? null : Path.GetFullPath(item.FileSystemPath);
         var destination = await _fileOperations.RenameAsync(item, newName);
-        if (oldPath is not null && _originalFileAttributes.Remove(oldPath, out var originalAttributes))
-        {
-            _originalFileAttributes[Path.GetFullPath(destination)] = originalAttributes;
-            WriteRecoveryMarker();
-        }
         if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder == true)
         {
             await RefreshMappedFoldersAsync();
@@ -669,14 +662,6 @@ public sealed class CrabDeskRuntime : IDisposable
         var newKey = renamed.Key.ToString();
         State.Assignments.Remove(oldKey);
         State.Assignments[newKey] = boxId;
-        if (_originalIconPositions.Remove(oldKey, out var originalPosition))
-        {
-            _originalIconPositions[newKey] = originalPosition;
-            if (_originalIconStateCaptured)
-            {
-                WriteRecoveryMarker();
-            }
-        }
         ReplaceItemOrderKey(oldKey, newKey);
         NotifyWorkspaceChanged(true);
     }
@@ -688,15 +673,10 @@ public sealed class CrabDeskRuntime : IDisposable
         Items = State.Settings.ShowSystemItems
             ? items
             : items.Where(item => !item.IsSystem || State.Assignments.ContainsKey(item.Key.ToString())).ToArray();
-        CaptureOriginalIconPositions(GetAssignedDesktopItems());
         await RefreshMappedFoldersAsync(false);
         if (applyDesktopRules && State.Organization.Enabled && State.Organization.RunOnDesktopChanges)
         {
             ApplyOrganizationRules(false);
-        }
-        if (!IsPaused && _surfaceManager is not null)
-        {
-            HideAssignedDesktopItems("item refresh");
         }
         _surfaceManager?.Refresh();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -716,6 +696,10 @@ public sealed class CrabDeskRuntime : IDisposable
         if (paused)
         {
             AreDesktopItemsHidden = false;
+            if (_desktopInputMonitor is not null)
+            {
+                _desktopInputMonitor.Enabled = false;
+            }
             try
             {
                 _surfaceManager?.Dispose();
@@ -725,22 +709,11 @@ public sealed class CrabDeskRuntime : IDisposable
                 _surfaceManager = null;
                 EnsureDesktopInput("pause");
             }
-            RestoreOriginalFileAttributes(true);
-            RestoreOriginalIconPositions(true);
-            _iconVisibility.SetIconsHidden(_originalIconsHidden);
         }
         else
         {
-            if (!_originalIconStateCaptured)
-            {
-                _originalIconsHidden = State.MigratedFromLegacyIconTakeover
-                    ? false
-                    : _iconVisibility.GetIconsHidden();
-                _originalIconStateCaptured = true;
-            }
-            EnsureRecoveryGuard();
+            ConfigureDesktopInputMonitor();
             AreDesktopItemsHidden = false;
-            CaptureOriginalIconPositions(GetAssignedDesktopItems());
             ActivateDesktopSurfaces("resume");
         }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -785,24 +758,6 @@ public sealed class CrabDeskRuntime : IDisposable
         binding.Modifiers = modifiers;
         binding.Key = key;
         ApplyHotkeys();
-        Changed?.Invoke(this, EventArgs.Empty);
-        ScheduleSave();
-    }
-
-    public void SetToggleIconsOnDesktopDoubleClick(bool enabled)
-    {
-        ConfigureDesktopDoubleClickMonitor(enabled);
-        State.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick = enabled;
-        if (!enabled && AreDesktopItemsHidden)
-        {
-            AreDesktopItemsHidden = false;
-            if (!IsPaused)
-            {
-                HideAssignedDesktopItems("double-click disabled");
-            }
-            _iconVisibility.SetIconsHidden(_originalIconsHidden);
-            _surfaceManager?.Refresh();
-        }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
@@ -1191,19 +1146,6 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
-    public void SetBoxMaterial(Guid? boxId, BoxMaterialKind material)
-    {
-        if (!Enum.IsDefined(material))
-        {
-            return;
-        }
-        foreach (var box in GetAppearanceTargets(boxId))
-        {
-            box.Appearance.Material = material;
-        }
-        NotifyWorkspaceChanged(true);
-    }
-
     public void SetBoxAccent(Guid? boxId, string value)
     {
         foreach (var box in GetAppearanceTargets(boxId))
@@ -1322,8 +1264,6 @@ public sealed class CrabDeskRuntime : IDisposable
     public async Task<LayoutResetResult> ResetLayoutAsync()
     {
         var backup = await CreateBackupAsync();
-        RestoreOriginalFileAttributes(true);
-        RestoreOriginalIconPositions(true);
         var primary = Monitors.FirstOrDefault(monitor => monitor.IsPrimary) ?? Monitors.FirstOrDefault();
         var disabledRules = LayoutCoordinator.ResetLayout(State, primary?.Id ?? "primary");
         _lastOrganizationAssignments = null;
@@ -1367,9 +1307,30 @@ public sealed class CrabDeskRuntime : IDisposable
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    public void SetBackupDirectory(string path)
+    {
+        var normalized = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim()));
+        Directory.CreateDirectory(normalized);
+        if (string.Equals(State.Settings.Backup.BackupDirectory, normalized, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        State.Settings.Backup.BackupDirectory = normalized;
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
     public void SetDailyBackup(bool enabled)
     {
         State.Settings.Backup.DailyBackup = enabled;
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
+    public void SetBackupIntervalHours(int hours)
+    {
+        State.Settings.Backup.IntervalHours = Math.Clamp(hours, 1, 8760);
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
@@ -1381,6 +1342,124 @@ public sealed class CrabDeskRuntime : IDisposable
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
+
+    public void ConfigureAiClassification(
+        string baseUrl,
+        string apiKey,
+        string model,
+        string categoryLabels,
+        string customPrompt,
+        bool reassignExistingItems)
+    {
+        var settings = State.Settings.AiClassification;
+        settings.BaseUrl = baseUrl?.Trim() ?? string.Empty;
+        settings.ApiKey = apiKey ?? string.Empty;
+        settings.Model = model?.Trim() ?? string.Empty;
+        settings.CategoryLabels = categoryLabels ?? string.Empty;
+        settings.CustomPrompt = customPrompt ?? string.Empty;
+        settings.ReassignExistingItems = reassignExistingItems;
+        try
+        {
+            AiApiKeyStore.Save(GetAiApiKeyPath(), settings.ApiKey);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to save encrypted AI API key", exception);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
+    public Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default) =>
+        _aiClassificationService.GetModelsAsync(State.Settings.AiClassification, cancellationToken);
+
+    public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
+        _aiClassificationService.TestModelConnectivityAsync(State.Settings.AiClassification, cancellationToken);
+
+    public async Task<AiClassificationApplyResult> ApplyAiClassificationAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var settings = State.Settings.AiClassification;
+        var labels = ParseAiCategoryLabels(settings.CategoryLabels);
+        if (labels.Count == 0)
+        {
+            throw new InvalidOperationException("请至少提供一个分类标签。");
+        }
+        var candidates = Items
+            .Where(item => settings.ReassignExistingItems || !State.Assignments.ContainsKey(item.Key.ToString()))
+            .Select(item => new AiClassificationInput(item.Key.ToString(), item.DisplayName))
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return new AiClassificationApplyResult(0, 0, 0, 0, 0, []);
+        }
+
+        var classifications = await _aiClassificationService.ClassifyAsync(
+            settings,
+            candidates,
+            labels,
+            cancellationToken);
+        if (classifications.Count == 0)
+        {
+            return new AiClassificationApplyResult(candidates.Length, 0, 0, 0, candidates.Length, []);
+        }
+
+        _lastOrganizationAssignments = new Dictionary<string, Guid>(
+            State.Assignments,
+            StringComparer.OrdinalIgnoreCase);
+        var boxesByTitle = State.Boxes
+            .Where(box => !box.IsMappedFolder)
+            .GroupBy(box => box.Title.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var createdBoxes = 0;
+        var applied = 0;
+        foreach (var classification in classifications)
+        {
+            if (!boxesByTitle.TryGetValue(classification.Label, out var box))
+            {
+                box = CreateBoxCore(classification.Label);
+                boxesByTitle[classification.Label] = box;
+                createdBoxes++;
+            }
+            var item = Items.FirstOrDefault(candidate => string.Equals(
+                candidate.Key.ToString(),
+                classification.ItemKey,
+                StringComparison.OrdinalIgnoreCase));
+            if (item is null)
+            {
+                continue;
+            }
+            State.Assignments[classification.ItemKey] = box.Id;
+            MoveItemOrderKey(classification.ItemKey, box.Id);
+            applied++;
+        }
+        if (applied > 0 || createdBoxes > 0)
+        {
+            if (IsPaused)
+            {
+                SetPaused(false);
+            }
+            else
+            {
+                NotifyWorkspaceChanged(true);
+            }
+        }
+        return new AiClassificationApplyResult(
+            candidates.Length,
+            classifications.Count,
+            applied,
+            createdBoxes,
+            candidates.Length - classifications.Count,
+            classifications);
+    }
+
+    private static IReadOnlyList<string> ParseAiCategoryLabels(string value) => value
+        .Split(['\r', '\n', ',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(label => label.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private string GetAiApiKeyPath() => Path.Combine(ConfigDirectory, "ai-api-key.dat");
 
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true)
     {
@@ -1409,11 +1488,6 @@ public sealed class CrabDeskRuntime : IDisposable
                     {
                         invalidTargets++;
                         continue;
-                    }
-                    var item = Items.FirstOrDefault(candidate => candidate.Key.ToString() == decision.ItemKey);
-                    if (item is not null)
-                    {
-                        CaptureOriginalIconPositions([item]);
                     }
                     State.Assignments[decision.ItemKey] = target;
                     MoveItemOrderKey(decision.ItemKey, target);
@@ -1489,11 +1563,6 @@ public sealed class CrabDeskRuntime : IDisposable
             if (State.Assignments.TryGetValue(key, out var current) && current == target)
             {
                 continue;
-            }
-            var item = Items.FirstOrDefault(candidate => candidate.Key.ToString() == key);
-            if (item is not null)
-            {
-                CaptureOriginalIconPositions([item]);
             }
             State.Assignments[key] = target;
             MoveItemOrderKey(key, target);
@@ -1688,14 +1757,10 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public async Task ReconnectDesktopAsync()
     {
-        var hostChanged = _desktopHost.Refresh();
-        if (_desktopDoubleClickMonitor is not null)
+        _desktopHost.Refresh();
+        if (_desktopInputMonitor is not null)
         {
-            _desktopDoubleClickMonitor.DesktopListView = _desktopHost.DesktopListView;
-        }
-        if (hostChanged)
-        {
-            RestoreOriginalIconPositions(false);
+            _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
         }
         Monitors = _monitorService.GetMonitors();
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
@@ -1714,81 +1779,70 @@ public sealed class CrabDeskRuntime : IDisposable
             return false;
         }
 
-        var resumeTakeover = !IsPaused;
-        DiagnosticLog.Info($"Desktop icon repair started resumeTakeover={resumeTakeover}");
-        if (resumeTakeover)
+        DiagnosticLog.Info($"Explorer shell repair started paused={IsPaused}");
+        _desktopHost.Refresh();
+        if (!_desktopHost.IsAvailable ||
+            _desktopHost.DesktopView == IntPtr.Zero ||
+            _desktopHost.DesktopListView == IntPtr.Zero)
         {
-            SetPaused(true);
-        }
-
-        try
-        {
-            await Task.Run(() =>
-            {
-                foreach (var process in Process.GetProcessesByName("explorer"))
-                {
-                    using (process)
-                    {
-                        try
-                        {
-                            process.Kill();
-                            process.WaitForExit(3000);
-                        }
-                        catch (InvalidOperationException)
-                        {
-                        }
-                        catch (System.ComponentModel.Win32Exception)
-                        {
-                        }
-                    }
-                }
-            });
-
-            await Task.Delay(500);
-            var windowsDirectory = Environment.GetEnvironmentVariable("WINDIR") ?? @"C:\Windows";
-            Process.Start(new ProcessStartInfo(Path.Combine(windowsDirectory, "explorer.exe"))
-            {
-                UseShellExecute = true
-            });
-
-            var recovered = false;
-            for (var attempt = 0; attempt < 40; attempt++)
-            {
-                await Task.Delay(250);
-                _desktopHost.Refresh();
-                if (_desktopHost.DesktopListView != IntPtr.Zero &&
-                    _desktopHost.EnsureIconImageList())
-                {
-                    recovered = true;
-                    break;
-                }
-            }
-
-            if (!recovered)
-            {
-                DiagnosticLog.Info("Desktop icon repair timed out waiting for Explorer");
-                Changed?.Invoke(this, EventArgs.Empty);
-                return false;
-            }
-
-            _iconProvider.ClearCache();
-            if (resumeTakeover)
-            {
-                SetPaused(false);
-            }
-            else
-            {
-                Changed?.Invoke(this, EventArgs.Empty);
-            }
-            DiagnosticLog.Info("Desktop icon repair completed");
-            return true;
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Desktop icon repair failed", exception);
+            DiagnosticLog.Info("Explorer shell repair skipped because the Explorer desktop view is unavailable");
             Changed?.Invoke(this, EventArgs.Empty);
             return false;
         }
+
+        if (_desktopInputMonitor is not null)
+        {
+            _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
+        }
+
+        var resumeTakeover = !IsPaused;
+        if (_desktopInputMonitor is not null)
+        {
+            _desktopInputMonitor.Enabled = false;
+            _desktopInputMonitor.DesktopListView = IntPtr.Zero;
+        }
+        _surfaceManager?.Dispose();
+        _surfaceManager = null;
+        EnsureDesktopInput("desktop icon repair");
+
+        _hostTimer.Stop();
+        var explorerRestarted = false;
+        try
+        {
+            explorerRestarted = await _desktopHost.RestartExplorerShellAsync();
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                _hostTimer.Start();
+            }
+        }
+        if (!explorerRestarted)
+        {
+            DiagnosticLog.Info("Explorer shell repair did not restore a desktop view before timeout");
+            Changed?.Invoke(this, EventArgs.Empty);
+            return false;
+        }
+
+        EnsureDesktopInput("Explorer shell restart");
+        Monitors = _monitorService.GetMonitors();
+        NormalizeMonitorIds();
+        LayoutCoordinator.NormalizeForMonitors(State, Monitors);
+        _iconProvider.ClearCache();
+        await RefreshItemsAsync(false);
+        if (resumeTakeover && !ActivateDesktopSurfaces("Explorer shell restart"))
+        {
+            return false;
+        }
+        if (resumeTakeover)
+        {
+            ConfigureDesktopInputMonitor();
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        DiagnosticLog.Info("Explorer shell repair completed");
+        return _desktopHost.GetIconImageListState().HasImageList;
     }
 
     public void RequestShowSettings(string? page = null) =>
@@ -1832,18 +1886,15 @@ public sealed class CrabDeskRuntime : IDisposable
             _surfaceManager = null;
             EnsureDesktopInput("dispose");
         }
-        RestoreOriginalFileAttributes(true);
-        RestoreOriginalIconPositions(true);
         _itemProvider.Dispose();
         _mappedFolderProvider.Dispose();
         _hotkeyService.Pressed -= OnGlobalHotkeyPressed;
         _hotkeyService.Dispose();
-        if (_desktopDoubleClickMonitor is not null)
+        if (_desktopInputMonitor is not null)
         {
-            _desktopDoubleClickMonitor.EmptyAreaClicked -= OnDesktopEmptyAreaClicked;
-            _desktopDoubleClickMonitor.EmptyAreaDoubleClicked -= OnDesktopEmptyAreaDoubleClicked;
-            _desktopDoubleClickMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;
-            _desktopDoubleClickMonitor.Dispose();
+            _desktopInputMonitor.EmptyAreaClicked -= OnDesktopEmptyAreaClicked;
+            _desktopInputMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;
+            _desktopInputMonitor.Dispose();
         }
         _updateCancellation.Cancel();
         if (_updateLock.Wait(0))
@@ -1860,23 +1911,8 @@ public sealed class CrabDeskRuntime : IDisposable
         _trayMenu?.Dispose();
         _applicationIcon?.Dispose();
         _menuFont.Dispose();
+        _aiClassificationService.Dispose();
         _iconProvider.ClearCache();
-        if (_originalIconStateCaptured)
-        {
-            _iconVisibility.SetIconsHidden(_originalIconsHidden);
-            if (_recoveryMarker is not null &&
-                _originalIconPositions.Count == 0 &&
-                _originalFileAttributes.Count == 0)
-            {
-                try
-                {
-                    File.Delete(_recoveryMarker);
-                }
-                catch
-                {
-                }
-            }
-        }
         SaveNowAsync().GetAwaiter().GetResult();
         _saveLock.Dispose();
         _mappedRefreshLock.Dispose();
@@ -1889,76 +1925,9 @@ public sealed class CrabDeskRuntime : IDisposable
         DiagnosticLog.Info($"Desktop takeover starting listView=0x{_desktopHost.DesktopListView.ToInt64():X} items={_allDesktopItems.Count}");
         IsPaused = false;
         AreDesktopItemsHidden = false;
-        _originalIconsHidden = State.MigratedFromLegacyIconTakeover
-            ? false
-            : _iconVisibility.GetIconsHidden();
-        _originalIconStateCaptured = true;
-        EnsureRecoveryGuard();
         if (ActivateDesktopSurfaces("startup"))
         {
             DiagnosticLog.Info("Desktop takeover started");
-        }
-    }
-
-    private void EnsureRecoveryGuard()
-    {
-        WriteRecoveryMarker();
-        if (_guardStarted)
-        {
-            return;
-        }
-
-        var guardPath = Path.Combine(AppContext.BaseDirectory, "CrabDesk.IconGuard.exe");
-        if (!File.Exists(guardPath))
-        {
-            return;
-        }
-
-        Process.Start(new ProcessStartInfo(guardPath)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            Arguments = $"{Environment.ProcessId} {_originalIconsHidden} \"{_recoveryMarker}\""
-        });
-        _guardStarted = true;
-    }
-
-    private void RecoverStaleIconState()
-    {
-        var marker = Path.Combine(Path.GetDirectoryName(_layoutStore.StatePath)!, "desktop-visibility.lock");
-        if (!File.Exists(marker))
-        {
-            return;
-        }
-
-        try
-        {
-            var recovery = JsonSerializer.Deserialize<DesktopRecoveryState>(File.ReadAllText(marker));
-            if (recovery is not null)
-            {
-                _iconVisibility.SetIconsHidden(recovery.PreviousHidden);
-                var attributesRestored = RestoreFileAttributeSnapshots(recovery.FileAttributes ?? []);
-                var workAreasRestored = recovery.WorkAreas is null ||
-                    DesktopIconPositionService.SetWorkAreas(
-                        _desktopHost.DesktopListView,
-                        recovery.WorkAreas.Select(area => System.Drawing.Rectangle.FromLTRB(
-                            area.Left,
-                            area.Top,
-                            area.Right,
-                            area.Bottom)).ToArray());
-                var positions = recovery.IconPositions ?? [];
-                var restored = DesktopIconPositionService.RestoreItemPositions(
-                    _desktopHost.DesktopListView,
-                    positions);
-                if (attributesRestored && workAreasRestored &&
-                    (positions.Count == 0 || restored >= positions.Count))
-                {
-                    File.Delete(marker);
-                }
-            }
-        }
-        catch
-        {
         }
     }
 
@@ -1971,7 +1940,6 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             return;
         }
-        CaptureOriginalIconPositions(GetAssignedDesktopItems());
         try
         {
             _surfaceManager = new DesktopSurfaceManager(this, _desktopHost, Monitors);
@@ -1992,17 +1960,12 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 throw new InvalidOperationException("No CrabDesk desktop surface was created.");
             }
-            var assignedItems = GetAssignedDesktopItems();
-            if (assignedItems.Count > 0 && assignedItems.Any(item =>
-                    !_originalIconPositions.ContainsKey(item.Key.ToString())))
-            {
-                throw new InvalidOperationException("Assigned desktop icon positions are not ready for recovery.");
-            }
-
             _surfaceManager.EnsureReady();
-            HideAssignedDesktopItems(context);
-            _iconVisibility.SetIconsHidden(_originalIconsHidden);
-            _surfaceManager.Refresh();
+            _surfaceManager.SetVisible(!AreDesktopItemsHidden);
+            if (!AreDesktopItemsHidden)
+            {
+                _surfaceManager.Refresh();
+            }
             return true;
         }
         catch (Exception exception)
@@ -2020,9 +1983,6 @@ public sealed class CrabDeskRuntime : IDisposable
             IsPaused = true;
             State.Settings.TakeOverDesktop = false;
             AreDesktopItemsHidden = false;
-            RestoreOriginalFileAttributes(true);
-            RestoreOriginalIconPositions(true);
-            _iconVisibility.SetIconsHidden(_originalIconStateCaptured && _originalIconsHidden);
             EnsureDesktopInput($"takeover rollback ({context})");
             return false;
         }
@@ -2061,7 +2021,6 @@ public sealed class CrabDeskRuntime : IDisposable
         source ??= new BoxAppearance();
         return new BoxAppearance
         {
-            Material = source.Material,
             Background = source.Background,
             Accent = source.Accent,
             Opacity = source.Opacity,
@@ -2260,10 +2219,6 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void NotifyWorkspaceChanged(bool rebuild)
     {
-        if (!IsPaused && _surfaceManager is not null)
-        {
-            HideAssignedDesktopItems("workspace change");
-        }
         if (rebuild)
         {
             _surfaceManager?.Refresh();
@@ -2340,25 +2295,21 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 EnsureDesktopInput("host refresh");
             }
-            if (_desktopDoubleClickMonitor is not null)
+            if (_desktopInputMonitor is not null)
             {
-                _desktopDoubleClickMonitor.DesktopListView = _desktopHost.DesktopListView;
+                _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
             }
             var monitors = _monitorService.GetMonitors();
             var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
                 .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
             if (!hostChanged && !topologyChanged)
             {
-                // This timer is a health check. Repainting here causes a visible desktop flash every two seconds.
-                _desktopHost.EnsureIconImageList();
+                // This timer only checks HWND/topology health. Do not touch
+                // Explorer's shared icon cache from a periodic callback.
                 return;
             }
 
             Monitors = monitors;
-            if (hostChanged)
-            {
-                RestoreOriginalIconPositions(false);
-            }
             NormalizeMonitorIds();
             LayoutCoordinator.NormalizeForMonitors(State, Monitors);
             if (!IsPaused)
@@ -2447,18 +2398,16 @@ public sealed class CrabDeskRuntime : IDisposable
         });
     }
 
-    private void ConfigureDesktopDoubleClickMonitor(bool enabled)
+    private void ConfigureDesktopInputMonitor()
     {
-        if (_desktopDoubleClickMonitor is null)
+        if (_desktopInputMonitor is null)
         {
-            _desktopDoubleClickMonitor = new DesktopDoubleClickMonitor();
-            _desktopDoubleClickMonitor.EmptyAreaClicked += OnDesktopEmptyAreaClicked;
-            _desktopDoubleClickMonitor.EmptyAreaDoubleClicked += OnDesktopEmptyAreaDoubleClicked;
-            _desktopDoubleClickMonitor.IconZoomRequested += OnDesktopIconZoomRequested;
+            _desktopInputMonitor = new DesktopInputMonitor();
+            _desktopInputMonitor.EmptyAreaClicked += OnDesktopEmptyAreaClicked;
+            _desktopInputMonitor.IconZoomRequested += OnDesktopIconZoomRequested;
         }
-        _desktopDoubleClickMonitor.DesktopListView = _desktopHost.DesktopListView;
-        _desktopDoubleClickMonitor.Enabled = true;
-        _desktopDoubleClickMonitor.DoubleClickEnabled = enabled;
+        _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
+        _desktopInputMonitor.Enabled = true;
     }
 
     private void OnDesktopEmptyAreaClicked(object? sender, EventArgs eventArgs)
@@ -2489,21 +2438,6 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
-    private void OnDesktopEmptyAreaDoubleClicked(object? sender, EventArgs eventArgs)
-    {
-        _beginInvoke(() =>
-        {
-            AreDesktopItemsHidden = !AreDesktopItemsHidden;
-            if (!AreDesktopItemsHidden)
-            {
-                HideAssignedDesktopItems("desktop icons shown");
-            }
-            _iconVisibility.SetIconsHidden(AreDesktopItemsHidden || _originalIconsHidden);
-            _surfaceManager?.Refresh();
-            Changed?.Invoke(this, EventArgs.Empty);
-        });
-    }
-
     private void OnSystemPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs eventArgs)
     {
         if (State.Settings.ThemeMode != ApplicationThemeMode.System || _disposed)
@@ -2528,10 +2462,6 @@ public sealed class CrabDeskRuntime : IDisposable
                 {
                     return;
                 }
-                if (_originalIconStateCaptured && !IsPaused)
-                {
-                    WriteRecoveryMarker();
-                }
                 await SaveNowAsync();
             });
             return;
@@ -2552,10 +2482,17 @@ public sealed class CrabDeskRuntime : IDisposable
         });
     }
 
-    private async Task RunDailyBackupIfNeededAsync()
+    private async Task RunScheduledBackupIfNeededAsync()
     {
         var settings = State.Settings.Backup;
-        if (!settings.DailyBackup || settings.LastBackupAt?.LocalDateTime.Date == DateTime.Today)
+        if (!settings.DailyBackup)
+        {
+            return;
+        }
+
+        var interval = TimeSpan.FromHours(Math.Clamp(settings.IntervalHours, 1, 8760));
+        if (settings.LastBackupAt is { } lastBackupAt &&
+            DateTimeOffset.Now - lastBackupAt < interval)
         {
             return;
         }
@@ -2577,10 +2514,8 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private DesktopBackupCapture CaptureDesktopBackup()
     {
-        CaptureOriginalIconPositions(GetAssignedDesktopItems());
         var positions = DesktopIconPositionService
             .CaptureAllItemPositions(_desktopHost.DesktopListView)
-            .Concat(_originalIconPositions.Values)
             .ToArray();
         return new DesktopBackupCapture(
             positions,
@@ -2604,6 +2539,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private async Task ApplyLoadedStateAsync(CrabDeskState state)
     {
+        var localAiApiKey = State.Settings.AiClassification.ApiKey;
         try
         {
             _surfaceManager?.Dispose();
@@ -2613,9 +2549,8 @@ public sealed class CrabDeskRuntime : IDisposable
             _surfaceManager = null;
             EnsureDesktopInput("state reload");
         }
-        RestoreOriginalFileAttributes(true);
-        RestoreOriginalIconPositions(true);
         State = state;
+        State.Settings.AiClassification.ApiKey = localAiApiKey;
         SynchronizeBoxStyles();
         _lastOrganizationAssignments = null;
         LastUpdateCheck = new UpdateCheckResult(
@@ -2626,9 +2561,16 @@ public sealed class CrabDeskRuntime : IDisposable
         StartupRegistration.SetEnabled(State.Settings.StartWithWindows);
         ApplyHotkeys();
         _desktopContextMenu.SetEnabled(
-            false,
+            true,
             Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "CrabDesk.WinUI.exe"));
-        ConfigureDesktopDoubleClickMonitor(State.Settings.DesktopBehavior.ToggleIconsOnDesktopDoubleClick);
+        if (State.Settings.TakeOverDesktop)
+        {
+            ConfigureDesktopInputMonitor();
+        }
+        else if (_desktopInputMonitor is not null)
+        {
+            _desktopInputMonitor.Enabled = false;
+        }
         ApplyTheme(false);
         Monitors = _monitorService.GetMonitors();
         NormalizeMonitorIds();
@@ -2636,13 +2578,8 @@ public sealed class CrabDeskRuntime : IDisposable
         await RefreshItemsAsync(false);
 
         IsPaused = !State.Settings.TakeOverDesktop;
-        if (IsPaused)
+        if (!IsPaused)
         {
-            _iconVisibility.SetIconsHidden(_originalIconsHidden);
-        }
-        else
-        {
-            EnsureRecoveryGuard();
             ActivateDesktopSurfaces("state reload");
         }
         Changed?.Invoke(this, EventArgs.Empty);
@@ -2956,317 +2893,11 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private int HideAssignedDesktopItems(string context)
-    {
-        var assignedItems = GetAssignedDesktopItems();
-        CaptureOriginalIconPositions(assignedItems);
-        var candidates = new List<(string Path, FileAttributes Attributes)>();
-        foreach (var item in assignedItems.Where(item => !string.IsNullOrWhiteSpace(item.FileSystemPath)))
-        {
-            var path = Path.GetFullPath(item.FileSystemPath!);
-            try
-            {
-                var attributes = File.GetAttributes(path);
-                if (!_originalFileAttributes.ContainsKey(path))
-                {
-                    _originalFileAttributes[path] = attributes;
-                }
-                candidates.Add((path, attributes));
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-        }
-        if (_originalIconStateCaptured)
-        {
-            WriteRecoveryMarker();
-        }
-        var hidden = 0;
-        foreach (var candidate in candidates)
-        {
-            try
-            {
-                var hiddenAttributes = candidate.Attributes | FileAttributes.Hidden | FileAttributes.System;
-                if (candidate.Attributes != hiddenAttributes)
-                {
-                    File.SetAttributes(candidate.Path, hiddenAttributes);
-                }
-                hidden++;
-            }
-            catch (IOException)
-            {
-                _originalFileAttributes.Remove(candidate.Path);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                _originalFileAttributes.Remove(candidate.Path);
-            }
-        }
-        if (_originalIconStateCaptured)
-        {
-            WriteRecoveryMarker();
-        }
-        if (hidden > 0)
-        {
-            _desktopHost.RefreshIconImageList();
-        }
-        DiagnosticLog.Info(
-            $"Assigned desktop items hidden context={context} requested={candidates.Count} hidden={hidden}");
-        return hidden;
-    }
-
-    private int CaptureOriginalIconPositions(IEnumerable<DesktopItemRef> items)
-    {
-        if (_desktopHost.DesktopListView == IntPtr.Zero)
-        {
-            return 0;
-        }
-
-        var uncaptured = items
-            .Where(item => !_originalIconPositions.ContainsKey(item.Key.ToString()))
-            .Select(item => new
-            {
-                Item = item,
-                Names = GetExplorerNames(item)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Select(NormalizeExplorerName)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray()
-            })
-            .Where(entry => entry.Names.Length > 0)
-            .ToArray();
-        if (uncaptured.Length == 0)
-        {
-            return 0;
-        }
-
-        var captured = DesktopIconPositionService.CaptureItemPositions(
-            _desktopHost.DesktopListView,
-            uncaptured.SelectMany(entry => entry.Names));
-        var positionsByName = captured
-            .GroupBy(position => NormalizeExplorerName(position.DisplayName), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                group => group.Key,
-                group => new Queue<DesktopIconPositionSnapshot>(group),
-                StringComparer.OrdinalIgnoreCase);
-
-        var capturedCount = 0;
-        foreach (var entry in uncaptured)
-        {
-            DesktopIconPositionSnapshot? position = null;
-            foreach (var name in entry.Names)
-            {
-                if (positionsByName.TryGetValue(name, out var queue) && queue.Count > 0)
-                {
-                    position = queue.Dequeue();
-                    break;
-                }
-            }
-            if (position is not { } capturedPosition)
-            {
-                continue;
-            }
-
-            _originalIconPositions[entry.Item.Key.ToString()] = capturedPosition;
-            capturedCount++;
-        }
-
-        if (capturedCount > 0 && _originalIconStateCaptured)
-        {
-            WriteRecoveryMarker();
-        }
-        return capturedCount;
-    }
-
-    private bool RestoreOriginalIconPositions(bool clear)
-    {
-        if (_originalIconPositions.Count == 0)
-        {
-            return true;
-        }
-
-        var restored = DesktopIconPositionService.RestoreItemPositions(
-            _desktopHost.DesktopListView,
-            _originalIconPositions.Values);
-        var complete = restored >= _originalIconPositions.Count;
-        if (clear && complete)
-        {
-            _originalIconPositions.Clear();
-            if (_originalIconStateCaptured)
-            {
-                WriteRecoveryMarker();
-            }
-        }
-        return complete;
-    }
-
-    private bool RestoreOriginalFileAttributes(bool clear)
-    {
-        var restoredPaths = new List<string>();
-        foreach (var pair in _originalFileAttributes)
-        {
-            try
-            {
-                if (File.Exists(pair.Key) || Directory.Exists(pair.Key))
-                {
-                    File.SetAttributes(pair.Key, pair.Value);
-                }
-                restoredPaths.Add(pair.Key);
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-        }
-        if (clear)
-        {
-            foreach (var path in restoredPaths)
-            {
-                _originalFileAttributes.Remove(path);
-            }
-        }
-        if (restoredPaths.Count > 0 && _originalIconStateCaptured)
-        {
-            WriteRecoveryMarker();
-        }
-        if (restoredPaths.Count > 0)
-        {
-            _desktopHost.RefreshIconImageList();
-        }
-        return restoredPaths.Count == _originalFileAttributes.Count ||
-            (clear && _originalFileAttributes.Count == 0);
-    }
-
-    private static bool RestoreFileAttributeSnapshots(IEnumerable<DesktopFileAttributeSnapshot> snapshots)
-    {
-        var complete = true;
-        foreach (var snapshot in snapshots)
-        {
-            try
-            {
-                if (File.Exists(snapshot.Path) || Directory.Exists(snapshot.Path))
-                {
-                    File.SetAttributes(snapshot.Path, (FileAttributes)snapshot.Attributes);
-                }
-            }
-            catch (IOException)
-            {
-                complete = false;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                complete = false;
-            }
-        }
-        return complete;
-    }
-
     private void UnassignItemCore(string itemKey)
     {
-        var item = _allDesktopItems.FirstOrDefault(candidate =>
-            string.Equals(candidate.Key.ToString(), itemKey, StringComparison.OrdinalIgnoreCase));
-        if (item?.FileSystemPath is { } fileSystemPath)
-        {
-            var path = Path.GetFullPath(fileSystemPath);
-            if (_originalFileAttributes.TryGetValue(path, out var attributes))
-            {
-                try
-                {
-                    File.SetAttributes(path, attributes);
-                    _originalFileAttributes.Remove(path);
-                }
-                catch (IOException)
-                {
-                }
-                catch (UnauthorizedAccessException)
-                {
-                }
-            }
-        }
-        if (_originalIconPositions.TryGetValue(itemKey, out var position))
-        {
-            if (DesktopIconPositionService.RestoreItemPositions(_desktopHost.DesktopListView, [position]) > 0)
-            {
-                _originalIconPositions.Remove(itemKey);
-            }
-            else
-            {
-                ScheduleIconPositionRestore(itemKey, position);
-            }
-        }
         State.Assignments.Remove(itemKey);
         MoveItemOrderKey(itemKey, null);
-        if (_originalIconStateCaptured)
-        {
-            WriteRecoveryMarker();
-        }
     }
-
-    private void ScheduleIconPositionRestore(string itemKey, DesktopIconPositionSnapshot position)
-        => ScheduleIconPositionRestore(itemKey, position, 0);
-
-    private void ScheduleIconPositionRestore(
-        string itemKey,
-        DesktopIconPositionSnapshot position,
-        int attempt)
-    {
-        _ = Task.Delay(attempt == 0 ? 350 : 250).ContinueWith(_ =>
-        {
-            if (_disposed)
-            {
-                return;
-            }
-            _beginInvoke(() =>
-            {
-                if (_disposed || !_originalIconPositions.ContainsKey(itemKey))
-                {
-                    return;
-                }
-                if (DesktopIconPositionService.RestoreItemPositions(
-                        _desktopHost.DesktopListView,
-                        [position]) > 0)
-                {
-                    _originalIconPositions.Remove(itemKey);
-                    WriteRecoveryMarker();
-                }
-                else if (attempt < 8)
-                {
-                    ScheduleIconPositionRestore(itemKey, position, attempt + 1);
-                }
-            });
-        }, TaskScheduler.Default);
-    }
-
-    private void WriteRecoveryMarker()
-    {
-        var root = Path.GetDirectoryName(_layoutStore.StatePath)!;
-        _recoveryMarker ??= Path.Combine(root, "desktop-visibility.lock");
-        var recovery = new DesktopRecoveryState
-        {
-            PreviousHidden = _originalIconsHidden,
-            IconPositions = _originalIconPositions.Values.ToList(),
-            WorkAreas = null,
-            FileAttributes = _originalFileAttributes.Select(pair =>
-                new DesktopFileAttributeSnapshot(pair.Key, (int)pair.Value)).ToList()
-        };
-        File.WriteAllText(_recoveryMarker, JsonSerializer.Serialize(recovery));
-    }
-
-    private static IEnumerable<string> GetExplorerNames(DesktopItemRef item)
-    {
-        yield return item.DisplayName;
-        if (item.FileSystemPath is not null)
-        {
-            yield return Path.GetFileName(item.FileSystemPath);
-        }
-    }
-
-    private static string NormalizeExplorerName(string value) => value.Trim().TrimEnd('.');
 
     private async void OnDesktopItemsChanged()
     {

@@ -92,6 +92,7 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();
         state.Settings.Backup ??= new BackupSettings();
+        state.Settings.AiClassification ??= new AiClassificationSettings();
         state.Settings.Hotkeys ??= new HotkeySettings();
         state.Settings.Updates ??= new UpdateSettings();
         if (!Enum.IsDefined(state.Settings.Updates.Channel))
@@ -112,6 +113,11 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.Updates.CachedSha256Url ??= string.Empty;
         state.Settings.Updates.RepositoryOwner = state.Settings.Updates.RepositoryOwner?.Trim() ?? string.Empty;
         state.Settings.Updates.RepositoryName = state.Settings.Updates.RepositoryName?.Trim() ?? string.Empty;
+        state.Settings.AiClassification.BaseUrl = state.Settings.AiClassification.BaseUrl?.Trim() ?? string.Empty;
+        state.Settings.AiClassification.ApiKey ??= string.Empty;
+        state.Settings.AiClassification.Model = state.Settings.AiClassification.Model?.Trim() ?? string.Empty;
+        state.Settings.AiClassification.CategoryLabels ??= string.Empty;
+        state.Settings.AiClassification.CustomPrompt ??= string.Empty;
         state.Settings.Hotkeys.ShowDesktop ??= new HotkeyBinding
         {
             Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
@@ -124,6 +130,11 @@ public sealed class JsonLayoutStore : ILayoutStore
         };
         NormalizeHotkey(state.Settings.Hotkeys.ShowDesktop, HotkeyKey.D);
         NormalizeHotkey(state.Settings.Hotkeys.OrganizeDesktop, HotkeyKey.O);
+        if (state.Settings.Backup.IntervalHours <= 0)
+        {
+            state.Settings.Backup.IntervalHours = 24;
+        }
+        state.Settings.Backup.IntervalHours = Math.Clamp(state.Settings.Backup.IntervalHours, 1, 8760);
         state.Settings.Backup.RetentionDays = Math.Clamp(state.Settings.Backup.RetentionDays, 1, 365);
         state.Settings.Appearance.CornerRadius = Math.Clamp(state.Settings.Appearance.CornerRadius, 0, 20);
         if (previousVersion < 18)
@@ -231,10 +242,6 @@ public sealed class JsonLayoutStore : ILayoutStore
         {
             box.Title = string.IsNullOrWhiteSpace(box.Title) ? "未命名盒子" : box.Title.Trim();
             box.Appearance ??= new BoxAppearance();
-            if (!Enum.IsDefined(box.Appearance.Material))
-            {
-                box.Appearance.Material = BoxMaterialKind.Solid;
-            }
             if (previousVersion < 12 && Math.Abs(box.Appearance.Opacity - 0.88) < 0.001)
             {
                 box.Appearance.Opacity = 1;

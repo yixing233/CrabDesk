@@ -37,7 +37,6 @@ public sealed class CrabDeskService : ICrabDeskService
     public Task SetShowSystemItemsAsync(bool enabled) => _runtime.SetShowSystemItemsAsync(enabled);
     public void SetConfirmDeleteBox(bool enabled) => _runtime.SetConfirmDeleteBox(enabled);
     public void SetLaunchToTray(bool enabled) => _runtime.SetLaunchToTray(enabled);
-    public void SetToggleIconsOnDesktopDoubleClick(bool enabled) => _runtime.SetToggleIconsOnDesktopDoubleClick(enabled);
     public void SetExpandBoxOnHover(bool enabled) => _runtime.SetExpandBoxOnHover(enabled);
     public void SetRefreshAfterRename(bool enabled) => _runtime.SetRefreshAfterRename(enabled);
     public void SetAnimationEnabled(bool enabled) => _runtime.SetAnimationEnabled(enabled);
@@ -66,12 +65,34 @@ public sealed class CrabDeskService : ICrabDeskService
     public Task ExportBackupAsync(string path) => _runtime.ExportBackupAsync(path);
     public Task RestoreBackupAsync(string path) => _runtime.RestoreBackupAsync(path);
     public Task DeleteBackupAsync(string path) => _runtime.DeleteBackupAsync(path);
+    public void SetBackupDirectory(string path) => _runtime.SetBackupDirectory(path);
     public void SetDailyBackup(bool enabled) => _runtime.SetDailyBackup(enabled);
+    public void SetBackupIntervalHours(int hours) => _runtime.SetBackupIntervalHours(hours);
     public Task SetBackupRetentionDaysAsync(int days) => _runtime.SetBackupRetentionDaysAsync(days);
     public void SetOrganizationEnabled(bool enabled) => _runtime.SetOrganizationEnabled(enabled);
     public void SetRunRulesOnStartup(bool enabled) => _runtime.SetRunRulesOnStartup(enabled);
     public void SetRunRulesOnDesktopChanges(bool enabled) => _runtime.SetRunRulesOnDesktopChanges(enabled);
     public void SetReassignExistingItems(bool enabled) => _runtime.SetReassignExistingItems(enabled);
+    public void ConfigureAiClassification(
+        string baseUrl,
+        string apiKey,
+        string model,
+        string categoryLabels,
+        string customPrompt,
+        bool reassignExistingItems) =>
+        _runtime.ConfigureAiClassification(
+            baseUrl,
+            apiKey,
+            model,
+            categoryLabels,
+            customPrompt,
+            reassignExistingItems);
+    public Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default) =>
+        _runtime.GetAiModelsAsync(cancellationToken);
+    public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
+        _runtime.TestAiModelConnectivityAsync(cancellationToken);
+    public Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default) =>
+        _runtime.ApplyAiClassificationAsync(cancellationToken);
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true) => _runtime.ApplyOrganizationRules(notify);
     public void UndoLastOrganization() => _runtime.UndoLastOrganization();
     public void InstallDefaultOrganizationRules() => _runtime.InstallDefaultOrganizationRules();
@@ -88,7 +109,6 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetIconSpacing(double horizontal, double vertical) => _runtime.SetIconSpacing(horizontal, vertical);
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment) => _runtime.SetBoxTitleAlignment(boxId, alignment);
-    public void SetBoxMaterial(Guid? boxId, BoxMaterialKind material) => _runtime.SetBoxMaterial(boxId, material);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);
     public void SetBoxOpacity(Guid? boxId, double value) => _runtime.SetBoxOpacity(boxId, value);

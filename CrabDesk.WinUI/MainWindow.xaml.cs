@@ -4,8 +4,10 @@ using CrabDesk.WinUI.Views;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Navigation;
 using Windows.Graphics;
 using Windows.UI.ViewManagement;
 
@@ -40,6 +42,10 @@ public sealed partial class MainWindow : Window
         _infoBarService = infoBarService;
         InitializeComponent();
         _infoBarService.Requested += OnInfoBarRequested;
+        RegisterFocusDismissalHandler(RootGrid);
+        RegisterFocusDismissalHandler(Navigation);
+        RegisterFocusDismissalHandler(ContentFrame);
+        ContentFrame.Navigated += ContentFrame_OnNavigated;
 
         Title = "CrabDesk 设置";
         ExtendsContentIntoTitleBar = true;
@@ -55,6 +61,73 @@ public sealed partial class MainWindow : Window
 
         RootGrid.Loaded += OnRootLoaded;
         Navigation.SelectedItem = Navigation.MenuItems[0];
+    }
+
+    private void ContentFrame_OnNavigated(object sender, NavigationEventArgs eventArgs)
+    {
+        if (eventArgs.Content is UIElement page)
+        {
+            RegisterFocusDismissalHandler(page);
+        }
+    }
+
+    private void RegisterFocusDismissalHandler(UIElement element)
+    {
+        element.AddHandler(
+            UIElement.PointerPressedEvent,
+            new PointerEventHandler(OnRootPointerPressed),
+            true);
+        element.AddHandler(
+            UIElement.PointerReleasedEvent,
+            new PointerEventHandler(OnRootPointerPressed),
+            true);
+        element.AddHandler(
+            UIElement.TappedEvent,
+            new TappedEventHandler(OnRootTapped),
+            true);
+    }
+
+    private void OnRootPointerPressed(object sender, PointerRoutedEventArgs eventArgs)
+    {
+        DismissInputFocus(eventArgs.OriginalSource as DependencyObject);
+    }
+
+    private void OnRootTapped(object sender, TappedRoutedEventArgs eventArgs)
+    {
+        DismissInputFocus(eventArgs.OriginalSource as DependencyObject);
+    }
+
+    private void DismissInputFocus(DependencyObject? source)
+    {
+        if (source is not null && IsWithinInputControl(source))
+        {
+            return;
+        }
+
+        var focusedElement = FocusManager.GetFocusedElement(RootGrid.XamlRoot) as DependencyObject;
+        if (focusedElement is null || !IsWithinInputControl(focusedElement))
+        {
+            return;
+        }
+
+        if (!FocusDismissalTarget.Focus(FocusState.Programmatic))
+        {
+            Navigation.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private static bool IsWithinInputControl(DependencyObject element)
+    {
+        for (DependencyObject? current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is TextBox or PasswordBox or RichEditBox or AutoSuggestBox or
+                NumberBox or ComboBox or CalendarDatePicker or DatePicker or TimePicker)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnRootLoaded(object sender, RoutedEventArgs eventArgs)
@@ -181,6 +254,7 @@ public sealed partial class MainWindow : Window
             "hotkeys" => typeof(HotkeysPage),
             "backup" => typeof(BackupPage),
             "organization" => typeof(OrganizationPage),
+            "ai" => typeof(AiClassificationPage),
             "appearance" => typeof(AppearancePage),
             "boxes" => typeof(BoxesPage),
             "about" => typeof(AboutPage),

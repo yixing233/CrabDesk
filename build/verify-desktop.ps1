@@ -265,7 +265,6 @@ $config = @{
             LaunchToTray = $true
             RefreshAfterRename = $true
             ShowDesktopContextMenu = $false
-            ToggleIconsOnDesktopDoubleClick = $false
             ExpandBoxOnHover = $true
         }
         Backup = @{ DailyBackup = $false; RetentionDays = 7; BackupDirectory = "" }

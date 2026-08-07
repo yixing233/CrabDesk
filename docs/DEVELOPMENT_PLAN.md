@@ -41,7 +41,6 @@ CrabDesk 是面向 Windows 10/11 x64 的桌面整理工具。产品以桌面盒�
 - 登录 Windows 后启动。
 - 启动后仅驻留托盘。
 - 启动时确保 Explorer 桌面图标可见。
-- 双击桌面空白区域显示或隐藏图标。
 - 鼠标移入标题栏时展开折叠盒子。
 - 文件重命名或桌面项目变化后刷新分组。
 - 深色、浅色、跟随系统主题切换。
@@ -150,7 +149,7 @@ OrganizationRule
   TargetBoxId, Action
 
 DesktopBehaviorSettings
-  LaunchToTray, ToggleIconsOnDesktopDoubleClick
+  LaunchToTray
   ExpandBoxOnHover, RefreshAfterRename
 
 GlobalAppearanceSettings
@@ -231,7 +230,6 @@ UpdateCheckResult
 - [x] 将“桌面变化后自动刷新”接入文件系统事件；关闭后停止普通变化刷新，但实时整理仍可按自身开关触发，手动重连和系统唤醒始终重新枚举。
 - [x] 增加可关闭的界面动画；盒子折叠/展开使用窗口区域缓动，主题切换使用窗口淡入过渡，并通过真实桌面区域中间态验证。
 - [x] 增加启动到托盘和系统桌面项目开关，并完成独立配置目录的进程验证。
-- [x] 增加双击桌面空白区域显示或隐藏 Explorer 原生图标与盒内图标，并覆盖动态桌面宿主命中和退出恢复验证。
 - [x] 完成浅色、深色与跟随系统主题下全部设置页控件、托盘菜单和窗口标题栏验收，并生成标准、底部及展开视图共 `51` 张验证截图。
 
 ### 里程碑 C：自动整理

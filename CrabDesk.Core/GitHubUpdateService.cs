@@ -80,7 +80,7 @@ public sealed class GitHubUpdateService : IUpdateService
                 return new UpdateCheckResult(
                     UpdateCheckStatus.Failed,
                     request.CurrentVersion,
-                    Message: "GitHub 中暂无可用的 Release");
+                    Message: "GitHub 中暂无可用的 Release，请确认更新仓库地址正确或稍后重试");
             }
             if ((response.StatusCode == HttpStatusCode.Forbidden ||
                  response.StatusCode == HttpStatusCode.TooManyRequests) &&

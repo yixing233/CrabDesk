@@ -223,12 +223,10 @@ public sealed class ViewModelTests
         viewModel.TitleFontFamily = "Microsoft YaHei UI";
         viewModel.LabelFontFamily = "Microsoft YaHei UI";
         viewModel.LabelFontSize = 12.5;
-        viewModel.BoxMaterial = BoxMaterialKind.AcrylicPreview;
 
         service.Verify(item => item.SetBoxTitleFontFamily(null, "Microsoft YaHei UI"), Times.Once);
         service.Verify(item => item.SetBoxLabelFontFamily(null, "Microsoft YaHei UI"), Times.Once);
         service.Verify(item => item.SetBoxLabelFontSize(null, 12.5), Times.Once);
-        service.Verify(item => item.SetBoxMaterial(null, BoxMaterialKind.AcrylicPreview), Times.Once);
     }
 
     [Fact]
@@ -296,6 +294,46 @@ public sealed class ViewModelTests
         service.Verify(item => item.LaunchUpdateInstaller("C:\\Updates\\CrabDesk-Setup-x64.exe"), Times.Once);
     }
 
+    [Fact]
+    public async Task AboutViewModelCopiesDiagnosticsAndReportsSuccess()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.GetDesktopHostDiagnosticsText()).Returns("diagnostic text");
+        var clipboard = new Mock<IClipboardService>();
+        clipboard.Setup(item => item.SetTextAsync("diagnostic text")).Returns(Task.CompletedTask);
+        var viewModel = new AboutViewModel(
+            service.Object,
+            Mock.Of<IDialogService>(),
+            clipboard.Object);
+
+        await viewModel.CopyDiagnosticsCommand.ExecuteAsync(null);
+
+        clipboard.Verify(item => item.SetTextAsync("diagnostic text"), Times.Once);
+        Assert.Equal("诊断信息已复制", viewModel.MaintenanceStatus);
+        Assert.Equal(Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success, viewModel.MaintenanceInfoSeverity);
+    }
+
+    [Fact]
+    public async Task AboutViewModelReportsClipboardFailureWithoutThrowing()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.GetDesktopHostDiagnosticsText()).Returns("diagnostic text");
+        var clipboard = new Mock<IClipboardService>();
+        clipboard.Setup(item => item.SetTextAsync(It.IsAny<string>()))
+            .Returns(Task.FromException(new System.Runtime.InteropServices.COMException(
+                "Clipboard is busy",
+                unchecked((int)0x800401D0))));
+        var viewModel = new AboutViewModel(
+            service.Object,
+            Mock.Of<IDialogService>(),
+            clipboard.Object);
+
+        await viewModel.CopyDiagnosticsCommand.ExecuteAsync(null);
+
+        Assert.Contains("复制诊断失败", viewModel.MaintenanceStatus);
+        Assert.Equal(Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error, viewModel.MaintenanceInfoSeverity);
+    }
+
     private static Mock<ICrabDeskService> CreateService(CrabDeskState state)
     {
         var service = new Mock<ICrabDeskService>();
@@ -303,6 +341,8 @@ public sealed class ViewModelTests
         service.SetupGet(item => item.Boxes).Returns(state.Boxes);
         service.SetupGet(item => item.DesktopConnected).Returns(true);
         service.SetupGet(item => item.BackupDirectory).Returns("C:\\Backups");
+        service.SetupGet(item => item.LastUpdateCheck)
+            .Returns(new UpdateCheckResult(UpdateCheckStatus.NotChecked, "0.6.0"));
         return service;
     }
 

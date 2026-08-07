@@ -25,8 +25,6 @@ public sealed class EnumDisplayConverter : IValueConverter
         BackdropKind.MicaAlt => "云母（增强）",
         BackdropKind.Acrylic => "亚克力",
 
-        BoxMaterialKind.Solid => "纯色",
-        BoxMaterialKind.AcrylicPreview => "Acrylic（预览）",
 
         BoxTitleAlignment.Left => "左对齐",
         BoxTitleAlignment.Center => "居中",

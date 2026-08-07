@@ -55,6 +55,11 @@
                         <SymbolIcon Symbol="Filter" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="AI 分类" Tag="ai" AutomationProperties.Name="AI 图标分类">
+                    <NavigationViewItem.Icon>
+                        <icons:FluentIcon Icon="Bot" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Content="主题与外观" Tag="appearance" AutomationProperties.Name="主题与外观">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="Edit" />
@@ -96,5 +101,15 @@
                      IsClosable="True"
                      Closed="GlobalInfoBar_OnClosed" />
         </Grid>
+
+        <Button x:Name="FocusDismissalTarget"
+                Grid.RowSpan="2"
+                Width="1"
+                Height="1"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Opacity="0"
+                IsTabStop="True"
+                AutomationProperties.AccessibilityView="Raw" />
     </Grid>
 </Window>

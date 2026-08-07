@@ -174,12 +174,23 @@ public partial class AboutViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void CopyDiagnostics()
+    private async Task CopyDiagnosticsAsync()
     {
-        _clipboard.SetText(_service.GetDesktopHostDiagnosticsText());
-        MaintenanceInfoSeverity = InfoBarSeverity.Success;
-        _notifications?.Show("诊断信息已复制", MaintenanceInfoSeverity);
-        MaintenanceStatus = "诊断信息已复制";
+        try
+        {
+            await _clipboard.SetTextAsync(_service.GetDesktopHostDiagnosticsText());
+            MaintenanceInfoSeverity = InfoBarSeverity.Success;
+            _notifications?.Show("诊断信息已复制", MaintenanceInfoSeverity);
+            MaintenanceStatus = "诊断信息已复制";
+        }
+        catch (Exception exception)
+        {
+            const string message = "复制诊断失败：系统剪贴板暂时不可用，请稍后重试";
+            global::CrabDesk.WinUI.AppDiagnostic.Error("Copy diagnostics failed", exception);
+            MaintenanceInfoSeverity = InfoBarSeverity.Error;
+            _notifications?.Show(message, MaintenanceInfoSeverity);
+            MaintenanceStatus = message;
+        }
     }
 
     [RelayCommand]

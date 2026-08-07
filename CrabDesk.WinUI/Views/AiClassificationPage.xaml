@@ -1,0 +1,90 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.AiClassificationPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:icons="using:FluentIcons.WinUI">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch">
+        <StackPanel Padding="{StaticResource PagePadding}" Spacing="12">
+            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
+                <StackPanel Spacing="12">
+                    <TextBox Header="接口地址"
+                             PlaceholderText="https://api.example.com/v1"
+                             Text="{Binding BaseUrl, Mode=TwoWay}" />
+                    <PasswordBox x:Name="ApiKeyBox"
+                                 Header="API Key"
+                                 PlaceholderText="本地模型可留空"
+                                 PasswordChanged="ApiKeyBox_OnPasswordChanged" />
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox Header="模型"
+                                  IsEditable="True"
+                                  ItemsSource="{Binding Models}"
+                                  Text="{Binding Model, Mode=TwoWay}"
+                                  MaxDropDownHeight="200"
+                                  PlaceholderText="选择或输入模型名称"
+                                  HorizontalAlignment="Stretch" />
+                        <Button Grid.Column="1"
+                                Content="获取模型列表"
+                                Command="{Binding LoadModelsCommand}"
+                                VerticalAlignment="Bottom" />
+                        <Button Grid.Column="2"
+                                Content="测试模型连通性"
+                                Command="{Binding TestConnectivityCommand}"
+                                VerticalAlignment="Bottom" />
+                    </Grid>
+                    <TextBlock Text="支持常见的 GET /models 返回结构；API Key 保存在本机 CrabDesk 配置中。"
+                               Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="分类规则" FontWeight="SemiBold" />
+                        <TextBlock Text="标签会对应同名盒子；没有对应盒子时会自动创建。"
+                                   Style="{StaticResource SecondaryBodyStyle}" />
+                    </StackPanel>
+                    <TextBox Header="分类标签"
+                             PlaceholderText="工作&#x0a;开发工具&#x0a;游戏&#x0a;影音&#x0a;系统工具"
+                             Text="{Binding CategoryLabels, Mode=TwoWay}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="112" />
+                    <TextBox Header="自定义提示词"
+                             Text="{Binding CustomPrompt, Mode=TwoWay}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="112" />
+                    <CheckBox Content="重新分类已经放入盒子的图标"
+                              IsChecked="{Binding ReassignExistingItems, Mode=TwoWay}" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Spacing="3">
+                        <TextBlock Text="开始识别桌面图标" FontWeight="SemiBold" />
+                        <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。"
+                                   Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
+                        <Button Content="AI 自动分类"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Command="{Binding ClassifyCommand}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

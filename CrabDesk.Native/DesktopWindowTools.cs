@@ -38,8 +38,9 @@ public static class DesktopWindowTools
     public static void AttachAsDesktopChild(IntPtr hwnd, IntPtr desktopParent)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
-        style &= ~(0x00CF0000L | NativeMethods.WsPopup | NativeMethods.WsDisabled | NativeMethods.WsClipSiblings);
-        style |= NativeMethods.WsChild | NativeMethods.WsVisible;
+        style &= ~(0x00CF0000L | NativeMethods.WsPopup | NativeMethods.WsDisabled |
+            NativeMethods.WsClipSiblings | NativeMethods.WsVisible);
+        style |= NativeMethods.WsChild;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(style));
 
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
@@ -63,9 +64,9 @@ public static class DesktopWindowTools
             NativeMethods.HwndTop,
             x,
             y,
-            Math.Max(1, width),
-            Math.Max(1, height),
-            NativeMethods.SwpNoActivate | NativeMethods.SwpNoOwnerZOrder | NativeMethods.SwpShowWindow))
+                Math.Max(1, width),
+                Math.Max(1, height),
+                NativeMethods.SwpNoActivate | NativeMethods.SwpNoOwnerZOrder))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Unable to position the CrabDesk surface.");
         }
@@ -74,6 +75,36 @@ public static class DesktopWindowTools
             throw new InvalidOperationException("The CrabDesk surface is not above the Explorer desktop view.");
         }
         NormalizeDesktopSurfaceStyles(hwnd);
+    }
+
+    /// <summary>
+    /// Explorer can raise the desktop list view when its icon visibility is
+    /// toggled. Restore the existing CrabDesk surface to the top of the
+    /// desktop view without changing its bounds or activating it.
+    /// </summary>
+    public static bool RestoreAboveDesktop(IntPtr hwnd, IntPtr desktopView)
+    {
+        if (desktopView == IntPtr.Zero || NativeMethods.GetParent(hwnd) != NativeMethods.GetParent(desktopView))
+        {
+            return false;
+        }
+
+        if (!NativeMethods.SetWindowPos(
+                hwnd,
+                NativeMethods.HwndTop,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoActivate |
+                NativeMethods.SwpNoMove |
+                NativeMethods.SwpNoSize |
+                NativeMethods.SwpNoOwnerZOrder))
+        {
+            return false;
+        }
+
+        return IsWindowAbove(hwnd, desktopView);
     }
 
     public static bool IsWindowAbove(IntPtr hwnd, IntPtr other)
@@ -115,8 +146,10 @@ public static class DesktopWindowTools
     public static void NormalizeDesktopSurfaceStyles(IntPtr hwnd)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
+        // Preserve the caller's current visibility state. Surface startup keeps
+        // the window hidden until its clipping region has been verified.
         var expectedStyle = (style & ~(NativeMethods.WsPopup | NativeMethods.WsDisabled | NativeMethods.WsClipSiblings)) |
-            NativeMethods.WsChild | NativeMethods.WsVisible;
+            NativeMethods.WsChild;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(expectedStyle));
 
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
@@ -170,25 +203,41 @@ public static class DesktopWindowTools
             NativeMethods.SwpNoActivate | NativeMethods.SwpNoOwnerZOrder | NativeMethods.SwpShowWindow);
     }
 
-    public static void ApplyRegion(
+    public static bool ApplyRegion(
         IntPtr hwnd,
         IEnumerable<LayoutRect> rectangles,
         double scale,
+        out string diagnostic,
         bool redraw = true)
     {
+        var deviceRectangles = ToDeviceRectangles(rectangles, scale).ToArray();
         var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        if (destination == IntPtr.Zero)
+        {
+            diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
         try
         {
-            foreach (var rectangle in rectangles)
+            foreach (var rectangle in deviceRectangles)
             {
                 var source = NativeMethods.CreateRectRgn(
-                    (int)Math.Floor(rectangle.X * scale),
-                    (int)Math.Floor(rectangle.Y * scale),
-                    (int)Math.Ceiling((rectangle.X + rectangle.Width) * scale),
-                    (int)Math.Ceiling((rectangle.Y + rectangle.Height) * scale));
+                    rectangle.Left,
+                    rectangle.Top,
+                    rectangle.Right,
+                    rectangle.Bottom);
+                if (source == IntPtr.Zero)
+                {
+                    diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
                 try
                 {
-                    NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnOr);
+                    if (NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnOr) == NativeMethods.Error)
+                    {
+                        diagnostic = $"CombineRgn failed error={Marshal.GetLastWin32Error()}";
+                        return false;
+                    }
                 }
                 finally
                 {
@@ -196,10 +245,13 @@ public static class DesktopWindowTools
                 }
             }
 
-            if (NativeMethods.SetWindowRgn(hwnd, destination, redraw) != 0)
+            if (NativeMethods.SetWindowRgn(hwnd, destination, redraw) == 0)
             {
-                destination = IntPtr.Zero;
+                diagnostic = $"SetWindowRgn failed error={Marshal.GetLastWin32Error()}";
+                return false;
             }
+            destination = IntPtr.Zero;
+            return VerifyRegion(hwnd, deviceRectangles, out diagnostic);
         }
         finally
         {
@@ -210,11 +262,63 @@ public static class DesktopWindowTools
         }
     }
 
+    public static bool VerifyRegion(
+        IntPtr hwnd,
+        IEnumerable<LayoutRect> rectangles,
+        double scale,
+        out string diagnostic) =>
+        VerifyRegion(hwnd, ToDeviceRectangles(rectangles, scale).ToArray(), out diagnostic);
+
+    private static bool VerifyRegion(
+        IntPtr hwnd,
+        IReadOnlyList<NativeMethods.Rect> expectedRectangles,
+        out string diagnostic)
+    {
+        var regionType = NativeMethods.GetWindowRgnBox(hwnd, out var actualBounds);
+        if (regionType == NativeMethods.Error)
+        {
+            diagnostic = $"GetWindowRgnBox failed error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+
+        if (expectedRectangles.Count == 0)
+        {
+            if (regionType == NativeMethods.NullRegion)
+            {
+                diagnostic = "region=NULL";
+                return true;
+            }
+
+            diagnostic = $"Expected an empty region but got type={regionType} bounds={FormatRect(actualBounds)}";
+            return false;
+        }
+
+        if (regionType is not (NativeMethods.SimpleRegion or NativeMethods.ComplexRegion))
+        {
+            diagnostic = $"Expected a non-empty region but got type={regionType} bounds={FormatRect(actualBounds)}";
+            return false;
+        }
+
+        var expectedBounds = GetBoundingRect(expectedRectangles);
+        if (actualBounds.Left != expectedBounds.Left ||
+            actualBounds.Top != expectedBounds.Top ||
+            actualBounds.Right != expectedBounds.Right ||
+            actualBounds.Bottom != expectedBounds.Bottom)
+        {
+            diagnostic = $"Region bounds mismatch expected={FormatRect(expectedBounds)} actual={FormatRect(actualBounds)} type={regionType}";
+            return false;
+        }
+
+        diagnostic = $"regionType={regionType} bounds={FormatRect(actualBounds)}";
+        return true;
+    }
+
     public static bool RedrawExposedParentArea(
         IntPtr childWindow,
         IEnumerable<LayoutRect> previousRectangles,
         IEnumerable<LayoutRect> currentRectangles,
-        double scale)
+        double scale,
+        bool updateNow = false)
     {
         var parent = NativeMethods.GetParent(childWindow);
         if (parent == IntPtr.Zero ||
@@ -259,13 +363,18 @@ public static class DesktopWindowTools
                 exposed,
                 childBounds.Left - redrawTargetBounds.Left,
                 childBounds.Top - redrawTargetBounds.Top);
+            var flags = NativeMethods.RdwInvalidate |
+                NativeMethods.RdwErase |
+                NativeMethods.RdwAllChildren;
+            if (updateNow)
+            {
+                flags |= NativeMethods.RdwUpdateNow;
+            }
             return NativeMethods.RedrawWindow(
                 redrawTarget,
                 IntPtr.Zero,
                 exposed,
-                NativeMethods.RdwInvalidate |
-                NativeMethods.RdwErase |
-                NativeMethods.RdwAllChildren);
+                flags);
         }
         finally
         {
@@ -313,6 +422,48 @@ public static class DesktopWindowTools
         }
         return destination;
     }
+
+    private static IEnumerable<NativeMethods.Rect> ToDeviceRectangles(
+        IEnumerable<LayoutRect> rectangles,
+        double scale)
+    {
+        foreach (var rectangle in rectangles)
+        {
+            var left = (int)Math.Floor(rectangle.X * scale);
+            var top = (int)Math.Floor(rectangle.Y * scale);
+            var right = (int)Math.Ceiling((rectangle.X + rectangle.Width) * scale);
+            var bottom = (int)Math.Ceiling((rectangle.Y + rectangle.Height) * scale);
+            if (right <= left || bottom <= top)
+            {
+                continue;
+            }
+
+            yield return new NativeMethods.Rect
+            {
+                Left = left,
+                Top = top,
+                Right = right,
+                Bottom = bottom
+            };
+        }
+    }
+
+    private static NativeMethods.Rect GetBoundingRect(IReadOnlyList<NativeMethods.Rect> rectangles)
+    {
+        var bounds = rectangles[0];
+        for (var index = 1; index < rectangles.Count; index++)
+        {
+            var rectangle = rectangles[index];
+            bounds.Left = Math.Min(bounds.Left, rectangle.Left);
+            bounds.Top = Math.Min(bounds.Top, rectangle.Top);
+            bounds.Right = Math.Max(bounds.Right, rectangle.Right);
+            bounds.Bottom = Math.Max(bounds.Bottom, rectangle.Bottom);
+        }
+        return bounds;
+    }
+
+    private static string FormatRect(NativeMethods.Rect rectangle) =>
+        $"{rectangle.Left},{rectangle.Top},{rectangle.Right},{rectangle.Bottom}";
 
     public static LayoutRect GetWindowBounds(IntPtr hwnd)
     {
