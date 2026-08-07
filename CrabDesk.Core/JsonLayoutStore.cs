@@ -190,6 +190,25 @@ public sealed class JsonLayoutStore : ILayoutStore
             rule.Priority = rule.Priority < 0 ? index : rule.Priority;
         }
 
+        // User rules that exactly duplicate a built-in definition (same
+        // title, kinds, "*" pattern and extensions) are adopted as the
+        // built-in rule first, so the BuiltInId deduplication below merges
+        // them instead of leaving semantic duplicates.
+        foreach (var definition in BuiltInOrganizationRules.Definitions)
+        {
+            if (state.OrganizationRules.Any(rule =>
+                    string.Equals(rule.BuiltInId, definition.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            var userRule = state.OrganizationRules.FirstOrDefault(rule =>
+                BuiltInOrganizationRules.TryAdoptUserRule(rule, definition));
+            if (userRule is not null)
+            {
+                userRule.Priority = definition.Priority;
+            }
+        }
+
         // Duplicate built-in rules (same BuiltInId) and exact user-rule
         // copies accumulated from repeated installs or duplication can
         // multiply assignments. Keep one occurrence of each while loading

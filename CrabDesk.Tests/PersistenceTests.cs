@@ -183,6 +183,34 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task UserRuleDuplicatingBuiltInIsAdoptedAndMerged()
+    {
+        Directory.CreateDirectory(_root);
+        var builtInId = Guid.NewGuid();
+        var userRuleId = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 20,
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": [
+            { "Id": "{{builtInId}}", "BuiltInId": "images", "Title": "图片", "Priority": 30, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff", "svg", "ico"] },
+            { "Id": "{{userRuleId}}", "Title": "图片", "Priority": 60, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff", "svg", "ico"] }
+          ]
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        var images = loaded.OrganizationRules
+            .Where(rule => rule.BuiltInId == BuiltInOrganizationRules.ImagesId)
+            .ToArray();
+        Assert.Single(images);
+        Assert.Equal(builtInId, images[0].Id);
+        Assert.Equal(30, images[0].Priority);
+    }
+
+    [Fact]
     public async Task VersionSixteenAdoptsUneditedGeneratedRuleWithoutDuplicatingIt()
     {
         Directory.CreateDirectory(_root);

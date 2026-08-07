@@ -70,6 +70,33 @@ public static class BuiltInOrganizationRules
     public static bool IsFallback(OrganizationRule rule) =>
         string.Equals(rule.BuiltInId, OtherId, StringComparison.OrdinalIgnoreCase);
 
+    // Adopts a user rule that exactly duplicates a built-in definition
+    // (same title, item kinds, "*" pattern and extension set) by stamping
+    // the built-in id onto it. Callers then run BuiltInId deduplication so
+    // the duplicate collapses instead of matching items twice.
+    public static bool TryAdoptUserRule(OrganizationRule rule, BuiltInOrganizationRuleDefinition definition)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.BuiltInId) ||
+            !string.Equals(rule.NamePattern, "*", StringComparison.Ordinal) ||
+            !rule.ItemKinds.ToHashSet().SetEquals(definition.ItemKinds) ||
+            !string.Equals(rule.Title, definition.Title, StringComparison.CurrentCultureIgnoreCase))
+        {
+            return false;
+        }
+        var normalized = rule.Extensions
+            .Select(extension => extension.Trim().TrimStart('.'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var definitionNormalized = definition.Extensions
+            .Select(extension => extension.Trim().TrimStart('.'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!normalized.SetEquals(definitionNormalized))
+        {
+            return false;
+        }
+        ApplyDefinition(rule, definition);
+        return true;
+    }
+
     private static OrganizationRule CreateRule(BuiltInOrganizationRuleDefinition definition) => new()
     {
         BuiltInId = definition.Id,

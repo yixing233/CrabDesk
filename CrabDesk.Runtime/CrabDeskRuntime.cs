@@ -1561,7 +1561,14 @@ public sealed class CrabDeskRuntime : IDisposable
                     .Select(decision => Items.FirstOrDefault(item =>
                         item.Key.ToString().Equals(decision.ItemKey, StringComparison.OrdinalIgnoreCase)))
                     .Where(item => item is not null)
-                    .Select(item => item!.DisplayName)
+                    // Match both display names without extension and full file
+                    // names because Explorer may show extensions depending on
+                    // the user's "HideFileExt" setting.
+                    .SelectMany(item => new[]
+                    {
+                        item!.DisplayName,
+                        Path.GetFileName(item.FileSystemPath ?? string.Empty)
+                    })
                     .Where(name => !string.IsNullOrWhiteSpace(name))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
