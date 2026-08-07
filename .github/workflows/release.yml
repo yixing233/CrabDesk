@@ -54,15 +54,6 @@ jobs:
             -GitHubOwner "${{ github.repository_owner }}" `
             -GitHubRepository "${{ github.event.repository.name }}"
 
-      - name: Publish Web payload
-        shell: pwsh
-        run: |
-          .\build\publish.ps1 `
-            -PackageKind Web `
-            -Version $env:CRABDESK_VERSION `
-            -GitHubOwner "${{ github.repository_owner }}" `
-            -GitHubRepository "${{ github.event.repository.name }}"
-
       - name: Publish Web bootstrapper
         shell: pwsh
         run: |
@@ -79,7 +70,6 @@ jobs:
           [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
           $files = @(
             (Get-ChildItem artifacts\publish\win-x64 -Filter *.exe | Select-Object -ExpandProperty FullName),
-            (Get-ChildItem artifacts\publish\win-x64-web -Filter *.exe | Select-Object -ExpandProperty FullName),
             (Resolve-Path artifacts\release\CrabDesk-Setup-Web-x64.exe).Path
           )
           .\build\sign-artifacts.ps1 `
@@ -114,8 +104,6 @@ jobs:
           $files = @(
             "artifacts\publish\win-x64\CrabDesk.WinUI.exe",
             "artifacts\publish\win-x64\CrabDesk.IconGuard.exe",
-            "artifacts\publish\win-x64-web\CrabDesk.WinUI.exe",
-            "artifacts\publish\win-x64-web\CrabDesk.IconGuard.exe",
             "artifacts\installer\CrabDesk-Setup-x64.exe",
             "artifacts\release\CrabDesk-Setup-Web-x64.exe"
           )
@@ -142,12 +130,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory artifacts\release -Force | Out-Null
-          Compress-Archive -Path artifacts\publish\win-x64-web\* `
-            -DestinationPath artifacts\release\CrabDesk-web-win-x64.zip -Force
           $assets = @(
             "artifacts\installer\CrabDesk-Setup-x64.exe",
-            "artifacts\release\CrabDesk-Setup-Web-x64.exe",
-            "artifacts\release\CrabDesk-web-win-x64.zip"
+            "artifacts\release\CrabDesk-Setup-Web-x64.exe"
           )
           $lines = foreach ($asset in $assets) {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
@@ -164,7 +149,6 @@ jobs:
             "release", "create", "${{ github.ref_name }}",
             "artifacts\installer\CrabDesk-Setup-x64.exe",
             "artifacts\release\CrabDesk-Setup-Web-x64.exe",
-            "artifacts\release\CrabDesk-web-win-x64.zip",
             "artifacts\release\SHA256SUMS.txt",
             "--title", "CrabDesk $env:CRABDESK_VERSION",
             "--verify-tag"

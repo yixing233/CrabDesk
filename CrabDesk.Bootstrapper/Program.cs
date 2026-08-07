@@ -1,19 +1,13 @@
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Win32;
 
 namespace CrabDesk.Bootstrapper;
 
 internal static class Program
 {
-    private const string DotnetDesktopRuntimeUrl =
-        "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe";
-    private const string WindowsAppRuntimeUrl =
-        "https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe";
-    private const string WebPayloadName = "CrabDesk-web-win-x64.zip";
+    private const string FullInstallerName = "CrabDesk-Setup-x64.exe";
     private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(20) };
 
     [STAThread]
@@ -31,24 +25,22 @@ internal static class Program
             Directory.CreateDirectory(root);
             try
             {
-                EnsureDesktopRuntime(root);
-                EnsureWindowsAppRuntime(root);
-
                 var releaseBase = $"https://github.com/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repository)}/releases/download/v{version}";
                 var checksumPath = await DownloadAsync($"{releaseBase}/SHA256SUMS.txt", Path.Combine(root, "SHA256SUMS.txt"));
-                var payloadPath = await DownloadAsync($"{releaseBase}/{WebPayloadName}", Path.Combine(root, WebPayloadName));
-                VerifySha256(payloadPath, FindExpectedHash(checksumPath, WebPayloadName));
+                var installerPath = await DownloadAsync($"{releaseBase}/{FullInstallerName}", Path.Combine(root, FullInstallerName));
+                VerifySha256(installerPath, FindExpectedHash(checksumPath, FullInstallerName));
 
-                var installDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "CrabDesk");
-                Directory.CreateDirectory(installDirectory);
-                ZipFile.ExtractToDirectory(payloadPath, installDirectory, true);
-                CreateShortcuts(Path.Combine(installDirectory, "CrabDesk.WinUI.exe"));
-                Process.Start(new ProcessStartInfo(Path.Combine(installDirectory, "CrabDesk.WinUI.exe"))
+                using var process = Process.Start(new ProcessStartInfo(installerPath, "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-")
                 {
                     UseShellExecute = true
                 });
+                process?.WaitForExit();
+                if (process is null || process.ExitCode is not 0)
+                {
+                    throw new InvalidOperationException("安装程序未能正常完成。");
+                }
+
+                TryLaunchInstalledApp();
                 return 0;
             }
             finally
@@ -63,38 +55,19 @@ internal static class Program
         }
     }
 
-    private static void EnsureDesktopRuntime(string root)
+    private static void TryLaunchInstalledApp()
     {
-        if (GetCommandOutput("dotnet", "--list-runtimes")?.Contains("Microsoft.WindowsDesktop.App 8.", StringComparison.OrdinalIgnoreCase) == true)
+        // Inno Setup with PrivilegesRequired=lowest installs per-user under
+        // %LocalAppData%\Programs. Launch the freshly installed application
+        // when it exists; otherwise the installer's shortcuts remain usable.
+        var candidate = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs",
+            "CrabDesk",
+            "CrabDesk.WinUI.exe");
+        if (File.Exists(candidate))
         {
-            return;
-        }
-        var installer = DownloadAsync(DotnetDesktopRuntimeUrl, Path.Combine(root, "windowsdesktop-runtime.exe")).GetAwaiter().GetResult();
-        RunElevatedInstaller(installer, "/install /quiet /norestart");
-    }
-
-    private static void EnsureWindowsAppRuntime(string root)
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\WindowsAppRuntime\InstalledVersions");
-        if (key?.GetSubKeyNames().Any(name => name.StartsWith("1.8", StringComparison.OrdinalIgnoreCase)) == true)
-        {
-            return;
-        }
-        var installer = DownloadAsync(WindowsAppRuntimeUrl, Path.Combine(root, "windowsappruntime.exe")).GetAwaiter().GetResult();
-        RunElevatedInstaller(installer, "/quiet /norestart");
-    }
-
-    private static void RunElevatedInstaller(string path, string arguments)
-    {
-        using var process = Process.Start(new ProcessStartInfo(path, arguments)
-        {
-            UseShellExecute = true,
-            Verb = "runas"
-        });
-        process?.WaitForExit();
-        if (process is null || process.ExitCode is not 0)
-        {
-            throw new InvalidOperationException("依赖环境安装未完成。");
+            Process.Start(new ProcessStartInfo(candidate) { UseShellExecute = true });
         }
     }
 
@@ -114,7 +87,7 @@ internal static class Program
         var actual = Convert.ToHexString(SHA256.HashData(stream));
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException("应用包 SHA-256 校验失败。");
+            throw new InvalidDataException("安装包 SHA-256 校验失败。");
         }
     }
 
@@ -128,42 +101,8 @@ internal static class Program
                 return parts[0];
             }
         }
-        throw new InvalidDataException("校验文件中缺少应用包校验值。");
+        throw new InvalidDataException("校验文件中缺少安装包校验值。");
     }
-
-    private static string? GetCommandOutput(string fileName, string arguments)
-    {
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo(fileName, arguments)
-            {
-                CreateNoWindow = true,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            });
-            return process is null ? null : process.StandardOutput.ReadToEnd();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static void CreateShortcuts(string executable)
-    {
-        var script = "$w=New-Object -ComObject WScript.Shell; $t='" +
-            EscapePowerShell(executable) +
-            "'; foreach($p in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))){ if($p){$s=$w.CreateShortcut((Join-Path $p 'CrabDesk.lnk'));$s.TargetPath=$t;$s.WorkingDirectory=[IO.Path]::GetDirectoryName($t);$s.Save()}}";
-        using var process = Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"{script}\"")
-        {
-            CreateNoWindow = true,
-            UseShellExecute = false
-        });
-        process?.WaitForExit();
-    }
-
-    private static string EscapePowerShell(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
     private static void ShowError(string message)
     {

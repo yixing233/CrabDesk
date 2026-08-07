@@ -40,7 +40,6 @@ $requiredFragments = @(
     "SignerCertificate.Thumbprint",
     "CrabDesk-Setup-x64.exe",
     "CrabDesk-Setup-Web-x64.exe",
-    "CrabDesk-web-win-x64.zip",
     "SHA256SUMS.txt",
     "--verify-tag",
     "docs\releases\v1.0.0.md"
