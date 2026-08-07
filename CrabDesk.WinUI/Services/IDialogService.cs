@@ -88,12 +88,19 @@ public sealed class DialogService : IDialogService
             SelectedItem = actionOptions.First(option => option.Value == source.Action),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
+        // "自动创建同名盒子" is represented by Guid.Empty; picking it leaves
+        // TargetBoxId null so organization creates a box from the rule title.
+        var autoCreate = new DesktopBox { Id = Guid.Empty, Title = "自动创建同名盒子" };
         var target = new ComboBox
         {
             Header = "目标盒子",
-            ItemsSource = boxes.Where(box => !box.IsMappedFolder).ToArray(),
+            ItemsSource = new object[] { autoCreate }
+                .Concat(boxes.Where(box => !box.IsMappedFolder))
+                .ToArray(),
             DisplayMemberPath = nameof(DesktopBox.Title),
-            SelectedItem = boxes.FirstOrDefault(box => box.Id == source.TargetBoxId) ?? boxes.FirstOrDefault(),
+            SelectedItem = source.TargetBoxId is { } targetId
+                ? boxes.FirstOrDefault(box => box.Id == targetId) ?? autoCreate
+                : autoCreate,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         var panel = new StackPanel { Spacing = 8, MinWidth = 400 };
@@ -141,7 +148,9 @@ public sealed class DialogService : IDialogService
             }.Where(pair => pair.Item1).Select(pair => pair.Item2).ToList(),
             Action = selectedAction,
             TargetBoxId = selectedAction == OrganizationRuleAction.AssignToBox
-                ? (target.SelectedItem as DesktopBox)?.Id
+                ? (target.SelectedItem as DesktopBox)?.Id is { } selectedId && selectedId != Guid.Empty
+                    ? selectedId
+                    : null
                 : null
         };
     }
