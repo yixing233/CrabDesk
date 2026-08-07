@@ -189,7 +189,7 @@ public sealed class DesktopHostService : IDesktopHost
         var listView = DesktopListView;
         if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
         {
-            return new DesktopIconImageListState(false, IntPtr.Zero, IntPtr.Zero, 0, 0);
+            return new DesktopIconImageListState(false, IntPtr.Zero, IntPtr.Zero);
         }
 
         NativeMethods.SendMessageTimeout(
@@ -208,17 +208,11 @@ public sealed class DesktopHostService : IDesktopHost
             NativeMethods.SmtoAbortIfHung,
             500,
             out var small);
-        // The image list handle can be non-null while the list itself is
-        // empty or was cleared by a damaged icon cache. Items then render as
-        // text-only labels. Check the actual image counts so an empty list
-        // is treated as lost and repaired.
-        var normalCount = ImageList_GetImageCount(normal);
-        var smallCount = ImageList_GetImageCount(small);
-        return new DesktopIconImageListState(true, normal, small, normalCount, smallCount);
+        // ImageList_GetImageCount cannot be used here: the image list handle
+        // lives in Explorer's process and the count call would always fail
+        // across processes, producing false "missing" detections.
+        return new DesktopIconImageListState(true, normal, small);
     }
-
-    [DllImport("comctl32.dll")]
-    private static extern int ImageList_GetImageCount(IntPtr himl);
 
     private void RedrawDesktopListView()
     {
@@ -390,11 +384,7 @@ public sealed class DesktopHostService : IDesktopHost
 public readonly record struct DesktopIconImageListState(
     bool IsDesktopListViewAvailable,
     IntPtr Normal,
-    IntPtr Small,
-    int NormalCount = 0,
-    int SmallCount = 0)
+    IntPtr Small)
 {
-    public bool HasImageList =>
-        (Normal != IntPtr.Zero && NormalCount > 0) ||
-        (Small != IntPtr.Zero && SmallCount > 0);
+    public bool HasImageList => Normal != IntPtr.Zero || Small != IntPtr.Zero;
 }
