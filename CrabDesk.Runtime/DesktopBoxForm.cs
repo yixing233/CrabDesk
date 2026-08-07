@@ -362,7 +362,13 @@ internal sealed class DesktopBoxForm : Forms.Form
                 HandleRegionFailure(regionDiagnostic);
                 return false;
             }
-            if (_lastWindowRegionRectangles.Count > 0)
+            // While a box is being dragged or resized the whole parent tree
+            // is redrawn once on mouse release (FlushTransformTrail). Doing
+            // it here per pointer move floods Explorer's desktop view with
+            // full-tree erase/redraw and can trigger GPU watchdog timeouts.
+            if (_lastWindowRegionRectangles.Count > 0 &&
+                _movingBox is null &&
+                _resizingBox is null)
             {
                 DesktopWindowTools.RedrawExposedParentArea(
                     Handle,
