@@ -81,7 +81,20 @@ public sealed class DesktopHostService : IDesktopHost
         RedrawDesktopListView();
         RedrawDesktopView();
         var after = GetIconImageListState();
-        return Task.FromResult(rowsUpdated && after.HasImageList);
+        if (after.HasImageList)
+        {
+            return Task.FromResult(rowsUpdated);
+        }
+
+        // The image list handle exists but contains no images: the Shell
+        // icon cache is damaged. Ask the Shell to rebuild its icon storage,
+        // then retry the row refresh once Explorer has repopulated it.
+        NativeMethods.SHChangeNotify(
+            NativeMethods.ShcneAssocChanged,
+            NativeMethods.ShcnfIdList,
+            IntPtr.Zero,
+            IntPtr.Zero);
+        return Task.FromResult(false);
     }
 
     /// <summary>
@@ -141,7 +154,7 @@ public sealed class DesktopHostService : IDesktopHost
         var listView = DesktopListView;
         if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView))
         {
-            return new DesktopIconImageListState(false, IntPtr.Zero, IntPtr.Zero);
+            return new DesktopIconImageListState(false, IntPtr.Zero, IntPtr.Zero, 0, 0);
         }
 
         NativeMethods.SendMessageTimeout(
@@ -160,8 +173,17 @@ public sealed class DesktopHostService : IDesktopHost
             NativeMethods.SmtoAbortIfHung,
             500,
             out var small);
-        return new DesktopIconImageListState(true, normal, small);
+        // The image list handle can be non-null while the list itself is
+        // empty or was cleared by a damaged icon cache. Items then render as
+        // text-only labels. Check the actual image counts so an empty list
+        // is treated as lost and repaired.
+        var normalCount = ImageList_GetImageCount(normal);
+        var smallCount = ImageList_GetImageCount(small);
+        return new DesktopIconImageListState(true, normal, small, normalCount, smallCount);
     }
+
+    [DllImport("comctl32.dll")]
+    private static extern int ImageList_GetImageCount(IntPtr himl);
 
     private void RedrawDesktopListView()
     {
@@ -333,7 +355,11 @@ public sealed class DesktopHostService : IDesktopHost
 public readonly record struct DesktopIconImageListState(
     bool IsDesktopListViewAvailable,
     IntPtr Normal,
-    IntPtr Small)
+    IntPtr Small,
+    int NormalCount = 0,
+    int SmallCount = 0)
 {
-    public bool HasImageList => Normal != IntPtr.Zero || Small != IntPtr.Zero;
+    public bool HasImageList =>
+        (Normal != IntPtr.Zero && NormalCount > 0) ||
+        (Small != IntPtr.Zero && SmallCount > 0);
 }
