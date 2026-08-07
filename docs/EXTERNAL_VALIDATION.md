@@ -114,12 +114,11 @@ Get-AuthenticodeSignature artifacts\installer\CrabDesk-Setup-x64.exe
 4. 创建并推送带注释标签 `v1.0.0`。
 5. 确认 `release.yml` 成功生成以下资产：
    - `CrabDesk-Setup-x64.exe`
-   - `CrabDesk-portable-win-x64.zip`
    - `SHA256SUMS.txt`
 6. 下载 GitHub Release 资产，重新验证 SHA-256、Authenticode 签名、安装和卸载。
 7. 确认 Release 使用 `docs\releases\v1.0.0.md`，并在已配置正式仓库的客户端中检查到 `1.0.0`。
 
-正式 Release 可用后，使用以下命令一次性下载并验证发布说明、固定资产、SHA-256、便携版与安装包 Authenticode 签名、可信时间戳、发布者一致性以及隔离安装/卸载：
+正式 Release 可用后，使用以下命令一次性下载并验证发布说明、固定资产、SHA-256、安装包 Authenticode 签名、可信时间戳、发布者一致性以及隔离安装/卸载：
 
 ```powershell
 .\build\verify-github-release.ps1 `
