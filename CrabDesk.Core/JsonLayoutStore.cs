@@ -190,6 +190,38 @@ public sealed class JsonLayoutStore : ILayoutStore
             rule.Priority = rule.Priority < 0 ? index : rule.Priority;
         }
 
+        // Duplicate built-in rules (same BuiltInId) and exact user-rule
+        // copies accumulated from repeated installs or duplication can
+        // multiply assignments. Keep one occurrence of each while loading
+        // and drop the rest.
+        var seenBuiltInIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenRuleShapes = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = state.OrganizationRules.Count - 1; index >= 0; index--)
+        {
+            var rule = state.OrganizationRules[index];
+            var builtInId = rule.BuiltInId ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(builtInId))
+            {
+                if (!seenBuiltInIds.Add(builtInId))
+                {
+                    state.OrganizationRules.RemoveAt(index);
+                }
+                continue;
+            }
+            var shape = string.Join(
+                "\u001F",
+                rule.Title ?? string.Empty,
+                rule.NamePattern ?? string.Empty,
+                rule.Action,
+                rule.TargetBoxId?.ToString() ?? string.Empty,
+                string.Join(",", rule.ItemKinds.Select(kind => kind.ToString()).OrderBy(kind => kind)),
+                string.Join(",", rule.Extensions.OrderBy(extension => extension, StringComparer.OrdinalIgnoreCase)));
+            if (!seenRuleShapes.Add(shape))
+            {
+                state.OrganizationRules.RemoveAt(index);
+            }
+        }
+
         if (previousVersion < 14)
         {
             var builtInTitles = new HashSet<string>(

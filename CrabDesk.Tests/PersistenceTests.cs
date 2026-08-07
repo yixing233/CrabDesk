@@ -151,6 +151,38 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task DuplicateBuiltInAndUserRulesAreDeduplicatedOnLoad()
+    {
+        Directory.CreateDirectory(_root);
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var userA = Guid.NewGuid();
+        var userB = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 20,
+          "Boxes": [],
+          "Assignments": {},
+          "OrganizationRules": [
+            { "Id": "{{firstId}}", "BuiltInId": "documents", "Title": "文档", "Priority": 20, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["pdf", "docx"] },
+            { "Id": "{{secondId}}", "BuiltInId": "documents", "Title": "文档", "Priority": 90, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["pdf", "docx"] },
+            { "Id": "{{userA}}", "Title": "工作", "Priority": 100, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["pdf"] },
+            { "Id": "{{userB}}", "Title": "工作", "Priority": 110, "ItemKinds": [0], "NamePattern": "*", "Extensions": ["pdf"] }
+          ]
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        var documents = loaded.OrganizationRules
+            .Where(rule => rule.BuiltInId == BuiltInOrganizationRules.DocumentsId)
+            .ToArray();
+        Assert.Single(documents);
+        Assert.Equal(secondId, documents[0].Id);
+        Assert.Single(loaded.OrganizationRules.Where(rule => rule.Title == "工作"));
+    }
+
+    [Fact]
     public async Task VersionSixteenAdoptsUneditedGeneratedRuleWithoutDuplicatingIt()
     {
         Directory.CreateDirectory(_root);

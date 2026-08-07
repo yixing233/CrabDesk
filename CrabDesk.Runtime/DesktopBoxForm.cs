@@ -645,7 +645,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                 item.Bounds.Y + 5,
                 iconSize,
                 iconSize);
-        var bitmap = GetIconBitmap(item.Item, iconSize);
+        var bitmap = GetIconBitmap(item.Item, iconSize) ?? ShellIconProvider.GetGenericFileIcon();
         if (bitmap is not null)
         {
             graphics.DrawImage(bitmap, iconBounds);
@@ -904,7 +904,10 @@ internal sealed class DesktopBoxForm : Forms.Form
                 Invalidate();
                 return;
             }
-            if ((Forms.Control.ModifierKeys & Forms.Keys.Control) == 0)
+            // Keep an existing multi-selection when pressing one of its items
+            // so dragging starts from the whole selection. Only a plain press
+            // on an unselected item resets the selection.
+            if ((Forms.Control.ModifierKeys & Forms.Keys.Control) == 0 && !_selection.Contains(key))
             {
                 _selection.Clear();
             }
@@ -1048,6 +1051,36 @@ internal sealed class DesktopBoxForm : Forms.Form
                 IsPointerOverAnyBox(Forms.Cursor.Position)))
         {
             _runtime.UnassignItems(itemKeys);
+            MoveReleasedItemsToDesktop(itemKeys, Forms.Cursor.Position);
+        }
+    }
+
+    private void MoveReleasedItemsToDesktop(IReadOnlyList<string> itemKeys, Point screenPoint)
+    {
+        try
+        {
+            var listView = _desktopHost.DesktopListView;
+            if (listView == IntPtr.Zero)
+            {
+                return;
+            }
+            var placements = itemKeys
+                .Select(key => _runtime.Items.FirstOrDefault(item =>
+                    item.Key.ToString().Equals(key, StringComparison.OrdinalIgnoreCase)))
+                .Where(item => item is not null)
+                .Select((item, index) => new DesktopIconPlacement(
+                    [item!.DisplayName, Path.GetFileName(item.FileSystemPath ?? string.Empty)],
+                    screenPoint.X + (index % 5) * 84,
+                    screenPoint.Y + (index / 5) * 92))
+                .ToArray();
+            if (placements.Length > 0)
+            {
+                DesktopIconPositionService.MoveItemsUnderBox(listView, placements);
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to place released desktop items", exception);
         }
     }
 

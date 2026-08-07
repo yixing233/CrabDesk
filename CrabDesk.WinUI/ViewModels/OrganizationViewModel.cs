@@ -95,6 +95,14 @@ public partial class OrganizationViewModel : ObservableObject
     [ObservableProperty] private OrganizationRuleListItem? _selectedRule;
     [ObservableProperty] private string _resultText = string.Empty;
 
+    public IReadOnlyList<OrganizationRuleListItem> SelectedRules { get; private set; } = [];
+
+    public void UpdateSelection(IEnumerable<OrganizationRuleListItem> selected)
+    {
+        SelectedRules = selected.ToArray();
+        DeleteRulesCommand.NotifyCanExecuteChanged();
+    }
+
     public OrganizationViewModel(ICrabDeskService service, IDialogService dialogs)
     {
         _service = service;
@@ -177,6 +185,25 @@ public partial class OrganizationViewModel : ObservableObject
         if (SelectedRule is null || !await _dialogs.ConfirmAsync("删除规则", $"删除“{SelectedRule.Title}”？", "删除")) return;
         _service.DeleteOrganizationRule(SelectedRule.Id);
     }
+
+    [RelayCommand(CanExecute = nameof(HasMultiSelection))]
+    private async Task DeleteRulesAsync()
+    {
+        var selected = SelectedRules.ToArray();
+        if (selected.Length == 0 || !await _dialogs.ConfirmAsync(
+                "删除规则",
+                $"删除选中的 {selected.Length} 条规则？",
+                "删除"))
+        {
+            return;
+        }
+        foreach (var item in selected)
+        {
+            _service.DeleteOrganizationRule(item.Id);
+        }
+    }
+
+    private bool HasMultiSelection() => SelectedRules.Count > 0;
 
     [RelayCommand(CanExecute = nameof(HasSelection))] private void MoveUp() { if (SelectedRule is not null) _service.MoveOrganizationRule(SelectedRule.Id, -1); }
     [RelayCommand(CanExecute = nameof(HasSelection))] private void MoveDown() { if (SelectedRule is not null) _service.MoveOrganizationRule(SelectedRule.Id, 1); }

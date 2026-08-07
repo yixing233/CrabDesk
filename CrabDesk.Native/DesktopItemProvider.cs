@@ -49,43 +49,55 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
             var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var directory in _desktopDirectories)
             {
-                foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var fullPath = Path.GetFullPath(path);
-                    if (!seenPaths.Add(fullPath))
+                    foreach (var path in Directory.EnumerateFileSystemEntries(directory))
                     {
-                        continue;
-                    }
-
-                    try
-                    {
-                        var attributes = File.GetAttributes(fullPath);
-                        var isDirectory = attributes.HasFlag(FileAttributes.Directory);
-                        var extension = Path.GetExtension(fullPath);
-                        items.Add(new DesktopItemRef
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var fullPath = Path.GetFullPath(path);
+                        if (!seenPaths.Add(fullPath))
                         {
-                            Key = new DesktopItemKey("file", FileIdentity.GetStableId(fullPath)),
-                            DisplayName = Path.GetFileNameWithoutExtension(fullPath),
-                            ParsingName = fullPath,
-                            FileSystemPath = fullPath,
-                            Kind = isDirectory
-                                ? DesktopItemKind.Folder
-                                : extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
-                                    ? DesktopItemKind.Shortcut
-                                    : DesktopItemKind.File,
-                            ModifiedAt = isDirectory
-                                ? Directory.GetLastWriteTimeUtc(fullPath)
-                                : File.GetLastWriteTimeUtc(fullPath),
-                            IsReadOnly = attributes.HasFlag(FileAttributes.ReadOnly)
-                        });
+                            continue;
+                        }
+
+                        try
+                        {
+                            var attributes = File.GetAttributes(fullPath);
+                            var isDirectory = attributes.HasFlag(FileAttributes.Directory);
+                            var extension = Path.GetExtension(fullPath);
+                            items.Add(new DesktopItemRef
+                            {
+                                Key = new DesktopItemKey("file", FileIdentity.GetStableId(fullPath)),
+                                DisplayName = Path.GetFileNameWithoutExtension(fullPath),
+                                ParsingName = fullPath,
+                                FileSystemPath = fullPath,
+                                Kind = isDirectory
+                                    ? DesktopItemKind.Folder
+                                    : extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
+                                        ? DesktopItemKind.Shortcut
+                                        : DesktopItemKind.File,
+                                ModifiedAt = isDirectory
+                                    ? Directory.GetLastWriteTimeUtc(fullPath)
+                                    : File.GetLastWriteTimeUtc(fullPath),
+                                IsReadOnly = attributes.HasFlag(FileAttributes.ReadOnly)
+                            });
+                        }
+                        catch (IOException)
+                        {
+                        }
+                        catch (UnauthorizedAccessException)
+                        {
+                        }
                     }
-                    catch (IOException)
-                    {
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                    }
+                }
+                catch (IOException)
+                {
+                    // A single unavailable desktop directory (offline drive,
+                    // cloud placeholder storm) must not fail the whole
+                    // enumeration and hide every other item.
+                }
+                catch (UnauthorizedAccessException)
+                {
                 }
             }
 

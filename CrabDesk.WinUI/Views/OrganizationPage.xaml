@@ -40,14 +40,14 @@
             <AppBarButton Label="复制规则" Command="{Binding DuplicateRuleCommand}" ToolTipService.ToolTip="复制规则"><AppBarButton.Icon><icons:FluentIcon Icon="DocumentCopy" /></AppBarButton.Icon></AppBarButton>
             <AppBarButton Label="上移" Command="{Binding MoveUpCommand}" ToolTipService.ToolTip="上移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowUp" /></AppBarButton.Icon></AppBarButton>
             <AppBarButton Label="下移" Command="{Binding MoveDownCommand}" ToolTipService.ToolTip="下移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowDown" /></AppBarButton.Icon></AppBarButton>
-            <AppBarButton Label="删除" Command="{Binding DeleteRuleCommand}" ToolTipService.ToolTip="删除规则"><AppBarButton.Icon><icons:FluentIcon Icon="Delete" /></AppBarButton.Icon></AppBarButton>
+            <AppBarButton Label="删除" Command="{Binding DeleteRulesCommand}" ToolTipService.ToolTip="删除选中的规则"><AppBarButton.Icon><icons:FluentIcon Icon="Delete" /></AppBarButton.Icon></AppBarButton>
             <CommandBar.SecondaryCommands>
                 <AppBarButton Label="安装默认规则" Command="{Binding InstallDefaultsCommand}" />
             </CommandBar.SecondaryCommands>
         </CommandBar>
 
         <ListView Grid.Row="2" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule, Mode=TwoWay}"
-                  SelectionMode="Single" DoubleTapped="Rules_OnDoubleTapped" AutomationProperties.Name="整理规则列表">
+                  SelectionMode="Extended" SelectionChanged="Rules_OnSelectionChanged" DoubleTapped="Rules_OnDoubleTapped" AutomationProperties.Name="整理规则列表">
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <Grid Padding="10,8" MinHeight="58" ColumnSpacing="14">

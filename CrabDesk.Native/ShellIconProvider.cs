@@ -19,6 +19,9 @@ public sealed class ShellIconProvider
     private const uint ShgfiLargeIcon = 0x000000000;
     private const uint ShgfiPidl = 0x000000008;
     private const uint StgMedium = 0;
+    private const uint ShgsiIcon = 0x000000100;
+    private const uint SiidDocNoAssoc = 2;
+    private static Bitmap? _genericFileIcon;
     private readonly object _cacheLock = new();
     private readonly Dictionary<CacheKey, CacheEntry> _cache = [];
     private readonly int _cacheCapacity;
@@ -134,6 +137,44 @@ public sealed class ShellIconProvider
     private static Bitmap? LoadImage(string parsingName, int pixelSize) =>
         LoadShellItemImage(parsingName, pixelSize) ?? LoadLegacyIcon(parsingName);
 
+    // A transient Shell failure (Explorer rebuilding its image list, cloud
+    // placeholder, permission flip) must never leave a box item rendered as
+    // text-only. Callers can draw this stock document icon as a placeholder
+    // while the normal lookup is retried; it is never cached per item so a
+    // later successful lookup can still replace it.
+    public static Bitmap? GetGenericFileIcon()
+    {
+        if (_genericFileIcon is not null)
+        {
+            return _genericFileIcon;
+        }
+        IntPtr iconHandle = IntPtr.Zero;
+        try
+        {
+            var info = new ShStockIconInfo { Size = (uint)Marshal.SizeOf<ShStockIconInfo>() };
+            if (SHGetStockIconInfo(SiidDocNoAssoc, ShgsiIcon, ref info, info.Size) != 0 ||
+                info.Icon == IntPtr.Zero)
+            {
+                return null;
+            }
+            iconHandle = info.Icon;
+            using var icon = (Icon)Icon.FromHandle(iconHandle).Clone();
+            _genericFileIcon = icon.ToBitmap();
+            return _genericFileIcon;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (iconHandle != IntPtr.Zero)
+            {
+                DestroyIcon(iconHandle);
+            }
+        }
+    }
+
     private static Bitmap? LoadShellItemImage(string parsingName, int pixelSize)
     {
         var interfaceId = typeof(IShellItemImageFactory).GUID;
@@ -243,6 +284,24 @@ public sealed class ShellIconProvider
         out ShFileInfo fileInfo,
         uint fileInfoSize,
         uint flags);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHGetStockIconInfo(
+        uint iconId,
+        uint flags,
+        ref ShStockIconInfo stockIconInfo,
+        uint stockIconInfoSize);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ShStockIconInfo
+    {
+        public uint Size;
+        public IntPtr Icon;
+        public int SystemIconIndex;
+        public int Index;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string Path;
+    }
 
     [DllImport("gdi32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

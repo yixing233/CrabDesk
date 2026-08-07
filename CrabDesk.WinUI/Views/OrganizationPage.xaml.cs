@@ -23,6 +23,14 @@ public sealed partial class OrganizationPage : Page
         }
     }
 
+    private void Rules_OnSelectionChanged(object sender, SelectionChangedEventArgs eventArgs)
+    {
+        if (sender is ListView listView)
+        {
+            ViewModel.UpdateSelection(listView.SelectedItems.OfType<OrganizationRuleListItem>());
+        }
+    }
+
     private void Rules_OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs eventArgs)
     {
         if (ViewModel.EditRuleCommand.CanExecute(null)) ViewModel.EditRuleCommand.Execute(null);

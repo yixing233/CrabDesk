@@ -669,6 +669,15 @@ public sealed class CrabDeskRuntime : IDisposable
     public async Task RefreshItemsAsync(bool applyDesktopRules = true)
     {
         var items = await _itemProvider.EnumerateAsync();
+        // A failed or degraded enumeration (Explorer restart, cloud placeholder
+        // lock, permission transition) must not wipe the persisted grouping or
+        // make every desktop item disappear. Keep the previous snapshot when
+        // the new one is empty and the desktop is known to have items.
+        if (items.Count == 0 && _allDesktopItems.Count > 0)
+        {
+            DiagnosticLog.Info("Desktop enumeration returned no items; keeping previous snapshot.");
+            items = _allDesktopItems;
+        }
         _allDesktopItems = items;
         Items = State.Settings.ShowSystemItems
             ? items
@@ -1507,6 +1516,10 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         var result = new OrganizationApplyResult(assigned, unassigned, ignored, invalidTargets, decisions);
+        if (assigned > 0)
+        {
+            SynchronizeAssignedItemsToBoxes(decisions);
+        }
         if (notify)
         {
             NotifyWorkspaceChanged(true);
@@ -1516,6 +1529,55 @@ public sealed class CrabDeskRuntime : IDisposable
             ScheduleSave();
         }
         return result;
+    }
+
+    // Rule-driven assignment must mirror the drag/drop path: move each newly
+    // assigned item's native Explorer icon underneath its target box so the
+    // desktop does not show a duplicate of the same item.
+    private void SynchronizeAssignedItemsToBoxes(IReadOnlyList<OrganizationDecision> decisions)
+    {
+        try
+        {
+            var listView = _desktopHost.DesktopListView;
+            if (listView == IntPtr.Zero)
+            {
+                return;
+            }
+            var byBox = decisions
+                .Where(decision => decision.Action == OrganizationRuleAction.AssignToBox && decision.TargetBoxId is { })
+                .GroupBy(decision => decision.TargetBoxId!.Value)
+                .ToArray();
+            foreach (var group in byBox)
+            {
+                var box = State.Boxes.FirstOrDefault(candidate => candidate.Id == group.Key);
+                if (box is null || box.IsMappedFolder)
+                {
+                    continue;
+                }
+                var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
+                    ?? Monitors.FirstOrDefault(candidate => candidate.IsPrimary)
+                    ?? Monitors.First();
+                var names = group
+                    .Select(decision => Items.FirstOrDefault(item =>
+                        item.Key.ToString().Equals(decision.ItemKey, StringComparison.OrdinalIgnoreCase)))
+                    .Where(item => item is not null)
+                    .Select(item => item!.DisplayName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (names.Length == 0)
+                {
+                    continue;
+                }
+                var screenX = (int)(monitor.PixelBounds.X + (box.Bounds.X + 24) * monitor.DpiScale);
+                var screenY = (int)(monitor.PixelBounds.Y + (box.Bounds.Y + 64) * monitor.DpiScale);
+                DesktopIconPositionService.MoveItemsUnderBox(listView, names, screenX, screenY);
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to synchronize assigned icon positions", exception);
+        }
     }
 
     public OrganizationApplyResult SmartOrganize()
