@@ -14,6 +14,10 @@
             <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource CrabDeskAccentColor}" />
             <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource CrabDeskSuccessColor}" />
             <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource CrabDeskDangerColor}" />
+            <SolidColorBrush x:Key="InfoBarInformationalBackground" Color="{ThemeResource SystemFillColorAttentionBackground}" />
+            <SolidColorBrush x:Key="InfoBarSuccessBackground" Color="{ThemeResource SystemFillColorSuccessBackground}" />
+            <SolidColorBrush x:Key="InfoBarWarningBackground" Color="{ThemeResource SystemFillColorCautionBackground}" />
+            <SolidColorBrush x:Key="InfoBarErrorBackground" Color="{ThemeResource SystemFillColorCriticalBackground}" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
             <Color x:Key="CrabDeskAccentColor">#58B6D9</Color>
@@ -27,6 +31,10 @@
             <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource CrabDeskAccentColor}" />
             <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource CrabDeskSuccessColor}" />
             <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource CrabDeskDangerColor}" />
+            <SolidColorBrush x:Key="InfoBarInformationalBackground" Color="{ThemeResource SystemFillColorAttentionBackground}" />
+            <SolidColorBrush x:Key="InfoBarSuccessBackground" Color="{ThemeResource SystemFillColorSuccessBackground}" />
+            <SolidColorBrush x:Key="InfoBarWarningBackground" Color="{ThemeResource SystemFillColorCautionBackground}" />
+            <SolidColorBrush x:Key="InfoBarErrorBackground" Color="{ThemeResource SystemFillColorCriticalBackground}" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="HighContrast">
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />

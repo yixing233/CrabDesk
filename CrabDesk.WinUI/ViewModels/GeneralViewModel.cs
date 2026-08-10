@@ -126,7 +126,7 @@ public partial class GeneralViewModel : ObservableObject
             DesktopIconRepairSeverity = repaired ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
             DesktopIconRepairStatus = repaired
                 ? "桌面图标已修复"
-                : "Explorer 桌面没有在等待时间内恢复；未启动额外的文件管理器窗口，可稍后再次修复";
+                : "Explorer 桌面未在等待时间内恢复接管，可稍后再次修复（不会额外打开文件管理器窗口）";
         }
         catch (Exception exception)
         {

@@ -46,17 +46,27 @@
             </CommandBar.SecondaryCommands>
         </CommandBar>
 
-        <ListView Grid.Row="2" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule, Mode=TwoWay}"
-                  SelectionMode="Extended" SelectionChanged="Rules_OnSelectionChanged" DoubleTapped="Rules_OnDoubleTapped" AutomationProperties.Name="整理规则列表">
+        <ListView Grid.Row="2" ItemsSource="{Binding Rules}"
+                  SelectionMode="None" AutomationProperties.Name="整理规则列表">
             <ListView.ItemTemplate>
                 <DataTemplate>
-                    <Grid Padding="10,8" MinHeight="58" ColumnSpacing="14">
+                    <Grid Padding="10,8" MinHeight="58" ColumnSpacing="14" Tapped="RuleRow_OnTapped">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="46" />
+                            <ColumnDefinition Width="32" />
+                            <ColumnDefinition Width="44" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="220" />
                         </Grid.ColumnDefinitions>
-                        <ToggleSwitch Width="44"
+                        <CheckBox Width="32"
+                                  MinWidth="0"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center"
+                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                  Checked="RuleSelected_OnChanged"
+                                  Unchecked="RuleSelected_OnChanged"
+                                  AutomationProperties.Name="选择规则" />
+                        <ToggleSwitch Grid.Column="1"
+                                      Width="44"
                                       MinWidth="0"
                                       OnContent=""
                                       OffContent=""
@@ -65,14 +75,14 @@
                                       IsOn="{Binding Enabled, Mode=OneWay}"
                                       Toggled="RuleEnabled_OnToggled"
                                       AutomationProperties.Name="启用规则" />
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding CriteriaText}"
                                        Style="{StaticResource SecondaryBodyStyle}"
                                        TextWrapping="NoWrap"
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                        <StackPanel Grid.Column="2"
+                        <StackPanel Grid.Column="3"
                                     Orientation="Horizontal"
                                     Spacing="7"
                                     VerticalAlignment="Center">

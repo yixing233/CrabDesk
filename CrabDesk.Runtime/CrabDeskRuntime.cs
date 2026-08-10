@@ -1822,10 +1822,19 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             UnassignItemCore(key);
         }
+        var validBoxes = State.Boxes.Where(box => !box.IsMappedFolder).Select(box => box.Id).ToHashSet();
         foreach (var (key, target) in previous)
         {
             if (State.Assignments.TryGetValue(key, out var current) && current == target)
             {
+                continue;
+            }
+            if (!validBoxes.Contains(target))
+            {
+                // The target box was deleted since the organization run.
+                // Restore the item to the desktop instead of parking it in a
+                // box that no longer exists, where it would be unreachable.
+                UnassignItemCore(key);
                 continue;
             }
             State.Assignments[key] = target;
@@ -2095,13 +2104,9 @@ public sealed class CrabDeskRuntime : IDisposable
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         _iconProvider.ClearCache();
         await RefreshItemsAsync(false);
-        if (resumeTakeover && !ActivateDesktopSurfaces("Explorer shell restart"))
+        if (resumeTakeover && !await ActivateDesktopSurfacesAfterExplorerRestartAsync())
         {
             return false;
-        }
-        if (resumeTakeover)
-        {
-            ConfigureDesktopInputMonitor();
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
@@ -2221,16 +2226,9 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         try
         {
-            RebuildSurfaces();
-            if (_surfaceManager is null)
+            if (!TryRebuildDesktopSurfaces())
             {
                 throw new InvalidOperationException("No CrabDesk desktop surface was created.");
-            }
-            _surfaceManager.EnsureReady();
-            _surfaceManager.SetVisible(!AreDesktopItemsHidden);
-            if (!AreDesktopItemsHidden)
-            {
-                _surfaceManager.Refresh();
             }
             return true;
         }
@@ -2252,6 +2250,63 @@ public sealed class CrabDeskRuntime : IDisposable
             EnsureDesktopInput($"takeover rollback ({context})");
             return false;
         }
+    }
+
+    private bool TryRebuildDesktopSurfaces()
+    {
+        RebuildSurfaces();
+        if (_surfaceManager is null)
+        {
+            return false;
+        }
+        try
+        {
+            _surfaceManager.EnsureReady();
+            _surfaceManager.SetVisible(!AreDesktopItemsHidden);
+            if (!AreDesktopItemsHidden)
+            {
+                _surfaceManager.Refresh();
+            }
+            return true;
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Desktop surface activation failed", exception);
+            try
+            {
+                _surfaceManager?.Dispose();
+            }
+            catch (Exception disposeException)
+            {
+                DiagnosticLog.Error("Failed to dispose an unusable desktop surface", disposeException);
+            }
+            _surfaceManager = null;
+            return false;
+        }
+    }
+
+    // Explorer takes a moment to recreate its desktop view after the shell
+    // restarts; retry the takeover instead of failing on the first transient
+    // miss. Only roll back to the paused state after all attempts fail.
+    private async Task<bool> ActivateDesktopSurfacesAfterExplorerRestartAsync()
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            if (TryRebuildDesktopSurfaces())
+            {
+                ConfigureDesktopInputMonitor();
+                return true;
+            }
+            await Task.Delay(500);
+            _desktopHost.Refresh();
+            Monitors = _monitorService.GetMonitors();
+        }
+
+        IsPaused = true;
+        State.Settings.TakeOverDesktop = false;
+        AreDesktopItemsHidden = false;
+        EnsureDesktopInput("takeover rollback (Explorer shell restart)");
+        return false;
     }
 
     private void EnsureDesktopInput(string context)
@@ -2334,6 +2389,7 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
         var active = new List<(DesktopBox Box, int ItemCount)>();
+        var createdBoxIds = new HashSet<Guid>();
         foreach (var definition in BuiltInOrganizationRules.Definitions)
         {
             var rule = State.OrganizationRules.FirstOrDefault(candidate =>
@@ -2352,7 +2408,16 @@ public sealed class CrabDeskRuntime : IDisposable
 
             if (matchingItems.Length == 0)
             {
+                // A user rule can reuse this auto-generated box (matching
+                // titles); removing it would orphan that rule's target and
+                // every future decision would count as an invalid target.
+                var referencedByAnotherRule = State.OrganizationRules.Any(candidate =>
+                    candidate.Id != rule.Id &&
+                    candidate.Enabled &&
+                    candidate.Action == OrganizationRuleAction.AssignToBox &&
+                    candidate.TargetBoxId == box?.Id);
                 if (box is not null &&
+                    !referencedByAnotherRule &&
                     (box.IsAutoGenerated || rule.TargetBoxId == box.Id) &&
                     !State.Assignments.Values.Contains(box.Id))
                 {
@@ -2372,11 +2437,15 @@ public sealed class CrabDeskRuntime : IDisposable
                     Appearance = CloneAppearance(State.Boxes.FirstOrDefault()?.Appearance)
                 };
                 State.Boxes.Add(box);
+                createdBoxIds.Add(box.Id);
             }
             if (box.IsAutoGenerated)
             {
                 box.Title = rule.Title;
-                box.MonitorId = monitor.Id;
+                if (createdBoxIds.Contains(box.Id))
+                {
+                    box.MonitorId = monitor.Id;
+                }
             }
 
             rule.TargetBoxId = box.Id;
@@ -2412,6 +2481,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 if (!State.Boxes.Contains(box))
                 {
                     State.Boxes.Add(box);
+                    createdBoxIds.Add(box.Id);
                 }
             }
             // Always pin the rule to its box (created or reused) so preview
@@ -2419,7 +2489,10 @@ public sealed class CrabDeskRuntime : IDisposable
             rule.TargetBoxId = box.Id;
             if (box.IsAutoGenerated && active.All(entry => entry.Box.Id != box.Id))
             {
-                box.MonitorId = monitor.Id;
+                if (createdBoxIds.Contains(box.Id))
+                {
+                    box.MonitorId = monitor.Id;
+                }
                 active.Add((box, matchingItems.Length));
             }
         }
@@ -2430,16 +2503,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 !activeIds.Contains(box.Id))
             .Select(box => box.Bounds)
             .ToArray();
-        var requested = active.Select(entry => new LayoutRect(
-            0,
-            0,
-            360,
-            Math.Clamp(82 + Math.Ceiling(entry.ItemCount / 4d) * 88, 190, 366))).ToArray();
-        var arranged = BoxLayoutPlanner.Arrange(monitor.WorkArea, requested, occupied);
-        for (var index = 0; index < active.Count; index++)
-        {
-            active[index].Box.Bounds = arranged[index];
-        }
+        PlaceAutoGeneratedBoxes(active, createdBoxIds, monitor.Id, monitor.WorkArea, occupied);
         NormalizeRulePriorities();
     }
 
@@ -2450,6 +2514,43 @@ public sealed class CrabDeskRuntime : IDisposable
             .Select(box => box.Bounds)
             .ToArray();
         return BoxLayoutPlanner.Arrange(monitor.WorkArea, [new LayoutRect(0, 0, width, height)], occupied)[0];
+    }
+
+    // Auto-generated boxes keep the position the user last left them in.
+    // Only boxes that are new this run (or whose bounds are degenerate) are
+    // arranged into free space, so an organization pass never resets a box
+    // the user has already moved or resized.
+    internal static void PlaceAutoGeneratedBoxes(
+        IReadOnlyList<(DesktopBox Box, int ItemCount)> active,
+        IReadOnlySet<Guid> createdBoxIds,
+        string monitorId,
+        LayoutRect workArea,
+        IReadOnlyList<LayoutRect> occupied)
+    {
+        var existingBoxes = active
+            .Where(entry => !createdBoxIds.Contains(entry.Box.Id) &&
+                entry.Box.Bounds.Width > 0 &&
+                entry.Box.Bounds.Height > 0)
+            .ToArray();
+        var newBoxes = active
+            .Where(entry => createdBoxIds.Contains(entry.Box.Id) ||
+                entry.Box.Bounds.Width <= 0 ||
+                entry.Box.Bounds.Height <= 0)
+            .ToArray();
+        var requested = newBoxes.Select(entry => new LayoutRect(
+            0,
+            0,
+            360,
+            Math.Clamp(82 + Math.Ceiling(entry.ItemCount / 4d) * 88, 190, 366))).ToArray();
+        var arranged = BoxLayoutPlanner.Arrange(
+            workArea,
+            requested,
+            occupied.Concat(existingBoxes.Select(entry => entry.Box.Bounds)).ToArray());
+        for (var index = 0; index < newBoxes.Length; index++)
+        {
+            newBoxes[index].Box.Bounds = arranged[index];
+            newBoxes[index].Box.MonitorId = monitorId;
+        }
     }
 
     private void NormalizeRulePriorities()

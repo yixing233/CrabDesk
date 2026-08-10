@@ -69,7 +69,10 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
         bool reassignExistingItems = false)
     {
         var decisions = Preview(state, items, reassignExistingItems);
-        var validBoxes = state.Boxes.Select(box => box.Id).ToHashSet();
+        // Mapped folders mirror a live directory; rules must not move items
+        // into them. Keep this in sync with CrabDeskRuntime which also
+        // excludes mapped boxes when it applies the same decisions.
+        var validBoxes = state.Boxes.Where(box => !box.IsMappedFolder).Select(box => box.Id).ToHashSet();
         var assigned = 0;
         var unassigned = 0;
         var ignored = 0;
@@ -177,9 +180,140 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
 
         var firstPattern = string.IsNullOrWhiteSpace(first.NamePattern) ? "*" : first.NamePattern.Trim();
         var secondPattern = string.IsNullOrWhiteSpace(second.NamePattern) ? "*" : second.NamePattern.Trim();
-        return firstPattern == "*" || secondPattern == "*" ||
-            string.Equals(firstPattern, secondPattern, StringComparison.OrdinalIgnoreCase);
+        return PatternsOverlap(firstPattern, secondPattern);
     }
+
+    // Decides whether two file-system wildcard patterns can match a common
+    // string. "*" and "?" follow FileSystemName.MatchesSimpleExpression
+    // semantics; "[...]" classes are approximated as "any one character" so
+    // the check stays conservative and never misses a real conflict.
+    private static bool PatternsOverlap(string firstPattern, string secondPattern)
+    {
+        if (string.Equals(firstPattern, secondPattern, StringComparison.OrdinalIgnoreCase) ||
+            firstPattern == "*" ||
+            secondPattern == "*")
+        {
+            return true;
+        }
+        return GlobNfasIntersect(CompileGlob(firstPattern), CompileGlob(secondPattern));
+    }
+
+    private static IReadOnlyList<GlobSegment> CompileGlob(string pattern)
+    {
+        var segments = new List<GlobSegment>();
+        for (var index = 0; index < pattern.Length; index++)
+        {
+            switch (pattern[index])
+            {
+                case '*':
+                    segments.Add(new GlobSegment(GlobKind.Star, '\0'));
+                    break;
+                case '?':
+                    segments.Add(new GlobSegment(GlobKind.Any, '\0'));
+                    break;
+                case '[':
+                {
+                    var close = pattern.IndexOf(']', index + 1);
+                    if (close > index)
+                    {
+                        index = close;
+                    }
+                    segments.Add(new GlobSegment(GlobKind.Any, '\0'));
+                    break;
+                }
+                default:
+                    segments.Add(new GlobSegment(GlobKind.Literal, char.ToLowerInvariant(pattern[index])));
+                    break;
+            }
+        }
+        return segments;
+    }
+
+    // Product reachability search over the two pattern NFAs. A shared
+    // accepting state means some string is matched by both patterns.
+    private static bool GlobNfasIntersect(
+        IReadOnlyList<GlobSegment> first,
+        IReadOnlyList<GlobSegment> second)
+    {
+        var visited = new HashSet<(int, int)>();
+        var queue = new Queue<(int, int)>();
+        queue.Enqueue((0, 0));
+        visited.Add((0, 0));
+        while (queue.Count > 0)
+        {
+            var (firstIndex, secondIndex) = queue.Dequeue();
+            if (firstIndex == first.Count && secondIndex == second.Count)
+            {
+                return true;
+            }
+            var left = firstIndex < first.Count ? first[firstIndex] : (GlobSegment?)null;
+            var right = secondIndex < second.Count ? second[secondIndex] : (GlobSegment?)null;
+
+            // A star may match the empty string, so it can be skipped.
+            if (left is { Kind: GlobKind.Star })
+            {
+                TryVisit(queue, visited, (firstIndex + 1, secondIndex));
+            }
+            if (right is { Kind: GlobKind.Star })
+            {
+                TryVisit(queue, visited, (firstIndex, secondIndex + 1));
+            }
+
+            if (left is null || right is null)
+            {
+                continue;
+            }
+
+            // Consume one character. A star absorbs whatever the other side
+            // needs; otherwise both segments must agree on the character.
+            if (left.Value.Kind == GlobKind.Star && right.Value.Kind != GlobKind.Star)
+            {
+                TryVisit(queue, visited, (firstIndex, secondIndex + 1));
+            }
+            else if (right.Value.Kind == GlobKind.Star && left.Value.Kind != GlobKind.Star)
+            {
+                TryVisit(queue, visited, (firstIndex + 1, secondIndex));
+            }
+            else if (left.Value.Kind != GlobKind.Star &&
+                     right.Value.Kind != GlobKind.Star &&
+                     GlobSegmentsCanMatch(left.Value, right.Value))
+            {
+                TryVisit(queue, visited, (firstIndex + 1, secondIndex + 1));
+            }
+        }
+        return false;
+    }
+
+    private static void TryVisit(
+        Queue<(int, int)> queue,
+        HashSet<(int, int)> visited,
+        (int, int) state)
+    {
+        if (visited.Add(state))
+        {
+            queue.Enqueue(state);
+        }
+    }
+
+    private static bool GlobSegmentsCanMatch(GlobSegment first, GlobSegment second)
+    {
+        if (first.Kind == GlobKind.Any || second.Kind == GlobKind.Any)
+        {
+            return true;
+        }
+        return first.Kind == GlobKind.Literal &&
+            second.Kind == GlobKind.Literal &&
+            first.Literal == second.Literal;
+    }
+
+    private enum GlobKind
+    {
+        Star,
+        Any,
+        Literal
+    }
+
+    private readonly record struct GlobSegment(GlobKind Kind, char Literal);
 
     private static string NormalizeExtension(string value)
     {

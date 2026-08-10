@@ -190,6 +190,83 @@ public sealed class OrganizationRuleEngineTests
         Assert.Equal([10, 20, 30, 40, 50], rules.Select(rule => rule.Priority));
     }
 
+    [Fact]
+    public void MappedBoxIsNotAValidRuleTarget()
+    {
+        var mappedBox = new DesktopBox
+        {
+            Title = "Mapped",
+            MappedFolder = new MappedFolderSettings { Path = "C:\\Mirror", IsReadOnly = true }
+        };
+        var state = new CrabDeskState
+        {
+            Boxes = [mappedBox],
+            OrganizationRules =
+            [
+                new OrganizationRule
+                {
+                    Title = "IntoMapped",
+                    Extensions = ["txt"],
+                    TargetBoxId = mappedBox.Id
+                }
+            ]
+        };
+        var item = Item("notes.txt", DesktopItemKind.File);
+
+        var result = _engine.Apply(state, [item]);
+
+        Assert.Equal(1, result.InvalidTargets);
+        Assert.Empty(state.Assignments);
+    }
+
+    [Fact]
+    public void OverlappingWildcardPatternsAreReportedAsConflicts()
+    {
+        var state = new CrabDeskState
+        {
+            OrganizationRules =
+            [
+                new OrganizationRule { Title = "Reports", NamePattern = "report*" },
+                new OrganizationRule { Title = "Year2026", NamePattern = "*2026" }
+            ]
+        };
+
+        var conflicts = _engine.FindConflicts(state);
+
+        Assert.Single(conflicts);
+    }
+
+    [Fact]
+    public void DisjointWildcardPatternsAreNotReportedAsConflicts()
+    {
+        var state = new CrabDeskState
+        {
+            OrganizationRules =
+            [
+                new OrganizationRule { Title = "Text", NamePattern = "*.txt" },
+                new OrganizationRule { Title = "Png", NamePattern = "*.png" }
+            ]
+        };
+
+        Assert.Empty(_engine.FindConflicts(state));
+    }
+
+    [Fact]
+    public void PatternThatNeedsBothSidesOfWildcardsIsReported()
+    {
+        var state = new CrabDeskState
+        {
+            OrganizationRules =
+            [
+                new OrganizationRule { Title = "StartsReport", NamePattern = "report*" },
+                new OrganizationRule { Title = "EndsPdf", NamePattern = "*.pdf" }
+            ]
+        };
+
+        // "report.pdf" satisfies both patterns.
+        Assert.Single(_engine.FindConflicts(state));
+    }
+
     private static DesktopItemRef Item(string name, DesktopItemKind kind) => new()
     {
         Key = new DesktopItemKey("test", Guid.NewGuid().ToString("N")),

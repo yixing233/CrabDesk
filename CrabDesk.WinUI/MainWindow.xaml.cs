@@ -227,7 +227,8 @@ public sealed partial class MainWindow : Window
         {
             From = fromOpacity,
             To = toOpacity,
-            Duration = new Duration(TimeSpan.FromMilliseconds(180))
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+            EnableDependentAnimation = true
         };
         Storyboard.SetTarget(slide, GlobalInfoBarTransform);
         Storyboard.SetTargetProperty(slide, "X");

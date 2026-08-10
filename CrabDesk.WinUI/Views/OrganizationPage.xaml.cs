@@ -2,6 +2,7 @@ using CrabDesk.WinUI.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace CrabDesk.WinUI.Views;
 
@@ -23,16 +24,40 @@ public sealed partial class OrganizationPage : Page
         }
     }
 
-    private void Rules_OnSelectionChanged(object sender, SelectionChangedEventArgs eventArgs)
+    private void RuleSelected_OnChanged(object sender, RoutedEventArgs eventArgs)
     {
-        if (sender is ListView listView)
+        if (sender is CheckBox { DataContext: OrganizationRuleListItem item } box)
         {
-            ViewModel.UpdateSelection(listView.SelectedItems.OfType<OrganizationRuleListItem>());
+            ViewModel.SetRuleChecked(item, box.IsChecked == true);
         }
     }
 
-    private void Rules_OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs eventArgs)
+    private void RuleRow_OnTapped(object sender, TappedRoutedEventArgs eventArgs)
     {
-        if (ViewModel.EditRuleCommand.CanExecute(null)) ViewModel.EditRuleCommand.Execute(null);
+        if (sender is not FrameworkElement { DataContext: OrganizationRuleListItem item })
+        {
+            return;
+        }
+
+        if (IsInsideInteractiveControl(eventArgs.OriginalSource))
+        {
+            return;
+        }
+
+        ViewModel.ToggleRuleChecked(item);
     }
+
+    private static bool IsInsideInteractiveControl(object originalSource)
+    {
+        for (var current = originalSource as DependencyObject; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is CheckBox || current is ToggleSwitch || current is Button)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }
+

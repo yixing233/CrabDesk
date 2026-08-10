@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CrabDesk.WinUI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
     <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
   </ItemGroup>

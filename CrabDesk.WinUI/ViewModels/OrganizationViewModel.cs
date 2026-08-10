@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CrabDesk.Core;
@@ -6,8 +7,10 @@ using CrabDesk.WinUI.Services;
 
 namespace CrabDesk.WinUI.ViewModels;
 
-public sealed class OrganizationRuleListItem
+public sealed class OrganizationRuleListItem : INotifyPropertyChanged
 {
+    private bool _isSelected;
+
     public OrganizationRuleListItem(OrganizationRule rule, IReadOnlyList<DesktopBox> boxes)
     {
         Rule = rule;
@@ -21,6 +24,22 @@ public sealed class OrganizationRuleListItem
     public bool Enabled => Rule.Enabled;
     public string CriteriaText { get; }
     public string DestinationText { get; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value)
+            {
+                return;
+            }
+            _isSelected = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
 
     private static string BuildCriteria(OrganizationRule rule)
     {
@@ -100,8 +119,32 @@ public partial class OrganizationViewModel : ObservableObject
     public void UpdateSelection(IEnumerable<OrganizationRuleListItem> selected)
     {
         SelectedRules = selected.ToArray();
+        var selectedIds = SelectedRules.Select(item => item.Id).ToHashSet();
+        foreach (var item in Rules)
+        {
+            item.IsSelected = selectedIds.Contains(item.Id);
+        }
         DeleteRulesCommand.NotifyCanExecuteChanged();
     }
+
+    public void SetRuleChecked(OrganizationRuleListItem item, bool isChecked)
+    {
+        if (isChecked)
+        {
+            SelectedRule = item;
+        }
+        else if (SelectedRule == item)
+        {
+            SelectedRule = SelectedRules.FirstOrDefault(candidate => candidate.Id != item.Id);
+        }
+
+        UpdateSelection(isChecked
+            ? SelectedRules.Append(item).Distinct()
+            : SelectedRules.Where(candidate => candidate.Id != item.Id));
+    }
+
+    public void ToggleRuleChecked(OrganizationRuleListItem item) =>
+        SetRuleChecked(item, !SelectedRules.Contains(item));
 
     public OrganizationViewModel(ICrabDeskService service, IDialogService dialogs)
     {
@@ -175,7 +218,11 @@ public partial class OrganizationViewModel : ObservableObject
         var copy = _service.DuplicateOrganizationRule(SelectedRule.Id);
         if (copy is not null)
         {
-            SelectedRule = Rules.FirstOrDefault(item => item.Id == copy.Id);
+            var item = Rules.FirstOrDefault(candidate => candidate.Id == copy.Id);
+            if (item is not null)
+            {
+                SetRuleChecked(item, true);
+            }
         }
     }
 
@@ -224,13 +271,14 @@ public partial class OrganizationViewModel : ObservableObject
 
     private void Refresh()
     {
-        var selectedId = SelectedRule?.Id;
+        var selectedIds = SelectedRules.Select(item => item.Id).ToHashSet();
         Rules.Clear();
         foreach (var rule in _service.State.OrganizationRules.OrderBy(rule => rule.Priority))
         {
             Rules.Add(new OrganizationRuleListItem(rule, _service.Boxes));
         }
-        SelectedRule = Rules.FirstOrDefault(item => item.Id == selectedId) ?? Rules.FirstOrDefault();
+        SelectedRule = Rules.FirstOrDefault(item => selectedIds.Contains(item.Id));
+        UpdateSelection(Rules.Where(item => selectedIds.Contains(item.Id)));
         OnPropertyChanged(string.Empty);
     }
 }

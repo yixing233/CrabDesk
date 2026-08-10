@@ -8,7 +8,7 @@
     <PublishAot>true</PublishAot>
     <StripSymbols>true</StripSymbols>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version Condition="'$(Version)' == ''">0.6.0</Version>
+    <Version Condition="'$(Version)' == ''">0.6.0-beta.3</Version>
     <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
     <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
   </PropertyGroup>

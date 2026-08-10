@@ -160,7 +160,7 @@ public sealed class DesktopHostService : IDesktopHost
         DesktopParent = IntPtr.Zero;
         DesktopView = IntPtr.Zero;
         DesktopListView = IntPtr.Zero;
-        return await WaitForDesktopShellAsync(cancellationToken);
+        return await WaitForDesktopShellAsync(cancellationToken, (int)processId);
     }
 
     private static async Task<bool> WaitForExplorerProcessAsync(CancellationToken cancellationToken)
@@ -258,20 +258,76 @@ public sealed class DesktopHostService : IDesktopHost
         return explorer.HasExited;
     }
 
-    private async Task<bool> WaitForDesktopShellAsync(CancellationToken cancellationToken)
+    private async Task<bool> WaitForDesktopShellAsync(
+        CancellationToken cancellationToken,
+        int avoidProcessId = 0)
     {
         var deadline = DateTimeOffset.UtcNow + ExplorerStartTimeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Refresh();
-            if (IsAvailable && DesktopView != IntPtr.Zero && DesktopListView != IntPtr.Zero)
+            if (IsAvailable &&
+                DesktopView != IntPtr.Zero &&
+                DesktopListView != IntPtr.Zero &&
+                DesktopViewIsLiveExplorer(avoidProcessId))
             {
-                return true;
+                // Windows destroys the killed shell's windows asynchronously;
+                // require the desktop view to survive two polls so the repair
+                // does not latch onto the dying explorer and fail takeover.
+                var stable = true;
+                for (var confirmation = 0; confirmation < 2; confirmation++)
+                {
+                    await Task.Delay(ExplorerPollInterval, cancellationToken).ConfigureAwait(false);
+                    Refresh();
+                    if (!IsAvailable ||
+                        DesktopView == IntPtr.Zero ||
+                        DesktopListView == IntPtr.Zero ||
+                        !DesktopViewIsLiveExplorer(avoidProcessId))
+                    {
+                        stable = false;
+                        break;
+                    }
+                }
+                if (stable)
+                {
+                    return true;
+                }
             }
             await Task.Delay(ExplorerPollInterval, cancellationToken).ConfigureAwait(false);
         }
         return false;
+    }
+
+    private bool DesktopViewIsLiveExplorer(int avoidProcessId)
+    {
+        if (DesktopView == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        NativeMethods.GetWindowThreadProcessId(DesktopView, out var ownerProcessId);
+        if (ownerProcessId == 0 ||
+            ownerProcessId == avoidProcessId ||
+            ownerProcessId == Environment.ProcessId)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var owner = Process.GetProcessById((int)ownerProcessId);
+            return !owner.HasExited &&
+                string.Equals(owner.ProcessName, "explorer", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private bool UpdateDesktopListViewRows(CancellationToken cancellationToken)
