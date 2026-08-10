@@ -761,6 +761,41 @@ directory. The location row now opens the native folder picker, validates and
 creates the selected path, persists it, and immediately refreshes the backup
 list from the new directory. Existing files remain in their original folder.
 
+### 53. An assigned icon appeared both inside its box and on the desktop
+
+Dropping a desktop icon into a box (or assigning one through rules) must
+not leave a second copy of the same icon on the desktop. Earlier builds
+parked the native Explorer icon off-screen and re-detected when Explorer
+pulled it back after a drag, which was a patch-on-patch fix: Explorer
+runs its own layout pass after every drag and kept pulling parked icons
+back, so the item flickered onto the desktop again and again.
+
+The root cause is removed instead of detected: assigned items no longer
+exist in Explorer's desktop view at all.
+
+- File items are stamped Hidden+System, which the desktop shell view
+  never renders regardless of drags or layout passes. The box still lists
+  them because the item provider enumerates the Desktop folder directly.
+- Shell items (This PC, Recycle Bin, Network, Control Panel, User Files)
+  use the OS desktop-icon visibility setting
+  (`HideDesktopIcons\NewStartPanel\{CLSID}`) and notify the shell with
+  SHCNE_ASSOCCHANGED.
+- Originals are captured before hiding. Unassigning, pausing, exiting,
+  resetting layout, or restoring a backup restores them exactly.
+- The recovery marker now records file-attribute snapshots and shell-icon
+  originals; `CrabDesk.IconGuard` and startup recovery restore them
+  after an abnormal exit, so icons can never stay missing.
+- All parking, drift detection, settle timers, and the mouse-hook drag
+  listener were deleted; there is nothing to detect because Explorer
+  never renders the items.
+- Hide and restore additionally send SHCNE_UPDATEDIR on the desktop
+  folder, so the desktop view re-enumerates immediately instead of
+  waiting for its lazy per-item attribute update. This removes the
+  2-3 s lingering/dimmed icon after a drop into a box and the delayed
+  reappearance when dragging an item back out. Dragging out of a box now
+  waits (bounded) for Explorer to re-add the icon, then places it at the
+  release point.
+
 ## Missing Regression Coverage
 
 - Repeated close/dispose, pause, host reconnect, topology rebuild, and exit.

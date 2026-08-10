@@ -42,6 +42,7 @@ internal static class NativeMethods
     internal const uint RdwAllChildren = 0x0080;
     internal const uint RdwUpdateNow = 0x0100;
     internal const uint ShcneUpdateItem = 0x00002000;
+    internal const uint ShcneUpdateDir = 0x00001000;
     internal const uint ShcneAssocChanged = 0x08000000;
     internal const uint ShcnfPathW = 0x0005;
     internal const uint ShcnfIdList = 0x0000;
@@ -68,6 +69,35 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, bool attach);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetActiveWindow();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetActiveWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetFocus(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetFocus();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetTopWindow(IntPtr hwnd);
@@ -112,6 +142,42 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    internal const uint EmSetCharFormat = 0x0444;
+    internal const uint EmSetSel = 0x00B1;
+    internal const int ScfAll = 0;
+    internal const int ScfSelection = 1;
+    internal const uint CfmColor = 0x40000000;
+    internal const uint CfeAutoColor = 0x40000000;
+    internal const uint CfmBackColor = 0x04000000;
+    internal const uint CfeAutoBackColor = 0x04000000;
+    internal struct CharFormat2
+    {
+        internal uint CbSize;
+        internal uint DwMask;
+        internal uint DwEffects;
+        internal int YHeight;
+        internal int YOffset;
+        internal int CrTextColor;
+        internal byte BCharSet;
+        internal byte BPitchAndFamily;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        internal string SzFaceName;
+        internal ushort WWeight;
+        internal short SSpacing;
+        internal int CrBackColor;
+        internal int Lcid;
+        internal uint DwReserved;
+        internal short SStyle;
+        internal ushort WKerning;
+        internal byte BUnderlineType;
+        internal byte BAnimation;
+        internal byte BRevAuthor;
+        internal byte BUnderlineColor;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, ref CharFormat2 lParam);
 
     [DllImport("shell32.dll")]
     internal static extern void SHChangeNotify(

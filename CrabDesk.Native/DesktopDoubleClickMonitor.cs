@@ -49,14 +49,15 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         if (code >= 0 && Enabled && DesktopListView != IntPtr.Zero)
         {
             var mouse = Marshal.PtrToStructure<LowLevelMouseHookStruct>(data);
-            if (message.ToInt32() == WmLButtonDown)
+            var msg = message.ToInt32();
+            if (msg == WmLButtonDown)
             {
                 if (IsEmptyDesktopPoint(mouse.Point))
                 {
                     EmptyAreaClicked?.Invoke(this, EventArgs.Empty);
                 }
             }
-            else if (message.ToInt32() == WmMouseWheel &&
+            else if (msg == WmMouseWheel &&
                      GetAsyncKeyState(VkControl) < 0 &&
                      IsDesktopSurfacePoint(mouse.Point))
             {

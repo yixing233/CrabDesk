@@ -334,59 +334,106 @@ public static class DesktopIconPositionService
         IntPtr listView,
         IEnumerable<DesktopIconPlacement> placements)
     {
-        var placementQueues = new Dictionary<string, Queue<DesktopIconPlacement>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var placement in placements)
-        {
-            foreach (var name in placement.DisplayNames
-                         .Where(name => !string.IsNullOrWhiteSpace(name))
-                         .SelectMany(name => new[] { name, Path.GetFileNameWithoutExtension(name) })
-                         .Select(NormalizeName)
-                         .Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (!placementQueues.TryGetValue(name, out var queue))
-                {
-                    queue = new Queue<DesktopIconPlacement>();
-                    placementQueues[name] = queue;
-                }
-                queue.Enqueue(placement);
-            }
-        }
-        if (placementQueues.Count == 0 || !RemoteListViewSession.TryCreate(listView, out var session))
+        var placementList = placements.ToArray();
+        if (placementList.Length == 0 || !RemoteListViewSession.TryCreate(listView, out var session))
         {
             return 0;
         }
 
         using (session)
         {
-            var moved = 0;
-            for (var index = 0; index < session.ItemCount; index++)
+            // Pass 1 matches only exact display names. Parking placements are
+            // built from the names Explorer actually shows, so an assigned
+            // icon is never confused with an unrelated icon that merely
+            // shares a base name (for example report.docx vs report.pdf).
+            var consumed = new bool[placementList.Length];
+            var moved = MoveMatchingItems(
+                session,
+                listView,
+                placementList,
+                consumed,
+                (placement, name) => placement.DisplayNames.Any(candidate =>
+                    !string.IsNullOrWhiteSpace(candidate) &&
+                    NormalizeName(candidate).Equals(name, StringComparison.OrdinalIgnoreCase)));
+            if (moved < placementList.Length)
             {
-                var text = session.ReadText(index);
-                if (text is null ||
-                    !placementQueues.TryGetValue(NormalizeName(text), out var queue) ||
-                    queue.Count == 0)
-                {
-                    continue;
-                }
-
-                var placement = queue.Dequeue();
-                var point = new NativeMethods.Point { X = placement.ScreenX, Y = placement.ScreenY };
-                if (!NativeMethods.ScreenToClient(listView, ref point))
-                {
-                    continue;
-                }
-                if (session.SetPosition(index, new NativePoint
-                {
-                    X = point.X,
-                    Y = point.Y
-                }))
-                {
-                    moved++;
-                }
+                // Pass 2 falls back to base names for placements that had no
+                // exact match (Explorer may hide file extensions). Only
+                // unmatched placements are considered, so a visible full
+                // name always wins over a base-name collision.
+                moved += MoveMatchingItems(
+                    session,
+                    listView,
+                    placementList,
+                    consumed,
+                    (placement, name) => placement.DisplayNames.Any(candidate =>
+                        !string.IsNullOrWhiteSpace(candidate) &&
+                        NormalizeName(Path.GetFileNameWithoutExtension(candidate))
+                            .Equals(name, StringComparison.OrdinalIgnoreCase)));
             }
             return moved;
         }
     }
+
+    private static int MoveMatchingItems(
+        RemoteListViewSession session,
+        IntPtr listView,
+        DesktopIconPlacement[] placements,
+        bool[] consumed,
+        Func<DesktopIconPlacement, string, bool> matches)
+    {
+        var moved = 0;
+        for (var index = 0; index < session.ItemCount; index++)
+        {
+            var text = session.ReadText(index);
+            if (text is null)
+            {
+                continue;
+            }
+            var name = NormalizeName(text);
+            var placementIndex = -1;
+            for (var candidate = 0; candidate < placements.Length; candidate++)
+            {
+                if (!consumed[candidate] && matches(placements[candidate], name))
+                {
+                    placementIndex = candidate;
+                    break;
+                }
+            }
+            if (placementIndex < 0)
+            {
+                continue;
+            }
+            var placement = placements[placementIndex];
+            var point = new NativeMethods.Point { X = placement.ScreenX, Y = placement.ScreenY };
+            if (!NativeMethods.ScreenToClient(listView, ref point))
+            {
+                continue;
+            }
+            // Skip icons that already sit at the target. Repeated parks of
+            // the same assigned item must not touch Explorer again; every
+            // extra ListView write proved to be a source of icon loss.
+            if (session.TryGetPosition(index, out var current) &&
+                Math.Abs(current.X - point.X) <= 2 &&
+                Math.Abs(current.Y - point.Y) <= 2)
+            {
+                consumed[placementIndex] = true;
+                moved++;
+                continue;
+            }
+            if (session.SetPosition(index, new NativePoint
+            {
+                X = point.X,
+                Y = point.Y
+            }))
+            {
+                consumed[placementIndex] = true;
+                moved++;
+            }
+        }
+        return moved;
+    }
+
 
     public static bool IsEmptyPoint(IntPtr listView, int clientX, int clientY)
     {

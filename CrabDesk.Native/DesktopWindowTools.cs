@@ -1,4 +1,4 @@
-using CrabDesk.Core;
+﻿using CrabDesk.Core;
 using System.ComponentModel;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -8,6 +8,7 @@ namespace CrabDesk.Native;
 public static class DesktopWindowTools
 {
     private const long WsExNoActivate = 0x08000000L;
+    private const uint GaRoot = 2;
 
     public static void ToggleDesktop()
     {
@@ -15,7 +16,7 @@ public static class DesktopWindowTools
         var shell = shellType is null ? null : Activator.CreateInstance(shellType);
         if (shell is null)
         {
-            throw new InvalidOperationException("无法连接 Windows Shell。");
+            throw new InvalidOperationException("Unable to connect to Windows Shell.");
         }
         try
         {
@@ -181,6 +182,97 @@ public static class DesktopWindowTools
 
     public static long GetSurfaceExtendedStyle(IntPtr hwnd) =>
         NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+
+    // Title editing needs the surface to become active so the child editor
+    // renders its selection with the active highlight color instead of the
+    // inactive cyan color. The surface normally keeps WS_EX_NOACTIVATE; these
+    // helpers lift it for the duration of the edit and restore it afterwards.
+    public static bool IsSurfaceNoActivate(IntPtr hwnd) =>
+        (NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64() & WsExNoActivate) != 0;
+
+    public static void SetSurfaceNoActivate(IntPtr hwnd, bool noActivate)
+    {
+        var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+        extendedStyle = noActivate
+            ? extendedStyle | WsExNoActivate
+            : extendedStyle & ~WsExNoActivate;
+        NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
+    }
+
+    public static bool IsSurfaceActive(IntPtr hwnd) =>
+        NativeMethods.GetActiveWindow() == hwnd;
+
+    public static bool FocusChild(IntPtr hwnd)
+    {
+        NativeMethods.SetFocus(hwnd);
+        return NativeMethods.GetFocus() == hwnd;
+    }
+
+    // RichEdit persists SelectionBackColor as character formatting. Select
+    // the document, restore automatic foreground/background colors, then put
+    // the caret back where it was so stale highlights never remain visible.
+    public static void ResetRichEditTextFormatting(IntPtr richEditHandle, int caretStart = 0)
+    {
+        if (richEditHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var format = new NativeMethods.CharFormat2
+        {
+            CbSize = (uint)Marshal.SizeOf<NativeMethods.CharFormat2>(),
+            DwMask = NativeMethods.CfmColor | NativeMethods.CfmBackColor,
+            DwEffects = NativeMethods.CfeAutoColor | NativeMethods.CfeAutoBackColor,
+            CrTextColor = 0,
+            CrBackColor = 0
+        };
+        NativeMethods.SendMessage(richEditHandle, NativeMethods.EmSetSel, IntPtr.Zero, new IntPtr(-1));
+        NativeMethods.SendMessage(
+            richEditHandle,
+            NativeMethods.EmSetCharFormat,
+            (IntPtr)NativeMethods.ScfSelection,
+            ref format);
+        NativeMethods.SendMessage(
+            richEditHandle,
+            NativeMethods.EmSetSel,
+            new IntPtr(caretStart),
+            new IntPtr(caretStart));
+    }
+
+    public static bool ActivateSurface(IntPtr hwnd)
+    {
+        SetSurfaceNoActivate(hwnd, false);
+        var foregroundThread = NativeMethods.GetWindowThreadProcessId(NativeMethods.GetForegroundWindow(), out _);
+        var currentThread = NativeMethods.GetCurrentThreadId();
+        var attached = foregroundThread != currentThread &&
+            NativeMethods.AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            // The surface is a child of the desktop shell view, so it can
+            // only become the active window while the desktop itself is the
+            // foreground window. Bring the desktop root to the front (the
+            // same state a native Explorer rename box uses), then activate
+            // the surface so its child editor can take real keyboard focus
+            // and render the active selection color.
+            var root = NativeMethods.GetAncestor(hwnd, GaRoot);
+            if (root != IntPtr.Zero)
+            {
+                NativeMethods.SetForegroundWindow(root);
+            }
+            if (!IsSurfaceActive(hwnd))
+            {
+                NativeMethods.SetActiveWindow(hwnd);
+            }
+            return IsSurfaceActive(hwnd);
+        }
+        finally
+        {
+            if (attached)
+            {
+                NativeMethods.AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+    }
 
     public static string GetDesktopSurfaceDiagnostics(IntPtr hwnd, IntPtr desktopView)
     {

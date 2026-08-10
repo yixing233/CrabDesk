@@ -4,6 +4,11 @@ using System.Drawing.Drawing2D;
 using CrabDesk.Core;
 using CrabDesk.Native;
 using Forms = System.Windows.Forms;
+using FormsIntegration = System.Windows.Forms.Integration;
+using Wpf = System.Windows;
+using WpfControls = System.Windows.Controls;
+using WpfInput = System.Windows.Input;
+using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
@@ -60,10 +65,10 @@ internal sealed class DesktopBoxForm : Forms.Form
     private readonly Forms.Timer _animationTimer;
     private readonly Forms.Timer _hoverTimer;
     private readonly Forms.ToolTip _headerToolTip;
-    private readonly Forms.TextBox _titleEditor;
+    private readonly FormsIntegration.ElementHost _titleEditorHost;
+    private readonly WpfControls.TextBox _titleEditor;
     private ShellContextMenuSession? _shellContextMenu;
     private DesktopBox? _editingBox;
-    private bool _cancelTitleEdit;
     private Font? _titleEditorFont;
     private DesktopBox? _movingBox;
     private DesktopBox? _resizingBox;
@@ -124,17 +129,25 @@ internal sealed class DesktopBoxForm : Forms.Form
             AutoPopDelay = 4000,
             ShowAlways = true
         };
-        _titleEditor = new Forms.TextBox
+        _titleEditor = new WpfControls.TextBox
+        {
+            BorderThickness = new Wpf.Thickness(0),
+            Padding = new Wpf.Thickness(0),
+            VerticalContentAlignment = Wpf.VerticalAlignment.Center,
+            AcceptsReturn = false,
+            TextWrapping = Wpf.TextWrapping.NoWrap
+        };
+        WpfMedia.TextOptions.SetTextFormattingMode(_titleEditor, WpfMedia.TextFormattingMode.Display);
+        WpfMedia.TextOptions.SetTextRenderingMode(_titleEditor, WpfMedia.TextRenderingMode.Grayscale);
+        _titleEditorHost = new FormsIntegration.ElementHost
         {
             Visible = false,
-            BorderStyle = Forms.BorderStyle.None,
-            AutoSize = true,
-            HideSelection = false,
-            Margin = Forms.Padding.Empty
+            Margin = Forms.Padding.Empty,
+            Child = _titleEditor
         };
         _titleEditor.KeyDown += OnTitleEditorKeyDown;
-        _titleEditor.LostFocus += (_, _) => FinishTitleEdit(!_cancelTitleEdit);
-        Controls.Add(_titleEditor);
+        _titleEditor.TextChanged += OnTitleEditorTextChanged;
+        Controls.Add(_titleEditorHost);
 
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
@@ -317,7 +330,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             _shellContextMenu = null;
             _titleEditorFont?.Dispose();
             _titleEditorFont = null;
-            _titleEditor.Dispose();
+            _titleEditorHost.Dispose();
             _headerToolTip.Dispose();
             Region?.Dispose();
         }
@@ -880,6 +893,10 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        if (_editingBox is not null)
+        {
+            FinishTitleEdit(true);
+        }
         RebuildGeometry();
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
@@ -1069,11 +1086,15 @@ internal sealed class DesktopBoxForm : Forms.Form
                 IsPointerOverAnyBox(Forms.Cursor.Position)))
         {
             _runtime.UnassignItems(itemKeys);
-            MoveReleasedItemsToDesktop(itemKeys, Forms.Cursor.Position);
+            _ = MoveReleasedItemsToDesktopAsync(itemKeys, Forms.Cursor.Position);
         }
     }
 
-    private void MoveReleasedItemsToDesktop(IReadOnlyList<string> itemKeys, Point screenPoint)
+    // Unassigning restores the file attributes and Explorer re-adds the
+    // icons to its desktop view asynchronously. Wait briefly (bounded) for
+    // them to exist in the ListView, then place them at the drop point so
+    // the icon appears immediately where the user released it.
+    private async Task MoveReleasedItemsToDesktopAsync(IReadOnlyList<string> itemKeys, Point screenPoint)
     {
         try
         {
@@ -1082,19 +1103,33 @@ internal sealed class DesktopBoxForm : Forms.Form
             {
                 return;
             }
-            var placements = itemKeys
+            var items = itemKeys
                 .Select(key => _runtime.Items.FirstOrDefault(item =>
                     item.Key.ToString().Equals(key, StringComparison.OrdinalIgnoreCase)))
                 .Where(item => item is not null)
+                .ToArray();
+            if (items.Length == 0)
+            {
+                return;
+            }
+            var placements = items
                 .Select((item, index) => new DesktopIconPlacement(
                     [item!.DisplayName, Path.GetFileName(item.FileSystemPath ?? string.Empty)],
                     screenPoint.X + (index % 5) * 84,
                     screenPoint.Y + (index / 5) * 92))
                 .ToArray();
-            if (placements.Length > 0)
+            for (var attempt = 0; attempt < 15; attempt++)
             {
-                DesktopIconPositionService.MoveItemsUnderBox(listView, placements);
+                var present = DesktopIconPositionService.CaptureItemPositions(
+                    listView,
+                    placements.SelectMany(placement => placement.DisplayNames));
+                if (present.Count >= placements.Length)
+                {
+                    break;
+                }
+                await Task.Delay(100);
             }
+            DesktopIconPositionService.MoveItemsUnderBox(listView, placements);
         }
         catch (Exception exception)
         {
@@ -1666,6 +1701,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         var transferEffect = ResolveTransferEffect(eventArgs, box.Box);
+        DiagnosticLog.Info($"Surface drag drop resolved monitor={_monitor.Id} effect={transferEffect}");
         if (transferEffect == BoxTransferEffect.None)
         {
             return;
@@ -2166,49 +2202,166 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
 
         _editingBox = box;
-        _cancelTitleEdit = false;
+        // GDI+ scales the drawn title with the surface transform. WinForms
+        // already resolves point fonts against the monitor DPI, so applying
+        // _scale here as well makes the editor text render at a different
+        // size and baseline from the title it replaces.
         _titleEditorFont?.Dispose();
         _titleEditorFont = CreateFont(
             box.Appearance.TitleFontFamily,
             (float)box.Appearance.TitleFontSize,
             box.Appearance.TitleFontBold ? FontStyle.Bold : FontStyle.Regular,
             GraphicsUnit.Point);
-        _titleEditor.Font = _titleEditorFont;
-        _titleEditor.TextAlign = box.Appearance.TitleAlignment == BoxTitleAlignment.Center
-            ? Forms.HorizontalAlignment.Center
-            : Forms.HorizontalAlignment.Left;
-        _titleEditor.BackColor = _runtime.IsDarkTheme
-            ? Color.FromArgb(24, 27, 31)
-            : Color.FromArgb(239, 242, 245);
-        _titleEditor.ForeColor = ResolveTitleColor(box.Appearance.TitleColor, _runtime.IsDarkTheme);
-        var rightPadding = GetTitleRightPadding(box);
-        var editorHeight = _titleEditor.PreferredHeight;
-        _titleEditor.Bounds = new Rectangle(
-            ToPixel(geometry.Header.X + 20),
-            ToPixel(geometry.Header.Y + geometry.Header.Height / 2) - editorHeight / 2,
-            Math.Max(48, ToPixel(geometry.Header.Width - rightPadding)),
-            editorHeight);
+        _titleEditor.FontFamily = new WpfMedia.FontFamily(
+            ResolveTitleEditorFontFamily(box.Appearance.TitleFontFamily, box.Title));
+        _titleEditor.FontSize = box.Appearance.TitleFontSize * 96d / 72d;
+        _titleEditor.FontWeight = box.Appearance.TitleFontBold
+            ? Wpf.FontWeights.Bold
+            : Wpf.FontWeights.Regular;
+        // Editing controls deliberately sit outside the box material: a box's
+        // background color and opacity must never wash into typed text or its
+        // selection state.
+        _titleEditor.Background = CreateOpaqueWpfBrush(GetOpaqueTitleEditorBackColor());
+        _titleEditor.Foreground = CreateOpaqueWpfBrush(ResolveTitleColor(box.Appearance.TitleColor, _runtime.IsDarkTheme));
         _titleEditor.Text = box.Title;
-        _titleEditor.Visible = true;
-        _titleEditor.BringToFront();
-        _titleEditor.SelectAll();
+        LayoutTitleEditor(geometry);
+        _titleEditorHost.Visible = true;
+        _titleEditorHost.BringToFront();
+        ResetTitleEditorHighlight();
+        _titleEditor.TextAlignment = box.Appearance.TitleAlignment == BoxTitleAlignment.Center
+            ? Wpf.TextAlignment.Center
+            : Wpf.TextAlignment.Left;
+        ActivateTitleEditor();
         _titleEditor.Focus();
         Invalidate();
     }
 
-    private void OnTitleEditorKeyDown(object? sender, Forms.KeyEventArgs eventArgs)
+    private void OnTitleEditorTextChanged(object? sender, WpfControls.TextChangedEventArgs eventArgs)
     {
-        if (eventArgs.KeyCode == Forms.Keys.Enter)
+        if (_editingBox is null || _titleEditorFont is null)
+        {
+            return;
+        }
+
+        var geometry = _boxes.FirstOrDefault(candidate => candidate.Box.Id == _editingBox.Id);
+        if (geometry is not null)
+        {
+            LayoutTitleEditor(geometry);
+        }
+    }
+
+    private void LayoutTitleEditor(BoxGeometry geometry)
+    {
+        if (_titleEditorFont is null)
+        {
+            return;
+        }
+
+        var left = ToPixel(geometry.Header.X + 20);
+        var rightPadding = GetTitleRightPadding(geometry.Box);
+        var availableWidth = Math.Max(48, ToPixel(geometry.Header.Width - rightPadding));
+        var minimumWidth = Math.Min(88, availableWidth);
+        var measuredWidth = Forms.TextRenderer.MeasureText(
+            string.IsNullOrEmpty(_titleEditor.Text) ? "M" : _titleEditor.Text + "M",
+            _titleEditorFont,
+            Size.Empty,
+            Forms.TextFormatFlags.NoPadding | Forms.TextFormatFlags.SingleLine).Width + 12;
+        var editorWidth = Math.Clamp(measuredWidth, minimumWidth, availableWidth);
+        if (geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center)
+        {
+            left += (availableWidth - editorWidth) / 2;
+        }
+
+        var editorHeight = Math.Min(
+            Math.Max(20, ToPixel(geometry.Header.Height) - 10),
+            Math.Max(22, _titleEditorFont.Height + 4));
+        _titleEditorHost.Bounds = new Rectangle(
+            left,
+            ToPixel(geometry.Header.Y + geometry.Header.Height / 2) - editorHeight / 2,
+            editorWidth,
+            editorHeight);
+    }
+
+    private Color GetOpaqueTitleEditorBackColor() => _runtime.IsDarkTheme
+        ? Color.FromArgb(24, 27, 31)
+        : Color.White;
+
+    private static WpfMedia.SolidColorBrush CreateOpaqueWpfBrush(Color color)
+    {
+        var brush = new WpfMedia.SolidColorBrush(WpfMedia.Color.FromRgb(color.R, color.G, color.B));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static string ResolveTitleEditorFontFamily(string? configuredFamily, string title)
+    {
+        // GDI+ resolves Chinese glyphs in Segoe UI through Microsoft YaHei.
+        // WPF otherwise picks the UI fallback, whose metrics and strokes differ
+        // visibly from the title that the editor replaces.
+        if (string.Equals(configuredFamily, "Segoe UI", StringComparison.OrdinalIgnoreCase) &&
+            title.Any(character => character is >= '\u3400' and <= '\u9FFF'))
+        {
+            return "Microsoft YaHei";
+        }
+
+        return string.IsNullOrWhiteSpace(configuredFamily) ? "Segoe UI" : configuredFamily;
+    }
+
+    private void ResetTitleEditorHighlight()
+    {
+        // Start with a caret at the end, matching the desktop rename field.
+        _titleEditor.Select(_titleEditor.Text.Length, 0);
+    }
+
+    // The desktop surface normally keeps WS_EX_NOACTIVATE so mouse clicks
+    // never steal activation from Explorer. In that state RichEdit renders
+    // its selection in the inactive cyan color and ignores SelectionBackColor.
+    // While the title is being edited, lift the flag and activate the surface
+    // so the editor takes real focus and shows the native rename blue.
+    private void ActivateTitleEditor()
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+        if (!DesktopWindowTools.IsSurfaceActive(Handle) ||
+            DesktopWindowTools.IsSurfaceNoActivate(Handle))
+        {
+            DesktopWindowTools.ActivateSurface(Handle);
+        }
+        if (!DesktopWindowTools.FocusChild(_titleEditorHost.Handle))
+        {
+            _titleEditorHost.Focus();
+        }
+        _titleEditor.Focus();
+        DiagnosticLog.Info(
+            $"Title editor activation active={DesktopWindowTools.IsSurfaceActive(Handle)} " +
+            $"editorFocused={_titleEditor.IsKeyboardFocused} " +
+            $"noActivate={DesktopWindowTools.IsSurfaceNoActivate(Handle)}");
+    }
+
+    private void RestoreTitleEditorActivation()
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+        if (!DesktopWindowTools.IsSurfaceNoActivate(Handle))
+        {
+            DesktopWindowTools.SetSurfaceNoActivate(Handle, true);
+        }
+    }
+
+    private void OnTitleEditorKeyDown(object? sender, WpfInput.KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key == WpfInput.Key.Enter)
         {
             eventArgs.Handled = true;
-            eventArgs.SuppressKeyPress = true;
             FinishTitleEdit(true);
         }
-        else if (eventArgs.KeyCode == Forms.Keys.Escape)
+        else if (eventArgs.Key == WpfInput.Key.Escape)
         {
             eventArgs.Handled = true;
-            eventArgs.SuppressKeyPress = true;
-            _cancelTitleEdit = true;
             FinishTitleEdit(false);
         }
     }
@@ -2221,8 +2374,8 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         var title = _titleEditor.Text.Trim();
         _editingBox = null;
-        _cancelTitleEdit = false;
-        _titleEditor.Visible = false;
+        _titleEditorHost.Visible = false;
+        RestoreTitleEditorActivation();
         if (commit && title.Length > 0 && !string.Equals(title, box.Title, StringComparison.Ordinal))
         {
             box.Title = title;

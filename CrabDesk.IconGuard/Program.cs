@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
 if (args.Length < 2 || !int.TryParse(args[0], out var processId))
@@ -35,6 +36,7 @@ try
     var inputRestored = ExplorerIcons.EnsureDesktopInputEnabled();
     var workAreasRestored = recovery.WorkAreas is null || ExplorerIcons.RestoreWorkAreas(recovery.WorkAreas);
     var attributesRestored = ExplorerIcons.RestoreFileAttributes(recovery.FileAttributes);
+    var shellRestored = ExplorerIcons.RestoreShellIcons(recovery.ShellIcons);
     var positionsRestored = recovery.IconPositions.Count == 0;
     if (recovery.IconPositions.Count > 0)
     {
@@ -48,7 +50,7 @@ try
             Thread.Sleep(500);
         }
     }
-    recoveryCompleted = attributesRestored && workAreasRestored && positionsRestored && inputRestored;
+    recoveryCompleted = attributesRestored && shellRestored && workAreasRestored && positionsRestored && inputRestored;
 }
 catch
 {
@@ -84,11 +86,13 @@ internal sealed class RecoveryState
     public List<RecoveryIconPosition> IconPositions { get; set; } = [];
     public List<RecoveryWorkArea>? WorkAreas { get; set; }
     public List<RecoveryFileAttribute> FileAttributes { get; set; } = [];
+    public List<RecoveryShellIcon> ShellIcons { get; set; } = [];
 }
 
 internal readonly record struct RecoveryIconPosition(string DisplayName, int X, int Y);
 internal readonly record struct RecoveryWorkArea(int Left, int Top, int Right, int Bottom);
 internal readonly record struct RecoveryFileAttribute(string Path, int Attributes);
+internal readonly record struct RecoveryShellIcon(string Clsid, int? PreviousHiddenValue);
 
 [JsonSerializable(typeof(RecoveryState))]
 internal partial class GuardJsonContext : JsonSerializerContext;
@@ -252,6 +256,58 @@ internal static class ExplorerIcons
         }
         return complete;
     }
+
+    internal static bool RestoreShellIcons(IReadOnlyList<RecoveryShellIcon> icons)
+    {
+        var distinct = icons
+            .Where(icon => Guid.TryParse(icon.Clsid, out _))
+            .GroupBy(icon => icon.Clsid, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var complete = true;
+        foreach (var group in distinct)
+        {
+            try
+            {
+                WriteShellIconVisibility(group.Key, group.First().PreviousHiddenValue);
+            }
+            catch
+            {
+                complete = false;
+            }
+        }
+        if (distinct.Length > 0)
+        {
+            SHChangeNotify(ShcneAssocChanged, ShcnfIdList, IntPtr.Zero, IntPtr.Zero);
+        }
+        return complete;
+    }
+
+    private static void WriteShellIconVisibility(string clsid, int? previousValue)
+    {
+        foreach (var subKey in ShellHideDesktopIconKeys)
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(subKey);
+            if (previousValue is { } value)
+            {
+                key.SetValue(clsid, value, RegistryValueKind.DWord);
+            }
+            else
+            {
+                key.DeleteValue(clsid, false);
+            }
+        }
+    }
+
+    private const int ShcneAssocChanged = 0x08000000;
+    private const uint ShcnfIdList = 0x0000;
+    private static readonly string[] ShellHideDesktopIconKeys =
+    [
+        @"SoftwareMicrosoftWindowsCurrentVersionExplorerHideDesktopIconsNewStartPanel",
+        @"SoftwareMicrosoftWindowsCurrentVersionExplorerHideDesktopIconsClassicStartMenu"
+    ];
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
 
     internal static bool RestoreWorkAreas(IReadOnlyList<RecoveryWorkArea> workAreas)
     {

@@ -459,10 +459,13 @@ public sealed class CrabDeskState
 public readonly record struct DesktopIconPositionSnapshot(string DisplayName, int X, int Y);
 public readonly record struct DesktopWorkAreaSnapshot(int Left, int Top, int Right, int Bottom);
 public readonly record struct DesktopFileAttributeSnapshot(string Path, int Attributes);
+public readonly record struct DesktopShellIconSnapshot(string Clsid, int? PreviousHiddenValue);
 
 public sealed class DesktopRecoveryState
 {
+    public bool PreviousHidden { get; set; }
     public List<DesktopIconPositionSnapshot> IconPositions { get; set; } = [];
     public List<DesktopWorkAreaSnapshot>? WorkAreas { get; set; }
     public List<DesktopFileAttributeSnapshot> FileAttributes { get; set; } = [];
+    public List<DesktopShellIconSnapshot> ShellIcons { get; set; } = [];
 }

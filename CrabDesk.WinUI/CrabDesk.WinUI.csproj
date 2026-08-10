@@ -11,12 +11,13 @@
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
+    <CrabDeskRuntimeUsesWpf>true</CrabDeskRuntimeUsesWpf>
     <UseSystemDrawing>true</UseSystemDrawing>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.6.0-beta.3</Version>
+    <Version>0.6.0-beta.4</Version>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
     <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
@@ -78,11 +79,12 @@
     </ItemGroup>
   </Target>
 
-  <!-- UseWindowsForms brings the combined WindowsDesktop runtime. Remove its
-       WPF renderer and design-time assemblies; CrabDesk uses WinUI for its
-       settings window and WinForms only for desktop boxes and native menus. -->
+  <!-- A WinUI host normally removes the unused WindowsDesktop payload. Keep it
+       intact when a runtime dependency hosts a WPF control inside the desktop
+       surface, so published builds retain the WPF renderer and input stack. -->
   <Target Name="ExcludeUnusedWindowsDesktopPayload"
-          AfterTargets="ComputeFilesToPublish">
+          AfterTargets="ComputeFilesToPublish"
+          Condition="'$(CrabDeskRuntimeUsesWpf)' != 'true'">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish->WithMetadataValue('RelativePath', 'D3DCompiler_47_cor3.dll'))" />
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish->WithMetadataValue('RelativePath', 'PenImc_cor3.dll'))" />
