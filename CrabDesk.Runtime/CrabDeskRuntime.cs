@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -32,6 +31,8 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly RuntimeTimer _hostTimer;
     private readonly RuntimeTimer _saveTimer;
     private readonly RuntimeTimer _desktopZoomTimer;
+    private static readonly TimeSpan DesktopReleaseVisibilityTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan DesktopReleaseVisibilityPollInterval = TimeSpan.FromMilliseconds(100);
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private readonly SemaphoreSlim _mappedRefreshLock = new(1, 1);
     private readonly SemaphoreSlim _updateLock = new(1, 1);
@@ -39,8 +40,6 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly Dictionary<Guid, MappedFolderSnapshot> _mappedFolderSnapshots = [];
     private readonly Dictionary<string, FileAttributes> _originalFileAttributes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int?> _hiddenShellIconOriginals = new(StringComparer.OrdinalIgnoreCase);
-    private string? _recoveryMarkerPath;
-    private bool _guardStarted;
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
@@ -269,7 +268,11 @@ public sealed class CrabDeskRuntime : IDisposable
         NormalizeMonitorIds();
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         await RefreshItemsAsync(false);
-        RecoverStaleIconState();
+        // A previous process can have ended before its normal shutdown path
+        // restored an assigned file's legacy Hidden+System stamp. Repair that
+        // stale state once, before this session decides whether to take over;
+        // there is deliberately no background watcher or helper process.
+        RepairHiddenAssignedItemAttributes();
         await RunScheduledBackupIfNeededAsync();
         if (State.Organization.Enabled && State.Organization.RunOnStartup)
         {
@@ -283,7 +286,6 @@ public sealed class CrabDeskRuntime : IDisposable
         else
         {
             IsPaused = true;
-            RepairHiddenAssignedItemAttributes();
         }
 
         CreateTrayIcon();
@@ -333,6 +335,20 @@ public sealed class CrabDeskRuntime : IDisposable
         return true;
     }
 
+    public bool MoveBoxInStack(Guid boxId, BoxStackMove move)
+    {
+        if (!BoxStacking.Move(State.Boxes, boxId, move))
+        {
+            return false;
+        }
+
+        NotifyWorkspaceChanged(true);
+        return true;
+    }
+
+    public bool BringBoxToFront(Guid boxId) =>
+        MoveBoxInStack(boxId, BoxStackMove.ToFront);
+
     public MappedFolderSnapshot? GetMappedFolderSnapshot(Guid boxId) =>
         _mappedFolderSnapshots.GetValueOrDefault(boxId);
 
@@ -358,6 +374,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             Title = title,
             MonitorId = monitor.Id,
+            StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
             Bounds = FindAvailableBoxBounds(monitor, 420, 310),
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
@@ -376,6 +393,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             Title = Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
             MonitorId = monitor.Id,
+            StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
             Bounds = FindAvailableBoxBounds(monitor, 420, 310),
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
@@ -436,19 +454,47 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public void AssignItem(string itemKey, Guid boxId)
     {
+        AssignItems([itemKey], boxId);
+    }
+
+    /// <summary>
+    /// Assigns a desktop selection to a normal box in one state transition.
+    /// A multi-icon desktop drop produces one Explorer notification and one
+    /// surface refresh, rather than repeating both once per icon.
+    /// </summary>
+    public int AssignItems(IEnumerable<string> itemKeys, Guid boxId)
+    {
         if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder != false)
         {
-            return;
+            return 0;
         }
-        var item = Items.FirstOrDefault(candidate => candidate.Key.ToString() == itemKey);
-        if (item is null)
+
+        var itemsByKey = Items.ToDictionary(
+            item => item.Key.ToString(),
+            StringComparer.OrdinalIgnoreCase);
+        var assignedKeys = new List<string>();
+        foreach (var requestedKey in itemKeys
+                     .Where(key => !string.IsNullOrWhiteSpace(key))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            return;
+            if (!itemsByKey.TryGetValue(requestedKey, out var item))
+            {
+                continue;
+            }
+
+            var itemKey = item.Key.ToString();
+            State.Assignments[itemKey] = boxId;
+            MoveItemOrderKey(itemKey, boxId);
+            assignedKeys.Add(itemKey);
         }
-        State.Assignments[itemKey] = boxId;
-        MoveItemOrderKey(itemKey, boxId);
-        HideAssignedDesktopItems("assign item");
+        if (assignedKeys.Count == 0)
+        {
+            return 0;
+        }
+
+        HideAssignedDesktopItems("assign items", assignedKeys);
         NotifyWorkspaceChanged(true);
+        return assignedKeys.Count;
     }
 
     public void UnassignItem(string itemKey)
@@ -475,25 +521,197 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Releases virtual box items onto the desktop as one operation. The item
+    /// remains drawn by its box until Explorer has enumerated its restored
+    /// row, so a drag never intentionally leaves a visual gap between owners.
+    /// </summary>
+    public async Task<bool> ReleaseAssignedItemsToDesktopAsync(
+        IEnumerable<string> itemKeys,
+        System.Drawing.Point screenPoint,
+        CancellationToken cancellationToken = default)
+    {
+        var keys = itemKeys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(key => State.Assignments.ContainsKey(key))
+            .ToArray();
+        if (keys.Length == 0)
+        {
+            return false;
+        }
+
+        var listView = _desktopHost.DesktopListView;
+        if (listView == IntPtr.Zero)
+        {
+            DiagnosticLog.Info("Desktop release skipped because Explorer ListView is unavailable");
+            return false;
+        }
+
+        var placements = BuildDesktopReleasePlacements(keys, screenPoint);
+        if (placements.Length == 0)
+        {
+            return false;
+        }
+
+        RevealAssignedItemsOnDesktop(keys);
+        if (!await WaitForDesktopReleaseRowsAsync(listView, placements, cancellationToken))
+        {
+            // The box is still the owner. Restore that single source of truth
+            // instead of leaving an item both in the box and on the desktop
+            // when Explorer declined to enumerate it in time.
+            HideAssignedDesktopItems("desktop release timeout", keys);
+            DiagnosticLog.Info("Explorer did not restore released desktop items before the timeout");
+            return false;
+        }
+
+        UnassignItems(keys);
+        DesktopIconPositionService.MoveItemsUnderBox(listView, placements);
+        return true;
+    }
+
+    // Make assigned desktop files visible to Explorer before removing their
+    // box assignment. This prevents a drag from a box producing a blank gap
+    // while Explorer re-enumerates the restored file attributes.
+    public void RevealAssignedItemsOnDesktop(IEnumerable<string> itemKeys)
+    {
+        var restoredPaths = new List<string>();
+        foreach (var itemKey in itemKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!State.Assignments.ContainsKey(itemKey))
+            {
+                continue;
+            }
+
+            var item = _allDesktopItems.FirstOrDefault(candidate =>
+                string.Equals(candidate.Key.ToString(), itemKey, StringComparison.OrdinalIgnoreCase));
+            if (item?.FileSystemPath is not { } pathValue || string.IsNullOrWhiteSpace(pathValue))
+            {
+                if (item?.Kind == DesktopItemKind.Shell &&
+                    item.ParsingName is { } parsingName &&
+                    TryGetShellClsid(parsingName, out var clsid) &&
+                    _hiddenShellIconOriginals.TryGetValue(clsid, out var previousVisibility))
+                {
+                    try
+                    {
+                        WriteShellIconVisibility(clsid, previousVisibility);
+                    }
+                    catch (Exception exception)
+                    {
+                        DiagnosticLog.Error($"Failed to reveal shell desktop icon clsid={clsid}", exception);
+                    }
+                }
+                continue;
+            }
+
+            var path = Path.GetFullPath(pathValue);
+            if (!_originalFileAttributes.TryGetValue(path, out var originalAttributes))
+            {
+                continue;
+            }
+
+            try
+            {
+                if ((File.Exists(path) || Directory.Exists(path)) &&
+                    File.GetAttributes(path) != originalAttributes)
+                {
+                    File.SetAttributes(path, originalAttributes);
+                    restoredPaths.Add(path);
+                }
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+
+        if (restoredPaths.Count > 0)
+        {
+            _desktopHost.NotifyItemAttributesChanged(restoredPaths);
+        }
+    }
+
+    private DesktopIconPlacement[] BuildDesktopReleasePlacements(
+        IEnumerable<string> itemKeys,
+        System.Drawing.Point screenPoint)
+    {
+        return itemKeys
+            .Select(key => _allDesktopItems.FirstOrDefault(item =>
+                string.Equals(item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase)))
+            .Select((item, index) => new DesktopIconPlacement(
+                item!.FileSystemPath is { } path
+                    ? [item.DisplayName, Path.GetFileName(path)]
+                    : [item.DisplayName],
+                screenPoint.X + (index % 5) * 84,
+                screenPoint.Y + (index / 5) * 92))
+            .ToArray();
+    }
+
+    private static async Task<bool> WaitForDesktopReleaseRowsAsync(
+        IntPtr listView,
+        IReadOnlyList<DesktopIconPlacement> placements,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + DesktopReleaseVisibilityTimeout;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var positions = DesktopIconPositionService.CaptureItemPositions(
+                listView,
+                placements.SelectMany(placement => placement.DisplayNames));
+            if (positions.Count >= placements.Count)
+            {
+                return true;
+            }
+
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                break;
+            }
+            await Task.Delay(
+                remaining < DesktopReleaseVisibilityPollInterval
+                    ? remaining
+                    : DesktopReleaseVisibilityPollInterval,
+                cancellationToken);
+        }
+        while (true);
+
+        return false;
+    }
+
     // Assigned items are removed from Explorer's desktop view instead of
     // being parked: file items get Hidden+System attributes (the desktop
     // shell view never renders them, so a drag re-layout cannot pull them
     // back), and shell items (This PC, Recycle Bin, ...) use the OS desktop
     // icon visibility setting. Originals are captured first so unassigning,
     // pausing, or exiting restores the desktop exactly as it was.
-    private int HideAssignedDesktopItems(string context)
+    private int HideAssignedDesktopItems(string context, IEnumerable<string>? itemKeys = null)
     {
         if (_disposed || IsPaused || !State.Settings.TakeOverDesktop)
         {
             return 0;
         }
         var assignedItems = GetAssignedDesktopItems();
+        if (itemKeys is not null)
+        {
+            var requestedKeys = itemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            assignedItems = assignedItems
+                .Where(item => requestedKeys.Contains(item.Key.ToString()))
+                .ToArray();
+        }
         if (assignedItems.Count == 0)
         {
             return 0;
         }
-        var hiddenPaths = new List<string>();
-        var hiddenShells = 0;
+        // Explorer treats a directory-change notification as a full desktop
+        // re-enumeration. Only notify it for a real attribute transition;
+        // surface reconstruction and monitor checks must remain read-only.
+        var changedPaths = new List<string>();
+        var capturedOriginals = 0;
+        var changedShells = 0;
         foreach (var item in assignedItems)
         {
             if (item.FileSystemPath is not { } pathValue || string.IsNullOrWhiteSpace(pathValue))
@@ -507,13 +725,14 @@ public sealed class CrabDeskRuntime : IDisposable
                 if (!_originalFileAttributes.ContainsKey(path))
                 {
                     _originalFileAttributes[path] = attributes;
+                    capturedOriginals++;
                 }
                 var hidden = attributes | FileAttributes.Hidden | FileAttributes.System;
                 if (attributes != hidden)
                 {
                     File.SetAttributes(path, hidden);
+                    changedPaths.Add(path);
                 }
-                hiddenPaths.Add(path);
             }
             catch (IOException)
             {
@@ -533,24 +752,19 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 continue;
             }
-            hiddenShells++;
+            changedShells++;
         }
-        if (hiddenPaths.Count == 0 && hiddenShells == 0)
+        if (changedPaths.Count == 0 && changedShells == 0 && capturedOriginals == 0)
         {
             return 0;
         }
-        EnsureRecoveryGuard();
-        if (hiddenPaths.Count > 0)
+        if (changedPaths.Count > 0)
         {
-            _desktopHost.NotifyItemAttributesChanged(hiddenPaths);
+            _desktopHost.NotifyItemAttributesChanged(changedPaths);
         }
-        // Explorer's desktop view keeps a lingering icon if it only receives
-        // a per-item attribute update; force a folder re-enumeration so the
-        // icon disappears immediately after the drop.
-        _desktopHost.NotifyDesktopFolderChanged();
         DiagnosticLog.Info(
-            $"Assigned desktop items hidden context={context} files={hiddenPaths.Count} shells={hiddenShells}");
-        return hiddenPaths.Count + hiddenShells;
+            $"Assigned desktop items hidden context={context} files={changedPaths.Count} shells={changedShells} snapshots={capturedOriginals}");
+        return changedPaths.Count + changedShells;
     }
 
     private static bool TryGetShellClsid(string parsingName, out string clsid)
@@ -578,8 +792,7 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 _hiddenShellIconOriginals[clsid] = ReadShellIconVisibility(clsid);
             }
-            WriteShellIconVisibility(clsid, 1);
-            return true;
+            return WriteShellIconVisibility(clsid, 1);
         }
         catch (Exception exception)
         {
@@ -595,35 +808,55 @@ public sealed class CrabDeskRuntime : IDisposable
         return key?.GetValue(clsid) is int value ? value : null;
     }
 
-    private void WriteShellIconVisibility(string clsid, int? value)
+    private bool WriteShellIconVisibility(string clsid, int? value)
     {
+        var changed = false;
         foreach (var subKey in new[] { HideDesktopIconsNewStartPanelKey, HideDesktopIconsClassicStartMenuKey })
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(subKey);
             if (value is { } hidden)
             {
+                using var readKey = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(subKey);
+                if (readKey?.GetValue(clsid) is int existing && existing == hidden)
+                {
+                    continue;
+                }
+                using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(subKey);
                 key.SetValue(clsid, hidden, Microsoft.Win32.RegistryValueKind.DWord);
+                changed = true;
             }
             else
             {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(subKey, writable: true);
+                if (key?.GetValue(clsid) is null)
+                {
+                    continue;
+                }
                 key.DeleteValue(clsid, false);
+                changed = true;
             }
         }
-        _desktopHost.NotifyShellIconVisibilityChanged();
+        if (changed)
+        {
+            _desktopHost.NotifyShellIconVisibilityChanged();
+        }
+        return changed;
     }
     private bool RestoreOriginalFileAttributes(bool clear)
     {
-        var restoredPaths = new List<string>();
+        var changedPaths = new List<string>();
+        var completedPaths = new List<string>();
         var failed = false;
         foreach (var pair in _originalFileAttributes)
         {
             try
             {
-                if (File.Exists(pair.Key) || Directory.Exists(pair.Key))
+                if ((File.Exists(pair.Key) || Directory.Exists(pair.Key)) &&
+                    File.GetAttributes(pair.Key) != pair.Value)
                 {
                     File.SetAttributes(pair.Key, pair.Value);
+                    changedPaths.Add(pair.Key);
                 }
-                restoredPaths.Add(pair.Key);
+                completedPaths.Add(pair.Key);
             }
             catch (IOException)
             {
@@ -634,17 +867,13 @@ public sealed class CrabDeskRuntime : IDisposable
                 failed = true;
             }
         }
-        if (restoredPaths.Count > 0)
+        if (changedPaths.Count > 0)
         {
-            _desktopHost.NotifyItemAttributesChanged(restoredPaths);
-        }
-        if (restoredPaths.Count > 0)
-        {
-            _desktopHost.NotifyDesktopFolderChanged();
+            _desktopHost.NotifyItemAttributesChanged(changedPaths);
         }
         if (clear)
         {
-            foreach (var path in restoredPaths)
+            foreach (var path in completedPaths)
             {
                 _originalFileAttributes.Remove(path);
             }
@@ -678,206 +907,10 @@ public sealed class CrabDeskRuntime : IDisposable
         var filesComplete = RestoreOriginalFileAttributes(clear);
         var shellsComplete = RestoreHiddenShellIcons(clear);
         var complete = filesComplete && shellsComplete;
-        if (complete && clear)
-        {
-            TryDeleteRecoveryMarker();
-        }
         return complete;
     }
 
-    private bool RestoreFileAttributeSnapshots(IReadOnlyList<DesktopFileAttributeSnapshot> snapshots)
-    {
-        var distinct = snapshots
-            .GroupBy(snapshot => snapshot.Path, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToArray();
-        var restored = 0;
-        foreach (var snapshot in distinct)
-        {
-            try
-            {
-                if (File.Exists(snapshot.Path) || Directory.Exists(snapshot.Path))
-                {
-                    File.SetAttributes(snapshot.Path, (FileAttributes)snapshot.Attributes);
-                }
-                restored++;
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-        }
-        var paths = distinct.Select(snapshot => snapshot.Path).ToArray();
-        if (paths.Length > 0)
-        {
-            _desktopHost.NotifyItemAttributesChanged(paths);
-            _desktopHost.NotifyDesktopFolderChanged();
-        }
-        return restored == distinct.Length;
-    }
-
-    private bool RestoreShellIconSnapshots(IReadOnlyList<DesktopShellIconSnapshot> snapshots)
-    {
-        var distinct = snapshots
-            .GroupBy(snapshot => snapshot.Clsid, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToArray();
-        var restored = 0;
-        foreach (var snapshot in distinct)
-        {
-            try
-            {
-                WriteShellIconVisibility(snapshot.Clsid, snapshot.PreviousHiddenValue);
-                restored++;
-            }
-            catch (Exception)
-            {
-            }
-        }
-        return restored == distinct.Length;
-    }
-
-    private void EnsureRecoveryGuard()
-    {
-        WriteRecoveryMarker();
-        if (_guardStarted)
-        {
-            return;
-        }
-        var guardPath = Path.Combine(AppContext.BaseDirectory, "CrabDesk.IconGuard.exe");
-        if (!File.Exists(guardPath))
-        {
-            DiagnosticLog.Info("IconGuard executable not found; abnormal exit recovery disabled");
-            return;
-        }
-        try
-        {
-            var marker = GetRecoveryMarkerPath();
-            Process.Start(new ProcessStartInfo(guardPath)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Arguments = $"{Environment.ProcessId} \"{marker}\"",
-            });
-            _guardStarted = true;
-            DiagnosticLog.Info("IconGuard recovery process started");
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Failed to start IconGuard recovery process", exception);
-        }
-    }
-
-    private string GetRecoveryMarkerPath()
-    {
-        if (_recoveryMarkerPath is null)
-        {
-            _recoveryMarkerPath = Path.Combine(
-                Path.GetDirectoryName(_layoutStore.StatePath)!,
-                "desktop-visibility.lock");
-        }
-        return _recoveryMarkerPath;
-    }
-
-    private void WriteRecoveryMarker()
-    {
-        try
-        {
-            var marker = GetRecoveryMarkerPath();
-            var recovery = new DesktopRecoveryState
-            {
-                PreviousHidden = false,
-                FileAttributes = _originalFileAttributes
-                    .Select(pair => new DesktopFileAttributeSnapshot(pair.Key, (int)pair.Value))
-                    .ToList(),
-                ShellIcons = _hiddenShellIconOriginals
-                    .Select(pair => new DesktopShellIconSnapshot(pair.Key, pair.Value))
-                    .ToList()
-            };
-            var temp = marker + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(recovery));
-            File.Move(temp, marker, true);
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Failed to write desktop icon recovery marker", exception);
-        }
-    }
-
-    private void TryDeleteRecoveryMarker()
-    {
-        if (_recoveryMarkerPath is null)
-        {
-            return;
-        }
-        try
-        {
-            if (File.Exists(_recoveryMarkerPath))
-            {
-                File.Delete(_recoveryMarkerPath);
-            }
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Failed to delete desktop icon recovery marker", exception);
-        }
-    }
-
-    private void RecoverStaleIconState()
-    {
-        var marker = GetRecoveryMarkerPath();
-        if (!File.Exists(marker))
-        {
-            return;
-        }
-        try
-        {
-            var recovery = JsonSerializer.Deserialize<DesktopRecoveryState>(File.ReadAllText(marker));
-            if (recovery is not null)
-            {
-                var attributesRestored = RestoreFileAttributeSnapshots(recovery.FileAttributes);
-                var shellRestored = RestoreShellIconSnapshots(recovery.ShellIcons);
-                if (_desktopHost.DesktopListView != IntPtr.Zero &&
-                    recovery.WorkAreas is { Count: > 0 })
-                {
-                    DesktopIconPositionService.SetWorkAreas(
-                        _desktopHost.DesktopListView,
-                        recovery.WorkAreas
-                            .Select(area => new System.Drawing.Rectangle(
-                                area.Left,
-                                area.Top,
-                                area.Right - area.Left,
-                                area.Bottom - area.Top))
-                            .ToArray());
-                }
-                if (_desktopHost.DesktopListView != IntPtr.Zero &&
-                    recovery.IconPositions.Count > 0)
-                {
-                    var restored = DesktopIconPositionService.RestoreItemPositions(
-                        _desktopHost.DesktopListView,
-                        recovery.IconPositions);
-                    DiagnosticLog.Info(
-                        $"Recovered stale desktop icon positions requested={recovery.IconPositions.Count} restored={restored}");
-                }
-                if (attributesRestored && shellRestored)
-                {
-                    File.Delete(marker);
-                }
-            }
-            else
-            {
-                File.Delete(marker);
-            }
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Failed to recover stale desktop icon state", exception);
-        }
-    }
-
-    public void BoxChanged(DesktopBox box, bool rebuild = false)
+    public void BoxChanged(DesktopBox box, bool rebuild = false, bool bringToFront = false)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
             ?? Monitors.FirstOrDefault(candidate => candidate.IsPrimary)
@@ -889,6 +922,10 @@ public sealed class CrabDeskRuntime : IDisposable
         box.Bounds = box.Bounds.Clamp(
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
             minimumWidth);
+        if (bringToFront)
+        {
+            BoxStacking.Move(State.Boxes, box.Id, BoxStackMove.ToFront);
+        }
         NotifyWorkspaceChanged(rebuild);
     }
 
@@ -949,10 +986,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (!target.IsMappedFolder && !source.IsMappedFolder)
         {
-            foreach (var item in items)
-            {
-                AssignItem(item.Key.ToString(), targetBoxId);
-            }
+            AssignItems(items.Select(item => item.Key.ToString()), targetBoxId);
             return;
         }
 
@@ -1019,20 +1053,20 @@ public sealed class CrabDeskRuntime : IDisposable
             .Where(item => item.FileSystemPath is not null)
             .ToDictionary(item => Path.GetFullPath(item.FileSystemPath!), StringComparer.OrdinalIgnoreCase);
         var external = new List<string>();
-        var assigned = 0;
+        var assignedKeys = new List<string>();
         foreach (var path in clipboard.Paths)
         {
             var fullPath = Path.GetFullPath(path);
             if (desktopItems.TryGetValue(fullPath, out var item))
             {
-                AssignItem(item.Key.ToString(), boxId);
-                assigned++;
+                assignedKeys.Add(item.Key.ToString());
             }
             else if (File.Exists(fullPath) || Directory.Exists(fullPath))
             {
                 external.Add(fullPath);
             }
         }
+        var assigned = AssignItems(assignedKeys, boxId);
         if (external.Count > 0)
         {
             await ImportFilesAsync(external, boxId, clipboard.Move);
@@ -1055,7 +1089,6 @@ public sealed class CrabDeskRuntime : IDisposable
             !string.IsNullOrWhiteSpace(destination))
         {
             _originalFileAttributes[Path.GetFullPath(destination)] = originalAttributes;
-            WriteRecoveryMarker();
         }
         if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder == true)
         {
@@ -1113,12 +1146,9 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void RepairHiddenAssignedItemAttributes()
     {
-        // Older builds hid assigned desktop items by stamping Hidden+System
-        // attributes on them and could leave them hidden after an abnormal
-        // exit. When the app is not taking over the desktop, every assigned
-        // item must be visible, so strip the legacy stamp. While active, the
-        // recovery marker carries the original attributes and hiding is
-        // reapplied idempotently.
+        // A previous process may have ended before it restored a file hidden
+        // for a box. This is a one-time startup cleanup only; normal runtime
+        // behavior has no guard, polling, or automatic repair path.
         var repaired = new List<string>();
         foreach (var item in GetAssignedDesktopItems())
         {
@@ -2654,6 +2684,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 {
                     Title = rule.Title,
                     MonitorId = monitor.Id,
+                    StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
                     IsAutoGenerated = true,
                     Appearance = CloneAppearance(State.Boxes.FirstOrDefault()?.Appearance)
                 };
@@ -2697,6 +2728,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 {
                     Title = rule.Title,
                     MonitorId = monitor.Id,
+                    StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
                     IsAutoGenerated = true
                 };
                 if (!State.Boxes.Contains(box))
@@ -3509,11 +3541,14 @@ public sealed class CrabDeskRuntime : IDisposable
             var path = Path.GetFullPath(pathValue);
             if (_originalFileAttributes.Remove(path, out var originalAttributes))
             {
+                var changed = false;
                 try
                 {
-                    if (File.Exists(path) || Directory.Exists(path))
+                    if ((File.Exists(path) || Directory.Exists(path)) &&
+                        File.GetAttributes(path) != originalAttributes)
                     {
                         File.SetAttributes(path, originalAttributes);
+                        changed = true;
                     }
                 }
                 catch (IOException)
@@ -3522,8 +3557,10 @@ public sealed class CrabDeskRuntime : IDisposable
                 catch (UnauthorizedAccessException)
                 {
                 }
-                _desktopHost.NotifyItemAttributesChanged([path]);
-                _desktopHost.NotifyDesktopFolderChanged();
+                if (changed)
+                {
+                    _desktopHost.NotifyItemAttributesChanged([path]);
+                }
             }
         }
         else if (item?.Kind == DesktopItemKind.Shell &&
@@ -3539,10 +3576,6 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 DiagnosticLog.Error($"Failed to restore shell desktop icon clsid={clsid}", exception);
             }
-        }
-        if (_originalFileAttributes.Count == 0 && _hiddenShellIconOriginals.Count == 0)
-        {
-            TryDeleteRecoveryMarker();
         }
     }
 

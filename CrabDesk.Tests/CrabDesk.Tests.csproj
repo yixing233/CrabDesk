@@ -23,14 +23,6 @@
   <ItemGroup>
     <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
     <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
-    <ProjectReference Include="..\CrabDesk.IconGuard\CrabDesk.IconGuard.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
-
-  <Target Name="CopyIconGuard" AfterTargets="Build">
-    <ItemGroup>
-      <IconGuardFiles Include="..\CrabDesk.IconGuard\bin\$(Configuration)\net8.0-windows\CrabDesk.IconGuard.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(IconGuardFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-  </Target>
 
 </Project>

@@ -36,7 +36,7 @@ function Save-Session($Session) {
         "- Baseline DPI: $((@($baseline.Monitors | ForEach-Object DpiX | Sort-Object -Unique)) -join ', ')",
         "- Boxes: $(@($baseline.Boxes).Count)",
         "- Mixed DPI required: $($Session.RequireMixedDpi)",
-        "- Explorer icon state expected after exit: $($baseline.ExpectedRestoredHideIcons)",
+        "- Explorer icon state expected after exit: $($baseline.HideIcons)",
         "- Result: $(if ($null -ne $Session.Finalize -and $Session.Finalize.Passed) { 'PASSED' } else { 'IN PROGRESS' })",
         "",
         "| Checkpoint | Time | Monitors | Surfaces | Status |",
@@ -196,14 +196,14 @@ switch ($Stage) {
         if ($exit.ExitCode -ne 0) { throw "The exit signal returned code $($exit.ExitCode)." }
         $deadline = [DateTime]::UtcNow.AddSeconds(20)
         do {
-            $remaining = @(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue)
+            $remaining = @(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue)
             if ($remaining.Count -eq 0) { break }
             Start-Sleep -Milliseconds 500
         } while ([DateTime]::UtcNow -lt $deadline)
         if ($remaining.Count -ne 0) { throw "CrabDesk processes remained after normal exit." }
         $hideIcons = Get-CrabDeskExplorerHideIcons
-        if ($hideIcons -ne $session.Baseline.ExpectedRestoredHideIcons) {
-            throw "Normal exit did not restore Explorer HideIcons. Expected=$($session.Baseline.ExpectedRestoredHideIcons), Current=$hideIcons."
+        if ($hideIcons -ne $session.Baseline.HideIcons) {
+            throw "Normal exit did not restore Explorer HideIcons. Expected=$($session.Baseline.HideIcons), Current=$hideIcons."
         }
         $session.Finalize = [pscustomobject]@{
             CapturedAt = [DateTimeOffset]::Now

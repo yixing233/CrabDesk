@@ -14,7 +14,7 @@ else {
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before validating box opacity."
 }
 [System.IO.Directory]::CreateDirectory((Split-Path -Parent $output)) | Out-Null

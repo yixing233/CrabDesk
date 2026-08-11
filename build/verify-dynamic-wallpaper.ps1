@@ -7,7 +7,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying dynamic wallpaper compatibility."
 }
 $wallpaperProcesses = @(Get-Process wallpaper32,wallpaper64 -ErrorAction SilentlyContinue)

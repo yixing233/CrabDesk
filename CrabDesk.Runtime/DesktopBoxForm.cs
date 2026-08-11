@@ -42,7 +42,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         ("雾灰", "#FF7B8794")
     ];
     private readonly CrabDeskRuntime _runtime;
-    private readonly DesktopHostService _desktopHost;
     private readonly MonitorLayout _monitor;
     private readonly double _scale;
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
@@ -83,6 +82,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private bool _dragStarted;
     private bool _dragDropCommitted;
     private bool _dragCancelled;
+    private bool _showVirtualDesktopDropCursor;
     private string? _hoveredItemKey;
     private Guid? _hoveredAutoExpandBoxId;
     private LayoutRect? _transformDirtyBounds;
@@ -94,11 +94,9 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     internal DesktopBoxForm(
         CrabDeskRuntime runtime,
-        DesktopHostService desktopHost,
         MonitorLayout monitor)
     {
         _runtime = runtime;
-        _desktopHost = desktopHost;
         _monitor = monitor;
         _scale = monitor.DpiScale;
         Text = "CrabDesk Desktop Boxes";
@@ -159,6 +157,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         DragOver += OnDragOver;
         DragDrop += OnDragDrop;
         QueryContinueDrag += OnQueryContinueDrag;
+        GiveFeedback += OnGiveFeedback;
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -214,8 +213,8 @@ internal sealed class DesktopBoxForm : Forms.Form
         base.WndProc(ref message);
     }
 
-    private IEnumerable<DesktopBox> DesktopBoxes => _runtime.State.Boxes.Where(box =>
-        string.Equals(box.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase));
+    private IReadOnlyList<DesktopBox> DesktopBoxes =>
+        BoxStacking.OrderBackToFront(_runtime.State.Boxes, _monitor.Id);
 
     private void RebuildBoxItemCache()
     {
@@ -299,7 +298,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         graphics.ResetTransform();
     }
 
-    internal bool EnsureRendered()
+    internal void RequestRender()
     {
         Refresh();
         if (IsHandleCreated)
@@ -309,7 +308,6 @@ internal sealed class DesktopBoxForm : Forms.Form
                 $"Surface exstyle=0x{ex:X} " +
                 $"layered={(ex & 0x80000) != 0} transparent={(ex & 0x20) != 0}");
         }
-        return IsHandleCreated && Visible && Enabled && _paintCount > 0;
     }
 
     internal int PaintCount => _paintCount;
@@ -900,7 +898,15 @@ internal sealed class DesktopBoxForm : Forms.Form
         RebuildGeometry();
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-        var item = _items.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        if (box is not null && _runtime.BringBoxToFront(box.Box.Id))
+        {
+            RebuildGeometry();
+            box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        }
+        var item = box is null
+            ? null
+            : _items.LastOrDefault(candidate =>
+                candidate.Box.Id == box.Box.Id && candidate.Bounds.Contains(point));
         DiagnosticLog.Info(
             $"Surface mouse down monitor={_monitor.Id} button={eventArgs.Button} x={point.X:0} y={point.Y:0} box={box?.Box.Id} itemKind={item?.Item.Key.Kind}");
         if (eventArgs.Button == Forms.MouseButtons.Right)
@@ -1077,7 +1083,16 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         _dragDropCommitted = false;
         _dragCancelled = false;
-        DoDragDrop(data, Forms.DragDropEffects.Move | Forms.DragDropEffects.Copy);
+        _showVirtualDesktopDropCursor = !sourceMapped;
+        try
+        {
+            DoDragDrop(data, Forms.DragDropEffects.Move | Forms.DragDropEffects.Copy);
+        }
+        finally
+        {
+            _showVirtualDesktopDropCursor = false;
+            Forms.Cursor.Current = Forms.Cursors.Default;
+        }
         if (BoxDragCompletionPolicy.ShouldUnassign(
                 _dragDropCommitted,
                 _dragCancelled,
@@ -1085,51 +1100,19 @@ internal sealed class DesktopBoxForm : Forms.Form
                 sourceMapped,
                 IsPointerOverAnyBox(Forms.Cursor.Position)))
         {
-            _runtime.UnassignItems(itemKeys);
-            _ = MoveReleasedItemsToDesktopAsync(itemKeys, Forms.Cursor.Position);
+            _ = ReleaseBoxItemsToDesktopAsync(itemKeys, Forms.Cursor.Position);
         }
     }
 
-    // Unassigning restores the file attributes and Explorer re-adds the
-    // icons to its desktop view asynchronously. Wait briefly (bounded) for
-    // them to exist in the ListView, then place them at the drop point so
-    // the icon appears immediately where the user released it.
-    private async Task MoveReleasedItemsToDesktopAsync(IReadOnlyList<string> itemKeys, Point screenPoint)
+    // The runtime owns the release transaction: visibility, Explorer
+    // confirmation, assignment removal and final placement must happen in
+    // that order. Keeping this form as a single caller avoids a second,
+    // slightly different drag-release path per desktop surface.
+    private async Task ReleaseBoxItemsToDesktopAsync(IReadOnlyList<string> itemKeys, Point screenPoint)
     {
         try
         {
-            var listView = _desktopHost.DesktopListView;
-            if (listView == IntPtr.Zero)
-            {
-                return;
-            }
-            var items = itemKeys
-                .Select(key => _runtime.Items.FirstOrDefault(item =>
-                    item.Key.ToString().Equals(key, StringComparison.OrdinalIgnoreCase)))
-                .Where(item => item is not null)
-                .ToArray();
-            if (items.Length == 0)
-            {
-                return;
-            }
-            var placements = items
-                .Select((item, index) => new DesktopIconPlacement(
-                    [item!.DisplayName, Path.GetFileName(item.FileSystemPath ?? string.Empty)],
-                    screenPoint.X + (index % 5) * 84,
-                    screenPoint.Y + (index / 5) * 92))
-                .ToArray();
-            for (var attempt = 0; attempt < 15; attempt++)
-            {
-                var present = DesktopIconPositionService.CaptureItemPositions(
-                    listView,
-                    placements.SelectMany(placement => placement.DisplayNames));
-                if (present.Count >= placements.Length)
-                {
-                    break;
-                }
-                await Task.Delay(100);
-            }
-            DesktopIconPositionService.MoveItemsUnderBox(listView, placements);
+            await _runtime.ReleaseAssignedItemsToDesktopAsync(itemKeys, screenPoint);
         }
         catch (Exception exception)
         {
@@ -1452,11 +1435,11 @@ internal sealed class DesktopBoxForm : Forms.Form
         FlushTransformTrail();
         if (movingBox is not null)
         {
-            _runtime.BoxChanged(movingBox, true);
+            _runtime.BoxChanged(movingBox, true, bringToFront: true);
         }
         else if (resizingBox is not null)
         {
-            _runtime.BoxChanged(resizingBox, true);
+            _runtime.BoxChanged(resizingBox, true, bringToFront: true);
         }
     }
 
@@ -1639,7 +1622,10 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-        var item = _items.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        var item = box is null
+            ? null
+            : _items.LastOrDefault(candidate =>
+                candidate.Box.Id == box.Box.Id && candidate.Bounds.Contains(point));
         DiagnosticLog.Info(
             $"Surface double click monitor={_monitor.Id} x={point.X:0} y={point.Y:0} box={box?.Box.Id} itemKind={item?.Item.Key.Kind}");
         if (item is not null)
@@ -1683,7 +1669,30 @@ internal sealed class DesktopBoxForm : Forms.Form
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
         }
-        eventArgs.Effect = ToDragDropEffects(ResolveTransferEffect(eventArgs, target));
+        var effect = ResolveTransferEffect(eventArgs, target);
+        // A desktop file dropped into a normal box is a virtual assignment,
+        // not a filesystem move. Advertising Move makes Explorer dim the
+        // source icon as a cut operation until its delayed shell refresh.
+        eventArgs.Effect = IsDesktopVirtualAssignment(eventArgs, target)
+            ? Forms.DragDropEffects.Copy
+            : ToDragDropEffects(effect);
+    }
+
+    private bool IsDesktopVirtualAssignment(Forms.DragEventArgs eventArgs, DesktopBox target)
+    {
+        if (target.IsMappedFolder || eventArgs.Data is null ||
+            eventArgs.Data.GetDataPresent(ItemKeysFormat) ||
+            !eventArgs.Data.GetDataPresent(Forms.DataFormats.FileDrop) ||
+            eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is not string[] paths)
+        {
+            return false;
+        }
+
+        var desktopPaths = _runtime.Items
+            .Where(item => item.FileSystemPath is not null)
+            .Select(item => Path.GetFullPath(item.FileSystemPath!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return paths.Length > 0 && paths.All(path => desktopPaths.Contains(Path.GetFullPath(path)));
     }
 
     private async void OnDragDrop(object? sender, Forms.DragEventArgs eventArgs)
@@ -1762,19 +1771,21 @@ internal sealed class DesktopBoxForm : Forms.Form
         var desktopPaths = _runtime.Items
             .Where(item => item.FileSystemPath is not null)
             .ToDictionary(item => Path.GetFullPath(item.FileSystemPath!), StringComparer.OrdinalIgnoreCase);
+        var assignedKeys = new List<string>();
         var external = new List<string>();
         foreach (var path in paths)
         {
             var fullPath = Path.GetFullPath(path);
             if (desktopPaths.TryGetValue(fullPath, out var item))
             {
-                _runtime.AssignItem(item.Key.ToString(), box.Box.Id);
+                assignedKeys.Add(item.Key.ToString());
             }
             else
             {
                 external.Add(path);
             }
         }
+        _runtime.AssignItems(assignedKeys, box.Box.Id);
         if (external.Count > 0)
         {
             await _runtime.ImportFilesAsync(
@@ -1844,6 +1855,17 @@ internal sealed class DesktopBoxForm : Forms.Form
             ToggleBoxCollapsed(box);
         });
         var accentMenu = new Forms.ToolStripMenuItem("颜色条颜色");
+        var stackMenu = new Forms.ToolStripMenuItem("层级");
+        stackMenu.DropDownItems.Add("置于顶层", null, (_, _) =>
+            _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToFront));
+        stackMenu.DropDownItems.Add("上移一层", null, (_, _) =>
+            _runtime.MoveBoxInStack(box.Id, BoxStackMove.Forward));
+        stackMenu.DropDownItems.Add("下移一层", null, (_, _) =>
+            _runtime.MoveBoxInStack(box.Id, BoxStackMove.Backward));
+        stackMenu.DropDownItems.Add("置于底层", null, (_, _) =>
+            _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToBack));
+        menu.Items.Add(stackMenu);
+
         foreach (var (name, hex) in AccentPalette)
         {
             AddMenuChoice(
@@ -2248,6 +2270,24 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             LayoutTitleEditor(geometry);
         }
+    }
+
+    // A normal box drop back to the desktop is a virtual state transition,
+    // not a filesystem drop. Explorer therefore reports DragDropEffects.None
+    // for our private data format and would show the prohibited cursor. Keep
+    // the native operation out of Explorer while giving the user a clear move
+    // affordance; OnQueryContinueDrag then commits the virtual release.
+    private void OnGiveFeedback(object? sender, Forms.GiveFeedbackEventArgs eventArgs)
+    {
+        if (!_showVirtualDesktopDropCursor ||
+            eventArgs.Effect != Forms.DragDropEffects.None ||
+            IsPointerOverAnyBox(Forms.Cursor.Position))
+        {
+            return;
+        }
+
+        eventArgs.UseDefaultCursors = false;
+        Forms.Cursor.Current = Forms.Cursors.SizeAll;
     }
 
     private void LayoutTitleEditor(BoxGeometry geometry)

@@ -10,7 +10,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying the desktop host."
 }
 
@@ -620,20 +620,6 @@ try {
         throw "Clean exit left the Explorer desktop parent disabled."
     }
 
-    $forcedProcess = Start-Process -FilePath $exe -PassThru
-    Start-Sleep -Seconds 8
-    if ($forcedProcess.HasExited) {
-        throw "CrabDesk exited before the forced-exit recovery test."
-    }
-    Stop-Process -Id $forcedProcess.Id -Force -ErrorAction Stop
-    $forcedProcess.WaitForExit()
-    Start-Sleep -Seconds 5
-    if ((Get-ExplorerHideIcons) -ne $previousHideIcons) {
-        throw "IconGuard did not restore the original Explorer icon visibility after forced exit."
-    }
-    if (-not [DesktopVerifier]::IsWindowEnabled($desktopParent)) {
-        throw "IconGuard left the Explorer desktop parent disabled after forced exit."
-    }
 }
 finally {
     if ($coverWindow -ne [IntPtr]::Zero) {
@@ -667,4 +653,4 @@ finally {
     }
 }
 
-Write-Host "Desktop host, inline title rename, box menu width/lifetime, child/tool-window styles, assigned-icon parking, native Explorer visibility, real-mouse hover expansion, animated collapse, Win+D, Win+M, Task View, normal/fullscreen coverage, clean exit and IconGuard recovery passed."
+Write-Host "Desktop host, inline title rename, box menu width/lifetime, child/tool-window styles, native Explorer visibility, real-mouse hover expansion, animated collapse, Win+D, Win+M, Task View, normal/fullscreen coverage and clean exit passed."

@@ -1,7 +1,5 @@
 using CrabDesk.Core;
 using CrabDesk.Native;
-using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Win32;
 
 namespace CrabDesk.Tests;
@@ -427,101 +425,4 @@ public sealed class WindowsIntegrationTests
         }
     }
 
-    [Fact]
-    public async Task IconGuardRestoresDesktopIconPositionAfterForcedExit()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var guardPath = Path.Combine(AppContext.BaseDirectory, "CrabDesk.IconGuard.exe");
-        Assert.True(File.Exists(guardPath), $"IconGuard executable was not copied to {guardPath}.");
-
-        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var stem = $"CrabDeskGuardTest-{Guid.NewGuid():N}";
-        var path = Path.Combine(desktop, stem + ".txt");
-        var marker = Path.Combine(Path.GetTempPath(), stem + ".json");
-        await File.WriteAllTextAsync(path, "CrabDesk guard recovery test");
-
-        DesktopIconPositionSnapshot? original = null;
-        IReadOnlyList<System.Drawing.Rectangle>? originalWorkAreas = null;
-        var host = new DesktopHostService();
-        try
-        {
-            host.Refresh();
-            for (var attempt = 0; attempt < 20 && original is null; attempt++)
-            {
-                await Task.Delay(250);
-                var captured = DesktopIconPositionService.CaptureItemPositions(
-                    host.DesktopListView,
-                    [stem, stem + ".txt"]).FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(captured.DisplayName))
-                {
-                    original = captured;
-                }
-            }
-            Assert.NotNull(original);
-
-            originalWorkAreas = DesktopIconPositionService.GetWorkAreas(host.DesktopListView);
-            var listViewBounds = DesktopWindowTools.GetWindowBounds(host.DesktopListView);
-            Assert.True(DesktopIconPositionService.SetWorkAreas(
-                host.DesktopListView,
-                [new System.Drawing.Rectangle(
-                    0,
-                    0,
-                    (int)listViewBounds.Width + 8192,
-                    (int)listViewBounds.Height + 8192)]));
-
-            Assert.True(DesktopIconPositionService.MoveItemsUnderBox(
-                host.DesktopListView,
-                [stem, stem + ".txt"],
-                720,
-                500) > 0);
-
-            await File.WriteAllTextAsync(marker, JsonSerializer.Serialize(new DesktopRecoveryState
-            {
-                IconPositions = [original.Value],
-                WorkAreas = originalWorkAreas.Select(area => new DesktopWorkAreaSnapshot(
-                    area.Left,
-                    area.Top,
-                    area.Right,
-                    area.Bottom)).ToList()
-            }));
-
-            using var guard = Process.Start(new ProcessStartInfo(guardPath)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                Arguments = $"{int.MaxValue} \"{marker}\""
-            });
-            Assert.NotNull(guard);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            await guard.WaitForExitAsync(timeout.Token);
-            Assert.Equal(0, guard.ExitCode);
-
-            var final = DesktopIconPositionService.CaptureItemPositions(
-                host.DesktopListView,
-                [stem, stem + ".txt"]).Single();
-            Assert.Equal(original.Value.X, final.X);
-            Assert.Equal(original.Value.Y, final.Y);
-            Assert.Equal(
-                originalWorkAreas,
-                DesktopIconPositionService.GetWorkAreas(host.DesktopListView));
-            Assert.False(File.Exists(marker));
-        }
-        finally
-        {
-            if (original is not null)
-            {
-                DesktopIconPositionService.RestoreItemPositions(host.DesktopListView, [original.Value]);
-            }
-            if (originalWorkAreas is not null)
-            {
-                DesktopIconPositionService.SetWorkAreas(host.DesktopListView, originalWorkAreas);
-            }
-            File.Delete(path);
-            File.Delete(marker);
-        }
-    }
 }

@@ -152,6 +152,9 @@ public sealed class DesktopBox
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "新盒子";
     public string MonitorId { get; set; } = string.Empty;
+    // Persistent back-to-front order within one monitor. Native window order
+    // remains owned by the desktop surface, never by individual boxes.
+    public int StackOrder { get; set; }
     public LayoutRect Bounds { get; set; } = new(32, 32, 420, 300);
     public bool IsCollapsed { get; set; }
     // Hover expansion belongs to the box so each title-bar toggle is isolated.
@@ -439,7 +442,7 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 18;
+    public int SchemaVersion { get; set; } = 19;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -458,14 +461,3 @@ public sealed class CrabDeskState
 
 public readonly record struct DesktopIconPositionSnapshot(string DisplayName, int X, int Y);
 public readonly record struct DesktopWorkAreaSnapshot(int Left, int Top, int Right, int Bottom);
-public readonly record struct DesktopFileAttributeSnapshot(string Path, int Attributes);
-public readonly record struct DesktopShellIconSnapshot(string Clsid, int? PreviousHiddenValue);
-
-public sealed class DesktopRecoveryState
-{
-    public bool PreviousHidden { get; set; }
-    public List<DesktopIconPositionSnapshot> IconPositions { get; set; } = [];
-    public List<DesktopWorkAreaSnapshot>? WorkAreas { get; set; }
-    public List<DesktopFileAttributeSnapshot> FileAttributes { get; set; } = [];
-    public List<DesktopShellIconSnapshot> ShellIcons { get; set; } = [];
-}

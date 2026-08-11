@@ -9,7 +9,7 @@ $exe = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot $Executable))
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "CrabDesk executable not found: $exe"
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before validating hardware checkpoints."
 }
 
@@ -24,10 +24,6 @@ try {
     $process = Start-Process -FilePath $exe -PassThru
     $snapshot = Get-CrabDeskHardwareSnapshot -DataDirectory $testRoot -WaitSeconds 30
     Assert-CrabDeskHardwareSnapshot -Snapshot $snapshot
-    if ($snapshot.ExpectedRestoredHideIcons -ne $previousHideIcons) {
-        throw "Recovery marker did not preserve the pre-takeover Explorer icon state. Expected=$previousHideIcons, Marker=$($snapshot.ExpectedRestoredHideIcons)."
-    }
-
     $exit = Start-Process -FilePath $exe -ArgumentList "--exit-existing" -Wait -PassThru
     if ($exit.ExitCode -ne 0 -or -not $process.WaitForExit(15000)) {
         throw "CrabDesk did not exit cleanly after the hardware-checkpoint smoke test."
@@ -54,4 +50,4 @@ finally {
     }
 }
 
-Write-Host "Hardware checkpoint snapshot, active takeover icon state, recovery marker and clean-exit restoration passed."
+Write-Host "Hardware checkpoint snapshot, active takeover icon state and clean-exit restoration passed."

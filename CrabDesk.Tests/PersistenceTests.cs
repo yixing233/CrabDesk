@@ -298,9 +298,39 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.Equal(76, loaded.Settings.Appearance.IconHorizontalSpacing);
         Assert.Equal(80, loaded.Settings.Appearance.IconVerticalSpacing);
+    }
+
+    [Fact]
+    public async Task VersionEighteenMigratesLegacyBoxOrderToPerMonitorStackOrder()
+    {
+        Directory.CreateDirectory(_root);
+        var primaryBack = Guid.NewGuid();
+        var secondary = Guid.NewGuid();
+        var primaryFront = Guid.NewGuid();
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), $$"""
+        {
+          "SchemaVersion": 18,
+          "Boxes": [
+            { "Id": "{{primaryBack}}", "MonitorId": "primary" },
+            { "Id": "{{secondary}}", "MonitorId": "secondary" },
+            { "Id": "{{primaryFront}}", "MonitorId": "primary" }
+          ],
+          "Assignments": {}
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(
+            [primaryBack, primaryFront],
+            BoxStacking.OrderBackToFront(loaded.Boxes, "primary").Select(box => box.Id));
+        Assert.Equal(0, loaded.Boxes.Single(box => box.Id == primaryBack).StackOrder);
+        Assert.Equal(1, loaded.Boxes.Single(box => box.Id == primaryFront).StackOrder);
+        Assert.Equal(0, loaded.Boxes.Single(box => box.Id == secondary).StackOrder);
     }
 
     [Fact]
@@ -359,7 +389,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -382,7 +412,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -407,7 +437,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
     }
@@ -427,7 +457,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
@@ -488,7 +518,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -512,7 +542,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(18, loaded.SchemaVersion);
+        Assert.Equal(19, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);

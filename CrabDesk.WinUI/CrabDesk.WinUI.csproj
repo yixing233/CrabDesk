@@ -17,7 +17,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.6.0-beta.4</Version>
+    <Version>0.6.0-beta.5</Version>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
     <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
@@ -38,7 +38,6 @@
     <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
     <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
     <ProjectReference Include="..\CrabDesk.Runtime\CrabDesk.Runtime.csproj" />
-    <ProjectReference Include="..\CrabDesk.IconGuard\CrabDesk.IconGuard.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,13 +51,6 @@
     <AssemblyMetadata Include="GitHubRepositoryName" Value="$(CrabDeskGitHubRepository)" />
     <AssemblyMetadata Include="CrabDeskPackageKind" Value="$(CrabDeskPackageKind)" />
   </ItemGroup>
-
-  <Target Name="CopyIconGuard" AfterTargets="Build">
-    <ItemGroup>
-      <IconGuardFiles Include="..\CrabDesk.IconGuard\bin\$(Configuration)\net8.0-windows\CrabDesk.IconGuard.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(IconGuardFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-  </Target>
 
   <!--
     Windows App SDK's self-contained MSIX contains optional AI, workload and

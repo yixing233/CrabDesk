@@ -86,7 +86,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 18;
+        state.SchemaVersion = 19;
         state.Settings ??= new AppSettings();
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
@@ -327,6 +327,11 @@ public sealed class JsonLayoutStore : ILayoutStore
                     ? string.Empty
                     : Environment.ExpandEnvironmentVariables(box.MappedFolder.Path.Trim());
             }
+        }
+
+        if (previousVersion < 19)
+        {
+            BoxStacking.Normalize(state.Boxes);
         }
 
         var validBoxIds = state.Boxes.Where(box => !box.IsMappedFolder).Select(box => box.Id).ToHashSet();

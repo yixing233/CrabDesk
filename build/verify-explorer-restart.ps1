@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $exe)) {
 if (-not $ConfirmExplorerRestart) {
     throw "Explorer restart is disruptive. Re-run with -ConfirmExplorerRestart to execute this test."
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying Explorer restart recovery."
 }
 

@@ -152,8 +152,6 @@ try {
                 if (-not $process.HasExited) {
                     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
                 }
-                Get-Process CrabDesk.IconGuard -ErrorAction SilentlyContinue |
-                    Stop-Process -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Milliseconds 300
             }
         }

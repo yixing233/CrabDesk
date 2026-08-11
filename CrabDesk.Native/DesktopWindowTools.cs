@@ -108,6 +108,36 @@ public static class DesktopWindowTools
         return IsWindowAbove(hwnd, desktopView);
     }
 
+    /// <summary>
+    /// Re-shows a desktop child after Explorer recreated its view, preserving
+    /// the no-activate behavior while placing it above the icon ListView.
+    /// </summary>
+    public static bool ShowAboveDesktop(IntPtr hwnd, IntPtr desktopView)
+    {
+        if (desktopView == IntPtr.Zero || NativeMethods.GetParent(hwnd) != NativeMethods.GetParent(desktopView))
+        {
+            return false;
+        }
+
+        if (!NativeMethods.SetWindowPos(
+                hwnd,
+                NativeMethods.HwndTop,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoActivate |
+                NativeMethods.SwpNoMove |
+                NativeMethods.SwpNoSize |
+                NativeMethods.SwpNoOwnerZOrder |
+                NativeMethods.SwpShowWindow))
+        {
+            return false;
+        }
+
+        return IsDesktopSurfaceReady(hwnd, desktopView);
+    }
+
     public static bool IsWindowAbove(IntPtr hwnd, IntPtr other)
     {
         var parent = NativeMethods.GetParent(hwnd);

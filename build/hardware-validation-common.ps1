@@ -178,26 +178,6 @@ function Get-CrabDeskExplorerHideIcons {
     }
 }
 
-function Get-CrabDeskExpectedRestoredHideIcons([string]$DataDirectory) {
-    $path = Join-Path $DataDirectory "desktop-visibility.lock"
-    $deadline = [DateTime]::UtcNow.AddSeconds(5)
-    do {
-        try {
-            if (Test-Path -LiteralPath $path) {
-                $recovery = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($null -ne $recovery.PreviousHidden) {
-                    return [int][bool]$recovery.PreviousHidden
-                }
-            }
-        }
-        catch {
-            if ([DateTime]::UtcNow -ge $deadline) { throw }
-        }
-        Start-Sleep -Milliseconds 200
-    } while ([DateTime]::UtcNow -lt $deadline)
-    throw "CrabDesk recovery marker was not available: $path"
-}
-
 function Get-CrabDeskOsDescription {
     $key = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
     $productName = [string]$key.ProductName
@@ -278,9 +258,7 @@ function Get-CrabDeskHardwareSnapshot {
         ProcessId = $process.Id
         ProcessStartTime = [DateTimeOffset]$process.StartTime
         Executable = $process.Path
-        IconGuardProcessCount = @(Get-Process CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count
         HideIcons = Get-CrabDeskExplorerHideIcons
-        ExpectedRestoredHideIcons = Get-CrabDeskExpectedRestoredHideIcons $DataDirectory
         Monitors = $monitors
         Surfaces = $surfaces
         ConfigPath = Join-Path $DataDirectory "config.json"
@@ -302,9 +280,6 @@ function Assert-CrabDeskHardwareSnapshot {
         [switch]$RequireMappedFolder
     )
 
-    if ($Snapshot.IconGuardProcessCount -lt 1) {
-        throw "IconGuard is not running."
-    }
     if ($Snapshot.HideIcons -ne 0) {
         throw "Explorer native icons must remain visible while CrabDesk hosts desktop boxes."
     }

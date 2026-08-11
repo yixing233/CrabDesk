@@ -42,7 +42,6 @@ internal static class NativeMethods
     internal const uint RdwAllChildren = 0x0080;
     internal const uint RdwUpdateNow = 0x0100;
     internal const uint ShcneUpdateItem = 0x00002000;
-    internal const uint ShcneUpdateDir = 0x00001000;
     internal const uint ShcneAssocChanged = 0x08000000;
     internal const uint ShcnfPathW = 0x0005;
     internal const uint ShcnfIdList = 0x0000;

@@ -12,7 +12,7 @@ else {
 if (-not (Test-Path -LiteralPath $setup)) {
     throw "CrabDesk setup executable not found: $setup"
 }
-if (@(Get-Process CrabDesk.WinUI,CrabDesk.IconGuard -ErrorAction SilentlyContinue).Count -gt 0) {
+if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {
     throw "Close the running CrabDesk instance before verifying the installer."
 }
 
@@ -93,8 +93,7 @@ try {
     }
 
     $installedApp = Join-Path $installDirectory "CrabDesk.WinUI.exe"
-    $installedGuard = Join-Path $installDirectory "CrabDesk.IconGuard.exe"
-    foreach ($required in $installedApp, $installedGuard, (Join-Path $installDirectory "LICENSE"), (Join-Path $installDirectory "PRIVACY.md"), $uninstaller) {
+    foreach ($required in $installedApp, (Join-Path $installDirectory "LICENSE"), (Join-Path $installDirectory "PRIVACY.md"), $uninstaller) {
         if (-not (Test-Path -LiteralPath $required)) {
             throw "Installed file is missing: $required"
         }

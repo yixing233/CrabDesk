@@ -90,7 +90,6 @@ Windows 10 与 Windows 11 的结果必须写入不同子目录，避免后一台
   -CertificatePassword <password> `
   -Files @(
     "artifacts\publish\win-x64\CrabDesk.WinUI.exe",
-    "artifacts\publish\win-x64\CrabDesk.IconGuard.exe",
     "artifacts\installer\CrabDesk-Setup-x64.exe"
   )
 ```
@@ -99,7 +98,6 @@ Windows 10 与 Windows 11 的结果必须写入不同子目录，避免后一台
 
 ```powershell
 Get-AuthenticodeSignature artifacts\publish\win-x64\CrabDesk.WinUI.exe
-Get-AuthenticodeSignature artifacts\publish\win-x64\CrabDesk.IconGuard.exe
 Get-AuthenticodeSignature artifacts\installer\CrabDesk-Setup-x64.exe
 ```
 

@@ -22,7 +22,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             var parentBounds = DesktopWindowTools.GetWindowBounds(parentHandle);
             foreach (var monitor in monitors)
             {
-                var surface = new DesktopBoxForm(runtime, host, monitor);
+                var surface = new DesktopBoxForm(runtime, monitor);
                 try
                 {
                     DesktopWindowTools.AttachAsDesktopChild(surface.Handle, parentHandle);
@@ -38,7 +38,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
                         throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified.");
                     }
                     surface.Show();
-                    if (!surface.UpdateInteractionRegion() || !surface.ValidateWindowRegion())
+                    if (!DesktopWindowTools.ShowAboveDesktop(surface.Handle, host.DesktopListView) ||
+                        !surface.UpdateInteractionRegion() || !surface.ValidateWindowRegion())
                     {
                         throw new InvalidOperationException("The CrabDesk desktop surface region was lost while showing.");
                     }
@@ -83,7 +84,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified before showing.");
                 }
                 surface.Show();
-                if (!surface.ValidateWindowRegion())
+                if (!DesktopWindowTools.ShowAboveDesktop(surface.Handle, _host.DesktopListView) ||
+                    !surface.ValidateWindowRegion())
                 {
                     surface.Hide();
                     throw new InvalidOperationException("The CrabDesk desktop surface region was lost while showing.");
@@ -101,13 +103,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
         foreach (var surface in _surfaces)
         {
             DesktopWindowTools.NormalizeDesktopSurfaceStyles(surface.Handle);
-            var rendered = surface.EnsureRendered();
+            surface.RequestRender();
             var ready = DesktopWindowTools.IsDesktopSurfaceReady(surface.Handle, _host.DesktopListView);
             var regionValid = surface.ValidateWindowRegion();
-            if (!ready || !rendered || !regionValid)
+            if (!ready || !regionValid)
             {
                 throw new InvalidOperationException(
-                    $"The CrabDesk desktop surface is not ready. rendered={rendered} regionValid={regionValid} paints={surface.PaintCount} " +
+                    $"The CrabDesk desktop surface is not ready. regionValid={regionValid} paints={surface.PaintCount} " +
                     DesktopWindowTools.GetDesktopSurfaceDiagnostics(surface.Handle, _host.DesktopListView));
             }
         }

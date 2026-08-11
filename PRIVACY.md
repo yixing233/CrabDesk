@@ -17,6 +17,6 @@ CrabDesk 在本机整理 Windows 桌面，不提供账户、云同步或遥测�
 
 ## Windows 集成
 
-CrabDesk 可按用户选择写入当前用户的开机启动项和桌面右键菜单项。退出或异常恢复时，CrabDesk 与 IconGuard 会恢复接管前的 Explorer 图标状态。
+CrabDesk 可按用户选择写入当前用户的开机启动项和桌面右键菜单项。退出或暂停接管时，CrabDesk 会恢复本次会话中由它修改的图标显示状态。
 
 卸载应用不会自动删除 `%LocalAppData%\CrabDesk` 中的用户配置和布局备份，便于用户保留或手动清理数据。

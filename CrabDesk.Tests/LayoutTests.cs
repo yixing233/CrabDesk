@@ -88,6 +88,26 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void BoxStackingOrdersOnlyWithinTheSameMonitor()
+    {
+        var back = new DesktopBox { MonitorId = "primary", StackOrder = 0 };
+        var middle = new DesktopBox { MonitorId = "primary", StackOrder = 1 };
+        var front = new DesktopBox { MonitorId = "primary", StackOrder = 2 };
+        var otherMonitor = new DesktopBox { MonitorId = "secondary", StackOrder = 0 };
+        IReadOnlyList<DesktopBox> boxes = [back, middle, front, otherMonitor];
+
+        Assert.Equal([back, middle, front], BoxStacking.OrderBackToFront(boxes, "primary"));
+        Assert.Equal(3, BoxStacking.GetFrontStackOrder(boxes, "primary"));
+        Assert.True(BoxStacking.Move(boxes, middle.Id, BoxStackMove.ToFront));
+        Assert.Equal([back, front, middle], BoxStacking.OrderBackToFront(boxes, "primary"));
+        Assert.Equal(0, otherMonitor.StackOrder);
+
+        Assert.True(BoxStacking.Move(boxes, middle.Id, BoxStackMove.ToBack));
+        Assert.Equal([middle, back, front], BoxStacking.OrderBackToFront(boxes, "primary"));
+        Assert.False(BoxStacking.Move(boxes, middle.Id, BoxStackMove.ToBack));
+    }
+
+    [Fact]
     public void AutomaticBoxLayoutAvoidsOverlapAndStaysVisible()
     {
         var workArea = new LayoutRect(0, 0, 1366, 728);

@@ -1,5 +1,101 @@
 namespace CrabDesk.Core;
 
+public enum BoxStackMove
+{
+    ToFront,
+    Forward,
+    Backward,
+    ToBack
+}
+
+public static class BoxStacking
+{
+    // The order of the state list is only a stable tie breaker for legacy
+    // layouts. Explicit StackOrder is the source of truth for rendering and
+    // hit testing inside a desktop surface.
+    public static IReadOnlyList<DesktopBox> OrderBackToFront(
+        IEnumerable<DesktopBox> boxes,
+        string monitorId) => boxes
+        .Select((box, index) => (box, index))
+        .Where(entry => string.Equals(
+            entry.box.MonitorId,
+            monitorId,
+            StringComparison.OrdinalIgnoreCase))
+        .OrderBy(entry => entry.box.StackOrder)
+        .ThenBy(entry => entry.index)
+        .Select(entry => entry.box)
+        .ToArray();
+
+    public static int GetFrontStackOrder(
+        IEnumerable<DesktopBox> boxes,
+        string monitorId)
+    {
+        var stack = OrderBackToFront(boxes, monitorId);
+        if (stack.Count == 0)
+        {
+            return 0;
+        }
+
+        var front = stack[^1].StackOrder;
+        return front == int.MaxValue ? int.MaxValue : front + 1;
+    }
+
+    public static bool Move(
+        IReadOnlyList<DesktopBox> boxes,
+        Guid boxId,
+        BoxStackMove move)
+    {
+        var target = boxes.FirstOrDefault(box => box.Id == boxId);
+        if (target is null)
+        {
+            return false;
+        }
+
+        var stack = OrderBackToFront(boxes, target.MonitorId).ToList();
+        var currentIndex = stack.FindIndex(box => box.Id == target.Id);
+        if (currentIndex < 0)
+        {
+            return false;
+        }
+
+        var destinationIndex = move switch
+        {
+            BoxStackMove.ToFront => stack.Count - 1,
+            BoxStackMove.Forward => Math.Min(stack.Count - 1, currentIndex + 1),
+            BoxStackMove.Backward => Math.Max(0, currentIndex - 1),
+            BoxStackMove.ToBack => 0,
+            _ => currentIndex
+        };
+        if (destinationIndex == currentIndex)
+        {
+            return false;
+        }
+
+        stack.RemoveAt(currentIndex);
+        stack.Insert(destinationIndex, target);
+        Apply(stack);
+        return true;
+    }
+
+    public static void Normalize(IReadOnlyList<DesktopBox> boxes)
+    {
+        foreach (var monitorId in boxes
+                     .Select(box => box.MonitorId)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            Apply(OrderBackToFront(boxes, monitorId));
+        }
+    }
+
+    private static void Apply(IReadOnlyList<DesktopBox> stack)
+    {
+        for (var index = 0; index < stack.Count; index++)
+        {
+            stack[index].StackOrder = index;
+        }
+    }
+}
+
 public static class LayoutCoordinator
 {
     public static void NormalizeForMonitors(CrabDeskState state, IReadOnlyList<MonitorLayout> monitors)
@@ -160,6 +256,9 @@ public static class BoxTransferPolicy
 
 public static class BoxDragCompletionPolicy
 {
+    // Normal boxes are virtual groupings. Exposing their desktop source paths
+    // to Explorer would make a drop back onto the same desktop copy a file
+    // onto itself. Mapped folders, by contrast, represent real file moves.
     public static bool ShouldExposeFileDrop(bool sourceMapped) => sourceMapped;
 
     public static bool ShouldUnassign(

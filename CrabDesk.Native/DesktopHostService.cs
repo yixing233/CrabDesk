@@ -30,41 +30,6 @@ public sealed class DesktopHostService : IDesktopHost
             IntPtr.Zero);
     }
 
-    /// <summary>
-    /// Forces Explorer's desktop view to re-enumerate its folder so icons
-    /// hidden or restored through file attributes appear or disappear right
-    /// away instead of waiting for the shell's lazy per-item attribute
-    /// update (which left the old icon visible for seconds after a drop).
-    /// </summary>
-    public int NotifyDesktopFolderChanged()
-    {
-        var notified = 0;
-        foreach (var directory in new[]
-                 {
-                     Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-                     Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)
-                 }
-                 .Where(path => !string.IsNullOrWhiteSpace(path))
-                 .Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var path = Marshal.StringToCoTaskMemUni(directory);
-            try
-            {
-                NativeMethods.SHChangeNotify(
-                    NativeMethods.ShcneUpdateDir,
-                    NativeMethods.ShcnfPathW,
-                    path,
-                    IntPtr.Zero);
-                notified++;
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(path);
-            }
-        }
-        return notified;
-    }
-
     public bool Refresh()
     {
         var view = FindDesktopView();
