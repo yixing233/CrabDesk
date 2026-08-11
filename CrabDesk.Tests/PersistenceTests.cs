@@ -18,7 +18,6 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.TitleFontFamily = "Microsoft YaHei UI";
         state.Boxes[0].Appearance.TitleFontSize = 15;
         state.Boxes[0].Appearance.TitleFontBold = false;
-        state.Boxes[0].Appearance.ShowCollapseButton = false;
         state.Boxes[0].Appearance.Background = "#FF162A3A";
         state.Boxes[0].Appearance.Accent = "#FF31A86D";
         state.Boxes[0].Appearance.Opacity = 0.6;
@@ -28,6 +27,9 @@ public sealed class PersistenceTests : IDisposable
         state.Boxes[0].Appearance.ShowItemLabels = false;
         state.Boxes[0].ExpandOnHover = true;
         state.Assignments["file:123"] = state.Boxes[0].Id;
+        var manualTab = new DesktopBoxTab { Title = "进行中" };
+        state.Boxes[0].ManualTabs.Add(manualTab);
+        state.Boxes[0].ItemTabAssignments["file:123"] = manualTab.Id;
         state.Settings.ThemeMode = ApplicationThemeMode.Dark;
         state.Settings.WindowBackdrop = "Acrylic";
         state.Settings.Appearance.CornerRadius = 42;
@@ -63,7 +65,6 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
         Assert.Equal(15, loaded.Boxes[0].Appearance.TitleFontSize);
         Assert.False(loaded.Boxes[0].Appearance.TitleFontBold);
-        Assert.False(loaded.Boxes[0].Appearance.ShowCollapseButton);
         Assert.Equal("#FF162A3A", loaded.Boxes[0].Appearance.Background);
         Assert.Equal("#FF31A86D", loaded.Boxes[0].Appearance.Accent);
         Assert.Equal(0.6, loaded.Boxes[0].Appearance.Opacity);
@@ -72,7 +73,12 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(16, loaded.Boxes[0].Appearance.LabelFontSize);
         Assert.False(loaded.Boxes[0].Appearance.ShowItemLabels);
         Assert.True(loaded.Boxes[0].ExpandOnHover);
+        Assert.True(loaded.Boxes[0].IsCollapsed);
         Assert.Equal(state.Boxes[0].Id, loaded.Assignments["file:123"]);
+        var loadedManualTab = Assert.Single(loaded.Boxes[0].ManualTabs);
+        Assert.Equal("进行中", loadedManualTab.Title);
+        Assert.Equal(manualTab.Id, loadedManualTab.Id);
+        Assert.Equal(manualTab.Id, loaded.Boxes[0].ItemTabAssignments["file:123"]);
         Assert.Equal(ApplicationThemeMode.Dark, loaded.Settings.ThemeMode);
         Assert.Equal("Acrylic", loaded.Settings.WindowBackdrop);
         Assert.Equal(20, loaded.Settings.Appearance.CornerRadius);
@@ -298,7 +304,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Equal(76, loaded.Settings.Appearance.IconHorizontalSpacing);
         Assert.Equal(80, loaded.Settings.Appearance.IconVerticalSpacing);
     }
@@ -324,7 +330,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Equal(
             [primaryBack, primaryFront],
             BoxStacking.OrderBackToFront(loaded.Boxes, "primary").Select(box => box.Id));
@@ -375,6 +381,46 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task VersionNineteenDisplayStateMigratesToFixedAndHoverModes()
+    {
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 19,
+          "Boxes": [
+            {
+              "Id": "11111111-1111-1111-1111-111111111111",
+              "Title": "固定",
+              "MonitorId": "primary",
+              "Bounds": { "X": 10, "Y": 10, "Width": 300, "Height": 200 },
+              "IsCollapsed": true,
+              "ExpandOnHover": false
+            },
+            {
+              "Id": "22222222-2222-2222-2222-222222222222",
+              "Title": "悬停",
+              "MonitorId": "primary",
+              "Bounds": { "X": 320, "Y": 10, "Width": 300, "Height": 200 },
+              "IsCollapsed": false,
+              "ExpandOnHover": true
+            }
+          ],
+          "Assignments": {}
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        var fixedBox = loaded.Boxes.Single(box => box.Title == "固定");
+        var hoverBox = loaded.Boxes.Single(box => box.Title == "悬停");
+        Assert.Equal(20, loaded.SchemaVersion);
+        Assert.False(fixedBox.ExpandOnHover);
+        Assert.False(fixedBox.IsCollapsed);
+        Assert.True(hoverBox.ExpandOnHover);
+        Assert.True(hoverBox.IsCollapsed);
+    }
+
+    [Fact]
     public async Task VersionOneStateDropsLegacyAutomaticAssignments()
     {
         Directory.CreateDirectory(_root);
@@ -389,7 +435,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -412,7 +458,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -437,7 +483,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
     }
@@ -457,7 +503,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
@@ -518,7 +564,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -542,7 +588,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);

@@ -51,6 +51,23 @@ public sealed class FileOperationServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void ReadOnlyMappedSourceAlwaysCopies(bool shiftPressed, bool controlPressed)
+    {
+        Assert.Equal(
+            BoxTransferEffect.CopyFiles,
+            BoxTransferPolicy.Resolve(
+                internalItems: true,
+                sourceMapped: true,
+                targetMapped: false,
+                shiftPressed: shiftPressed,
+                controlPressed: controlPressed,
+                sourceMappedReadOnly: true));
+    }
+
+    [Theory]
     [InlineData(true, false, false, false, false, true)]
     [InlineData(false, false, false, false, false, false)]
     [InlineData(true, true, false, false, false, false)]
@@ -101,6 +118,28 @@ public sealed class FileOperationServiceTests : IDisposable
         Assert.True(File.Exists(destination));
         Assert.False(File.Exists(source));
         Assert.False(File.Exists(destination + ".txt"));
+    }
+
+    [Fact]
+    public async Task RenameTreatsDotPrefixedFilenameAsItsOwnStem()
+    {
+        Directory.CreateDirectory(_root);
+        var source = Path.Combine(_root, ".gitignore");
+        await File.WriteAllTextAsync(source, "bin/");
+        var item = new DesktopItemRef
+        {
+            Key = new DesktopItemKey("path", source),
+            DisplayName = ".gitignore",
+            ParsingName = source,
+            FileSystemPath = source,
+            Kind = DesktopItemKind.File
+        };
+
+        var destination = await new FileOperationService().RenameAsync(item, ".dockerignore");
+
+        Assert.Equal(Path.Combine(_root, ".dockerignore"), destination);
+        Assert.True(File.Exists(destination));
+        Assert.False(File.Exists(source));
     }
 
     [Fact]

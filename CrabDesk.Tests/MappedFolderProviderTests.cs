@@ -31,6 +31,21 @@ public sealed class MappedFolderProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task PreservesDotPrefixedFileAndFolderNames()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, ".minecraft"));
+        await File.WriteAllTextAsync(Path.Combine(_root, ".gitignore"), "bin/");
+        await File.WriteAllTextAsync(Path.Combine(_root, ".env.local"), "mode=test");
+        using var provider = new MappedFolderProvider();
+
+        var snapshot = await provider.EnumerateAsync(_root);
+
+        Assert.Contains(snapshot.Items, item => item.DisplayName == ".minecraft" && item.Kind == DesktopItemKind.Folder);
+        Assert.Contains(snapshot.Items, item => item.DisplayName == ".gitignore" && item.Kind == DesktopItemKind.File);
+        Assert.Contains(snapshot.Items, item => item.DisplayName == ".env" && item.Kind == DesktopItemKind.File);
+    }
+
+    [Fact]
     public async Task MissingDirectoryReturnsExplicitState()
     {
         using var provider = new MappedFolderProvider();

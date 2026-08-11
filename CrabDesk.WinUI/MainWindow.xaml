@@ -40,9 +40,14 @@
                         <SymbolIcon Symbol="Home" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="快捷键" Tag="hotkeys" AutomationProperties.Name="全局快捷键">
+                <NavigationViewItem Content="桌面盒子" Tag="boxes" AutomationProperties.Name="桌面盒子">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Keyboard" />
+                        <SymbolIcon Symbol="ViewAll" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="智能整理" Tag="smart-organization" AutomationProperties.Name="智能整理">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Filter" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="布局备份" Tag="backup" AutomationProperties.Name="布局备份">
@@ -50,24 +55,9 @@
                         <icons:FluentIcon Icon="Album" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="整理规则" Tag="organization" AutomationProperties.Name="整理规则">
+                <NavigationViewItem Content="快捷键" Tag="hotkeys" AutomationProperties.Name="全局快捷键">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Filter" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-                <NavigationViewItem Content="AI 分类" Tag="ai" AutomationProperties.Name="AI 图标分类">
-                    <NavigationViewItem.Icon>
-                        <icons:FluentIcon Icon="Bot" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-                <NavigationViewItem Content="主题与外观" Tag="appearance" AutomationProperties.Name="主题与外观">
-                    <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Edit" />
-                    </NavigationViewItem.Icon>
-                </NavigationViewItem>
-                <NavigationViewItem Content="桌面盒子" Tag="boxes" AutomationProperties.Name="桌面盒子">
-                    <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="ViewAll" />
+                        <SymbolIcon Symbol="Keyboard" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="关于" Tag="about" AutomationProperties.Name="关于 CrabDesk">

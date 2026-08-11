@@ -106,9 +106,7 @@ public sealed class MappedFolderProvider : IMappedFolderProvider
                     items.Add(new DesktopItemRef
                     {
                         Key = new DesktopItemKey("file", FileIdentity.GetStableId(fullPath)),
-                        DisplayName = isDirectory
-                            ? Path.GetFileName(fullPath)
-                            : Path.GetFileNameWithoutExtension(fullPath),
+                        DisplayName = DesktopItemName.GetDisplayName(fullPath, isDirectory),
                         ParsingName = fullPath,
                         FileSystemPath = fullPath,
                         Kind = isDirectory

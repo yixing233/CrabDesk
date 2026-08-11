@@ -254,10 +254,8 @@ public sealed partial class MainWindow : Window
         {
             "hotkeys" => typeof(HotkeysPage),
             "backup" => typeof(BackupPage),
-            "organization" => typeof(OrganizationPage),
-            "ai" => typeof(AiClassificationPage),
-            "appearance" => typeof(AppearancePage),
-            "boxes" => typeof(BoxesPage),
+            "smart-organization" or "organization" or "ai" => typeof(SmartOrganizationPage),
+            "appearance" or "boxes" => typeof(DesktopBoxesPage),
             "about" => typeof(AboutPage),
             _ => typeof(GeneralPage)
         });

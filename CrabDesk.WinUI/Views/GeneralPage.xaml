@@ -14,7 +14,6 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                             <Grid Width="8" Height="8">
@@ -30,10 +29,6 @@
                                 Command="{Binding ReconnectCommand}"
                                 AutomationProperties.Name="重新连接 Explorer 桌面" />
                         <Button Grid.Column="2"
-                                Content="修复桌面图标"
-                                Command="{Binding RepairDesktopIconsCommand}"
-                                AutomationProperties.Name="修复桌面图标" />
-                        <Button Grid.Column="3"
                                 Content="{Binding PauseButtonText}"
                                 Command="{Binding TogglePauseCommand}"
                                 AutomationProperties.Name="切换桌面接管状态" />
@@ -80,11 +75,39 @@
             </StackPanel>
 
             <StackPanel Margin="0,0,0,24">
-                <TextBlock Text="主题" Style="{StaticResource SectionTitleStyle}" />
-                <ComboBox ItemsSource="{Binding ThemeModes}"
-                          ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
-                          SelectedItem="{Binding ThemeMode, Mode=TwoWay}"
-                          HorizontalAlignment="Stretch" AutomationProperties.Name="应用主题" />
+                <TextBlock Text="应用外观" Style="{StaticResource SectionTitleStyle}" />
+                <Border Style="{StaticResource SectionCardStyle}" Padding="16,0">
+                    <StackPanel>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="主题" FontWeight="SemiBold" />
+                                <TextBlock Text="选择设置界面的明暗模式" Style="{StaticResource SecondaryBodyStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1"
+                                      Width="{StaticResource SettingsControlWidth}"
+                                      ItemsSource="{Binding ThemeModes}"
+                                      ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
+                                      SelectedItem="{Binding ThemeMode, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      AutomationProperties.Name="应用主题" />
+                        </Grid>
+                        <Grid Style="{StaticResource SettingRowGridStyle}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="窗口材质" FontWeight="SemiBold" />
+                                <TextBlock Text="只影响设置窗口的 Fluent 背景效果，不影响桌面盒子" Style="{StaticResource SecondaryBodyStyle}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1"
+                                      Width="{StaticResource SettingsControlWidth}"
+                                      ItemsSource="{Binding BackdropKinds}"
+                                      ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
+                                      SelectedItem="{Binding Backdrop, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      AutomationProperties.Name="窗口背景材质" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

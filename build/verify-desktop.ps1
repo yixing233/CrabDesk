@@ -289,7 +289,6 @@ $config = @{
             TitleColor = "Auto"
             TitleFontSize = 10
             TitleFontBold = $true
-            ShowCollapseButton = $true
         }
     })
     Assignments = @{}

@@ -17,6 +17,12 @@ public sealed partial class DesktopSnapshotView : UserControl
         typeof(DesktopSnapshotView),
         new PropertyMetadata(null, OnSnapshotChanged));
 
+    public static readonly DependencyProperty DesktopPreviewPathProperty = DependencyProperty.Register(
+        nameof(DesktopPreviewPath),
+        typeof(string),
+        typeof(DesktopSnapshotView),
+        new PropertyMetadata(string.Empty, OnSnapshotChanged));
+
     public DesktopSnapshotView()
     {
         InitializeComponent();
@@ -26,6 +32,12 @@ public sealed partial class DesktopSnapshotView : UserControl
     {
         get => (LayoutBackupSnapshot?)GetValue(SnapshotProperty);
         set => SetValue(SnapshotProperty, value);
+    }
+
+    public string DesktopPreviewPath
+    {
+        get => (string)GetValue(DesktopPreviewPathProperty);
+        set => SetValue(DesktopPreviewPathProperty, value);
     }
 
     private static void OnSnapshotChanged(DependencyObject sender, DependencyPropertyChangedEventArgs args)
@@ -42,6 +54,21 @@ public sealed partial class DesktopSnapshotView : UserControl
     {
         SnapshotCanvas.Children.Clear();
         SnapshotWallpaper.Source = null;
+        if (!string.IsNullOrWhiteSpace(DesktopPreviewPath) && File.Exists(DesktopPreviewPath))
+        {
+            try
+            {
+                SnapshotWallpaper.Opacity = 1;
+                SnapshotWallpaper.Source = new BitmapImage(new Uri(DesktopPreviewPath, UriKind.Absolute));
+                return;
+            }
+            catch
+            {
+                SnapshotWallpaper.Source = null;
+            }
+        }
+
+        SnapshotWallpaper.Opacity = 0.34;
         if (Snapshot is not { } snapshot ||
             SnapshotCanvas.ActualWidth <= 0 ||
             SnapshotCanvas.ActualHeight <= 0 ||

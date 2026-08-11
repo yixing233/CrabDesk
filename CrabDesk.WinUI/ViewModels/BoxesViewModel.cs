@@ -55,6 +55,17 @@ public partial class BoxesViewModel : ObservableObject
         get => SelectedBox?.MappedFolder?.IsReadOnly == true;
         set { if (SelectedBox?.IsMappedFolder == true && value != MappedFolderReadOnly) _service.SetMappedFolderReadOnly(SelectedBox, value); }
     }
+    public bool MappedFolderCategoryTabs
+    {
+        get => SelectedBox?.MappedFolder?.EnableCategoryTabs == true;
+        set
+        {
+            if (SelectedBox?.IsMappedFolder == true && value != MappedFolderCategoryTabs)
+            {
+                _service.SetMappedFolderCategoryTabsEnabled(SelectedBox, value);
+            }
+        }
+    }
 
     [RelayCommand]
     private async Task AddAsync()
@@ -104,6 +115,7 @@ public partial class BoxesViewModel : ObservableObject
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(MappedFolderPath));
         OnPropertyChanged(nameof(MappedFolderReadOnly));
+        OnPropertyChanged(nameof(MappedFolderCategoryTabs));
         DeleteCommand.NotifyCanExecuteChanged();
     }
 

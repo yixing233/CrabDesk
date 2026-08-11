@@ -68,7 +68,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                             items.Add(new DesktopItemRef
                             {
                                 Key = new DesktopItemKey("file", FileIdentity.GetStableId(fullPath)),
-                                DisplayName = Path.GetFileNameWithoutExtension(fullPath),
+                                DisplayName = DesktopItemName.GetDisplayName(fullPath, isDirectory),
                                 ParsingName = fullPath,
                                 FileSystemPath = fullPath,
                                 Kind = isDirectory

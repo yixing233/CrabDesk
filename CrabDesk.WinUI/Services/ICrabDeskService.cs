@@ -19,7 +19,6 @@ public interface ICrabDeskService
     HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action);
     void SetPaused(bool paused);
     Task ReconnectDesktopAsync();
-    Task<bool> RepairDesktopIconsAsync();
     void SetStartWithWindows(bool enabled);
     Task SetShowSystemItemsAsync(bool enabled);
     void SetConfirmDeleteBox(bool enabled);
@@ -43,6 +42,7 @@ public interface ICrabDeskService
     Task<DesktopBox> AddMappedFolderBoxAsync(string path, bool isReadOnly = false);
     Task UpdateMappedFolderAsync(DesktopBox box, string path);
     void SetMappedFolderReadOnly(DesktopBox box, bool isReadOnly);
+    void SetMappedFolderCategoryTabsEnabled(DesktopBox box, bool enabled);
     void DeleteBox(DesktopBox box);
     void BoxChanged(DesktopBox box, bool rebuild = false);
     void SetHotkey(HotkeyAction action, bool enabled, HotkeyModifiers modifiers, HotkeyKey key);
@@ -93,7 +93,6 @@ public interface ICrabDeskService
     void SetBoxTitleFontFamily(Guid? boxId, string value);
     void SetBoxTitleFontSize(Guid? boxId, double value);
     void SetBoxTitleFontBold(Guid? boxId, bool enabled);
-    void SetShowCollapseButton(Guid? boxId, bool enabled);
     void SetBoxIconSize(Guid? boxId, double value);
     void SetBoxLabelFontFamily(Guid? boxId, string value);
     void SetBoxLabelFontSize(Guid? boxId, double value);

@@ -6,7 +6,6 @@ namespace CrabDesk.Native;
 internal static class NativeMethods
 {
     internal const uint WmCommand = 0x0111;
-    internal const uint WmSetRedraw = 0x000B;
     internal const uint SmtoAbortIfHung = 0x0002;
     internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
@@ -25,26 +24,12 @@ internal static class NativeMethods
     internal const int SwpShowWindow = 0x0040;
     internal const int SwpNoOwnerZOrder = 0x0200;
     internal const uint GwHwndNext = 2;
-    internal const uint LvmGetImageList = 0x1002;
-    internal const uint LvmGetItemCount = 0x1004;
-    internal const uint LvmUpdate = 0x102A;
-    internal const int LvsilNormal = 0;
-    internal const int LvsilSmall = 1;
     internal const int RgnOr = 2;
     internal const int RgnDiff = 4;
     internal const int Error = 0;
     internal const int NullRegion = 1;
     internal const int SimpleRegion = 2;
     internal const int ComplexRegion = 3;
-    internal const uint RdwInvalidate = 0x0001;
-    internal const uint RdwErase = 0x0004;
-    internal const uint RdwNoChildren = 0x0040;
-    internal const uint RdwAllChildren = 0x0080;
-    internal const uint RdwUpdateNow = 0x0100;
-    internal const uint ShcneUpdateItem = 0x00002000;
-    internal const uint ShcneAssocChanged = 0x08000000;
-    internal const uint ShcnfPathW = 0x0005;
-    internal const uint ShcnfIdList = 0x0000;
     internal static readonly IntPtr HwndTop = IntPtr.Zero;
 
     internal delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -68,35 +53,6 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetForegroundWindow();
-
-    [DllImport("kernel32.dll")]
-    internal static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool AttachThreadInput(uint attachThreadId, uint attachToThreadId, bool attach);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool SetForegroundWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetActiveWindow();
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr SetActiveWindow(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr SetFocus(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetFocus();
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetTopWindow(IntPtr hwnd);
@@ -177,14 +133,6 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, ref CharFormat2 lParam);
-
-    [DllImport("shell32.dll")]
-    internal static extern void SHChangeNotify(
-        uint eventId,
-        uint flags,
-        IntPtr item1,
-        IntPtr item2);
-
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

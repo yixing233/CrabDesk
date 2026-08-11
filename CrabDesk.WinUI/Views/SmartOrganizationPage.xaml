@@ -1,0 +1,18 @@
+<Page
+    x:Class="CrabDesk.WinUI.Views.SmartOrganizationPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:CrabDesk.WinUI.Views"
+    NavigationCacheMode="Enabled">
+    <TabView TabWidthMode="SizeToContent"
+             IsAddTabButtonVisible="False"
+             CanReorderTabs="False"
+             CanDragTabs="False">
+        <TabViewItem Header="普通规则" IsClosable="False">
+            <views:OrganizationPage />
+        </TabViewItem>
+        <TabViewItem Header="AI 整理" IsClosable="False">
+            <views:AiClassificationPage />
+        </TabViewItem>
+    </TabView>
+</Page>

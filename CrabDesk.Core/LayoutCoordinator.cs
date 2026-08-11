@@ -240,11 +240,18 @@ public static class BoxTransferPolicy
         bool sourceMapped,
         bool targetMapped,
         bool shiftPressed,
-        bool controlPressed)
+        bool controlPressed,
+        bool sourceMappedReadOnly = false)
     {
         if (internalItems && !sourceMapped && !targetMapped)
         {
             return BoxTransferEffect.VirtualMove;
+        }
+        // A read-only mapping is a view of the folder, not a writable source.
+        // Even with Shift held, its files must remain in place.
+        if (sourceMappedReadOnly)
+        {
+            return BoxTransferEffect.CopyFiles;
         }
         if (controlPressed)
         {

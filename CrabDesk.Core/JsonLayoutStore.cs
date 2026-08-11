@@ -86,7 +86,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 19;
+        state.SchemaVersion = 20;
         state.Settings ??= new AppSettings();
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
@@ -321,12 +321,53 @@ public sealed class JsonLayoutStore : ILayoutStore
                 box.Appearance.TitleColor = "Auto";
             }
             box.ItemOrder ??= [];
+            box.ManualTabs ??= [];
+            box.ItemTabAssignments = new Dictionary<string, Guid>(
+                box.ItemTabAssignments ?? [],
+                StringComparer.OrdinalIgnoreCase);
             if (box.MappedFolder is not null)
             {
                 box.MappedFolder.Path = string.IsNullOrWhiteSpace(box.MappedFolder.Path)
                     ? string.Empty
                     : Environment.ExpandEnvironmentVariables(box.MappedFolder.Path.Trim());
+                box.ManualTabs.Clear();
+                box.ItemTabAssignments.Clear();
             }
+            else
+            {
+                var tabIds = new HashSet<Guid>();
+                for (var index = box.ManualTabs.Count - 1; index >= 0; index--)
+                {
+                    var tab = box.ManualTabs[index];
+                    tab.Title = tab.Title?.Trim() ?? string.Empty;
+                    if (tab.Id == Guid.Empty || string.IsNullOrWhiteSpace(tab.Title))
+                    {
+                        box.ManualTabs.RemoveAt(index);
+                        continue;
+                    }
+                    if (!tabIds.Add(tab.Id))
+                    {
+                        box.ManualTabs.RemoveAt(index);
+                    }
+                }
+
+                var validTabIds = box.ManualTabs.Select(tab => tab.Id).ToHashSet();
+                foreach (var itemKey in box.ItemTabAssignments
+                             .Where(pair =>
+                                 !validTabIds.Contains(pair.Value) ||
+                                 !state.Assignments.TryGetValue(pair.Key, out var assignedBoxId) ||
+                                 assignedBoxId != box.Id)
+                             .Select(pair => pair.Key)
+                             .ToArray())
+                {
+                    box.ItemTabAssignments.Remove(itemKey);
+                }
+            }
+
+            // Before schema 20, a box could be manually collapsed independently
+            // of its hover setting. The display model now has exactly two modes:
+            // fixed expanded or hover auto-expand.
+            box.IsCollapsed = box.ExpandOnHover;
         }
 
         if (previousVersion < 19)

@@ -8,7 +8,6 @@ namespace CrabDesk.Native;
 public static class DesktopWindowTools
 {
     private const long WsExNoActivate = 0x08000000L;
-    private const uint GaRoot = 2;
 
     public static void ToggleDesktop()
     {
@@ -174,11 +173,9 @@ public static class DesktopWindowTools
             IsWindowAbove(hwnd, desktopView);
     }
 
-    public static void NormalizeDesktopSurfaceStyles(IntPtr hwnd)
+    private static void NormalizeDesktopSurfaceStyles(IntPtr hwnd)
     {
         var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
-        // Preserve the caller's current visibility state. Surface startup keeps
-        // the window hidden until its clipping region has been verified.
         var expectedStyle = (style & ~(NativeMethods.WsPopup | NativeMethods.WsDisabled | NativeMethods.WsClipSiblings)) |
             NativeMethods.WsChild;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(expectedStyle));
@@ -199,44 +196,10 @@ public static class DesktopWindowTools
             NativeMethods.SwpNoSize |
             NativeMethods.SwpNoZOrder |
             NativeMethods.SwpFrameChanged);
-
-        var actualStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
-        var actualExtendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
-        if ((actualStyle & NativeMethods.WsClipSiblings) != 0 ||
-            (actualExtendedStyle & NativeMethods.WsExTransparent) != 0)
-        {
-            throw new InvalidOperationException(
-                $"Desktop surface styles did not persist. style=0x{actualStyle:X} ex=0x{actualExtendedStyle:X}");
-        }
     }
 
     public static long GetSurfaceExtendedStyle(IntPtr hwnd) =>
         NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
-
-    // Title editing needs the surface to become active so the child editor
-    // renders its selection with the active highlight color instead of the
-    // inactive cyan color. The surface normally keeps WS_EX_NOACTIVATE; these
-    // helpers lift it for the duration of the edit and restore it afterwards.
-    public static bool IsSurfaceNoActivate(IntPtr hwnd) =>
-        (NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64() & WsExNoActivate) != 0;
-
-    public static void SetSurfaceNoActivate(IntPtr hwnd, bool noActivate)
-    {
-        var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
-        extendedStyle = noActivate
-            ? extendedStyle | WsExNoActivate
-            : extendedStyle & ~WsExNoActivate;
-        NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
-    }
-
-    public static bool IsSurfaceActive(IntPtr hwnd) =>
-        NativeMethods.GetActiveWindow() == hwnd;
-
-    public static bool FocusChild(IntPtr hwnd)
-    {
-        NativeMethods.SetFocus(hwnd);
-        return NativeMethods.GetFocus() == hwnd;
-    }
 
     // RichEdit persists SelectionBackColor as character formatting. Select
     // the document, restore automatic foreground/background colors, then put
@@ -267,41 +230,6 @@ public static class DesktopWindowTools
             NativeMethods.EmSetSel,
             new IntPtr(caretStart),
             new IntPtr(caretStart));
-    }
-
-    public static bool ActivateSurface(IntPtr hwnd)
-    {
-        SetSurfaceNoActivate(hwnd, false);
-        var foregroundThread = NativeMethods.GetWindowThreadProcessId(NativeMethods.GetForegroundWindow(), out _);
-        var currentThread = NativeMethods.GetCurrentThreadId();
-        var attached = foregroundThread != currentThread &&
-            NativeMethods.AttachThreadInput(currentThread, foregroundThread, true);
-        try
-        {
-            // The surface is a child of the desktop shell view, so it can
-            // only become the active window while the desktop itself is the
-            // foreground window. Bring the desktop root to the front (the
-            // same state a native Explorer rename box uses), then activate
-            // the surface so its child editor can take real keyboard focus
-            // and render the active selection color.
-            var root = NativeMethods.GetAncestor(hwnd, GaRoot);
-            if (root != IntPtr.Zero)
-            {
-                NativeMethods.SetForegroundWindow(root);
-            }
-            if (!IsSurfaceActive(hwnd))
-            {
-                NativeMethods.SetActiveWindow(hwnd);
-            }
-            return IsSurfaceActive(hwnd);
-        }
-        finally
-        {
-            if (attached)
-            {
-                NativeMethods.AttachThreadInput(currentThread, foregroundThread, false);
-            }
-        }
     }
 
     public static string GetDesktopSurfaceDiagnostics(IntPtr hwnd, IntPtr desktopView)
@@ -436,86 +364,6 @@ public static class DesktopWindowTools
 
         diagnostic = $"regionType={regionType} bounds={FormatRect(actualBounds)}";
         return true;
-    }
-
-    public static bool RedrawExposedParentArea(
-        IntPtr childWindow,
-        IEnumerable<LayoutRect> previousRectangles,
-        IEnumerable<LayoutRect> currentRectangles,
-        double scale,
-        bool updateNow = false)
-    {
-        var parent = NativeMethods.GetParent(childWindow);
-        if (parent == IntPtr.Zero ||
-            !NativeMethods.GetWindowRect(childWindow, out var childBounds) ||
-            !NativeMethods.GetWindowRect(parent, out _))
-        {
-            return false;
-        }
-
-        var redrawTarget = parent;
-        for (var ancestor = NativeMethods.GetParent(redrawTarget);
-             ancestor != IntPtr.Zero;
-             ancestor = NativeMethods.GetParent(redrawTarget))
-        {
-            redrawTarget = ancestor;
-        }
-        if (!NativeMethods.GetWindowRect(redrawTarget, out var redrawTargetBounds))
-        {
-            return false;
-        }
-
-        var previous = CreateRegion(previousRectangles, scale);
-        var current = CreateRegion(currentRectangles, scale);
-        var exposed = NativeMethods.CreateRectRgn(0, 0, 0, 0);
-        try
-        {
-            if (previous == IntPtr.Zero || current == IntPtr.Zero || exposed == IntPtr.Zero)
-            {
-                return false;
-            }
-            var regionType = NativeMethods.CombineRgn(
-                exposed,
-                previous,
-                current,
-                NativeMethods.RgnDiff);
-            if (regionType <= 1)
-            {
-                return true;
-            }
-
-            NativeMethods.OffsetRgn(
-                exposed,
-                childBounds.Left - redrawTargetBounds.Left,
-                childBounds.Top - redrawTargetBounds.Top);
-            var flags = NativeMethods.RdwInvalidate |
-                NativeMethods.RdwErase |
-                NativeMethods.RdwAllChildren;
-            if (updateNow)
-            {
-                flags |= NativeMethods.RdwUpdateNow;
-            }
-            return NativeMethods.RedrawWindow(
-                redrawTarget,
-                IntPtr.Zero,
-                exposed,
-                flags);
-        }
-        finally
-        {
-            if (previous != IntPtr.Zero)
-            {
-                NativeMethods.DeleteObject(previous);
-            }
-            if (current != IntPtr.Zero)
-            {
-                NativeMethods.DeleteObject(current);
-            }
-            if (exposed != IntPtr.Zero)
-            {
-                NativeMethods.DeleteObject(exposed);
-            }
-        }
     }
 
     private static IntPtr CreateRegion(IEnumerable<LayoutRect> rectangles, double scale)

@@ -75,7 +75,10 @@
                                     <TextBlock Text="更改文件夹" />
                                 </StackPanel>
                             </Button>
-                            <ToggleSwitch Grid.Column="1" Header="只读" IsOn="{Binding MappedFolderReadOnly, Mode=TwoWay}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14">
+                                <ToggleSwitch Header="类型标签" IsOn="{Binding MappedFolderCategoryTabs, Mode=TwoWay}" />
+                                <ToggleSwitch Header="只读" IsOn="{Binding MappedFolderReadOnly, Mode=TwoWay}" />
+                            </StackPanel>
                         </Grid>
                     </StackPanel>
                 </Border>

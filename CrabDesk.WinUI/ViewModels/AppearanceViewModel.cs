@@ -8,16 +8,13 @@ namespace CrabDesk.WinUI.ViewModels;
 public partial class AppearanceViewModel : ObservableObject
 {
     private readonly ICrabDeskService _service;
-    private readonly IBackdropService _backdrops;
     private string _manualTitleColor = "#FFFFFFFF";
 
     public AppearanceViewModel(
         ICrabDeskService service,
-        IBackdropService backdrops,
         IFontCatalogService fontCatalog)
     {
         _service = service;
-        _backdrops = backdrops;
         FontFamilies = fontCatalog.FontFamilies is { Count: > 0 } families
             ? families
             : ["Segoe UI"];
@@ -25,24 +22,10 @@ public partial class AppearanceViewModel : ObservableObject
         Refresh();
     }
 
-    public IReadOnlyList<BackdropKind> BackdropKinds { get; } = Enum.GetValues<BackdropKind>();
     public IReadOnlyList<BoxTitleAlignment> TitleAlignments { get; } = Enum.GetValues<BoxTitleAlignment>();
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();
     public IReadOnlyList<string> FontFamilies { get; }
-    public BackdropKind Backdrop
-    {
-        get => Enum.TryParse<BackdropKind>(_service.State.Settings.WindowBackdrop, true, out var backdrop)
-            ? backdrop
-            : BackdropKind.Mica;
-        set
-        {
-            if (value == Backdrop) return;
-            _backdrops.Apply(App.GetService<MainWindow>(), value);
-            _service.SetWindowBackdrop(value.ToString());
-            OnPropertyChanged();
-        }
-    }
     private DesktopBox CurrentBox => _service.Boxes.First();
 
     public string Background { get => CurrentBox.Appearance.Background; set { if (IsColor(value)) _service.SetBoxBackground(null, value); } }
@@ -86,7 +69,6 @@ public partial class AppearanceViewModel : ObservableObject
     public bool IsManualTitleColorEnabled => !UseAutomaticTitleColor;
     public double TitleFontSize { get => CurrentBox.Appearance.TitleFontSize; set => _service.SetBoxTitleFontSize(null, value); }
     public bool TitleFontBold { get => CurrentBox.Appearance.TitleFontBold; set => _service.SetBoxTitleFontBold(null, value); }
-    public bool ShowCollapseButton { get => CurrentBox.Appearance.ShowCollapseButton; set => _service.SetShowCollapseButton(null, value); }
     public double IconSize { get => CurrentBox.Appearance.IconSize; set => _service.SetBoxIconSize(null, value); }
     public string LabelFontFamily { get => CurrentBox.Appearance.LabelFontFamily; set { if (!string.IsNullOrWhiteSpace(value) && value != LabelFontFamily) _service.SetBoxLabelFontFamily(null, value); } }
     public double LabelFontSize { get => CurrentBox.Appearance.LabelFontSize; set => _service.SetBoxLabelFontSize(null, value); }

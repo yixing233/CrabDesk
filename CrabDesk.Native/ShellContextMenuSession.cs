@@ -94,9 +94,14 @@ public sealed class ShellContextMenuSession : IDisposable
                 {
                     parentFolder = candidate;
                 }
-                else
+                else if (!ReferenceEquals(parentFolder, candidate))
                 {
-                    Marshal.FinalReleaseComObject(candidate);
+                    // SHBindToParent can return the exact same RCW for every
+                    // selected item in a folder. Final-releasing that shared
+                    // wrapper also detaches parentFolder, which makes the
+                    // subsequent multi-selection GetUIObjectOf call throw
+                    // "COM object that has been separated from its underlying RCW".
+                    Marshal.ReleaseComObject(candidate);
                 }
                 relativeIds.Add(relativeId);
             }
@@ -125,6 +130,10 @@ public sealed class ShellContextMenuSession : IDisposable
             return new ShellContextMenuSession(absoluteIds, parentFolder, contextMenu);
         }
         catch (COMException)
+        {
+            return null;
+        }
+        catch (InvalidComObjectException)
         {
             return null;
         }

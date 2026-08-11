@@ -60,9 +60,9 @@ public sealed class FileOperationService : IFileOperationService
                 throw new ArgumentException("名称为空或包含无效字符。", nameof(newName));
             }
             var directory = Path.GetDirectoryName(item.FileSystemPath)!;
-            var extension = item.Kind is DesktopItemKind.File or DesktopItemKind.Shortcut
-                ? Path.GetExtension(item.FileSystemPath)
-                : string.Empty;
+            var (_, extension) = item.Kind is DesktopItemKind.File or DesktopItemKind.Shortcut
+                ? DesktopItemName.SplitFileName(item.FileSystemPath)
+                : (string.Empty, string.Empty);
             if (!string.IsNullOrEmpty(extension) && newName.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
             {
                 newName = newName[..^extension.Length];
@@ -183,8 +183,7 @@ public sealed class FileOperationService : IFileOperationService
             return candidate;
         }
 
-        var stem = Path.GetFileNameWithoutExtension(name);
-        var extension = Path.GetExtension(name);
+        var (stem, extension) = DesktopItemName.SplitFileName(name);
         for (var index = 2; ; index++)
         {
             candidate = Path.Combine(directory, $"{stem} ({index}){extension}");

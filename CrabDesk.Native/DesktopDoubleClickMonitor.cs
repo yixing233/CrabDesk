@@ -8,6 +8,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
 {
     private const int WhMouseLl = 14;
     private const int WmLButtonDown = 0x0201;
+    private const int WmRButtonDown = 0x0204;
     private const int WmMouseWheel = 0x020A;
     private const int VkControl = 0x11;
     private readonly LowLevelMouseProc _callback;
@@ -24,8 +25,8 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         }
     }
 
-    public event EventHandler? EmptyAreaClicked;
     public event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
+    public event EventHandler? DesktopSurfaceClicked;
 
     public IntPtr DesktopListView { get; set; }
     public bool Enabled { get; set; }
@@ -50,21 +51,25 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         {
             var mouse = Marshal.PtrToStructure<LowLevelMouseHookStruct>(data);
             var msg = message.ToInt32();
-            if (msg == WmLButtonDown)
+            var isDesktopSurface = IsDesktopSurfacePoint(mouse.Point);
+            var targetWindow = WindowFromPoint(mouse.Point);
+            if ((msg == WmLButtonDown || msg == WmRButtonDown) &&
+                isDesktopSurface &&
+                !IsCurrentProcessWindow(targetWindow))
             {
-                if (IsEmptyDesktopPoint(mouse.Point))
-                {
-                    EmptyAreaClicked?.Invoke(this, EventArgs.Empty);
-                }
+                // The surface window is intentionally transparent outside its
+                // box regions, so Explorer owns this click. Mirror only the
+                // selection-clear part of Explorer's blank-area behaviour;
+                // never consume or redirect the native click.
+                DesktopSurfaceClicked?.Invoke(this, EventArgs.Empty);
             }
             else if (msg == WmMouseWheel &&
                      GetAsyncKeyState(VkControl) < 0 &&
-                     IsDesktopSurfacePoint(mouse.Point))
+                     isDesktopSurface)
             {
                 var delta = unchecked((short)(mouse.MouseData >> 16));
                 if (delta != 0)
                 {
-                    var targetWindow = WindowFromPoint(mouse.Point);
                     if (IsCurrentProcessWindow(targetWindow))
                     {
                         DesktopIconPositionService.ForwardControlMouseWheel(
@@ -94,25 +99,6 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         var desktopView = GetParent(DesktopListView);
         return desktopView != IntPtr.Zero &&
             (window == desktopView || IsChild(desktopView, window));
-    }
-
-    private bool IsEmptyDesktopPoint(NativePoint screenPoint)
-    {
-        var window = WindowFromPoint(screenPoint);
-        if (window != DesktopListView &&
-            !IsChild(DesktopListView, window) &&
-            !IsChild(window, DesktopListView) &&
-            !IsDesktopBackgroundWindow(window))
-        {
-            return false;
-        }
-
-        var clientPoint = screenPoint;
-        if (!ScreenToClient(DesktopListView, ref clientPoint))
-        {
-            return false;
-        }
-        return DesktopIconPositionService.IsEmptyPoint(DesktopListView, clientPoint.X, clientPoint.Y);
     }
 
     private static bool IsDesktopBackgroundWindow(IntPtr window)

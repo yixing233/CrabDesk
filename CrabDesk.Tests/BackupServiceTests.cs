@@ -29,7 +29,7 @@ public sealed class BackupServiceTests : IDisposable
         Assert.Equal(state.Boxes[0].Bounds, snapshotBox.Bounds);
         Assert.True(backup.Snapshot.DesktopBounds.Width >= 1920);
         Assert.True(backup.Snapshot.DesktopBounds.Height >= 1080);
-        Assert.Equal(19, loaded.SchemaVersion);
+        Assert.Equal(20, loaded.SchemaVersion);
         Assert.True(loaded.Settings.Backup.DailyBackup);
         var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>
             string.IsNullOrEmpty(rule.BuiltInId)));
@@ -64,7 +64,8 @@ public sealed class BackupServiceTests : IDisposable
                 new DesktopIconPositionSnapshot("Chrome", 24, 48),
                 new DesktopIconPositionSnapshot("Notes", 180, 126)
             ],
-            @"C:\Wallpapers\desk.jpg");
+            @"C:\Wallpapers\desk.jpg",
+            [137, 80, 78, 71, 13, 10, 26, 10]);
 
         var backup = await service.CreateAsync(state, capture);
         var document = await service.LoadDocumentAsync(backup.Path);
@@ -73,6 +74,14 @@ public sealed class BackupServiceTests : IDisposable
         Assert.Equal(capture.WallpaperPath, document.Snapshot.WallpaperPath);
         Assert.Equal(2, backup.IconCount);
         Assert.True(backup.HasWallpaper);
+        Assert.True(backup.HasDesktopPreview);
+        Assert.True(File.Exists(backup.DesktopPreviewPath));
+        Assert.Equal(
+            capture.DesktopPreviewPng,
+            await File.ReadAllBytesAsync(backup.DesktopPreviewPath));
+        Assert.Equal(
+            Path.GetFileName(backup.DesktopPreviewPath),
+            document.Snapshot.DesktopPreviewFileName);
         Assert.True(document.Snapshot.DesktopBounds.Width >= 276);
         Assert.True(document.Snapshot.DesktopBounds.Height >= 222);
     }
@@ -96,6 +105,20 @@ public sealed class BackupServiceTests : IDisposable
         var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.crabdesk.json");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(outside));
+    }
+
+    [Fact]
+    public async Task DeleteRemovesTheAssociatedDesktopPreview()
+    {
+        var service = new JsonBackupService(_root);
+        var backup = await service.CreateAsync(
+            JsonLayoutStore.CreateDefaultState(),
+            new DesktopBackupCapture([], "", [137, 80, 78, 71]));
+
+        await service.DeleteAsync(backup.Path);
+
+        Assert.False(File.Exists(backup.Path));
+        Assert.False(File.Exists(backup.DesktopPreviewPath));
     }
 
     [Fact]

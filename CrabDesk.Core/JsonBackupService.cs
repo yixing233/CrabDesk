@@ -15,17 +15,41 @@ public sealed record LayoutBackupInfo(
     public string CreatedAtText => CreatedAt.ToString("yyyy/MM/dd  HH:mm");
     public int IconCount => Snapshot.IconPositions?.Count ?? 0;
     public bool HasWallpaper => !string.IsNullOrWhiteSpace(Snapshot.WallpaperPath);
+    public string DesktopPreviewPath
+    {
+        get
+        {
+            var fileName = Snapshot.DesktopPreviewFileName;
+            if (string.IsNullOrWhiteSpace(fileName) ||
+                !string.Equals(fileName, System.IO.Path.GetFileName(fileName), StringComparison.Ordinal))
+            {
+                return string.Empty;
+            }
+
+            var directory = System.IO.Path.GetDirectoryName(Path);
+            var previewPath = string.IsNullOrWhiteSpace(directory)
+                ? string.Empty
+                : System.IO.Path.Combine(directory, fileName);
+            return File.Exists(previewPath) ? previewPath : string.Empty;
+        }
+    }
+    public bool HasDesktopPreview => !string.IsNullOrWhiteSpace(DesktopPreviewPath);
+    public string PreviewSummaryText => HasDesktopPreview
+        ? "真实桌面快照"
+        : IconCount > 0 ? $"{IconCount} 个图标" : "布局预览";
 }
 
 public sealed record LayoutBackupSnapshot(
     LayoutRect DesktopBounds,
     IReadOnlyList<LayoutBackupBoxSnapshot> Boxes,
     IReadOnlyList<DesktopIconPositionSnapshot>? IconPositions = null,
-    string WallpaperPath = "");
+    string WallpaperPath = "",
+    string DesktopPreviewFileName = "");
 
 public sealed record DesktopBackupCapture(
     IReadOnlyList<DesktopIconPositionSnapshot> IconPositions,
-    string WallpaperPath);
+    string WallpaperPath,
+    byte[]? DesktopPreviewPng = null);
 
 public sealed record LayoutBackupDocument(
     CrabDeskState State,
@@ -56,16 +80,18 @@ public sealed class JsonBackupService : IBackupService
         var path = System.IO.Path.Combine(
             BackupDirectory,
             $"CrabDesk-{DateTime.Now:yyyyMMdd-HHmmssfff}.crabdesk.json");
-        await WriteAtomicAsync(state, path, desktopCapture, cancellationToken).ConfigureAwait(false);
-        return CreateInfo(state, path, File.GetLastWriteTimeUtc(path), desktopCapture);
+        var snapshot = await WriteAtomicAsync(state, path, desktopCapture, cancellationToken).ConfigureAwait(false);
+        return CreateInfo(state, path, File.GetLastWriteTimeUtc(path), snapshot);
     }
 
-    public Task ExportAsync(
+    public async Task ExportAsync(
         CrabDeskState state,
         string destinationPath,
         DesktopBackupCapture? desktopCapture = null,
-        CancellationToken cancellationToken = default) =>
-        WriteAtomicAsync(state, destinationPath, desktopCapture, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        await WriteAtomicAsync(state, destinationPath, desktopCapture, cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task<CrabDeskState> LoadAsync(
         string path,
@@ -139,6 +165,7 @@ public sealed class JsonBackupService : IBackupService
         cancellationToken.ThrowIfCancellationRequested();
         var fullPath = EnsurePathInsideBackupDirectory(path);
         File.Delete(fullPath);
+        File.Delete(GetPreviewPath(fullPath));
         return Task.CompletedTask;
     }
 
@@ -153,7 +180,7 @@ public sealed class JsonBackupService : IBackupService
         }
     }
 
-    private static async Task WriteAtomicAsync(
+    private static async Task<LayoutBackupSnapshot> WriteAtomicAsync(
         CrabDeskState state,
         string destinationPath,
         DesktopBackupCapture? desktopCapture,
@@ -165,8 +192,26 @@ public sealed class JsonBackupService : IBackupService
             ?? throw new InvalidOperationException("Invalid backup path.");
         Directory.CreateDirectory(directory);
         var tempPath = fullPath + ".tmp";
+        var previewPath = GetPreviewPath(fullPath);
+        var previewTempPath = previewPath + ".tmp";
+        var previewFileName = desktopCapture?.DesktopPreviewPng is { Length: > 0 }
+            ? System.IO.Path.GetFileName(previewPath)
+            : string.Empty;
+        var snapshot = CreateSnapshot(state.Boxes, desktopCapture, previewFileName);
+        var previewWritten = false;
         try
         {
+            if (desktopCapture?.DesktopPreviewPng is { Length: > 0 } previewPng)
+            {
+                await File.WriteAllBytesAsync(previewTempPath, previewPng, cancellationToken).ConfigureAwait(false);
+                File.Move(previewTempPath, previewPath, true);
+                previewWritten = true;
+            }
+            else
+            {
+                File.Delete(previewPath);
+            }
+
             await using (var stream = new FileStream(
                 tempPath,
                 FileMode.Create,
@@ -175,7 +220,7 @@ public sealed class JsonBackupService : IBackupService
                 4096,
                 true))
             {
-                var package = new LayoutBackupDocument(state, CreateSnapshot(state.Boxes, desktopCapture));
+                var package = new LayoutBackupDocument(state, snapshot);
                 await JsonSerializer.SerializeAsync(
                         stream,
                         package,
@@ -185,10 +230,16 @@ public sealed class JsonBackupService : IBackupService
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             File.Move(tempPath, fullPath, true);
+            return snapshot;
         }
         finally
         {
             File.Delete(tempPath);
+            File.Delete(previewTempPath);
+            if (previewWritten && !File.Exists(fullPath))
+            {
+                File.Delete(previewPath);
+            }
         }
     }
 
@@ -202,13 +253,6 @@ public sealed class JsonBackupService : IBackupService
         }
         return fullPath;
     }
-
-    private static LayoutBackupInfo CreateInfo(
-        CrabDeskState state,
-        string path,
-        DateTime createdAt,
-        DesktopBackupCapture? desktopCapture) =>
-        CreateInfo(state, path, createdAt, CreateSnapshot(state.Boxes, desktopCapture));
 
     private static LayoutBackupInfo CreateInfo(
         CrabDeskState state,
@@ -228,7 +272,8 @@ public sealed class JsonBackupService : IBackupService
 
     private static LayoutBackupSnapshot CreateSnapshot(
         IReadOnlyList<DesktopBox> boxes,
-        DesktopBackupCapture? desktopCapture)
+        DesktopBackupCapture? desktopCapture,
+        string desktopPreviewFileName = "")
     {
         const double defaultDesktopWidth = 1920;
         const double defaultDesktopHeight = 1080;
@@ -256,6 +301,12 @@ public sealed class JsonBackupService : IBackupService
             desktopBounds,
             snapshotBoxes,
             positions.ToArray(),
-            desktopCapture?.WallpaperPath ?? string.Empty);
+            desktopCapture?.WallpaperPath ?? string.Empty,
+            desktopPreviewFileName);
     }
+
+    private static string GetPreviewPath(string backupPath) =>
+        System.IO.Path.Combine(
+            System.IO.Path.GetDirectoryName(backupPath)!,
+            System.IO.Path.GetFileNameWithoutExtension(backupPath) + ".preview.png");
 }

@@ -112,6 +112,7 @@
                             <controls:DesktopSnapshotView Width="168"
                                                           Height="94"
                                                           Snapshot="{Binding Snapshot}"
+                                                          DesktopPreviewPath="{Binding DesktopPreviewPath}"
                                                           AutomationProperties.Name="备份桌面快照" />
 
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
@@ -134,8 +135,7 @@
                                     <TextBlock Text="{Binding MonitorCount}" Style="{StaticResource SecondaryBodyStyle}" />
                                     <TextBlock Text="块屏幕" Style="{StaticResource SecondaryBodyStyle}" />
                                     <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="{Binding IconCount}" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="个图标" Style="{StaticResource SecondaryBodyStyle}" />
+                                    <TextBlock Text="{Binding PreviewSummaryText}" Style="{StaticResource SecondaryBodyStyle}" />
                                 </StackPanel>
                             </StackPanel>
 

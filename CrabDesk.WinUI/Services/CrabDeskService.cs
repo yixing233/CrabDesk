@@ -32,7 +32,6 @@ public sealed class CrabDeskService : ICrabDeskService
     public HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action) => _runtime.GetHotkeyStatus(action);
     public void SetPaused(bool paused) => _runtime.SetPaused(paused);
     public Task ReconnectDesktopAsync() => _runtime.ReconnectDesktopAsync();
-    public Task<bool> RepairDesktopIconsAsync() => _runtime.RepairDesktopIconsAsync();
     public void SetStartWithWindows(bool enabled) => _runtime.SetStartWithWindows(enabled);
     public Task SetShowSystemItemsAsync(bool enabled) => _runtime.SetShowSystemItemsAsync(enabled);
     public void SetConfirmDeleteBox(bool enabled) => _runtime.SetConfirmDeleteBox(enabled);
@@ -57,6 +56,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public Task<DesktopBox> AddMappedFolderBoxAsync(string path, bool isReadOnly = false) => _runtime.AddMappedFolderBoxAsync(path, isReadOnly);
     public Task UpdateMappedFolderAsync(DesktopBox box, string path) => _runtime.UpdateMappedFolderAsync(box, path);
     public void SetMappedFolderReadOnly(DesktopBox box, bool isReadOnly) => _runtime.SetMappedFolderReadOnly(box, isReadOnly);
+    public void SetMappedFolderCategoryTabsEnabled(DesktopBox box, bool enabled) => _runtime.SetMappedFolderCategoryTabsEnabled(box, enabled);
     public void DeleteBox(DesktopBox box) => _runtime.DeleteBox(box);
     public void BoxChanged(DesktopBox box, bool rebuild = false) => _runtime.BoxChanged(box, rebuild);
     public void SetHotkey(HotkeyAction action, bool enabled, HotkeyModifiers modifiers, HotkeyKey key) => _runtime.SetHotkey(action, enabled, modifiers, key);
@@ -117,7 +117,6 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetBoxTitleFontFamily(Guid? boxId, string value) => _runtime.SetBoxTitleFontFamily(boxId, value);
     public void SetBoxTitleFontSize(Guid? boxId, double value) => _runtime.SetBoxTitleFontSize(boxId, value);
     public void SetBoxTitleFontBold(Guid? boxId, bool enabled) => _runtime.SetBoxTitleFontBold(boxId, enabled);
-    public void SetShowCollapseButton(Guid? boxId, bool enabled) => _runtime.SetShowCollapseButton(boxId, enabled);
     public void SetBoxIconSize(Guid? boxId, double value) => _runtime.SetBoxIconSize(boxId, value);
     public void SetBoxLabelFontFamily(Guid? boxId, string value) => _runtime.SetBoxLabelFontFamily(boxId, value);
     public void SetBoxLabelFontSize(Guid? boxId, double value) => _runtime.SetBoxLabelFontSize(boxId, value);

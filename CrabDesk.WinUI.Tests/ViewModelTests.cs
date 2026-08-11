@@ -16,28 +16,11 @@ public sealed class ViewModelTests
         var state = CreateState();
         var service = CreateService(state);
         var theme = new Mock<IThemeService>();
-        var viewModel = new GeneralViewModel(service.Object, theme.Object, Mock.Of<IDialogService>());
+        var viewModel = new GeneralViewModel(service.Object, theme.Object, Mock.Of<IBackdropService>());
 
         viewModel.StartWithWindows = true;
 
         service.Verify(item => item.SetStartWithWindows(true), Times.Once);
-    }
-
-    [Fact]
-    public async Task GeneralViewModelRepairsDesktopIconsAfterConfirmation()
-    {
-        var service = CreateService(CreateState());
-        service.Setup(item => item.RepairDesktopIconsAsync()).ReturnsAsync(true);
-        var dialogs = new Mock<IDialogService>();
-        dialogs.Setup(item => item.ConfirmAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .ReturnsAsync(true);
-        var viewModel = new GeneralViewModel(service.Object, Mock.Of<IThemeService>(), dialogs.Object);
-
-        await viewModel.RepairDesktopIconsCommand.ExecuteAsync(null);
-
-        service.Verify(item => item.RepairDesktopIconsAsync(), Times.Once);
-        Assert.Equal("桌面图标已修复", viewModel.DesktopIconRepairStatus);
     }
 
     [Fact]
@@ -115,8 +98,7 @@ public sealed class ViewModelTests
     {
         var state = CreateState();
         var service = CreateService(state);
-        var backdrop = new Mock<IBackdropService>();
-        var viewModel = new AppearanceViewModel(service.Object, backdrop.Object, Mock.Of<IFontCatalogService>());
+        var viewModel = new AppearanceViewModel(service.Object, Mock.Of<IFontCatalogService>());
         var bounds = state.Boxes[0].Bounds;
 
         viewModel.Background = "#FF112233";
@@ -180,7 +162,6 @@ public sealed class ViewModelTests
             .Callback<Guid?, string>((_, color) => state.Boxes[0].Appearance.TitleColor = color);
         var viewModel = new AppearanceViewModel(
             service.Object,
-            Mock.Of<IBackdropService>(),
             Mock.Of<IFontCatalogService>());
 
         viewModel.UseAutomaticTitleColor = true;
@@ -200,7 +181,6 @@ public sealed class ViewModelTests
         var service = CreateService(state);
         var viewModel = new AppearanceViewModel(
             service.Object,
-            Mock.Of<IBackdropService>(),
             Mock.Of<IFontCatalogService>());
 
         state.Boxes[0].ViewMode = BoxViewMode.List;
@@ -218,7 +198,7 @@ public sealed class ViewModelTests
         var service = CreateService(state);
         var fonts = new Mock<IFontCatalogService>();
         fonts.SetupGet(item => item.FontFamilies).Returns(["Segoe UI", "Microsoft YaHei UI"]);
-        var viewModel = new AppearanceViewModel(service.Object, Mock.Of<IBackdropService>(), fonts.Object);
+        var viewModel = new AppearanceViewModel(service.Object, fonts.Object);
 
         viewModel.TitleFontFamily = "Microsoft YaHei UI";
         viewModel.LabelFontFamily = "Microsoft YaHei UI";

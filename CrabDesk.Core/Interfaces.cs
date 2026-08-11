@@ -28,8 +28,8 @@ public interface IDesktopContextMenuRegistration
 
 public interface IDesktopInputMonitor : IDisposable
 {
-    event EventHandler? EmptyAreaClicked;
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
+    event EventHandler? DesktopSurfaceClicked;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
 }

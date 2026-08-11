@@ -13,27 +13,9 @@
                     HorizontalAlignment="Stretch" Spacing="24">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock Text="盒子外观" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="恢复默认" Command="{Binding ResetCommand}" VerticalAlignment="Bottom" />
             </Grid>
-
-            <Border Style="{StaticResource SectionCardStyle}" Padding="16,0">
-                <StackPanel>
-                    <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
-                        <Grid ColumnSpacing="16">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="窗口材质" FontWeight="SemiBold" />
-                                <TextBlock Text="选择设置窗口的 Fluent 背景效果" Style="{StaticResource SecondaryBodyStyle}" />
-                            </StackPanel>
-                            <ComboBox Grid.Column="1" Width="{StaticResource SettingsControlWidth}"
-                                      ItemsSource="{Binding BackdropKinds}"
-                                      ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
-                                      SelectedItem="{Binding Backdrop, Mode=TwoWay}"
-                                      VerticalAlignment="Center" AutomationProperties.Name="窗口背景材质" />
-                        </Grid>
-                    </Border>
-                </StackPanel>
-            </Border>
 
             <Expander Header="盒子表面" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
@@ -219,7 +201,6 @@
                         </Grid>
                     </StackPanel>
                     <ToggleSwitch Grid.Row="3" Header="粗体标题" IsOn="{Binding TitleFontBold, Mode=TwoWay}" />
-                    <ToggleSwitch Grid.Row="3" Grid.Column="1" Header="显示折叠按钮" IsOn="{Binding ShowCollapseButton, Mode=TwoWay}" />
                 </Grid>
             </Expander>
 
