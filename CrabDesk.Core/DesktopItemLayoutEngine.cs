@@ -14,6 +14,13 @@ public sealed record VisibleDesktopItemLayoutResult(
 
 public static class DesktopItemLayoutEngine
 {
+    // The tab strip occupies the same fixed DIP height for manual and
+    // mapped-folder tabs. Height snapping must reserve this space before it
+    // calculates how many complete item rows can fit.
+    public const double TabBarHeight = 30;
+    public const double SnapThreshold = 14;
+    private const double BodyVerticalPadding = 16;
+
     public static double GetGridCellWidth(double iconSize, double horizontalSpacing)
     {
         iconSize = Math.Clamp(iconSize, 24, 96);
@@ -65,17 +72,33 @@ public static class DesktopItemLayoutEngine
         double requestedHeight,
         double titleBarHeight,
         double iconSize,
-        double verticalSpacing)
+        double verticalSpacing,
+        double tabBarHeight = 0)
     {
-        const double bodyVerticalPadding = 16;
+        tabBarHeight = Math.Max(0, tabBarHeight);
         var cellHeight = viewMode == BoxViewMode.List
             ? Math.Max(48, Math.Clamp(iconSize, 24, 96) + 12)
             : GetGridCellHeight(iconSize, verticalSpacing);
-        var availableHeight = Math.Max(0, requestedHeight - titleBarHeight - bodyVerticalPadding);
+        var availableHeight = Math.Max(
+            0,
+            requestedHeight - titleBarHeight - BodyVerticalPadding - tabBarHeight);
         var rows = Math.Max(
             1,
             (int)Math.Round(availableHeight / cellHeight, MidpointRounding.AwayFromZero));
-        return titleBarHeight + bodyVerticalPadding + rows * cellHeight;
+        return titleBarHeight + BodyVerticalPadding + tabBarHeight + rows * cellHeight;
+    }
+
+    public static double GetMinimumBoxHeight(
+        BoxViewMode viewMode,
+        double titleBarHeight,
+        double iconSize,
+        double verticalSpacing,
+        double tabBarHeight = 0)
+    {
+        var cellHeight = viewMode == BoxViewMode.List
+            ? Math.Max(48, Math.Clamp(iconSize, 24, 96) + 12)
+            : GetGridCellHeight(iconSize, verticalSpacing);
+        return titleBarHeight + BodyVerticalPadding + Math.Max(0, tabBarHeight) + cellHeight;
     }
 
     public static DesktopItemLayoutResult Calculate(

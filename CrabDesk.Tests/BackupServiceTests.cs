@@ -29,7 +29,7 @@ public sealed class BackupServiceTests : IDisposable
         Assert.Equal(state.Boxes[0].Bounds, snapshotBox.Bounds);
         Assert.True(backup.Snapshot.DesktopBounds.Width >= 1920);
         Assert.True(backup.Snapshot.DesktopBounds.Height >= 1080);
-        Assert.Equal(20, loaded.SchemaVersion);
+        Assert.Equal(21, loaded.SchemaVersion);
         Assert.True(loaded.Settings.Backup.DailyBackup);
         var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>
             string.IsNullOrEmpty(rule.BuiltInId)));

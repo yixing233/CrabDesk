@@ -23,6 +23,13 @@ public sealed class WindowsIntegrationTests
             Assert.InRange(monitor.DpiScale, 0.5, 4);
             Assert.Equal(monitor.PixelBounds.Width / monitor.DpiScale, monitor.Bounds.Width, 3);
             Assert.Equal(monitor.PixelWorkArea.Height / monitor.DpiScale, monitor.WorkArea.Height, 3);
+            var localWorkArea = MonitorCoordinateConverter.GetMonitorRelativeWorkArea(monitor);
+            Assert.InRange(localWorkArea.X, 0, monitor.Bounds.Width);
+            Assert.InRange(localWorkArea.Y, 0, monitor.Bounds.Height);
+            Assert.InRange(localWorkArea.Width, 0, monitor.Bounds.Width);
+            Assert.InRange(localWorkArea.Height, 0, monitor.Bounds.Height);
+            Assert.True(localWorkArea.X + localWorkArea.Width <= monitor.Bounds.Width + 0.01);
+            Assert.True(localWorkArea.Y + localWorkArea.Height <= monitor.Bounds.Height + 0.01);
         });
     }
 
@@ -164,8 +171,40 @@ public sealed class WindowsIntegrationTests
         using var provider = new DesktopItemProvider();
         var items = await provider.EnumerateAsync();
 
-        Assert.Contains(items, item => item.ParsingName.Contains("645FF040", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(items, item => item.ParsingName.Contains("20D04FE0", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(items, item => item.FileSystemPath is { } path &&
+            string.Equals(Path.GetFileName(path), "desktop.ini", StringComparison.OrdinalIgnoreCase));
+        // The desktop namespace objects are virtual Shell items. They do not
+        // expose System.DateModified, so date sorting must never manufacture
+        // an installation, creation, or icon-layout timestamp for them.
+        Assert.All(items.Where(item => item.IsSystem), item => Assert.Null(item.ModifiedAt));
+        foreach (var (clsid, identifier) in new[]
+        {
+            ("{645FF040-5081-101B-9F08-00AA002F954E}", "645FF040"),
+            ("{20D04FE0-3AEA-1069-A2D8-08002B30309D}", "20D04FE0"),
+            ("{59031A47-3F72-44A7-89C5-5595FE6B30EE}", "59031A47"),
+            ("{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}", "F02C1A0D"),
+            ("{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}", "5399E694")
+        })
+        {
+            Assert.Equal(
+                DesktopSystemIconVisibility.IsVisible(clsid),
+                items.Any(item => item.ParsingName.Contains(identifier, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 1, true)]
+    [InlineData(1, 0, false)]
+    [InlineData(null, 0, true)]
+    [InlineData(null, 1, false)]
+    [InlineData(null, null, true)]
+    public void DesktopSystemIconVisibilityHonorsExplorerPrecedence(
+        int? userSetting,
+        int? machineSetting,
+        bool expectedVisible)
+    {
+        Assert.Equal(expectedVisible,
+            DesktopSystemIconVisibility.ResolveIsVisible(userSetting, machineSetting));
     }
 
     [Fact]

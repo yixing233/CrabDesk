@@ -18,7 +18,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     [xml]$project = Get-Content -LiteralPath (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") -Raw -Encoding UTF8
     $Version = @($project.Project.PropertyGroup.Version | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })[0]
 }
-if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|\d{8}\.\d{2})$') {
     throw "Invalid installer version: $Version"
 }
 

@@ -40,6 +40,34 @@ public sealed class DesktopItemLayoutTests
     }
 
     [Fact]
+    public void GridBoxHeightWithTabBarReservesTheTabStrip()
+    {
+        var height = DesktopItemLayoutEngine.SnapBoxHeight(
+            BoxViewMode.Grid,
+            134,
+            38,
+            36,
+            80,
+            DesktopItemLayoutEngine.TabBarHeight);
+
+        Assert.Equal(164, height);
+        Assert.Equal(1, (int)((height - 38 - 16 - DesktopItemLayoutEngine.TabBarHeight) / 80));
+    }
+
+    [Fact]
+    public void MinimumBoxHeightIncludesTheTabStrip()
+    {
+        var height = DesktopItemLayoutEngine.GetMinimumBoxHeight(
+            BoxViewMode.Grid,
+            38,
+            36,
+            80,
+            DesktopItemLayoutEngine.TabBarHeight);
+
+        Assert.Equal(164, height);
+    }
+
+    [Fact]
     public void ListBoxHeightSnapsToWholeRows()
     {
         var height = DesktopItemLayoutEngine.SnapBoxHeight(BoxViewMode.List, 180, 36, 42, 80);

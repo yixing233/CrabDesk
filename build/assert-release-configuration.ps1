@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+if ($Version -notmatch '^(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|\d{8}\.\d{2})$') {
     throw "Invalid release version: $Version"
 }
 

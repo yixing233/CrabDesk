@@ -24,7 +24,7 @@ if (-not $output.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnore
 if ($Owner -notmatch '^[A-Za-z0-9_.-]+$' -or $Repository -notmatch '^[A-Za-z0-9_.-]+$') {
     throw "GitHub owner or repository contains unsupported characters."
 }
-if ($Tag -notmatch '^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+if ($Tag -notmatch '^v(?:\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?|\d{8}\.\d{2})$') {
     throw "Release tag is invalid: $Tag"
 }
 if (@(Get-Process CrabDesk.WinUI -ErrorAction SilentlyContinue).Count -gt 0) {

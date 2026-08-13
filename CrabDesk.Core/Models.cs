@@ -234,6 +234,31 @@ public sealed class DesktopItemRef
     public bool IsSystem => Kind == DesktopItemKind.Shell;
 }
 
+/// <summary>
+/// A user-chosen desktop grid slot. Positions are stored as grid coordinates
+/// rather than pixels so they remain stable when Explorer's icon scale or
+/// monitor DPI changes.
+/// </summary>
+public sealed class DesktopIconPlacement
+{
+    public string MonitorId { get; set; } = string.Empty;
+    public int Column { get; set; }
+    public int Row { get; set; }
+}
+
+/// <summary>
+/// Captures the grid arrangement produced by the most recent Explorer sort.
+/// The snapshot is intentionally retained after a manual drag, matching the
+/// native desktop behavior where a sort is a one-time arrangement rather than
+/// a continuously enforced ordering.
+/// </summary>
+public sealed class DesktopIconLayoutSnapshot
+{
+    public string MonitorId { get; set; } = string.Empty;
+    public int Column { get; set; }
+    public int Row { get; set; }
+}
+
 public sealed class MonitorLayout
 {
     public required string Id { get; init; }
@@ -465,10 +490,12 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 20;
+    public int SchemaVersion { get; set; } = 21;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, DesktopIconPlacement> DesktopIconPositions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, DesktopIconLayoutSnapshot> DesktopIconLayout { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public OrganizationSettings Organization { get; set; } = new();
     public List<OrganizationRule> OrganizationRules { get; set; } = [];
 

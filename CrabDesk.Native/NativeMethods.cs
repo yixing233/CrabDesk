@@ -6,6 +6,7 @@ namespace CrabDesk.Native;
 internal static class NativeMethods
 {
     internal const uint WmCommand = 0x0111;
+    internal const uint WmContextMenu = 0x007B;
     internal const uint SmtoAbortIfHung = 0x0002;
     internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
@@ -16,6 +17,7 @@ internal static class NativeMethods
     internal const int WsClipSiblings = 0x04000000;
     internal const int WsExToolWindow = 0x00000080;
     internal const int WsExTransparent = 0x00000020;
+    internal const int WsExLayered = 0x00080000;
     internal const int SwpNoActivate = 0x0010;
     internal const int SwpNoSize = 0x0001;
     internal const int SwpNoMove = 0x0002;
@@ -23,6 +25,8 @@ internal static class NativeMethods
     internal const int SwpFrameChanged = 0x0020;
     internal const int SwpShowWindow = 0x0040;
     internal const int SwpNoOwnerZOrder = 0x0200;
+    internal const int SwHide = 0;
+    internal const int SwShowNoActivate = 4;
     internal const uint GwHwndNext = 2;
     internal const int RgnOr = 2;
     internal const int RgnDiff = 4;
@@ -80,6 +84,10 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ShowWindow(IntPtr hwnd, int command);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -161,6 +169,15 @@ internal static class NativeMethods
 
     [DllImport("gdi32.dll", SetLastError = true)]
     internal static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern IntPtr CreateRoundRectRgn(
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int ellipseWidth,
+        int ellipseHeight);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     internal static extern int CombineRgn(IntPtr destination, IntPtr source1, IntPtr source2, int mode);

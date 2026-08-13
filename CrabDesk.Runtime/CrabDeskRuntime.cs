@@ -14,6 +14,14 @@ public sealed class ShowSettingsRequestedEventArgs(string? page) : EventArgs
 
 public sealed class CrabDeskRuntime : IDisposable
 {
+    private static readonly TimeSpan DesktopViewRefreshInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan DesktopViewRefreshWindow = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan DesktopMenuRefreshDelay = TimeSpan.FromMilliseconds(120);
+    // A desktop submenu command is observed on mouse-down, just before
+    // Explorer commits its new SortColumns value. Keep the replacement layer
+    // in its sort-pending state for this short interval so a saved manual
+    // layout cannot win the first redraw.
+    private static readonly TimeSpan DesktopSortCommandMinimumWait = TimeSpan.FromMilliseconds(160);
     private readonly Action<Action> _beginInvoke;
     private readonly ILayoutStore _layoutStore = new JsonLayoutStore();
     private readonly IMonitorTopologyService _monitorService = new MonitorTopologyService();
@@ -31,6 +39,8 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly RuntimeTimer _hostTimer;
     private readonly RuntimeTimer _saveTimer;
     private readonly RuntimeTimer _desktopZoomTimer;
+    private readonly RuntimeTimer _desktopViewRefreshTimer;
+    private readonly RuntimeTimer _desktopMenuRefreshTimer;
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private readonly SemaphoreSlim _mappedRefreshLock = new(1, 1);
     private readonly SemaphoreSlim _updateLock = new(1, 1);
@@ -59,6 +69,17 @@ public sealed class CrabDeskRuntime : IDisposable
     private string? _verifiedUpdateInstallerPath;
     private string? _verifiedUpdateSha256;
     private bool _verifiedUpdateIsPrerelease;
+    private string _desktopSortSignature = string.Empty;
+    private string _desktopSystemIconVisibilitySignature = string.Empty;
+    private DesktopIconSortState _desktopSortState;
+    private bool _desktopAutoArrange;
+    private bool _desktopIconsVisible = true;
+    private bool _virtualBoxDesktopDropEnabled;
+    private DateTimeOffset? _desktopViewRefreshDeadline;
+    private bool _desktopMenuRefreshPending;
+    private bool _desktopMenuRefreshInProgress;
+    private bool _desktopSortCommandPending;
+    private DateTimeOffset? _desktopSortCommandReadyAt;
 
     public CrabDeskRuntime(Action<Action> beginInvoke)
     {
@@ -78,6 +99,16 @@ public sealed class CrabDeskRuntime : IDisposable
             false,
             beginInvoke,
             SynchronizeDesktopIconZoom);
+        _desktopViewRefreshTimer = new RuntimeTimer(
+            DesktopViewRefreshInterval,
+            false,
+            beginInvoke,
+            SynchronizeExplorerDesktopView);
+        _desktopMenuRefreshTimer = new RuntimeTimer(
+            DesktopMenuRefreshDelay,
+            false,
+            beginInvoke,
+            RefreshAfterDesktopMenuCommandAsync);
         _itemProvider.ItemsChanged += (_, _) => _beginInvoke(OnDesktopItemsChanged);
         _mappedFolderProvider.ItemsChanged += (_, _) => _beginInvoke(async () => await RefreshMappedFoldersAsync());
         _hotkeyService.Pressed += OnGlobalHotkeyPressed;
@@ -258,6 +289,13 @@ public sealed class CrabDeskRuntime : IDisposable
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         _desktopHost.Refresh();
         EnsureDesktopInput("startup");
+        var initialDesktopViewState = DesktopIconPositionService.GetDesktopViewState();
+        _desktopSortSignature = initialDesktopViewState.Signature;
+        _desktopSortState = initialDesktopViewState.Sort;
+        _desktopAutoArrange = initialDesktopViewState.AutoArrange;
+        _desktopIconsVisible = initialDesktopViewState.DesktopIconsVisible;
+        _desktopSystemIconVisibilitySignature =
+            DesktopItemProvider.GetSystemDesktopIconVisibilitySignature();
         if (State.Settings.TakeOverDesktop)
         {
             ConfigureDesktopInputMonitor();
@@ -266,6 +304,7 @@ public sealed class CrabDeskRuntime : IDisposable
         NormalizeMonitorIds();
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         await RefreshItemsAsync(false);
+        RestoreLegacyAssignedDesktopItemVisibility();
         await RunScheduledBackupIfNeededAsync();
         if (State.Organization.Enabled && State.Organization.RunOnStartup)
         {
@@ -298,18 +337,276 @@ public sealed class CrabDeskRuntime : IDisposable
             ? _mappedFolderSnapshots.GetValueOrDefault(boxId)?.Items ?? []
             : Items.Where(item =>
                 State.Assignments.TryGetValue(item.Key.ToString(), out var assignedBox) && assignedBox == boxId);
-        query = box.SortMode switch
+        return OrderItemsForBox(box, query);
+    }
+
+    /// <summary>
+    /// Produces the target box order that AssignItems would create without
+    /// changing assignments, item order, or the current manual sort.
+    /// </summary>
+    internal IReadOnlyList<DesktopItemRef> GetItemsForBoxAfterAssigning(
+        Guid boxId,
+        IEnumerable<string> itemKeys)
+    {
+        var box = State.Boxes.First(candidate => candidate.Id == boxId);
+        if (box.IsMappedFolder)
         {
-            BoxSortMode.Name => query.OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
-            BoxSortMode.Type => query.OrderBy(item => item.Kind).ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
-            BoxSortMode.Modified => query.OrderByDescending(item => item.ModifiedAt).ThenBy(item => item.DisplayName),
-            _ => query.OrderBy(item =>
+            return GetItemsForBox(boxId);
+        }
+
+        return ProjectItemsForBoxAfterAssigning(box, Items, State.Assignments, itemKeys);
+    }
+
+    internal static IReadOnlyList<DesktopItemRef> ProjectItemsForBoxAfterAssigning(
+        DesktopBox box,
+        IReadOnlyList<DesktopItemRef> items,
+        IReadOnlyDictionary<string, Guid> assignments,
+        IEnumerable<string> itemKeys)
+    {
+        if (box.IsMappedFolder)
+        {
+            return OrderItemsForBox(box, []);
+        }
+
+        var itemsByKey = items.ToDictionary(
+            item => item.Key.ToString(),
+            StringComparer.OrdinalIgnoreCase);
+        var pendingKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingOrder = new List<string>();
+        foreach (var requestedKey in itemKeys
+                     .Where(key => !string.IsNullOrWhiteSpace(key))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!itemsByKey.TryGetValue(requestedKey, out var item))
             {
-                var index = box.ItemOrder.IndexOf(item.Key.ToString());
+                continue;
+            }
+
+            var itemKey = item.Key.ToString();
+            pendingKeys.Add(itemKey);
+            pendingOrder.Add(itemKey);
+        }
+
+        if (pendingKeys.Count == 0)
+        {
+            return OrderItemsForBox(
+                box,
+                items.Where(item =>
+                    assignments.TryGetValue(item.Key.ToString(), out var assignedBox) &&
+                    assignedBox == box.Id));
+        }
+
+        var projectedItemOrder = box.ItemOrder
+            .Where(key => !pendingKeys.Contains(key))
+            .Concat(pendingOrder)
+            .ToArray();
+        var projectedItems = items.Where(item =>
+            pendingKeys.Contains(item.Key.ToString()) ||
+            (assignments.TryGetValue(item.Key.ToString(), out var assignedBox) && assignedBox == box.Id));
+        return OrderItemsForBox(box, projectedItems, projectedItemOrder);
+    }
+
+    private static IReadOnlyList<DesktopItemRef> OrderItemsForBox(
+        DesktopBox box,
+        IEnumerable<DesktopItemRef> items,
+        IReadOnlyList<string>? manualItemOrder = null)
+    {
+        var order = manualItemOrder ?? box.ItemOrder;
+        var query = box.SortMode switch
+        {
+            BoxSortMode.Name => items.OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
+            BoxSortMode.Type => items.OrderBy(item => item.Kind).ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
+            BoxSortMode.Modified => items.OrderByDescending(item => item.ModifiedAt).ThenBy(item => item.DisplayName),
+            _ => items.OrderBy(item =>
+            {
+                var index = FindItemOrderIndex(order, item.Key.ToString());
                 return index < 0 ? int.MaxValue : index;
             })
         };
         return query.ToArray();
+    }
+
+    private static int FindItemOrderIndex(IReadOnlyList<string> itemOrder, string itemKey)
+    {
+        for (var index = 0; index < itemOrder.Count; index++)
+        {
+            if (string.Equals(itemOrder[index], itemKey, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    internal IReadOnlyList<DesktopItemRef> GetUnassignedDesktopItems() =>
+        Items.Where(item => !State.Assignments.ContainsKey(item.Key.ToString())).ToArray();
+
+    internal bool IsDesktopAutoArrangeEnabled =>
+        DesktopIconPositionService.GetDesktopViewState().AutoArrange;
+
+    internal bool IsDesktopSortCommandPending => _desktopSortCommandPending;
+
+    internal bool TryDropDesktopItemsIntoBox(
+        System.Drawing.Point screenPoint,
+        IReadOnlyList<string> itemKeys) =>
+        _surfaceManager?.TryDropDesktopItemsIntoBox(screenPoint, itemKeys) == true;
+
+    internal bool UpdateDesktopItemDropPreview(
+        System.Drawing.Point screenPoint,
+        IReadOnlyList<string> itemKeys,
+        out bool pointerOverBox)
+    {
+        if (_surfaceManager is null)
+        {
+            pointerOverBox = false;
+            return false;
+        }
+
+        return _surfaceManager.UpdateDesktopItemDropPreview(
+            screenPoint,
+            itemKeys,
+            out pointerOverBox);
+    }
+
+    internal void ClearDesktopItemDropPreviews() =>
+        _surfaceManager?.ClearDesktopItemDropPreviews();
+
+    internal void ClearDesktopBoxSelection() => _surfaceManager?.ClearBoxSelection();
+
+    // The icon surface owns the pointer-captured desktop drag. Box OLE events
+    // can still arrive while that capture crosses a box; callers use this bit
+    // to avoid replacing the projected slot marker with the legacy floating
+    // thumbnail preview.
+    internal bool IsDesktopIconPointerInteractionActive =>
+        _surfaceManager?.IsDesktopIconPointerInteractionActive == true;
+
+    internal bool IsVirtualBoxDesktopDropEnabled => _virtualBoxDesktopDropEnabled;
+
+    internal void SetVirtualBoxDesktopDropEnabled(bool enabled)
+    {
+        _virtualBoxDesktopDropEnabled = enabled;
+        _surfaceManager?.SetVirtualBoxDropTargetEnabled(enabled);
+    }
+
+    internal void ResetDesktopIconLayoutForAutoArrange(bool refreshWorkspace = true)
+    {
+        if (State.DesktopIconLayout.Count == 0 && State.DesktopIconPositions.Count == 0)
+        {
+            return;
+        }
+
+        State.DesktopIconLayout.Clear();
+        State.DesktopIconPositions.Clear();
+        if (refreshWorkspace)
+        {
+            NotifyWorkspaceChanged(true);
+        }
+        else
+        {
+            Changed?.Invoke(this, EventArgs.Empty);
+            ScheduleSave();
+        }
+    }
+
+    internal bool SetDesktopIconLayout(
+        IEnumerable<KeyValuePair<string, DesktopIconLayoutSnapshot>> placements,
+        bool refreshWorkspace = true)
+    {
+        var next = new Dictionary<string, DesktopIconLayoutSnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (itemKey, source) in placements)
+        {
+            if (string.IsNullOrWhiteSpace(itemKey) || source is null)
+            {
+                continue;
+            }
+
+            next[itemKey] = new DesktopIconLayoutSnapshot
+            {
+                MonitorId = source.MonitorId?.Trim() ?? string.Empty,
+                Column = Math.Max(0, source.Column),
+                Row = Math.Max(0, source.Row)
+            };
+        }
+
+        if (DesktopIconLayoutsEqual(State.DesktopIconLayout, next))
+        {
+            return false;
+        }
+
+        State.DesktopIconLayout = next;
+        // Older builds stored only moved keys. Once a full snapshot exists it
+        // replaces that partial state, avoiding a later refresh that mixes
+        // sorted and manually moved icons.
+        State.DesktopIconPositions.Clear();
+        if (refreshWorkspace)
+        {
+            NotifyWorkspaceChanged(true);
+        }
+        else
+        {
+            Changed?.Invoke(this, EventArgs.Empty);
+            ScheduleSave();
+        }
+        return true;
+    }
+
+    internal bool SetDesktopIconPositions(
+        IEnumerable<KeyValuePair<string, DesktopIconPlacement>> positions)
+    {
+        var changed = false;
+        foreach (var (itemKey, source) in positions)
+        {
+            if (string.IsNullOrWhiteSpace(itemKey) || source is null)
+            {
+                continue;
+            }
+
+            var placement = new DesktopIconPlacement
+            {
+                MonitorId = source.MonitorId?.Trim() ?? string.Empty,
+                Column = Math.Max(0, source.Column),
+                Row = Math.Max(0, source.Row)
+            };
+            if (State.DesktopIconPositions.TryGetValue(itemKey, out var existing) &&
+                string.Equals(existing.MonitorId, placement.MonitorId, StringComparison.OrdinalIgnoreCase) &&
+                existing.Column == placement.Column &&
+                existing.Row == placement.Row)
+            {
+                continue;
+            }
+
+            State.DesktopIconPositions[itemKey] = placement;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            NotifyWorkspaceChanged(true);
+        }
+        return changed;
+    }
+
+    private static bool DesktopIconLayoutsEqual(
+        IReadOnlyDictionary<string, DesktopIconLayoutSnapshot> left,
+        IReadOnlyDictionary<string, DesktopIconLayoutSnapshot> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, leftPlacement) in left)
+        {
+            if (!right.TryGetValue(key, out var rightPlacement) ||
+                !string.Equals(leftPlacement.MonitorId, rightPlacement.MonitorId, StringComparison.OrdinalIgnoreCase) ||
+                leftPlacement.Column != rightPlacement.Column ||
+                leftPlacement.Row != rightPlacement.Row)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private IReadOnlyList<DesktopItemRef> GetAssignedDesktopItems() => _allDesktopItems
@@ -451,6 +748,10 @@ public sealed class CrabDeskRuntime : IDisposable
             Title = GetUniqueManualTabTitle(box, title)
         };
         box.ManualTabs.Add(tab);
+        // The first manual tab adds a fixed tab strip to the content stack.
+        // Re-run layout normalization so legacy no-tab magnetic heights are
+        // promoted before the surface is redrawn.
+        LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         NotifyWorkspaceChanged(true);
         return tab;
     }
@@ -596,7 +897,6 @@ public sealed class CrabDeskRuntime : IDisposable
             return 0;
         }
 
-        HideAssignedDesktopItems("assign items", assignedKeys);
         NotifyWorkspaceChanged(true);
         return assignedKeys.Count;
     }
@@ -650,82 +950,47 @@ public sealed class CrabDeskRuntime : IDisposable
         return Task.FromResult(true);
     }
 
-    // Assigned items are removed from Explorer's desktop view instead of
-    // being parked: file items get Hidden+System attributes (the desktop
-    // shell view never renders them, so a drag re-layout cannot pull them
-    // back), and shell items (This PC, Recycle Bin, ...) use the OS desktop
-    // icon visibility setting. Originals are captured first so unassigning,
-    // pausing, or exiting restores the desktop exactly as it was.
-    private int HideAssignedDesktopItems(string context, IEnumerable<string>? itemKeys = null)
+    // The visual desktop surface owns only presentation. It never hides a
+    // desktop file through attributes: hidden/system files disappear from
+    // common file dialogs as well as the desktop. Repair the legacy marker
+    // once at startup, then leave file visibility entirely to Windows.
+    private void RestoreLegacyAssignedDesktopItemVisibility()
     {
-        if (_disposed || IsPaused || !State.Settings.TakeOverDesktop)
+        RestoreAssignedItemVisibility(true);
+        var restoredFiles = 0;
+        var restoredShells = 0;
+        foreach (var item in GetAssignedDesktopItems())
         {
-            return 0;
-        }
-        var assignedItems = GetAssignedDesktopItems();
-        if (itemKeys is not null)
-        {
-            var requestedKeys = itemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            assignedItems = assignedItems
-                .Where(item => requestedKeys.Contains(item.Key.ToString()))
-                .ToArray();
-        }
-        if (assignedItems.Count == 0)
-        {
-            return 0;
-        }
-        var changedPaths = new List<string>();
-        var capturedOriginals = 0;
-        var changedShells = 0;
-        foreach (var item in assignedItems)
-        {
-            if (item.FileSystemPath is not { } pathValue || string.IsNullOrWhiteSpace(pathValue))
+            if (item.FileSystemPath is { } pathValue && !string.IsNullOrWhiteSpace(pathValue))
             {
-                continue;
-            }
-            var path = Path.GetFullPath(pathValue);
-            try
-            {
-                var attributes = File.GetAttributes(path);
-                if (!_originalFileAttributes.ContainsKey(path))
+                try
                 {
-                    _originalFileAttributes[path] = attributes;
-                    capturedOriginals++;
+                    var path = Path.GetFullPath(pathValue);
+                    var attributes = File.GetAttributes(path);
+                    var legacyMarker = FileAttributes.Hidden | FileAttributes.System;
+                    if ((attributes & legacyMarker) == legacyMarker)
+                    {
+                        File.SetAttributes(path, attributes & ~legacyMarker);
+                        restoredFiles++;
+                    }
                 }
-                var hidden = attributes | FileAttributes.Hidden | FileAttributes.System;
-                if (attributes != hidden)
+                catch (IOException)
                 {
-                    File.SetAttributes(path, hidden);
-                    changedPaths.Add(path);
+                }
+                catch (UnauthorizedAccessException)
+                {
                 }
             }
-            catch (IOException)
-            {
-                _originalFileAttributes.Remove(path);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                _originalFileAttributes.Remove(path);
-            }
-        }
-        foreach (var item in assignedItems)
-        {
             if (item.Kind != DesktopItemKind.Shell ||
                 item.ParsingName is not { } parsingName ||
                 !TryGetShellClsid(parsingName, out var clsid) ||
-                !HideShellDesktopIcon(clsid))
+                !WriteShellIconVisibility(clsid, null))
             {
                 continue;
             }
-            changedShells++;
+            restoredShells++;
         }
-        if (changedPaths.Count == 0 && changedShells == 0 && capturedOriginals == 0)
-        {
-            return 0;
-        }
-        DiagnosticLog.Info(
-            $"Assigned desktop items hidden context={context} files={changedPaths.Count} shells={changedShells} snapshots={capturedOriginals}");
-        return changedPaths.Count + changedShells;
+        DiagnosticLog.Info($"Legacy assigned item visibility restored files={restoredFiles} shells={restoredShells}");
     }
 
     private static bool TryGetShellClsid(string parsingName, out string clsid)
@@ -870,9 +1135,16 @@ public sealed class CrabDeskRuntime : IDisposable
             box.ViewMode,
             box.Appearance.IconSize,
             State.Settings.Appearance.IconHorizontalSpacing);
+        var minimumHeight = DesktopItemLayoutEngine.GetMinimumBoxHeight(
+            box.ViewMode,
+            box.Appearance.TitleBarHeight,
+            box.Appearance.IconSize,
+            State.Settings.Appearance.IconVerticalSpacing,
+            box.ManualTabs.Count > 0 ? DesktopItemLayoutEngine.TabBarHeight : 0);
         box.Bounds = box.Bounds.Clamp(
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
-            minimumWidth);
+            minimumWidth,
+            minimumHeight);
         if (bringToFront)
         {
             BoxStacking.Move(State.Boxes, box.Id, BoxStackMove.ToFront);
@@ -891,7 +1163,6 @@ public sealed class CrabDeskRuntime : IDisposable
             State.Assignments[item.Key.ToString()] = boxId;
             MoveItemOrderKey(item.Key.ToString(), boxId);
         }
-        HideAssignedDesktopItems("import files");
         NotifyWorkspaceChanged(true);
     }
 
@@ -1592,6 +1863,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.TitleBarHeight = Math.Clamp(value, 32, 56);
         }
+        LayoutCoordinator.NormalizeForMonitors(State, Monitors);
         NotifyWorkspaceChanged(true);
     }
 
@@ -1849,7 +2121,6 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         if (applied > 0 || createdBoxes > 0)
         {
-            HideAssignedDesktopItems("ai classification");
             if (IsPaused)
             {
                 SetPaused(false);
@@ -1922,10 +2193,6 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         var result = new OrganizationApplyResult(assigned, unassigned, ignored, invalidTargets, decisions);
-        if (assigned > 0 || unassigned > 0)
-        {
-            HideAssignedDesktopItems("organization");
-        }
         if (notify)
         {
             NotifyWorkspaceChanged(true);
@@ -2232,6 +2499,8 @@ public sealed class CrabDeskRuntime : IDisposable
         _hostTimer.Stop();
         _saveTimer.Stop();
         _desktopZoomTimer.Stop();
+        _desktopViewRefreshTimer.Stop();
+        _desktopMenuRefreshTimer.Stop();
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         try
@@ -2251,6 +2520,10 @@ public sealed class CrabDeskRuntime : IDisposable
         if (_desktopInputMonitor is not null)
         {
             _desktopInputMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;
+            _desktopInputMonitor.DesktopSurfaceClicked -= OnDesktopSurfaceClicked;
+            _desktopInputMonitor.DesktopContextMenuRequested -= OnDesktopContextMenuRequested;
+            _desktopInputMonitor.DesktopContextMenuCommandRequested -= OnDesktopContextMenuCommandRequested;
+            _desktopInputMonitor.DesktopContextMenuRefreshRequested -= OnDesktopContextMenuRefreshRequested;
             _desktopInputMonitor.Dispose();
         }
         _updateCancellation.Cancel();
@@ -2274,6 +2547,8 @@ public sealed class CrabDeskRuntime : IDisposable
         _saveLock.Dispose();
         _mappedRefreshLock.Dispose();
         _desktopZoomTimer.Dispose();
+        _desktopViewRefreshTimer.Dispose();
+        _desktopMenuRefreshTimer.Dispose();
         DiagnosticLog.Info("Runtime disposal completed");
     }
 
@@ -2284,6 +2559,7 @@ public sealed class CrabDeskRuntime : IDisposable
         AreDesktopItemsHidden = false;
         if (ActivateDesktopSurfaces("startup"))
         {
+            _surfaceManager?.SetDesktopIconsVisible(_desktopIconsVisible);
             DiagnosticLog.Info("Desktop takeover started");
         }
     }
@@ -2351,15 +2627,8 @@ public sealed class CrabDeskRuntime : IDisposable
             _surfaceManager.SetVisible(!AreDesktopItemsHidden);
             if (!AreDesktopItemsHidden)
             {
+                _surfaceManager.SetDesktopIconsVisible(_desktopIconsVisible);
                 _surfaceManager.Refresh();
-            }
-            try
-            {
-                HideAssignedDesktopItems("surface rebuild");
-            }
-            catch (Exception exception)
-            {
-                DiagnosticLog.Error("Assigned icon hiding after surface activation failed", exception);
             }
             return true;
         }
@@ -2744,13 +3013,25 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
             }
-            // No periodic icon operations: every touch of Explorer's desktop
-            // ListView from this timer proved to be a source of icon loss.
-            // Assigned icons are hidden/restored only on explicit actions,
-            // and the user can repair the desktop with the dedicated button.
+            var desktopViewChanged = CaptureDesktopViewState(
+                DesktopIconPositionService.GetDesktopViewState());
+            var systemIconVisibilitySignature =
+                DesktopItemProvider.GetSystemDesktopIconVisibilitySignature();
+            var systemIconVisibilityChanged = !string.Equals(
+                _desktopSystemIconVisibilitySignature,
+                systemIconVisibilitySignature,
+                StringComparison.Ordinal);
+            if (systemIconVisibilityChanged)
+            {
+                _desktopSystemIconVisibilitySignature = systemIconVisibilitySignature;
+                await RefreshItemsAsync(false);
+                DiagnosticLog.Info("Windows desktop system-icon visibility synchronized.");
+            }
             var monitors = _monitorService.GetMonitors();
-            var topologyChanged = !monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}")
-                .SequenceEqual(Monitors.Select(monitor => $"{monitor.Id}:{monitor.PixelBounds}"));
+            var topologyChanged = !monitors.Select(monitor =>
+                    $"{monitor.Id}:{monitor.PixelBounds}:{monitor.PixelWorkArea}:{monitor.DpiScale}")
+                .SequenceEqual(Monitors.Select(monitor =>
+                    $"{monitor.Id}:{monitor.PixelBounds}:{monitor.PixelWorkArea}:{monitor.DpiScale}"));
             if (topologyChanged)
             {
                 DiagnosticLog.Info(
@@ -2760,8 +3041,12 @@ public sealed class CrabDeskRuntime : IDisposable
             }
             if (!hostChanged && !topologyChanged)
             {
-                // This timer only checks HWND/topology health. Do not touch
-                // Explorer's shared icon cache from a periodic callback.
+                if (!IsPaused &&
+                    !TryApplyPendingDesktopSort(desktopViewChanged) &&
+                    desktopViewChanged)
+                {
+                    RefreshDesktopView();
+                }
                 return;
             }
 
@@ -2861,6 +3146,9 @@ public sealed class CrabDeskRuntime : IDisposable
             _desktopInputMonitor = new DesktopInputMonitor();
             _desktopInputMonitor.IconZoomRequested += OnDesktopIconZoomRequested;
             _desktopInputMonitor.DesktopSurfaceClicked += OnDesktopSurfaceClicked;
+            _desktopInputMonitor.DesktopContextMenuRequested += OnDesktopContextMenuRequested;
+            _desktopInputMonitor.DesktopContextMenuCommandRequested += OnDesktopContextMenuCommandRequested;
+            _desktopInputMonitor.DesktopContextMenuRefreshRequested += OnDesktopContextMenuRefreshRequested;
         }
         _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
         _desktopInputMonitor.Enabled = true;
@@ -2873,28 +3161,271 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void OnDesktopSurfaceClicked(object? sender, EventArgs eventArgs)
     {
-        // The low-level hook reports this before Explorer completes its own
-        // click handling. Queue the visual update on our UI context while
-        // leaving Explorer's desktop selection and context menu untouched.
-        _beginInvoke(() => _surfaceManager?.ClearSelection());
+        _beginInvoke(() =>
+        {
+            // The low-level hook can observe the same button-down before the
+            // icon surface's WinForms handler starts capture. Let that handler
+            // own the gesture, including blank-area marquee selection.
+            if (_surfaceManager?.IsDesktopIconPointerInteractionActive == true)
+            {
+                return;
+            }
+
+            _surfaceManager?.ClearSelection();
+        });
     }
 
-    private void SynchronizeDesktopIconZoom()
+    private void OnDesktopContextMenuRequested(object? sender, EventArgs eventArgs)
     {
-        if (_disposed || DesktopIconPositionService.GetDesktopIconSize() is not { } nativeIconSize)
+        // Explorer commits a native context-menu command only after the menu
+        // closes. Poll briefly after the request so a chosen sort mode reaches
+        // the replacement icon layer without waiting for the host health tick.
+        _beginInvoke(() =>
+        {
+            if (_disposed || IsPaused)
+            {
+                return;
+            }
+
+            _desktopViewRefreshDeadline = DateTimeOffset.UtcNow + DesktopViewRefreshWindow;
+            _desktopViewRefreshTimer.Start();
+        });
+    }
+
+    internal void NotifyDesktopContextMenuOpened()
+    {
+        // DesktopIconSurface forwards its background context menu by posting
+        // WM_CONTEXTMENU to Explorer. Arm the input monitor explicitly so it
+        // can identify a selected sort item even when SortColumns itself does
+        // not change (for example, repeating the active sort mode).
+        _desktopInputMonitor?.TrackDesktopContextMenu();
+        OnDesktopContextMenuRequested(this, EventArgs.Empty);
+    }
+
+    private void OnDesktopContextMenuCommandRequested(object? sender, EventArgs eventArgs)
+    {
+        // A sort item can be selected repeatedly without changing Explorer's
+        // SortColumns signature. Clear the saved grid before the command is
+        // applied so the next redraw is still a one-time native sort.
+        _beginInvoke(() =>
+        {
+            if (_disposed || IsPaused)
+            {
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            _desktopSortCommandPending = true;
+            _desktopSortCommandReadyAt = now + DesktopSortCommandMinimumWait;
+            ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
+            _desktopViewRefreshDeadline = now + DesktopViewRefreshWindow;
+            _desktopViewRefreshTimer.Start();
+        });
+    }
+
+    private void OnDesktopContextMenuRefreshRequested(object? sender, EventArgs eventArgs)
+    {
+        _beginInvoke(() =>
+        {
+            if (_disposed || IsPaused)
+            {
+                return;
+            }
+
+            // A Refresh command leaves Explorer's sort, size, and visibility
+            // state unchanged, so the normal context-menu synchronization has
+            // no change token to act on. Defer briefly so Explorer completes
+            // its command, then refresh the replacement icon layer directly.
+            _desktopMenuRefreshPending = true;
+            _desktopViewRefreshDeadline = null;
+            _desktopViewRefreshTimer.Stop();
+            _desktopMenuRefreshTimer.Start();
+        });
+    }
+
+    private async void RefreshAfterDesktopMenuCommandAsync()
+    {
+        if (_disposed || IsPaused)
+        {
+            _desktopMenuRefreshPending = false;
+            return;
+        }
+        if (_desktopMenuRefreshInProgress)
+        {
+            _desktopMenuRefreshTimer.Start();
+            return;
+        }
+        if (!_desktopMenuRefreshPending)
         {
             return;
         }
 
-        var iconSize = Math.Clamp(nativeIconSize, 24, 96);
-        foreach (var box in State.Boxes)
+        _desktopMenuRefreshPending = false;
+        _desktopMenuRefreshInProgress = true;
+        try
         {
-            box.Appearance.IconSize = iconSize;
+            await RefreshItemsAsync(false);
+            DiagnosticLog.Info($"Explorer desktop refresh synchronized items={Items.Count}");
         }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Explorer desktop refresh synchronization failed", exception);
+        }
+        finally
+        {
+            _desktopMenuRefreshInProgress = false;
+            if (_desktopMenuRefreshPending && !_disposed && !IsPaused)
+            {
+                _desktopMenuRefreshTimer.Start();
+            }
+        }
+    }
+
+    private void SynchronizeDesktopIconZoom()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var desktopViewState = DesktopIconPositionService.GetDesktopViewState();
+        if (desktopViewState.IconSize is not { } nativeIconSize)
+        {
+            return;
+        }
+
+        var viewChanged = CaptureDesktopViewState(desktopViewState);
         var spacing = DesktopIconPositionService.GetItemSpacing(_desktopHost.DesktopListView);
         DiagnosticLog.Info(
-            $"Desktop icon zoom synchronized size={iconSize} spacing={spacing.Width}x{spacing.Height}");
-        NotifyWorkspaceChanged(true);
+            $"Desktop icon zoom synchronized size={nativeIconSize} spacing={spacing.Width}x{spacing.Height}");
+        // Desktop icon zoom belongs to Explorer's unassigned-icon layer. Box
+        // icon sizes remain an explicit per-box appearance setting.
+        if (!TryApplyPendingDesktopSort(viewChanged) && !_desktopSortCommandPending)
+        {
+            RefreshDesktopView();
+        }
+    }
+
+    private void SynchronizeExplorerDesktopView()
+    {
+        if (_disposed || IsPaused)
+        {
+            _desktopViewRefreshDeadline = null;
+            return;
+        }
+
+        try
+        {
+            var viewChanged = CaptureDesktopViewState(DesktopIconPositionService.GetDesktopViewState());
+            if (TryApplyPendingDesktopSort(viewChanged))
+            {
+                return;
+            }
+            if (viewChanged)
+            {
+                RefreshDesktopView();
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Explorer desktop view synchronization failed", exception);
+        }
+
+        if (_desktopViewRefreshDeadline is { } deadline && DateTimeOffset.UtcNow < deadline)
+        {
+            _desktopViewRefreshTimer.Start();
+        }
+        else
+        {
+            _desktopViewRefreshDeadline = null;
+        }
+    }
+
+    /// <summary>
+    /// Performs the one-time redraw for a native Sort by command. The flag
+    /// remains set while <see cref="RefreshDesktopView"/> runs, which tells
+    /// the desktop icon surface to ignore its persisted manual layout exactly
+    /// once. This also covers selecting the currently active sort command,
+    /// where Explorer leaves SortColumns unchanged.
+    /// </summary>
+    private bool TryApplyPendingDesktopSort(bool explorerViewChanged)
+    {
+        if (!_desktopSortCommandPending)
+        {
+            return false;
+        }
+
+        if (!explorerViewChanged &&
+            _desktopSortCommandReadyAt is { } readyAt &&
+            DateTimeOffset.UtcNow < readyAt)
+        {
+            return false;
+        }
+
+        // Keep the pending flag true during this call. DesktopIconSurface
+        // reads it while rebuilding geometry and deliberately skips the
+        // saved grid for this one native sort operation.
+        RefreshDesktopView();
+        _desktopSortCommandPending = false;
+        _desktopSortCommandReadyAt = null;
+        _desktopViewRefreshDeadline = null;
+        _desktopViewRefreshTimer.Stop();
+        DiagnosticLog.Info("Explorer desktop sort command synchronized.");
+        return true;
+    }
+
+    private bool CaptureDesktopViewState(DesktopIconViewState desktopViewState)
+    {
+        var sortChanged = _desktopSortState != desktopViewState.Sort;
+        var autoArrangeChanged = _desktopAutoArrange != desktopViewState.AutoArrange;
+        var changed = !string.Equals(
+            _desktopSortSignature,
+            desktopViewState.Signature,
+            StringComparison.Ordinal);
+        _desktopSortSignature = desktopViewState.Signature;
+        _desktopSortState = desktopViewState.Sort;
+        _desktopAutoArrange = desktopViewState.AutoArrange;
+        _desktopIconsVisible = desktopViewState.DesktopIconsVisible;
+        if ((sortChanged || autoArrangeChanged) &&
+            (State.DesktopIconPositions.Count > 0 || State.DesktopIconLayout.Count > 0))
+        {
+            State.DesktopIconPositions.Clear();
+            State.DesktopIconLayout.Clear();
+            ScheduleSave();
+            DiagnosticLog.Info(
+                $"Desktop icon layout cleared after Explorer view change sortChanged={sortChanged} " +
+                $"autoArrangeChanged={autoArrangeChanged} autoArrange={desktopViewState.AutoArrange}.");
+        }
+        if (changed)
+        {
+            // A pending sort still needs to reach TryApplyPendingDesktopSort
+            // so the first replacement-layer redraw cannot restore the old
+            // saved positions.
+            if (!_desktopSortCommandPending)
+            {
+                _desktopViewRefreshDeadline = null;
+                _desktopViewRefreshTimer.Stop();
+            }
+            DiagnosticLog.Info(
+                $"Explorer desktop view changed mode={desktopViewState.Sort.Mode} " +
+                $"descending={desktopViewState.Sort.Descending} " +
+                $"iconSize={desktopViewState.IconSize?.ToString() ?? "unknown"} " +
+                $"iconsVisible={desktopViewState.DesktopIconsVisible}");
+        }
+        return changed;
+    }
+
+    private void RefreshDesktopView()
+    {
+        if (_disposed || IsPaused)
+        {
+            return;
+        }
+
+        _surfaceManager?.SetDesktopIconsVisible(_desktopIconsVisible);
+        _surfaceManager?.Refresh();
+        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnSystemPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs eventArgs)

@@ -41,6 +41,17 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
+    public void DateRevisionVersionPreservesTheReleaseIdentifierAndSortsByRevision()
+    {
+        Assert.True(SemanticVersion.TryParse("20260813.01", out var firstRelease));
+        Assert.True(SemanticVersion.TryParse("v20260813.02", out var secondRelease));
+
+        Assert.Equal("20260813.01", firstRelease.ToString());
+        Assert.Equal("20260813.02", secondRelease.ToString());
+        Assert.True(firstRelease.CompareTo(secondRelease) < 0);
+    }
+
+    [Fact]
     public async Task UnifiedReleaseStreamSelectsFixedAssets()
     {
         HttpRequestMessage? captured = null;

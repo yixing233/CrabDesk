@@ -30,8 +30,12 @@ public interface IDesktopInputMonitor : IDisposable
 {
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
     event EventHandler? DesktopSurfaceClicked;
+    event EventHandler? DesktopContextMenuRequested;
+    event EventHandler? DesktopContextMenuCommandRequested;
+    event EventHandler? DesktopContextMenuRefreshRequested;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
+    void TrackDesktopContextMenu();
 }
 
 public sealed class DesktopIconZoomEventArgs(int delta) : EventArgs

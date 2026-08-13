@@ -116,7 +116,37 @@ public static class LayoutCoordinator
                 box.ViewMode,
                 box.Appearance.IconSize,
                 state.Settings.Appearance.IconHorizontalSpacing);
-            box.Bounds = box.Bounds.Clamp(localBounds, minimumWidth);
+            var tabBarHeight = box.ManualTabs.Count > 0
+                ? DesktopItemLayoutEngine.TabBarHeight
+                : 0;
+            if (tabBarHeight > 0)
+            {
+                // Layouts saved before tab-aware snapping used the no-tab
+                // height slots. Upgrade those exact legacy slots once so an
+                // existing box keeps the same number of complete item rows
+                // after its tab strip appears.
+                var legacyHeight = DesktopItemLayoutEngine.SnapBoxHeight(
+                    box.ViewMode,
+                    box.Bounds.Height,
+                    box.Appearance.TitleBarHeight,
+                    box.Appearance.IconSize,
+                    state.Settings.Appearance.IconVerticalSpacing);
+                if (Math.Abs(box.Bounds.Height - legacyHeight) <= DesktopItemLayoutEngine.SnapThreshold)
+                {
+                    box.Bounds = new LayoutRect(
+                        box.Bounds.X,
+                        box.Bounds.Y,
+                        box.Bounds.Width,
+                        legacyHeight + tabBarHeight);
+                }
+            }
+            var minimumHeight = DesktopItemLayoutEngine.GetMinimumBoxHeight(
+                box.ViewMode,
+                box.Appearance.TitleBarHeight,
+                box.Appearance.IconSize,
+                state.Settings.Appearance.IconVerticalSpacing,
+                tabBarHeight);
+            box.Bounds = box.Bounds.Clamp(localBounds, minimumWidth, minimumHeight);
         }
     }
 
@@ -203,6 +233,46 @@ public static class LayoutCoordinator
             return false;
         }
 
+        var normalized = ProjectReorderedKeys(box, currentKeys, movingKeys, beforeKey).ToList();
+        var changed = box.SortMode == BoxSortMode.Manual
+            ? !box.ItemOrder.SequenceEqual(normalized, comparer)
+            : !currentKeys.SequenceEqual(normalized, comparer);
+        if (!changed)
+        {
+            return false;
+        }
+        box.SortMode = BoxSortMode.Manual;
+        box.ItemOrder = normalized;
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the visible order that a reorder drop would produce without
+    /// mutating the box. The same projection is used by the live drag preview
+    /// and by <see cref="ReorderItems"/> when the drop is committed.
+    /// </summary>
+    public static IReadOnlyList<string> ProjectReorderedKeys(
+        DesktopBox box,
+        IReadOnlyList<string> currentKeys,
+        IReadOnlyCollection<string> movingKeys,
+        string? beforeKey)
+    {
+        if (currentKeys.Count == 0 || movingKeys.Count == 0)
+        {
+            return [];
+        }
+
+        var comparer = StringComparer.OrdinalIgnoreCase;
+        var currentSet = currentKeys.ToHashSet(comparer);
+        var movingSet = movingKeys
+            .Where(currentSet.Contains)
+            .ToHashSet(comparer);
+        if (movingSet.Count == 0 ||
+            (beforeKey is not null && movingSet.Contains(beforeKey)))
+        {
+            return currentKeys.ToArray();
+        }
+
         var normalized = box.SortMode == BoxSortMode.Manual
             ? box.ItemOrder
                 .Where(currentSet.Contains)
@@ -220,16 +290,7 @@ public static class LayoutCoordinator
             targetIndex = normalized.Count;
         }
         normalized.InsertRange(targetIndex, moving);
-        var changed = box.SortMode == BoxSortMode.Manual
-            ? !box.ItemOrder.SequenceEqual(normalized, comparer)
-            : !currentKeys.SequenceEqual(normalized, comparer);
-        if (!changed)
-        {
-            return false;
-        }
-        box.SortMode = BoxSortMode.Manual;
-        box.ItemOrder = normalized;
-        return true;
+        return normalized;
     }
 }
 

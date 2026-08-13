@@ -63,6 +63,10 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                         try
                         {
                             var attributes = File.GetAttributes(fullPath);
+                            if (IsDesktopMetadataFile(fullPath))
+                            {
+                                continue;
+                            }
                             var isDirectory = attributes.HasFlag(FileAttributes.Directory);
                             var extension = Path.GetExtension(fullPath);
                             items.Add(new DesktopItemRef
@@ -76,9 +80,11 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                                     : extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
                                         ? DesktopItemKind.Shortcut
                                         : DesktopItemKind.File,
-                                ModifiedAt = isDirectory
-                                    ? Directory.GetLastWriteTimeUtc(fullPath)
-                                    : File.GetLastWriteTimeUtc(fullPath),
+                                // Explorer's "Modified date" column is
+                                // System.DateModified. For regular file
+                                // system desktop items that is the last-write
+                                // timestamp, independent of icon placement.
+                                ModifiedAt = ReadShellModifiedAt(fullPath, isDirectory),
                                 IsReadOnly = attributes.HasFlag(FileAttributes.ReadOnly)
                             });
                         }
@@ -101,7 +107,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                 }
             }
 
-            items.AddRange(SystemItems);
+            items.AddRange(GetVisibleSystemItems());
             return items;
         }, cancellationToken);
     }
@@ -126,13 +132,54 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         _changeTimer.Change(250, Timeout.Infinite);
     }
 
-    private static IReadOnlyList<DesktopItemRef> SystemItems =>
+    private static DateTimeOffset? ReadShellModifiedAt(string path, bool isDirectory)
+    {
+        try
+        {
+            var modified = isDirectory
+                ? Directory.GetLastWriteTimeUtc(path)
+                : File.GetLastWriteTimeUtc(path);
+            return modified == DateTime.MinValue ? null : modified;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Used by the runtime to detect changes made in Windows' Desktop Icon
+    /// Settings dialog without treating a registry write as a filesystem
+    /// change.
+    /// </summary>
+    public static string GetSystemDesktopIconVisibilitySignature() => string.Join(
+        ";",
+        StandardSystemItems.Select(item =>
+            $"{item.Clsid}:{(DesktopSystemIconVisibility.IsVisible(item.Clsid) ? 1 : 0)}"));
+
+    private static bool IsDesktopMetadataFile(string path) =>
+        string.Equals(Path.GetFileName(path), "desktop.ini", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<DesktopItemRef> GetVisibleSystemItems() =>
+        StandardSystemItems
+            .Where(item => DesktopSystemIconVisibility.IsVisible(item.Clsid))
+            .Select(item => Shell(item.DisplayName, $"shell:::{item.Clsid}"))
+            .ToArray();
+
+    private static readonly SystemDesktopItem[] StandardSystemItems =
     [
-        Shell("回收站", "shell:::{645FF040-5081-101B-9F08-00AA002F954E}"),
-        Shell("此电脑", "shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"),
-        Shell("用户文件", "shell:::{59031A47-3F72-44A7-89C5-5595FE6B30EE}"),
-        Shell("网络", "shell:::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}"),
-        Shell("控制面板", "shell:::{26EE0668-A00A-44D7-9371-BEB064C98683}")
+        new("回收站", "{645FF040-5081-101B-9F08-00AA002F954E}"),
+        new("此电脑", "{20D04FE0-3AEA-1069-A2D8-08002B30309D}"),
+        new("用户文件", "{59031A47-3F72-44A7-89C5-5595FE6B30EE}"),
+        new("网络", "{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}"),
+        // The Desktop Icon Settings dialog controls the category root, not
+        // the all-tasks namespace ({26EE...}). Using the latter bypasses the
+        // checkbox and incorrectly makes Control Panel permanently visible.
+        new("控制面板", "{5399E694-6CE5-4D6C-8FCE-1D8870FDCBA0}")
     ];
 
     private static DesktopItemRef Shell(string name, string parsingName) => new()
@@ -143,4 +190,6 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         Kind = DesktopItemKind.Shell,
         IsReadOnly = true
     };
+
+    private readonly record struct SystemDesktopItem(string DisplayName, string Clsid);
 }

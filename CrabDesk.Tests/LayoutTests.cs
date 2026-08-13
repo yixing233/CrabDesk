@@ -214,6 +214,29 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void MonitorRelativeWorkAreaExcludesTheTaskbarFromDesktopSurfaceCoordinates()
+    {
+        var monitor = new MonitorLayout
+        {
+            Id = "primary",
+            DeviceName = "primary",
+            PixelBounds = new LayoutRect(100, 200, 2560, 1600),
+            PixelWorkArea = new LayoutRect(100, 200, 2560, 1540),
+            Bounds = new LayoutRect(66.667, 133.333, 1706.667, 1066.667),
+            WorkArea = new LayoutRect(66.667, 133.333, 1706.667, 1026.667),
+            DpiScale = 1.5,
+            IsPrimary = true
+        };
+
+        var workArea = MonitorCoordinateConverter.GetMonitorRelativeWorkArea(monitor);
+
+        Assert.Equal(0, workArea.X, 3);
+        Assert.Equal(0, workArea.Y, 3);
+        Assert.Equal(2560d / 1.5d, workArea.Width, 3);
+        Assert.Equal(1540d / 1.5d, workArea.Height, 3);
+    }
+
+    [Fact]
     public void MixedDpiMonitorsClampBoxesInEachMonitorsDipWorkArea()
     {
         var primary = Monitor("primary", true, 1920, 1040);
@@ -243,6 +266,26 @@ public sealed class LayoutTests
         Assert.Equal(740, box.Bounds.Y);
         Assert.Equal(420, box.Bounds.Width);
         Assert.Equal(300, box.Bounds.Height);
+    }
+
+    [Fact]
+    public void ExistingManualTabBoxPromotesLegacyHeightSlot()
+    {
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Settings.Appearance.IconVerticalSpacing = 80;
+        var tab = new DesktopBoxTab { Title = "Tab" };
+        state.Boxes.Add(new DesktopBox
+        {
+            MonitorId = "primary",
+            Bounds = new LayoutRect(40, 40, 360, 134),
+            ViewMode = BoxViewMode.Grid,
+            Appearance = new BoxAppearance { IconSize = 36 },
+            ManualTabs = [tab]
+        });
+
+        LayoutCoordinator.NormalizeForMonitors(state, [Monitor("primary", true, 1920, 1040)]);
+
+        Assert.Equal(164, state.Boxes[0].Bounds.Height);
     }
 
     [Fact]
@@ -455,6 +498,44 @@ public sealed class LayoutTests
         Assert.False(changed);
         Assert.Equal(BoxSortMode.Type, box.SortMode);
         Assert.Empty(box.ItemOrder);
+    }
+
+    [Fact]
+    public void ReorderProjectionMovesStationaryItemsAroundSingleDraggedItem()
+    {
+        var box = new DesktopBox
+        {
+            SortMode = BoxSortMode.Manual,
+            ItemOrder = ["A", "B", "C", "D"]
+        };
+
+        var projected = LayoutCoordinator.ProjectReorderedKeys(
+            box,
+            ["A", "B", "C", "D"],
+            ["A"],
+            "C");
+
+        Assert.Equal(["B", "A", "C", "D"], projected);
+        Assert.Equal(["A", "B", "C", "D"], box.ItemOrder);
+    }
+
+    [Fact]
+    public void ReorderProjectionKeepsMultiSelectionTogether()
+    {
+        var box = new DesktopBox
+        {
+            SortMode = BoxSortMode.Manual,
+            ItemOrder = ["A", "B", "C", "D", "E"]
+        };
+
+        var projected = LayoutCoordinator.ProjectReorderedKeys(
+            box,
+            ["A", "B", "C", "D", "E"],
+            ["B", "D"],
+            "E");
+
+        Assert.Equal(["A", "C", "B", "D", "E"], projected);
+        Assert.Equal(["A", "B", "C", "D", "E"], box.ItemOrder);
     }
 
     [Theory]

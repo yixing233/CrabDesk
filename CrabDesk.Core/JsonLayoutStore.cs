@@ -86,7 +86,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 20;
+        state.SchemaVersion = 21;
         state.Settings ??= new AppSettings();
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
@@ -162,6 +162,53 @@ public sealed class JsonLayoutStore : ILayoutStore
         }
         state.Boxes ??= [];
         state.Assignments = new Dictionary<string, Guid>(state.Assignments ?? [], StringComparer.OrdinalIgnoreCase);
+        state.DesktopIconPositions = new Dictionary<string, DesktopIconPlacement>(
+            state.DesktopIconPositions ?? [],
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var key in state.DesktopIconPositions
+                     .Where(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            state.DesktopIconPositions.Remove(key);
+        }
+        foreach (var placement in state.DesktopIconPositions.Values)
+        {
+            placement.MonitorId = placement.MonitorId?.Trim() ?? string.Empty;
+            placement.Column = Math.Max(0, placement.Column);
+            placement.Row = Math.Max(0, placement.Row);
+        }
+        state.DesktopIconLayout = new Dictionary<string, DesktopIconLayoutSnapshot>(
+            state.DesktopIconLayout ?? [],
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var key in state.DesktopIconLayout
+                     .Where(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            state.DesktopIconLayout.Remove(key);
+        }
+        foreach (var placement in state.DesktopIconLayout.Values)
+        {
+            placement.MonitorId = placement.MonitorId?.Trim() ?? string.Empty;
+            placement.Column = Math.Max(0, placement.Column);
+            placement.Row = Math.Max(0, placement.Row);
+        }
+        // Schema 20 stored only manually moved keys. Treat those entries as
+        // the initial full snapshot so upgrading does not snap icons back to
+        // the old sorted order on the first launch of schema 21.
+        if (state.DesktopIconLayout.Count == 0 && state.DesktopIconPositions.Count > 0)
+        {
+            state.DesktopIconLayout = state.DesktopIconPositions.ToDictionary(
+                pair => pair.Key,
+                pair => new DesktopIconLayoutSnapshot
+                {
+                    MonitorId = pair.Value.MonitorId,
+                    Column = pair.Value.Column,
+                    Row = pair.Value.Row
+                },
+                StringComparer.OrdinalIgnoreCase);
+        }
         state.Organization ??= new OrganizationSettings();
         state.OrganizationRules ??= [];
 

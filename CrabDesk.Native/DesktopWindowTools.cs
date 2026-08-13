@@ -9,6 +9,27 @@ public static class DesktopWindowTools
 {
     private const long WsExNoActivate = 0x08000000L;
 
+    /// <summary>
+    /// Routes a background right-click from a CrabDesk desktop child back to
+    /// Explorer so the normal desktop context menu remains available while
+    /// the replacement icon layer accepts blank-area drag selection.
+    /// </summary>
+    public static bool ShowDesktopContextMenu(IntPtr desktopListView, int screenX, int screenY)
+    {
+        if (desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
+        {
+            return false;
+        }
+
+        var coordinates = unchecked((uint)(ushort)(short)screenX) |
+            (unchecked((uint)(ushort)(short)screenY) << 16);
+        return NativeMethods.PostMessage(
+            desktopListView,
+            NativeMethods.WmContextMenu,
+            desktopListView,
+            new IntPtr(unchecked((int)coordinates)));
+    }
+
     public static void ToggleDesktop()
     {
         var shellType = Type.GetTypeFromProgID("Shell.Application");
@@ -108,6 +129,33 @@ public static class DesktopWindowTools
     }
 
     /// <summary>
+    /// Places a desktop child immediately above another child in the same
+    /// Explorer desktop parent.  This explicit insertion point is important
+    /// when the lower child is a full-monitor layered icon surface: HWND_TOP
+    /// alone can leave a regular box child visually underneath it even when
+    /// the reported sibling order looks correct.
+    /// </summary>
+    public static bool PlaceAbove(IntPtr hwnd, IntPtr below)
+    {
+        if (hwnd == IntPtr.Zero || below == IntPtr.Zero ||
+            NativeMethods.GetParent(hwnd) != NativeMethods.GetParent(below))
+        {
+            return false;
+        }
+
+        return NativeMethods.SetWindowPos(
+            hwnd,
+            below,
+            0,
+            0,
+            0,
+            0,
+            NativeMethods.SwpNoActivate |
+            NativeMethods.SwpNoMove |
+            NativeMethods.SwpNoSize);
+    }
+
+    /// <summary>
     /// Re-shows a desktop child after Explorer recreated its view, preserving
     /// the no-activate behavior while placing it above the icon ListView.
     /// </summary>
@@ -200,6 +248,62 @@ public static class DesktopWindowTools
 
     public static long GetSurfaceExtendedStyle(IntPtr hwnd) =>
         NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+
+    /// <summary>
+    /// Hides Explorer's complete desktop icon view only after CrabDesk's
+    /// replacement surface has rendered successfully. No filesystem metadata
+    /// or individual ListView item is changed.
+    /// </summary>
+    public static bool TryHideDesktopIconView(IntPtr desktopListView, out bool wasVisible)
+    {
+        wasVisible = false;
+        if (desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
+        {
+            return false;
+        }
+
+        wasVisible = NativeMethods.IsWindowVisible(desktopListView);
+        if (!wasVisible)
+        {
+            return true;
+        }
+
+        NativeMethods.ShowWindow(desktopListView, NativeMethods.SwHide);
+        return !NativeMethods.IsWindowVisible(desktopListView);
+    }
+
+    /// <summary>
+    /// Repairs a hidden Explorer ListView left behind when a previous visual
+    /// desktop process ended before it could restore the native icon layer.
+    /// Callers decide whether the user's shell preference says icons should
+    /// be visible; this method only restores the window itself and never
+    /// changes that preference.
+    /// </summary>
+    public static bool EnsureDesktopIconViewVisible(IntPtr desktopListView)
+    {
+        if (desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
+        {
+            return false;
+        }
+
+        if (NativeMethods.IsWindowVisible(desktopListView))
+        {
+            return true;
+        }
+
+        NativeMethods.ShowWindow(desktopListView, NativeMethods.SwShowNoActivate);
+        return NativeMethods.IsWindowVisible(desktopListView);
+    }
+
+    public static void RestoreDesktopIconView(IntPtr desktopListView, bool wasVisible)
+    {
+        if (!wasVisible || desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
+        {
+            return;
+        }
+
+        NativeMethods.ShowWindow(desktopListView, NativeMethods.SwShowNoActivate);
+    }
 
     // RichEdit persists SelectionBackColor as character formatting. Select
     // the document, restore automatic foreground/background colors, then put
@@ -305,6 +409,215 @@ public static class DesktopWindowTools
             }
             destination = IntPtr.Zero;
             return VerifyRegion(hwnd, deviceRectangles, out diagnostic);
+        }
+        finally
+        {
+            if (destination != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(destination);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies a union of rounded rectangles as the native window region.
+    /// This is used by the regular desktop box child so WinForms' backing
+    /// paint cannot leak a square background through the visual box corners.
+    /// </summary>
+    public static bool ApplyRoundedRegion(
+        IntPtr hwnd,
+        IEnumerable<LayoutRect> rectangles,
+        double scale,
+        double cornerRadius,
+        out string diagnostic,
+        bool redraw = true)
+    {
+        var deviceRectangles = ToDeviceRectangles(rectangles, scale).ToArray();
+        var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        if (destination == IntPtr.Zero)
+        {
+            diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+        try
+        {
+            var diameter = Math.Max(1, (int)Math.Round(cornerRadius * scale * 2));
+            foreach (var rectangle in deviceRectangles)
+            {
+                var source = NativeMethods.CreateRoundRectRgn(
+                    rectangle.Left,
+                    rectangle.Top,
+                    rectangle.Right,
+                    rectangle.Bottom,
+                    diameter,
+                    diameter);
+                if (source == IntPtr.Zero)
+                {
+                    diagnostic = $"CreateRoundRectRgn failed error={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+                try
+                {
+                    if (NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnOr) == NativeMethods.Error)
+                    {
+                        diagnostic = $"CombineRgn failed error={Marshal.GetLastWin32Error()}";
+                        return false;
+                    }
+                }
+                finally
+                {
+                    NativeMethods.DeleteObject(source);
+                }
+            }
+
+            if (NativeMethods.SetWindowRgn(hwnd, destination, redraw) == 0)
+            {
+                diagnostic = $"SetWindowRgn failed error={Marshal.GetLastWin32Error()}";
+                return false;
+            }
+            destination = IntPtr.Zero;
+            return VerifyRoundedRegion(hwnd, deviceRectangles, out diagnostic);
+        }
+        finally
+        {
+            if (destination != IntPtr.Zero)
+            {
+                NativeMethods.DeleteObject(destination);
+            }
+        }
+    }
+
+    public static bool VerifyRoundedRegion(
+        IntPtr hwnd,
+        IEnumerable<LayoutRect> rectangles,
+        double scale,
+        out string diagnostic) =>
+        VerifyRoundedRegion(hwnd, ToDeviceRectangles(rectangles, scale).ToArray(), out diagnostic);
+
+    private static bool VerifyRoundedRegion(
+        IntPtr hwnd,
+        IReadOnlyList<NativeMethods.Rect> deviceRectangles,
+        out string diagnostic)
+    {
+            // CreateRoundRectRgn omits the extreme right/bottom corner pixel,
+            // so GetWindowRgnBox reports those edges one pixel inward.  That
+            // is valid rounded geometry rather than a lost box region.
+            var regionType = NativeMethods.GetWindowRgnBox(hwnd, out var actualBounds);
+            if (regionType == NativeMethods.Error)
+            {
+                diagnostic = $"GetWindowRgnBox failed error={Marshal.GetLastWin32Error()}";
+                return false;
+            }
+            if (deviceRectangles.Count == 0)
+            {
+                diagnostic = regionType == NativeMethods.NullRegion
+                    ? "region=NULL"
+                    : $"Expected an empty region but got type={regionType} bounds={FormatRect(actualBounds)}";
+                return regionType == NativeMethods.NullRegion;
+            }
+            var expectedBounds = GetBoundingRect(deviceRectangles);
+            var valid = regionType is NativeMethods.SimpleRegion or NativeMethods.ComplexRegion &&
+                actualBounds.Left == expectedBounds.Left &&
+                actualBounds.Top == expectedBounds.Top &&
+                actualBounds.Right >= expectedBounds.Right - 1 &&
+                actualBounds.Right <= expectedBounds.Right &&
+                actualBounds.Bottom >= expectedBounds.Bottom - 1 &&
+                actualBounds.Bottom <= expectedBounds.Bottom;
+            diagnostic = $"roundedRegion type={regionType} bounds={FormatRect(actualBounds)} " +
+                         $"expected={FormatRect(expectedBounds)} valid={valid}";
+            return valid;
+    }
+
+    public static bool ApplyRegionExcluding(
+        IntPtr hwnd,
+        IEnumerable<LayoutRect> rectangles,
+        IEnumerable<LayoutRect> excludedRectangles,
+        double scale,
+        out string diagnostic,
+        bool redraw = true)
+    {
+        var included = ToDeviceRectangles(rectangles, scale).ToArray();
+        var excluded = ToDeviceRectangles(excludedRectangles, scale).ToArray();
+        var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
+        if (destination == IntPtr.Zero)
+        {
+            diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+        try
+        {
+            foreach (var rectangle in included)
+            {
+                var source = NativeMethods.CreateRectRgn(
+                    rectangle.Left,
+                    rectangle.Top,
+                    rectangle.Right,
+                    rectangle.Bottom);
+                if (source == IntPtr.Zero)
+                {
+                    diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+                try
+                {
+                    if (NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnOr) == NativeMethods.Error)
+                    {
+                        diagnostic = $"CombineRgn failed error={Marshal.GetLastWin32Error()}";
+                        return false;
+                    }
+                }
+                finally
+                {
+                    NativeMethods.DeleteObject(source);
+                }
+            }
+
+            foreach (var rectangle in excluded)
+            {
+                var source = NativeMethods.CreateRectRgn(
+                    rectangle.Left,
+                    rectangle.Top,
+                    rectangle.Right,
+                    rectangle.Bottom);
+                if (source == IntPtr.Zero)
+                {
+                    diagnostic = $"CreateRectRgn failed error={Marshal.GetLastWin32Error()}";
+                    return false;
+                }
+                try
+                {
+                    NativeMethods.CombineRgn(destination, destination, source, NativeMethods.RgnDiff);
+                }
+                finally
+                {
+                    NativeMethods.DeleteObject(source);
+                }
+            }
+
+            if (NativeMethods.SetWindowRgn(hwnd, destination, redraw) == 0)
+            {
+                diagnostic = $"SetWindowRgn failed error={Marshal.GetLastWin32Error()}";
+                return false;
+            }
+            destination = IntPtr.Zero;
+            if (included.Length == 0)
+            {
+                diagnostic = "region=NULL";
+                return true;
+            }
+            var expectedBounds = GetBoundingRect(included);
+            var regionType = NativeMethods.GetWindowRgnBox(hwnd, out var actualBounds);
+            if (regionType == NativeMethods.Error)
+            {
+                diagnostic = $"GetWindowRgnBox failed error={Marshal.GetLastWin32Error()}";
+                return false;
+            }
+            diagnostic = $"regionType={regionType} bounds={FormatRect(actualBounds)} " +
+                         $"expectedBounds={FormatRect(expectedBounds)} excluded={excluded.Length}";
+            return actualBounds.Left == expectedBounds.Left &&
+                actualBounds.Top == expectedBounds.Top &&
+                actualBounds.Right == expectedBounds.Right &&
+                actualBounds.Bottom == expectedBounds.Bottom;
         }
         finally
         {

@@ -2,12 +2,13 @@ namespace CrabDesk.Core;
 
 public sealed class SemanticVersion : IComparable<SemanticVersion>
 {
-    private SemanticVersion(int major, int minor, int patch, string[] prerelease)
+    private SemanticVersion(int major, int minor, int patch, string[] prerelease, bool isDateRevision = false)
     {
         Major = major;
         Minor = minor;
         Patch = patch;
         Prerelease = prerelease;
+        IsDateRevision = isDateRevision;
     }
 
     public int Major { get; }
@@ -15,6 +16,7 @@ public sealed class SemanticVersion : IComparable<SemanticVersion>
     public int Patch { get; }
     public IReadOnlyList<string> Prerelease { get; }
     public bool IsPrerelease => Prerelease.Count > 0;
+    public bool IsDateRevision { get; }
 
     public static bool TryParse(string? value, out SemanticVersion version)
     {
@@ -40,12 +42,27 @@ public sealed class SemanticVersion : IComparable<SemanticVersion>
             ? []
             : normalized[(prereleaseSeparator + 1)..].Split('.');
         var parts = main.Split('.');
+        if (prerelease.Any(identifier => string.IsNullOrEmpty(identifier) ||
+            identifier.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-')))
+        {
+            return false;
+        }
+
+        if (parts.Length == 2 &&
+            parts[0].Length == 8 && parts[0].All(char.IsAsciiDigit) &&
+            parts[1].Length == 2 && parts[1].All(char.IsAsciiDigit) &&
+            DateOnly.TryParseExact(parts[0], "yyyyMMdd", out _) &&
+            int.TryParse(parts[0], out var dateCode) &&
+            int.TryParse(parts[1], out var releaseNumber) && releaseNumber is >= 0 and <= 99)
+        {
+            version = new SemanticVersion(dateCode, releaseNumber, 0, prerelease, isDateRevision: true);
+            return true;
+        }
+
         if (parts.Length != 3 ||
             !int.TryParse(parts[0], out var major) || major < 0 ||
             !int.TryParse(parts[1], out var minor) || minor < 0 ||
-            !int.TryParse(parts[2], out var patch) || patch < 0 ||
-            prerelease.Any(identifier => string.IsNullOrEmpty(identifier) ||
-                identifier.Any(character => !char.IsAsciiLetterOrDigit(character) && character != '-')))
+            !int.TryParse(parts[2], out var patch) || patch < 0)
         {
             return false;
         }
@@ -114,6 +131,11 @@ public sealed class SemanticVersion : IComparable<SemanticVersion>
         return 0;
     }
 
-    public override string ToString() =>
-        $"{Major}.{Minor}.{Patch}" + (IsPrerelease ? "-" + string.Join('.', Prerelease) : string.Empty);
+    public override string ToString()
+    {
+        var main = IsDateRevision
+            ? $"{Major:D8}.{Minor:D2}"
+            : $"{Major}.{Minor}.{Patch}";
+        return main + (IsPrerelease ? "-" + string.Join('.', Prerelease) : string.Empty);
+    }
 }
