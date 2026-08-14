@@ -73,6 +73,55 @@ public partial class AppearanceViewModel : ObservableObject
     public string LabelFontFamily { get => CurrentBox.Appearance.LabelFontFamily; set { if (!string.IsNullOrWhiteSpace(value) && value != LabelFontFamily) _service.SetBoxLabelFontFamily(null, value); } }
     public double LabelFontSize { get => CurrentBox.Appearance.LabelFontSize; set => _service.SetBoxLabelFontSize(null, value); }
     public bool ShowItemLabels { get => CurrentBox.Appearance.ShowItemLabels; set => _service.SetBoxShowItemLabels(null, value); }
+    public bool IconLabelCustomEnabled
+    {
+        get
+        {
+            var appearance = _service.State.Settings.Appearance;
+            return !string.IsNullOrWhiteSpace(appearance.IconLabelFontFamily) || appearance.IconLabelFontSize > 0;
+        }
+        set
+        {
+            if (value == IconLabelCustomEnabled) return;
+            if (value)
+            {
+                _service.SetIconLabelFontFamily("Segoe UI");
+                _service.SetIconLabelFontSize(9);
+            }
+            else
+            {
+                _service.SetIconLabelFontFamily(string.Empty);
+                _service.SetIconLabelFontSize(0);
+            }
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IconLabelFontFamily));
+            OnPropertyChanged(nameof(IconLabelFontSize));
+        }
+    }
+    public string IconLabelFontFamily
+    {
+        get
+        {
+            var family = _service.State.Settings.Appearance.IconLabelFontFamily;
+            return string.IsNullOrWhiteSpace(family) ? "Segoe UI" : family;
+        }
+        set
+        {
+            if (!string.IsNullOrWhiteSpace(value) && value != IconLabelFontFamily)
+            {
+                _service.SetIconLabelFontFamily(value);
+            }
+        }
+    }
+    public double IconLabelFontSize
+    {
+        get
+        {
+            var size = _service.State.Settings.Appearance.IconLabelFontSize;
+            return size > 0 ? size : 9;
+        }
+        set => _service.SetIconLabelFontSize(value);
+    }
     public BoxViewMode ViewMode { get => CurrentBox.ViewMode; set => _service.SetBoxViewMode(null, value); }
     public BoxSortMode SortMode { get => CurrentBox.SortMode; set => _service.SetBoxSortMode(null, value); }
 

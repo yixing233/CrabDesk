@@ -26,6 +26,22 @@ public interface IDesktopContextMenuRegistration
     void SetEnabled(bool enabled, string executablePath);
 }
 
+public enum DesktopKeyboardCommand
+{
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
+    Open,
+    Delete,
+    Rename
+}
+
+public sealed class DesktopKeyboardCommandEventArgs(DesktopKeyboardCommand command) : EventArgs
+{
+    public DesktopKeyboardCommand Command { get; } = command;
+}
+
 public interface IDesktopInputMonitor : IDisposable
 {
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
@@ -33,14 +49,38 @@ public interface IDesktopInputMonitor : IDisposable
     event EventHandler? DesktopContextMenuRequested;
     event EventHandler? DesktopContextMenuCommandRequested;
     event EventHandler? DesktopContextMenuRefreshRequested;
+    event EventHandler? DesktopDeleteRequested;
+    event EventHandler? DesktopRenameRequested;
+    event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
+    // Lets the low-level wheel hook keep Ctrl+wheel on the unassigned-icon
+    // layer when the pointer is over the desktop, and route it to a single
+    // box when the pointer is inside one of the box surfaces.
+    Func<int, int, bool>? IsPointerOverBox { get; set; }
+    // Called by the low-level keyboard hook before it consumes Delete.
+    // Explorer keeps its normal behavior while CrabDesk has no custom selection.
+    Func<bool>? CanDeleteDesktopItems { get; set; }
+    // Called by the low-level keyboard hook before it consumes F2.
+    // Explorer keeps its normal behavior while CrabDesk has no renamable selection.
+    Func<bool>? CanRenameDesktopItems { get; set; }
+    // Called by the low-level keyboard hook before a desktop command is consumed.
+    // Returning false leaves the key with Explorer or the active application.
+    Func<DesktopKeyboardCommand, bool>? CanHandleDesktopKeyboardCommand { get; set; }
     void TrackDesktopContextMenu();
 }
 
 public sealed class DesktopIconZoomEventArgs(int delta) : EventArgs
 {
     public int Delta { get; } = delta;
+    public int X { get; }
+    public int Y { get; }
+
+    public DesktopIconZoomEventArgs(int delta, int x, int y) : this(delta)
+    {
+        X = x;
+        Y = y;
+    }
 }
 
 public interface IUpdateService : IDisposable
@@ -62,7 +102,7 @@ public interface IFileOperationService
     void ShowProperties(DesktopItemRef item);
     Task<string> RenameAsync(DesktopItemRef item, string newName, CancellationToken cancellationToken = default);
     Task DeleteAsync(IEnumerable<DesktopItemRef> items, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<string>> ImportAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool move, CancellationToken cancellationToken = default);
+    Task<FileImportBatchResult> ImportAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool move, CancellationToken cancellationToken = default);
     void SetClipboardFiles(IEnumerable<DesktopItemRef> items, bool move);
     FileClipboardContent GetClipboardFiles();
     void ClearClipboardFiles();

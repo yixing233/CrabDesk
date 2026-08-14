@@ -4,15 +4,17 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:views="using:CrabDesk.WinUI.Views"
     NavigationCacheMode="Enabled">
-    <TabView TabWidthMode="SizeToContent"
-             IsAddTabButtonVisible="False"
-             CanReorderTabs="False"
-             CanDragTabs="False">
-        <TabViewItem Header="普通规则" IsClosable="False">
-            <views:OrganizationPage />
-        </TabViewItem>
-        <TabViewItem Header="AI 整理" IsClosable="False">
-            <views:AiClassificationPage />
-        </TabViewItem>
-    </TabView>
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <SelectorBar x:Name="PageSelectorBar"
+                     SelectionChanged="PageSelectorBar_SelectionChanged"
+                     HorizontalAlignment="Left">
+            <SelectorBarItem Text="普通规则" Tag="rules" IsSelected="True" AutomationProperties.Name="普通规则" />
+            <SelectorBarItem Text="AI 整理" Tag="ai" AutomationProperties.Name="AI 整理" />
+        </SelectorBar>
+        <Frame x:Name="ContentFrame" Grid.Row="1" />
+    </Grid>
 </Page>

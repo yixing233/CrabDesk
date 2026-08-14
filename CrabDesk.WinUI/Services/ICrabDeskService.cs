@@ -69,6 +69,7 @@ public interface ICrabDeskService
     Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default);
     Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default);
     Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default);
+    IReadOnlyList<OrganizationDecision> PreviewOrganizationRules();
     OrganizationApplyResult ApplyOrganizationRules(bool notify = true);
     void UndoLastOrganization();
     void InstallDefaultOrganizationRules();
@@ -84,6 +85,8 @@ public interface ICrabDeskService
     void SetHoverFeedback(bool enabled);
     void SetIconSpacing(double horizontal, double vertical);
     void SetSelectionColor(string value);
+    void SetIconLabelFontSize(double value);
+    void SetIconLabelFontFamily(string value);
     void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);

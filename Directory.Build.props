@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- Keep Windows assembly metadata within its UInt16 component limits while
          the user-facing release identifier follows the YYYYMMDD.NN format. -->
-    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">2026.813.1.0</AssemblyVersion>
-    <FileVersion Condition="'$(FileVersion)' == ''">2026.813.1.0</FileVersion>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == ''">2026.815.1.0</AssemblyVersion>
+    <FileVersion Condition="'$(FileVersion)' == ''">2026.815.1.0</FileVersion>
   </PropertyGroup>
 </Project>

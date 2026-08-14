@@ -33,6 +33,15 @@ public static class DesktopItemLayoutEngine
         return Math.Max(Math.Clamp(verticalSpacing, 56, 180), iconSize + 38);
     }
 
+    // Box icon zoom only changes the box IconSize. Scale the configured
+    // global icon spacing with that size so the box grid follows its icons
+    // instead of staying pinned to the global default spacing.
+    public static double ScaleIconSpacing(double spacing, double iconSize)
+    {
+        const double anchorIconSize = 42;
+        return spacing * (Math.Clamp(iconSize, 24, 96) / anchorIconSize);
+    }
+
     public static double GetMinimumBoxWidth(
         BoxViewMode viewMode,
         double iconSize,

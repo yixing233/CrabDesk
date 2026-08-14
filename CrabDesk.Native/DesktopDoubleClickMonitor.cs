@@ -7,26 +7,44 @@ namespace CrabDesk.Native;
 public sealed class DesktopInputMonitor : IDesktopInputMonitor
 {
     private const int WhMouseLl = 14;
+    private const int WhKeyboardLl = 13;
     private const int WmLButtonDown = 0x0201;
     private const int WmRButtonDown = 0x0204;
     private const int WmMouseWheel = 0x020A;
+    private const int WmKeyDown = 0x0100;
+    private const int WmKeyUp = 0x0101;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmSysKeyUp = 0x0105;
     private const uint MnGetHMenu = 0x01E1;
     private const uint MfByPosition = 0x0400;
     private const uint ExplorerRefreshCommandId = 0x7003;
     private const uint MenuCommandTimeoutMilliseconds = 50;
     private const long DesktopContextMenuTrackingWindowMilliseconds = 10_000;
     private const int VkControl = 0x11;
-    private readonly LowLevelMouseProc _callback;
-    private IntPtr _hook;
+    private const int VkReturn = 0x0D;
+    private const int VkDelete = 0x2E;
+    private const int VkA = 0x41;
+    private const int VkC = 0x43;
+    private const int VkV = 0x56;
+    private const int VkX = 0x58;
+    private const int VkF2 = 0x71;
+    private readonly LowLevelHookProc _mouseCallback;
+    private readonly LowLevelHookProc _keyboardCallback;
+    private IntPtr _mouseHook;
+    private IntPtr _keyboardHook;
     private long _desktopContextMenuExpiresAt;
+    private readonly HashSet<uint> _interceptedKeyboardKeys = [];
     private bool _disposed;
 
     public DesktopInputMonitor()
     {
-        _callback = MouseHook;
-        _hook = SetWindowsHookEx(WhMouseLl, _callback, GetModuleHandle(null), 0);
-        if (_hook == IntPtr.Zero)
+        _mouseCallback = MouseHook;
+        _keyboardCallback = KeyboardHook;
+        _mouseHook = SetWindowsHookEx(WhMouseLl, _mouseCallback, GetModuleHandle(null), 0);
+        _keyboardHook = SetWindowsHookEx(WhKeyboardLl, _keyboardCallback, GetModuleHandle(null), 0);
+        if (_mouseHook == IntPtr.Zero || _keyboardHook == IntPtr.Zero)
         {
+            Dispose();
             throw new InvalidOperationException("无法监听桌面双击操作。");
         }
     }
@@ -36,9 +54,16 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     public event EventHandler? DesktopContextMenuRequested;
     public event EventHandler? DesktopContextMenuCommandRequested;
     public event EventHandler? DesktopContextMenuRefreshRequested;
+    public event EventHandler? DesktopDeleteRequested;
+    public event EventHandler? DesktopRenameRequested;
+    public event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;
 
     public IntPtr DesktopListView { get; set; }
     public bool Enabled { get; set; }
+    public Func<int, int, bool>? IsPointerOverBox { get; set; }
+    public Func<bool>? CanDeleteDesktopItems { get; set; }
+    public Func<bool>? CanRenameDesktopItems { get; set; }
+    public Func<DesktopKeyboardCommand, bool>? CanHandleDesktopKeyboardCommand { get; set; }
 
     /// <summary>
     /// Arms command tracking when the replacement icon layer forwards a
@@ -59,10 +84,15 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
             return;
         }
         _disposed = true;
-        if (_hook != IntPtr.Zero)
+        if (_mouseHook != IntPtr.Zero)
         {
-            UnhookWindowsHookEx(_hook);
-            _hook = IntPtr.Zero;
+            UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = IntPtr.Zero;
+        }
+        if (_keyboardHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_keyboardHook);
+            _keyboardHook = IntPtr.Zero;
         }
     }
 
@@ -109,7 +139,11 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
                 var delta = unchecked((short)(mouse.MouseData >> 16));
                 if (delta != 0)
                 {
-                    if (IsCurrentProcessWindow(targetWindow))
+                    // Ctrl+wheel over a box zooms the icons of that box instead
+                    // of Explorer unassigned-icon layer. Keep forwarding to the
+                    // native ListView only while the pointer is on the desktop.
+                    var overBox = IsPointerOverBox?.Invoke(mouse.Point.X, mouse.Point.Y) == true;
+                    if (IsCurrentProcessWindow(targetWindow) && !overBox)
                     {
                         DesktopIconPositionService.ForwardControlMouseWheel(
                             DesktopListView,
@@ -117,11 +151,94 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
                             mouse.Point.Y,
                             delta);
                     }
-                    IconZoomRequested?.Invoke(this, new DesktopIconZoomEventArgs(delta));
+                    IconZoomRequested?.Invoke(
+                        this,
+                        new DesktopIconZoomEventArgs(delta, mouse.Point.X, mouse.Point.Y));
                 }
             }
         }
-        return CallNextHookEx(_hook, code, message, data);
+        return CallNextHookEx(_mouseHook, code, message, data);
+    }
+
+    private IntPtr KeyboardHook(int code, IntPtr message, IntPtr data)
+    {
+        if (code >= 0 && Enabled && DesktopListView != IntPtr.Zero)
+        {
+            var keyboard = Marshal.PtrToStructure<LowLevelKeyboardHookStruct>(data);
+            var msg = message.ToInt32();
+            if (msg == WmKeyUp || msg == WmSysKeyUp)
+            {
+                if (_interceptedKeyboardKeys.Remove(keyboard.VirtualKeyCode))
+                {
+                    return new IntPtr(1);
+                }
+            }
+            else if (msg == WmKeyDown || msg == WmSysKeyDown)
+            {
+                if (_interceptedKeyboardKeys.Contains(keyboard.VirtualKeyCode))
+                {
+                    return new IntPtr(1);
+                }
+
+                if (TryGetDesktopKeyboardCommand(keyboard.VirtualKeyCode, out var command) &&
+                    IsDesktopForeground() &&
+                    CanHandleDesktopCommand(command))
+                {
+                    _interceptedKeyboardKeys.Add(keyboard.VirtualKeyCode);
+                    DesktopKeyboardCommandRequested?.Invoke(
+                        this,
+                        new DesktopKeyboardCommandEventArgs(command));
+                    if (command == DesktopKeyboardCommand.Delete)
+                    {
+                        DesktopDeleteRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                    else if (command == DesktopKeyboardCommand.Rename)
+                    {
+                        DesktopRenameRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                    return new IntPtr(1);
+                }
+            }
+        }
+
+        return CallNextHookEx(_keyboardHook, code, message, data);
+    }
+
+    private bool TryGetDesktopKeyboardCommand(uint virtualKey, out DesktopKeyboardCommand command)
+    {
+        command = virtualKey switch
+        {
+            (uint)VkDelete => DesktopKeyboardCommand.Delete,
+            (uint)VkF2 => DesktopKeyboardCommand.Rename,
+            (uint)VkReturn => DesktopKeyboardCommand.Open,
+            (uint)VkA when GetAsyncKeyState(VkControl) < 0 => DesktopKeyboardCommand.SelectAll,
+            (uint)VkC when GetAsyncKeyState(VkControl) < 0 => DesktopKeyboardCommand.Copy,
+            (uint)VkX when GetAsyncKeyState(VkControl) < 0 => DesktopKeyboardCommand.Cut,
+            (uint)VkV when GetAsyncKeyState(VkControl) < 0 => DesktopKeyboardCommand.Paste,
+            _ => default
+        };
+        return virtualKey == (uint)VkDelete ||
+            virtualKey == (uint)VkF2 ||
+            virtualKey == (uint)VkReturn ||
+            ((virtualKey == (uint)VkA ||
+              virtualKey == (uint)VkC ||
+              virtualKey == (uint)VkX ||
+              virtualKey == (uint)VkV) && GetAsyncKeyState(VkControl) < 0);
+    }
+
+    private bool CanHandleDesktopCommand(DesktopKeyboardCommand command)
+    {
+        if (CanHandleDesktopKeyboardCommand is not null)
+        {
+            return CanHandleDesktopKeyboardCommand(command);
+        }
+
+        return command switch
+        {
+            DesktopKeyboardCommand.Delete => CanDeleteDesktopItems?.Invoke() == true,
+            DesktopKeyboardCommand.Rename => CanRenameDesktopItems?.Invoke() == true,
+            _ => false
+        };
     }
 
     private bool IsDesktopContextMenuActive()
@@ -226,7 +343,19 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
 
     private bool IsDesktopSurfacePoint(NativePoint screenPoint)
     {
-        var window = WindowFromPoint(screenPoint);
+        return IsDesktopSurfaceWindow(WindowFromPoint(screenPoint));
+    }
+
+    private bool IsDesktopForeground()
+    {
+        var window = GetForegroundWindow();
+        return window != IntPtr.Zero &&
+            !IsCurrentProcessWindow(window) &&
+            IsDesktopSurfaceWindow(window);
+    }
+
+    private bool IsDesktopSurfaceWindow(IntPtr window)
+    {
         if (window == DesktopListView ||
             IsChild(DesktopListView, window) ||
             IsChild(window, DesktopListView) ||
@@ -259,7 +388,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         return processId == Environment.ProcessId;
     }
 
-    private delegate IntPtr LowLevelMouseProc(int code, IntPtr message, IntPtr data);
+    private delegate IntPtr LowLevelHookProc(int code, IntPtr message, IntPtr data);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
@@ -278,9 +407,19 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         internal IntPtr ExtraInfo;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LowLevelKeyboardHookStruct
+    {
+        internal uint VirtualKeyCode;
+        internal uint ScanCode;
+        internal uint Flags;
+        internal uint Time;
+        internal IntPtr ExtraInfo;
+    }
+
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc callback, IntPtr module, uint threadId);
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelHookProc callback, IntPtr module, uint threadId);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -294,6 +433,9 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
 
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr window, uint flags);

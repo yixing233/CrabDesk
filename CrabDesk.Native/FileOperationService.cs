@@ -108,43 +108,59 @@ public sealed class FileOperationService : IFileOperationService
         }, cancellationToken);
     }
 
-    public Task<IReadOnlyList<string>> ImportAsync(
+    public Task<FileImportBatchResult> ImportAsync(
         IEnumerable<string> sourcePaths,
         string destinationDirectory,
         bool move,
         CancellationToken cancellationToken = default)
     {
         var sources = sourcePaths.ToArray();
-        return Task.Run<IReadOnlyList<string>>(() =>
+        return Task.Run(() =>
         {
             Directory.CreateDirectory(destinationDirectory);
-            var imported = new List<string>();
+            var results = new List<FileImportItemResult>(sources.Length);
             foreach (var source in sources)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var destination = GetUniqueDestination(destinationDirectory, Path.GetFileName(source));
-                if (Directory.Exists(source))
+                string? destination = null;
+                try
                 {
-                    if (move)
+                    destination = GetUniqueDestination(destinationDirectory, Path.GetFileName(source));
+                    if (Directory.Exists(source))
                     {
-                        MoveDirectory(source, destination, cancellationToken);
+                        if (move)
+                        {
+                            MoveDirectory(source, destination, cancellationToken);
+                        }
+                        else
+                        {
+                            CopyDirectory(source, destination, cancellationToken);
+                        }
+                    }
+                    else if (move)
+                    {
+                        MoveFile(source, destination);
                     }
                     else
                     {
-                        CopyDirectory(source, destination, cancellationToken);
+                        File.Copy(source, destination);
                     }
+                    results.Add(new FileImportItemResult(source, destination, null));
                 }
-                else if (move)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    MoveFile(source, destination);
+                    throw;
                 }
-                else
+                catch (Exception exception)
                 {
-                    File.Copy(source, destination);
+                    if (destination is not null)
+                    {
+                        RemoveIncompleteDestination(destination);
+                    }
+                    results.Add(new FileImportItemResult(source, null, exception.Message));
                 }
-                imported.Add(destination);
             }
-            return imported;
+            return new FileImportBatchResult(results);
         }, cancellationToken);
     }
 
@@ -191,6 +207,26 @@ public sealed class FileOperationService : IFileOperationService
             {
                 return candidate;
             }
+        }
+    }
+
+    private static void RemoveIncompleteDestination(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+            else if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Keep the original import error as the actionable failure. A
+            // later retry will choose a new collision-free destination.
         }
     }
 

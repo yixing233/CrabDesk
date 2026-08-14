@@ -23,14 +23,18 @@ internal sealed class DesktopBoxForm : Forms.Form
     private const int WmMouseActivate = 0x0021;
     private const int WmContextMenu = 0x007B;
     private const int WmEraseBkgnd = 0x0014;
+    private const int WmMouseWheel = 0x020A;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
-    private const int BoxHoverFillAlpha = 48;
-    private const int BoxHoverBorderAlpha = 156;
+    private const int SelectedItemFillAlpha = 112;
+    private const int BoxHoverFillAlpha = 156;
+    private const int BoxHoverBorderAlpha = 232;
+    private const float HoverBrightness = 0.30f;
     private const int HoverExpansionDelayMilliseconds = 120;
     private const int HoverCollapseDelayMilliseconds = 180;
     private const int HoverPollingIntervalMilliseconds = 25;
     private const int BoxHeightAnimationMilliseconds = 140;
+    private const int DragRenderCoalesceMilliseconds = 16;
     private const float MappedFolderTabBarHeight = (float)DesktopItemLayoutEngine.TabBarHeight;
     private const int CompactGridLabelLineCount = 2;
     private static readonly IntPtr HtTransparent = new(-1);
@@ -76,9 +80,19 @@ internal sealed class DesktopBoxForm : Forms.Form
     private readonly Dictionary<Guid, BoxHeightAnimation> _heightAnimations = [];
     private readonly List<BoxGeometry> _boxes = [];
     private readonly List<ItemGeometry> _items = [];
+    private readonly List<ItemGeometry> _marqueeSelectionItems = [];
+    private readonly HashSet<string> _marqueeSelectionKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(Guid BoxId, string ItemKey), RectangleF> _expandedItemHitBounds = [];
+    private bool _geometryDirty = true;
     private IReadOnlyList<LayoutRect> _lastWindowRegionRectangles = [];
     private readonly Forms.Timer _animationTimer;
     private readonly Forms.Timer _hoverTimer;
+    private readonly Forms.Timer _dragRenderTimer;
+    private DateTime _lastDragRenderUtc = DateTime.MinValue;
+    private bool _dragRenderPending;
+    private bool _hoverReconcilePending;
+    private bool _confirmationInProgress;
+    private Bitmap? _hitMaskBitmap;
     private readonly Forms.ToolTip _headerToolTip;
     private readonly Forms.Form _titleEditorWindow;
     private readonly FormsIntegration.ElementHost _titleEditorHost;
@@ -91,6 +105,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private ResizeEdges _resizeEdges;
     private DesktopItemRef? _pressedItem;
     private DesktopBox? _selectionBox;
+    private BoxGeometry? _selectionGeometry;
     private Guid? _pressedBoxId;
     private LayoutRect _startBounds;
     private PointF _pressPoint;
@@ -112,6 +127,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     private bool _isCompositedByIconSurface;
     private Action? _iconLayerRenderRequest;
     private int _iconCacheVersion;
+    private int _dynamicVisualVersion;
     private int _paintCount;
     private bool _resourcesDisposed;
     private bool _regionFailureHandled;
@@ -143,6 +159,8 @@ internal sealed class DesktopBoxForm : Forms.Form
         _hoverTimer = new Forms.Timer { Interval = HoverPollingIntervalMilliseconds };
         _hoverTimer.Tick += OnHoverTimer;
         _hoverTimer.Start();
+        _dragRenderTimer = new Forms.Timer { Interval = DragRenderCoalesceMilliseconds };
+        _dragRenderTimer.Tick += OnDragRenderTimerTick;
         _headerToolTip = new Forms.ToolTip
         {
             InitialDelay = 450,
@@ -265,6 +283,16 @@ internal sealed class DesktopBoxForm : Forms.Form
                 return;
             }
         }
+        if (message.Msg == WmMouseWheel &&
+            (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
+        {
+            // The low-level hook already converts Ctrl+wheel over a box into
+            // a box-icon zoom. Swallowing the native message here stops
+            // WinForms from bubbling it to the Explorer list view, which
+            // would zoom the desktop icons as well.
+            message.Result = IntPtr.Zero;
+            return;
+        }
         base.WndProc(ref message);
     }
 
@@ -286,6 +314,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     internal bool RefreshWorkspace()
     {
         RebuildBoxItemCache();
+        _geometryDirty = true;
         if (!DesktopBoxes.Any(box => box.ExpandOnHover))
         {
             ClearHoverState();
@@ -373,6 +402,59 @@ internal sealed class DesktopBoxForm : Forms.Form
     internal void PrepareIconLayerComposition() =>
         _isCompositedByIconSurface = true;
 
+    internal bool IsTransformActive => _movingBox is not null || _resizingBox is not null;
+
+    internal bool HasDynamicVisual =>
+        IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null;
+
+    internal bool IsMarqueeSelectionActive => _selectionBox is not null;
+
+    internal int DynamicVisualVersion => _dynamicVisualVersion;
+
+    internal RectangleF? GetDynamicVisualBounds()
+    {
+        if (IsDisposed || _resourcesDisposed || !HasDynamicVisual)
+        {
+            return null;
+        }
+
+        EnsureGeometry();
+        RectangleF? bounds = null;
+        var transformBox = _movingBox ?? _resizingBox;
+        if (transformBox is not null)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == transformBox.Id);
+            if (geometry is not null)
+            {
+                bounds = GetTransformGeometry(geometry).Bounds;
+            }
+        }
+
+        if (_dropPreview is { } preview && preview.BoxId != transformBox?.Id)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == preview.BoxId);
+            if (geometry is not null)
+            {
+                bounds = bounds is { } existing
+                    ? RectangleF.Union(existing, geometry.Bounds)
+                    : geometry.Bounds;
+            }
+        }
+
+        if (_selectionBox is { } selectionBox)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == selectionBox.Id);
+            if (geometry is not null && GetMarqueeSelectionOverlayBounds(geometry) is { } selectionBounds)
+            {
+                bounds = bounds is { } existing
+                    ? RectangleF.Union(existing, selectionBounds)
+                    : selectionBounds;
+            }
+        }
+
+        return bounds;
+    }
+
     internal void SetIconLayerRenderRequest(Action renderRequest) =>
         _iconLayerRenderRequest = renderRequest;
 
@@ -389,10 +471,86 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
 
-        RebuildGeometry();
+        EnsureGeometry();
         foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
         {
             DrawBox(graphics, box, clipBounds);
+        }
+    }
+
+    /// <summary>
+    /// Renders the settled portion of this monitor. During a transform the
+    /// active box is supplied by the small dynamic pass instead of forcing the
+    /// desktop-wide backing layer to redraw it every frame.
+    /// </summary>
+    internal void RenderStaticOnIconLayer(Graphics graphics, RectangleF clipBounds)
+    {
+        if (IsDisposed || _resourcesDisposed)
+        {
+            return;
+        }
+
+        EnsureGeometry();
+        var transformId = (_movingBox ?? _resizingBox)?.Id;
+        var previewId = _dropPreview?.BoxId;
+        var selectionId = _selectionBox?.Id;
+        var hasDynamicVisual = HasDynamicVisual;
+        foreach (var box in _boxes.Where(box =>
+                     box.Bounds.IntersectsWith(clipBounds) &&
+                     (!hasDynamicVisual ||
+                      (box.Box.Id != transformId &&
+                       box.Box.Id != previewId))))
+        {
+            var isSelectionBox = box.Box.Id == selectionId;
+            DrawBox(
+                graphics,
+                box,
+                clipBounds,
+                includeDropPreview: !hasDynamicVisual,
+                selectedItemKeys: isSelectionBox ? _selectionBase : null,
+                includeSelectionRectangle: !isSelectionBox,
+                suppressedHoverItemKeys: isSelectionBox ? _marqueeSelectionKeys : null);
+        }
+    }
+
+    /// <summary>
+    /// Paints only the mutable part of an icon-layer drag frame: the box being
+    /// moved/resized or the one currently receiving a desktop-item preview.
+    /// </summary>
+    internal void RenderDragOnIconLayer(Graphics graphics, RectangleF clipBounds)
+    {
+        if (IsDisposed || _resourcesDisposed)
+        {
+            return;
+        }
+
+        EnsureGeometry();
+        var transformBox = _movingBox ?? _resizingBox;
+        if (_selectionBox is { } selectionBox)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == selectionBox.Id);
+            if (geometry is not null)
+            {
+                DrawMarqueeSelectionOverlay(graphics, geometry, clipBounds);
+            }
+        }
+
+        if (transformBox is not null)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == transformBox.Id);
+            if (geometry is not null)
+            {
+                DrawBox(graphics, GetTransformGeometry(geometry), clipBounds);
+            }
+        }
+
+        if (_dropPreview is { } preview && preview.BoxId != transformBox?.Id)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == preview.BoxId);
+            if (geometry is not null)
+            {
+                DrawBox(graphics, geometry, clipBounds);
+            }
         }
     }
 
@@ -445,14 +603,14 @@ internal sealed class DesktopBoxForm : Forms.Form
         try
         {
             _paintCount++;
-            RebuildGeometry();
+            if (!_isCompositedByIconSurface)
+            {
+                RebuildGeometry();
+            }
             if (_isCompositedByIconSurface)
             {
-                using var inputBitmap = new Bitmap(
-                    ClientSize.Width,
-                    ClientSize.Height,
-                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                using (var graphics = Graphics.FromImage(inputBitmap))
+                EnsureHitMaskBitmap();
+                using (var graphics = Graphics.FromImage(_hitMaskBitmap!))
                 {
                     graphics.Clear(Color.Transparent);
                     graphics.ScaleTransform((float)_scale, (float)_scale);
@@ -461,16 +619,24 @@ internal sealed class DesktopBoxForm : Forms.Form
                     // box region; it is visually imperceptible but preserves
                     // the existing box mouse and drag handlers.
                     using var hitMask = new SolidBrush(Color.FromArgb(1, Color.Black));
-                    foreach (var box in _boxes)
+                    // Hit masking only needs the current model bounds. Avoid a
+                    // full geometry rebuild on every coalesced drag frame.
+                    foreach (var box in DesktopBoxes)
                     {
-                        graphics.FillRectangle(hitMask, box.Bounds);
+                        var hitHeight = (float)GetVisualBoxHeight(box);
+                        graphics.FillRectangle(
+                            hitMask,
+                            (float)box.Bounds.X,
+                            (float)box.Bounds.Y,
+                            (float)box.Bounds.Width,
+                            hitHeight);
                     }
                     graphics.ResetTransform();
                 }
 
                 _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
                     Handle,
-                    inputBitmap,
+                    _hitMaskBitmap!,
                     PointToScreen(Point.Empty),
                     out _lastPresentDiagnostic);
                 if (_lastPresentSucceeded)
@@ -552,6 +718,20 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
+    private void EnsureHitMaskBitmap()
+    {
+        if (_hitMaskBitmap is null ||
+            _hitMaskBitmap.Width != ClientSize.Width ||
+            _hitMaskBitmap.Height != ClientSize.Height)
+        {
+            _hitMaskBitmap?.Dispose();
+            _hitMaskBitmap = new Bitmap(
+                ClientSize.Width,
+                ClientSize.Height,
+                System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        }
+    }
+
     internal void RequestRender()
     {
         PresentLayer();
@@ -580,6 +760,11 @@ internal sealed class DesktopBoxForm : Forms.Form
             _animationTimer.Dispose();
             _hoverTimer.Stop();
             _hoverTimer.Dispose();
+            CancelPendingDragRender();
+            _dragRenderTimer.Dispose();
+            _hitMaskBitmap?.Dispose();
+            _hitMaskBitmap = null;
+            LayeredWindowPresenter.Release(Handle);
             ClearIconCache();
             _iconLoadCancellation.Dispose();
             _shellContextMenu?.Dispose();
@@ -619,6 +804,140 @@ internal sealed class DesktopBoxForm : Forms.Form
         Invalidate();
     }
 
+    internal bool HasSelection => _selection.Count > 0;
+
+    internal bool IsTitleEditing => _editingBox is not null || _titleEditorWindow.Visible;
+
+    internal IReadOnlyList<DesktopItemRef> GetSelectedFileSystemItems(bool includeReadOnly = false)
+    {
+        var selected = new List<DesktopItemRef>();
+        foreach (var box in DesktopBoxes)
+        {
+            if (!includeReadOnly && box.MappedFolder?.IsReadOnly == true)
+            {
+                continue;
+            }
+
+            selected.AddRange(GetCachedItemsForBox(box.Id).Where(item =>
+                _selection.Contains(item.Key.ToString()) && item.FileSystemPath is not null));
+        }
+        return selected;
+    }
+
+    internal IReadOnlyList<DesktopItemRef> GetSelectedItems() => DesktopBoxes
+        .SelectMany(box => GetCachedItemsForBox(box.Id).Where(item =>
+            _selection.Contains(item.Key.ToString())))
+        .ToArray();
+
+    internal bool CanPasteSelectedOrHoveredBox(Point screenPoint) =>
+        TryGetPasteTargetBox(screenPoint, out var box) && _runtime.CanPasteIntoBox(box);
+
+    internal async Task<bool> PasteIntoSelectedOrHoveredBoxAsync(Point screenPoint)
+    {
+        if (!TryGetPasteTargetBox(screenPoint, out var box) || !_runtime.CanPasteIntoBox(box))
+        {
+            return false;
+        }
+
+        await PasteIntoBoxAsync(box);
+        return true;
+    }
+
+    internal bool CanSelectAllSelectedOrHoveredItems(Point screenPoint) =>
+        GetSingleSelectedBox() is not null || TryGetBoxAtScreenPoint(screenPoint, out _);
+
+    internal bool SelectAllSelectedOrHoveredItems(Point screenPoint)
+    {
+        var selectedBox = GetSingleSelectedBox();
+        if (selectedBox is null && !TryGetBoxAtScreenPoint(screenPoint, out selectedBox))
+        {
+            return false;
+        }
+
+        RebuildGeometry();
+        var geometry = _boxes.LastOrDefault(box => box.Box.Id == selectedBox.Id);
+        if (geometry is null)
+        {
+            return false;
+        }
+
+        _selection.Clear();
+        foreach (var item in GetVisibleItemsForBox(geometry))
+        {
+            _selection.Add(item.Key.ToString());
+        }
+        _pressedItem = null;
+        _pressedBoxId = null;
+        Invalidate();
+        return true;
+    }
+
+    internal int RenameSelectionCount => GetRenameTargets().Count;
+
+    internal bool BeginRenameSelectedItem()
+    {
+        var targets = GetRenameTargets();
+        if (targets.Count != 1)
+        {
+            return false;
+        }
+
+        _ = RenameItemAsync(targets[0].Box, targets[0].Item);
+        return true;
+    }
+
+    private List<(DesktopBox Box, DesktopItemRef Item)> GetRenameTargets()
+    {
+        var targets = new List<(DesktopBox Box, DesktopItemRef Item)>();
+        foreach (var box in DesktopBoxes)
+        {
+            if (box.MappedFolder?.IsReadOnly == true)
+            {
+                continue;
+            }
+
+            targets.AddRange(GetCachedItemsForBox(box.Id)
+                .Where(item => _selection.Contains(item.Key.ToString()) && item.FileSystemPath is not null)
+                .Select(item => (box, item)));
+        }
+        return targets;
+    }
+
+    private bool TryGetPasteTargetBox(Point screenPoint, out DesktopBox box)
+    {
+        box = GetSingleSelectedBox()!;
+        if (box is not null)
+        {
+            return true;
+        }
+        return TryGetBoxAtScreenPoint(screenPoint, out box);
+    }
+
+    private DesktopBox? GetSingleSelectedBox()
+    {
+        var selectedBoxes = DesktopBoxes
+            .Where(box => GetCachedItemsForBox(box.Id)
+                .Any(item => _selection.Contains(item.Key.ToString())))
+            .Take(2)
+            .ToArray();
+        return selectedBoxes.Length == 1 ? selectedBoxes[0] : null;
+    }
+
+    private bool TryGetBoxAtScreenPoint(Point screenPoint, out DesktopBox box)
+    {
+        RebuildGeometry();
+        var point = ToDip(PointToClient(screenPoint));
+        var geometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        if (geometry is null)
+        {
+            box = null!;
+            return false;
+        }
+
+        box = geometry.Box;
+        return true;
+    }
+
     /// <summary>
     /// Receives a rendered desktop-icon drag without exposing a FileDrop
     /// payload to Explorer. Screen coordinates are used because the icon and
@@ -634,7 +953,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
 
         var point = ToDip(PointToClient(screenPoint));
-        RebuildGeometry();
+        EnsureGeometry();
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (box is null || box.Box.IsMappedFolder || box.Box.MappedFolder?.IsReadOnly == true)
         {
@@ -661,7 +980,10 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
 
         var point = ToDip(PointToClient(screenPoint));
-        RebuildGeometry();
+        // This path runs for every captured desktop mouse move. Geometry is
+        // already invalidated by workspace and box changes, so only rebuild
+        // when that state is actually dirty.
+        EnsureGeometry();
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (box is null)
         {
@@ -684,6 +1006,52 @@ internal sealed class DesktopBoxForm : Forms.Form
     }
 
     internal void ClearDesktopItemDropPreview() => ClearDropPreview();
+
+    private DesktopBox? GetBoxAtScreenPoint(Point screenPoint)
+    {
+        if (IsDisposed || _resourcesDisposed)
+        {
+            return null;
+        }
+
+        // Pure model-space hit test so the low-level input hook can query it
+        // without touching WinForms controls from its callback thread.
+        var localX = (float)((screenPoint.X - _monitor.PixelBounds.X) / _scale);
+        var localY = (float)((screenPoint.Y - _monitor.PixelBounds.Y) / _scale);
+        return DesktopBoxes.LastOrDefault(box =>
+        {
+            var bounds = new RectangleF(
+                (float)box.Bounds.X,
+                (float)box.Bounds.Y,
+                (float)box.Bounds.Width,
+                (float)GetVisualBoxHeight(box));
+            return bounds.Contains(localX, localY);
+        });
+    }
+
+    internal bool IsPointOverBox(Point screenPoint) =>
+        GetBoxAtScreenPoint(screenPoint) is not null;
+
+    /// <summary>
+    /// Scales the icons of the box under the pointer. Returns false when the
+    /// pointer is not inside any box so the caller can fall back to the
+    /// unassigned-icon zoom path.
+    /// </summary>
+    internal bool TryZoomBoxIconsAt(Point screenPoint, int delta)
+    {
+        var box = GetBoxAtScreenPoint(screenPoint);
+        if (box is null)
+        {
+            return false;
+        }
+
+        var notches = Math.Max(1, Math.Abs(delta) / 120) * (delta > 0 ? 1 : -1);
+        var targetSize = Math.Clamp(box.Appearance.IconSize + notches * 4, 24, 96);
+        _runtime.SetBoxIconSize(box.Id, targetSize);
+        DiagnosticLog.Info(
+            $"Box icon zoom box={box.Id:N} size={box.Appearance.IconSize:0.##} delta={delta}");
+        return true;
+    }
 
     private int AssignDesktopItemsAtDrop(
         BoxGeometry target,
@@ -775,6 +1143,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         _regionFailureHandled = true;
         _animationTimer.Stop();
         _hoverTimer.Stop();
+        CancelPendingDragRender();
         try
         {
             Hide();
@@ -791,6 +1160,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         _boxes.Clear();
         _items.Clear();
+        _expandedItemHitBounds.Clear();
         foreach (var box in DesktopBoxes)
         {
             var titleBarHeight = (float)box.Appearance.TitleBarHeight;
@@ -828,7 +1198,48 @@ internal sealed class DesktopBoxForm : Forms.Form
                 BuildItemGeometry(geometry);
             }
         }
+        _geometryDirty = false;
     }
+
+    private void EnsureGeometry()
+    {
+        if (_geometryDirty || _boxes.Count == 0)
+        {
+            RebuildGeometry();
+        }
+    }
+
+    private BoxGeometry GetTransformGeometry(BoxGeometry geometry)
+    {
+        if (_movingBox is null || geometry.Box.Id != _movingBox.Id)
+        {
+            return geometry;
+        }
+
+        var offsetX = (float)(_movingBox.Bounds.X - _startBounds.X);
+        var offsetY = (float)(_movingBox.Bounds.Y - _startBounds.Y);
+        if (Math.Abs(offsetX) < float.Epsilon && Math.Abs(offsetY) < float.Epsilon)
+        {
+            return geometry;
+        }
+
+        return geometry with
+        {
+            Bounds = OffsetBounds(geometry.Bounds, offsetX, offsetY),
+            Header = OffsetBounds(geometry.Header, offsetX, offsetY),
+            TabBar = OffsetBounds(geometry.TabBar, offsetX, offsetY),
+            Body = OffsetBounds(geometry.Body, offsetX, offsetY),
+            AutoExpand = OffsetBounds(geometry.AutoExpand, offsetX, offsetY),
+            Menu = OffsetBounds(geometry.Menu, offsetX, offsetY),
+            Resize = OffsetBounds(geometry.Resize, offsetX, offsetY)
+        };
+    }
+
+    private static RectangleF OffsetBounds(RectangleF bounds, float offsetX, float offsetY) => new(
+        bounds.X + offsetX,
+        bounds.Y + offsetY,
+        bounds.Width,
+        bounds.Height);
 
     private void BuildItemGeometry(BoxGeometry geometry)
     {
@@ -843,8 +1254,8 @@ internal sealed class DesktopBoxForm : Forms.Form
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
             items.Count,
             geometry.Box.Appearance.IconSize,
-            appearance.IconHorizontalSpacing,
-            appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
             _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
         _scrollOffsets[GetItemViewKey(geometry)] = layout.ScrollOffset;
         foreach (var entry in layout.Items)
@@ -1001,7 +1412,15 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
 
         return _items.LastOrDefault(candidate =>
-            candidate.Box.Id == box.Box.Id && candidate.Bounds.Contains(point));
+            candidate.Box.Id == box.Box.Id && GetItemHitBounds(candidate, box.Body).Contains(point));
+    }
+
+    private RectangleF GetItemHitBounds(ItemGeometry item, RectangleF contentBounds)
+    {
+        var key = (item.Box.Id, item.Item.Key.ToString());
+        return _expandedItemHitBounds.TryGetValue(key, out var expandedBounds)
+            ? RectangleF.Intersect(expandedBounds, contentBounds)
+            : item.Bounds;
     }
 
     private bool TrySelectBoxTab(BoxGeometry box, PointF point)
@@ -1019,6 +1438,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                 box.Box.Id,
                 $"manual:{manualTab.Id?.ToString("N") ?? "all"}"));
             ClearBoxItemSelection(box.Box.Id);
+            _geometryDirty = true;
             InvalidateDip(box.TabBar);
             InvalidateDip(box.Body);
             return true;
@@ -1038,6 +1458,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         _activeMappedFolderCategories[box.Box.Id] = tab.Category;
         _scrollOffsets.Remove(new ItemViewKey(box.Box.Id, $"mapped:{tab.Category}"));
         ClearBoxItemSelection(box.Box.Id);
+        _geometryDirty = true;
         InvalidateDip(box.TabBar);
         InvalidateDip(box.Body);
         return true;
@@ -1126,13 +1547,12 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var previousBoxId = _dropPreview?.BoxId;
-        _dropPreview = preview;
-        InvalidateDropPreview(previousBoxId);
-        if (preview?.BoxId != previousBoxId)
+        if (_dropPreview?.BoxId != preview?.BoxId)
         {
-            InvalidateDropPreview(preview?.BoxId);
+            _dynamicVisualVersion++;
         }
+        _dropPreview = preview;
+        RequestDragRender();
     }
 
     private void ClearDropPreview()
@@ -1142,9 +1562,9 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var previousBoxId = _dropPreview.BoxId;
         _dropPreview = null;
-        InvalidateDropPreview(previousBoxId);
+        _dynamicVisualVersion++;
+        RequestDragRender();
     }
 
     private void InvalidateDropPreview(Guid? boxId)
@@ -1349,8 +1769,8 @@ internal sealed class DesktopBoxForm : Forms.Form
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
             projectedItems.Length,
             geometry.Box.Appearance.IconSize,
-            appearance.IconHorizontalSpacing,
-            appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
             _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
         foreach (var entry in layout.Items)
         {
@@ -1415,8 +1835,8 @@ internal sealed class DesktopBoxForm : Forms.Form
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
             visibleItems.Count,
             geometry.Box.Appearance.IconSize,
-            appearance.IconHorizontalSpacing,
-            appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
             _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
         foreach (var entry in layout.Items)
         {
@@ -1608,7 +2028,14 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
-    private void DrawBox(Graphics graphics, BoxGeometry geometry, RectangleF clipBounds)
+    private void DrawBox(
+        Graphics graphics,
+        BoxGeometry geometry,
+        RectangleF clipBounds,
+        bool includeDropPreview = true,
+        IReadOnlySet<string>? selectedItemKeys = null,
+        bool includeSelectionRectangle = true,
+        IReadOnlySet<string>? suppressedHoverItemKeys = null)
     {
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
         var opacity = Math.Clamp(geometry.Box.Appearance.Opacity, 0.35, 1);
@@ -1666,7 +2093,10 @@ internal sealed class DesktopBoxForm : Forms.Form
 
         if (geometry.IsCollapsed)
         {
-            DrawDropTargetFeedback(graphics, geometry, clipBounds);
+            if (includeDropPreview)
+            {
+                DrawDropTargetFeedback(graphics, geometry, clipBounds);
+            }
             return;
         }
 
@@ -1689,11 +2119,11 @@ internal sealed class DesktopBoxForm : Forms.Form
                                            geometry.Box.ViewMode == BoxViewMode.Grid
             ? CreateSelectedGridItemTextFormat()
             : null;
-        var visibleItems = GetRenderedItemsForBox(geometry, clipBounds)
-            // Draw a selected label above its neighbours so an expanded
-            // filename remains readable instead of being covered by the
-            // following grid cell.
-            .OrderBy(item => _selection.Contains(item.Item.Key.ToString()))
+        var effectiveSelection = selectedItemKeys ?? _selection;
+        var visibleItems = GetRenderedItemsForBox(geometry, clipBounds, includeDropPreview)
+            // Raised labels must be drawn after their neighbours so a full
+            // filename remains readable for both selection and hover.
+            .OrderBy(item => IsRaisedVisual(item, effectiveSelection, suppressedHoverItemKeys))
             .ToArray();
         foreach (var item in visibleItems)
         {
@@ -1704,15 +2134,22 @@ internal sealed class DesktopBoxForm : Forms.Form
                 itemBrush,
                 itemFormat,
                 selectedGridItemFormat,
-                geometry.Body);
+                geometry.Body,
+                effectiveSelection,
+                suppressedHoverItemKeys);
         }
-        DrawDropInsertionFeedback(graphics, geometry, clipBounds);
+        if (includeDropPreview)
+        {
+            DrawDropInsertionFeedback(graphics, geometry, clipBounds);
+        }
         if (!_runtime.AreDesktopItemsHidden && geometry.Box.IsMappedFolder &&
             !_items.Any(item => item.Box.Id == geometry.Box.Id))
         {
             DrawMappedFolderState(graphics, geometry, textColor);
         }
-        if (_selectionBox?.Id == geometry.Box.Id && !_selectionRectangle.IsEmpty)
+        if (includeSelectionRectangle &&
+            _selectionBox?.Id == geometry.Box.Id &&
+            !_selectionRectangle.IsEmpty)
         {
             var selectionColor = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
             using var selectionFill = new SolidBrush(Color.FromArgb(42, selectionColor));
@@ -1730,7 +2167,10 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         graphics.Restore(state);
 
-        DrawDropTargetFeedback(graphics, geometry, clipBounds);
+        if (includeDropPreview)
+        {
+            DrawDropTargetFeedback(graphics, geometry, clipBounds);
+        }
 
         if (_runtime.State.Settings.Appearance.ShowResizeGrip)
         {
@@ -1740,16 +2180,139 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
-    private IReadOnlyList<ItemGeometry> GetRenderedItemsForBox(
+    private void DrawMarqueeSelectionOverlay(
+        Graphics graphics,
         BoxGeometry geometry,
         RectangleF clipBounds)
+    {
+        if (_selectionRectangle.IsEmpty && _marqueeSelectionItems.Count == 0)
+        {
+            return;
+        }
+
+        var state = graphics.Save();
+        graphics.SetClip(geometry.Body, CombineMode.Intersect);
+        var textColor = ResolveAutoTextColor(ParseOpaqueColor(geometry.Box.Appearance.Background));
+        using var itemFont = geometry.Box.Appearance.ShowItemLabels
+            ? CreateFont(
+                geometry.Box.Appearance.LabelFontFamily,
+                (float)geometry.Box.Appearance.LabelFontSize,
+                FontStyle.Regular,
+                GraphicsUnit.Point)
+            : null;
+        using var itemBrush = geometry.Box.Appearance.ShowItemLabels
+            ? new SolidBrush(textColor)
+            : null;
+        using var itemFormat = geometry.Box.Appearance.ShowItemLabels
+            ? CreateItemTextFormat(geometry.Box.ViewMode)
+            : null;
+        using var selectedGridItemFormat = geometry.Box.Appearance.ShowItemLabels &&
+                                           geometry.Box.ViewMode == BoxViewMode.Grid
+            ? CreateSelectedGridItemTextFormat()
+            : null;
+
+        foreach (var item in _marqueeSelectionItems
+                     .Where(item => item.Box.Id == geometry.Box.Id &&
+                                    GetMarqueeItemOverlayBounds(item, geometry.Body).IntersectsWith(clipBounds))
+                     .OrderBy(item => IsRaisedVisual(item, _selection)))
+        {
+            DrawItem(
+                graphics,
+                item,
+                itemFont,
+                itemBrush,
+                itemFormat,
+                selectedGridItemFormat,
+                geometry.Body,
+                _selection);
+        }
+
+        if (!_selectionRectangle.IsEmpty)
+        {
+            var selectionColor = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
+            using var selectionFill = new SolidBrush(Color.FromArgb(42, selectionColor));
+            using var selectionBorder = new Pen(Color.FromArgb(190, selectionColor), 1)
+            {
+                DashStyle = DashStyle.Dash
+            };
+            graphics.FillRectangle(selectionFill, _selectionRectangle);
+            graphics.DrawRectangle(
+                selectionBorder,
+                _selectionRectangle.X,
+                _selectionRectangle.Y,
+                _selectionRectangle.Width,
+                _selectionRectangle.Height);
+        }
+
+        graphics.Restore(state);
+    }
+
+    private RectangleF? GetMarqueeSelectionOverlayBounds(BoxGeometry geometry)
+    {
+        RectangleF? bounds = null;
+        if (!_selectionRectangle.IsEmpty)
+        {
+            bounds = RectangleF.Inflate(_selectionRectangle, 4, 4);
+        }
+
+        foreach (var item in _marqueeSelectionItems)
+        {
+            if (item.Box.Id != geometry.Box.Id)
+            {
+                continue;
+            }
+
+            var itemBounds = GetMarqueeItemOverlayBounds(item, geometry.Body);
+            bounds = bounds is { } existing
+                ? RectangleF.Union(existing, itemBounds)
+                : itemBounds;
+        }
+
+        return bounds;
+    }
+
+    private static RectangleF GetMarqueeItemOverlayBounds(
+        ItemGeometry item,
+        RectangleF contentBounds)
+    {
+        var bounds = RectangleF.Inflate(item.Bounds, 4, 4);
+        if (item.Box.ViewMode != BoxViewMode.Grid || !item.Box.Appearance.ShowItemLabels)
+        {
+            return bounds;
+        }
+
+        // A selected grid label can grow to the bottom of the box. Include
+        // that possible visual extent without measuring text on every move.
+        var labelBounds = new RectangleF(
+            item.Bounds.X - 4,
+            item.Bounds.Y - 4,
+            item.Bounds.Width + 8,
+            Math.Max(item.Bounds.Height + 8, contentBounds.Bottom - item.Bounds.Y + 4));
+        return RectangleF.Union(bounds, labelBounds);
+    }
+
+    private IReadOnlyList<ItemGeometry> GetRenderedItemsForBox(
+        BoxGeometry geometry,
+        RectangleF clipBounds,
+        bool includeDropPreview = true)
     {
         if (_runtime.AreDesktopItemsHidden)
         {
             return [];
         }
 
-        var preview = _dropPreview;
+        // During a box marquee the geometry built for hit testing already is
+        // the visible layout. Reusing it avoids recalculating the layout,
+        // tab projection and scroll state for every overlay frame.
+        if (!includeDropPreview && !_dragStarted)
+        {
+            return _items
+                .Where(item => item.Box.Id == geometry.Box.Id &&
+                               item.Bounds.IntersectsWith(clipBounds))
+                .ToArray();
+        }
+
+        var preview = includeDropPreview ? _dropPreview : null;
         IReadOnlyList<DesktopItemRef>? projectedItems = null;
         var hiddenKeySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (_dragStarted && _pressedBoxId == geometry.Box.Id)
@@ -1811,8 +2374,8 @@ internal sealed class DesktopBoxForm : Forms.Form
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
             layoutItems.Count,
             geometry.Box.Appearance.IconSize,
-            appearance.IconHorizontalSpacing,
-            appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
+            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
             _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
         return layout.Items
             .Select(entry =>
@@ -1965,34 +2528,51 @@ internal sealed class DesktopBoxForm : Forms.Form
         Brush? labelBrush,
         StringFormat? labelFormat,
         StringFormat? selectedGridItemFormat,
-        RectangleF contentBounds)
+        RectangleF contentBounds,
+        IReadOnlySet<string>? selectedItemKeys = null,
+        IReadOnlySet<string>? suppressedHoverItemKeys = null)
     {
         var itemKey = item.Item.Key.ToString();
-        var isSelected = _selection.Contains(itemKey);
+        var isSelected = (selectedItemKeys ?? _selection).Contains(itemKey);
+        var isHovered =
+            _runtime.State.Settings.Appearance.HoverFeedback &&
+            !(suppressedHoverItemKeys?.Contains(itemKey) ?? false) &&
+            string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
         var iconSize = (float)item.Box.Appearance.IconSize;
         var iconBounds = GetItemIconBounds(item);
         var textBounds = item.Box.Appearance.ShowItemLabels
-            ? GetItemTextBounds(graphics, item, iconBounds, labelFont!, isSelected, contentBounds)
+            ? GetItemTextBounds(graphics, item, iconBounds, labelFont!, isSelected || isHovered, contentBounds)
             : RectangleF.Empty;
-        if (isSelected)
+        var visualBounds = textBounds.IsEmpty
+            ? item.Bounds
+            : RectangleF.Union(item.Bounds, textBounds);
+        var visualKey = (item.Box.Id, itemKey);
+        if (isSelected || isHovered)
         {
-            var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
-            using var selected = new SolidBrush(Color.FromArgb(112, configuredSelection));
-            var selectedBounds = textBounds.IsEmpty
-                ? item.Bounds
-                : RectangleF.Union(item.Bounds, textBounds);
-            using var selectedPath = RoundedRectangle(RectangleF.Inflate(selectedBounds, -2, -2), 4);
-            graphics.FillPath(selected, selectedPath);
+            _expandedItemHitBounds[visualKey] = RectangleF.Intersect(visualBounds, contentBounds);
         }
-        else if (_runtime.State.Settings.Appearance.HoverFeedback &&
-            string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase))
+        else
         {
-            var hoverColor = ParseOpaqueColor(item.Box.Appearance.Accent);
+            _expandedItemHitBounds.Remove(visualKey);
+        }
+        if (isHovered)
+        {
+            // Hover remains visible while the item is selected and is kept
+            // brighter than the settled selection treatment.
+            var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
+            var hoverColor = BrightenColor(configuredSelection, HoverBrightness);
             using var hovered = new SolidBrush(Color.FromArgb(BoxHoverFillAlpha, hoverColor));
             using var hoverBorder = new Pen(Color.FromArgb(BoxHoverBorderAlpha, hoverColor), 1);
-            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(item.Bounds, -1, -1), 4);
+            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), 4);
             graphics.FillPath(hovered, hoveredPath);
             graphics.DrawPath(hoverBorder, hoveredPath);
+        }
+        else if (isSelected)
+        {
+            var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
+            using var selected = new SolidBrush(Color.FromArgb(SelectedItemFillAlpha, configuredSelection));
+            using var selectedPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), 4);
+            graphics.FillPath(selected, selectedPath);
         }
 
         var bitmap = GetIconBitmap(item.Item, iconSize) ?? ShellIconProvider.GetGenericFileIcon();
@@ -2009,9 +2589,21 @@ internal sealed class DesktopBoxForm : Forms.Form
             labelFont!,
             labelBrush!,
             textBounds,
-            isSelected && item.Box.ViewMode == BoxViewMode.Grid
+            (isSelected || isHovered) && item.Box.ViewMode == BoxViewMode.Grid
                 ? selectedGridItemFormat!
                 : labelFormat!);
+    }
+
+    private bool IsRaisedVisual(
+        ItemGeometry item,
+        IReadOnlySet<string>? selectedItemKeys = null,
+        IReadOnlySet<string>? suppressedHoverItemKeys = null)
+    {
+        var itemKey = item.Item.Key.ToString();
+        return (selectedItemKeys ?? _selection).Contains(itemKey) ||
+            (_runtime.State.Settings.Appearance.HoverFeedback &&
+             !(suppressedHoverItemKeys?.Contains(itemKey) ?? false) &&
+             string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase));
     }
 
     private static RectangleF GetItemIconBounds(ItemGeometry item)
@@ -2116,6 +2708,25 @@ internal sealed class DesktopBoxForm : Forms.Form
         if (_iconCache.TryGetValue(key, out var bitmap))
         {
             return bitmap;
+        }
+        // A zoom notch changes the requested pixel size. Keep rendering from
+        // the nearest cached size while the new size loads asynchronously;
+        // DrawImage scales the bitmap to the current icon bounds.
+        var nearest = _iconCache
+            .Where(pair =>
+                pair.Key.ParsingName == key.ParsingName &&
+                pair.Key.ModifiedTicks == key.ModifiedTicks &&
+                pair.Key.Length == key.Length)
+            .OrderBy(pair => Math.Abs(pair.Key.PixelSize - key.PixelSize))
+            .Select(pair => pair.Value)
+            .FirstOrDefault();
+        if (nearest is not null)
+        {
+            if (_pendingIconLoads.Add(key))
+            {
+                _ = LoadIconBitmapAsync(key, _iconCacheVersion);
+            }
+            return nearest;
         }
         if (_iconLoadRetries.TryGetValue(key, out var retry) &&
             DateTimeOffset.UtcNow < retry.RetryAfter)
@@ -2243,7 +2854,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         var activeKeys = DesktopBoxes
             .SelectMany(box => GetCachedItemsForBox(box.Id)
-                .Select(item => CreateIconBitmapKey(item, (float)box.Appearance.IconSize)))
+                .SelectMany(item => CreateNeighborIconBitmapKeys(item, (float)box.Appearance.IconSize)))
             .ToHashSet();
         foreach (var key in _iconCache.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
         {
@@ -2256,11 +2867,32 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
+    private IEnumerable<IconBitmapKey> CreateNeighborIconBitmapKeys(
+        DesktopItemRef item,
+        float iconSize)
+    {
+        var center = QuantizeIconPixelSize((int)Math.Round(iconSize * _scale));
+        foreach (var offset in new[] { -32, -16, 0, 16, 32 })
+        {
+            yield return new IconBitmapKey(
+                item.ParsingName,
+                Math.Clamp(center + offset, 16, 256),
+                item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
+                0);
+        }
+    }
+
+    private static int QuantizeIconPixelSize(int pixelSize)
+    {
+        pixelSize = Math.Clamp(pixelSize, 16, 256);
+        return (int)(16 * Math.Round(pixelSize / 16.0, MidpointRounding.AwayFromZero));
+    }
+
     private IconBitmapKey CreateIconBitmapKey(DesktopItemRef item, float iconSize)
     {
         return new IconBitmapKey(
             item.ParsingName,
-            Math.Clamp((int)Math.Round(iconSize * _scale), 16, 256),
+            QuantizeIconPixelSize((int)Math.Round(iconSize * _scale)),
             item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
             0);
     }
@@ -2272,14 +2904,14 @@ internal sealed class DesktopBoxForm : Forms.Form
         // items use the bitmap.  Do not enumerate _items here: presenting a
         // layer rebuilds that list synchronously, which used to invalidate a
         // Where() enumerator between its first and second matching item.
-        RequestLayerRender();
+        RequestVisualLayerRender();
     }
 
     private void InvalidateItem(ItemGeometry? item)
     {
         if (item is not null)
         {
-            InvalidateDip(item.Bounds);
+            RequestVisualLayerRender();
         }
     }
 
@@ -2302,6 +2934,127 @@ internal sealed class DesktopBoxForm : Forms.Form
         PresentLayer();
     }
 
+    private void RequestVisualLayerRender()
+    {
+        if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        // In desktop composition mode the box window is only an invisible
+        // hit mask. Item hover is painted by the shared icon layer, so
+        // updating this window first creates a visible two-window transition.
+        if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)
+        {
+            _iconLayerRenderRequest();
+            return;
+        }
+
+        PresentLayer();
+    }
+
+    private void RequestDragRender()
+    {
+        if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)
+        {
+            // The shared icon layer owns the small drag overlay and already
+            // coalesces frames. A second 16 ms timer here adds a full extra
+            // frame of input latency to every box movement.
+            _iconLayerRenderRequest();
+            return;
+        }
+
+        // Mouse handlers only publish the latest pointer state. Queue the
+        // expensive layered update so pointer messages remain responsive even
+        // when the previous frame took longer than the coalesce interval.
+        var now = DateTime.UtcNow;
+        if (_dragRenderPending)
+        {
+            return;
+        }
+
+        _dragRenderPending = true;
+        var elapsedMilliseconds = (now - _lastDragRenderUtc).TotalMilliseconds;
+        if (elapsedMilliseconds >= DragRenderCoalesceMilliseconds)
+        {
+            QueueDragRender();
+            return;
+        }
+
+        _dragRenderTimer.Interval = Math.Max(
+            1,
+            DragRenderCoalesceMilliseconds - (int)Math.Floor(elapsedMilliseconds));
+        _dragRenderTimer.Start();
+    }
+
+    private void QueueDragRender()
+    {
+        try
+        {
+            BeginInvoke((Action)RenderQueuedDragFrame);
+        }
+        catch (InvalidOperationException)
+        {
+            _dragRenderPending = false;
+        }
+    }
+
+    private void OnDragRenderTimerTick(object? sender, EventArgs eventArgs)
+    {
+        _dragRenderTimer.Stop();
+        QueueDragRender();
+    }
+
+    private void RenderQueuedDragFrame()
+    {
+        if (!_dragRenderPending || _resourcesDisposed || IsDisposed)
+        {
+            return;
+        }
+
+        _dragRenderPending = false;
+        _lastDragRenderUtc = DateTime.UtcNow;
+        RenderPendingDragFrame();
+    }
+
+    private void RenderPendingDragFrame()
+    {
+        if (_movingBox is not null || _resizingBox is not null)
+        {
+            if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)
+            {
+                // Mouse capture keeps this surface receiving the drag even while
+                // its old hit mask remains installed. Rebuild that full-monitor
+                // mask and native region only once the transform is committed.
+                _iconLayerRenderRequest();
+                return;
+            }
+            UpdateWindowRegion();
+            PresentLayer();
+            return;
+        }
+        if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)
+        {
+            // Preview and selection frames never change box bounds, so the
+            // box layer hit-mask does not need another full-screen
+            // UpdateLayeredWindow pass. Redraw the shared icon layer directly.
+            _iconLayerRenderRequest();
+            return;
+        }
+        PresentLayer();
+    }
+
+    private void CancelPendingDragRender()
+    {
+        _dragRenderTimer.Stop();
+        _dragRenderPending = false;
+    }
+
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
         if (_editingBox is not null)
@@ -2311,11 +3064,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         RebuildGeometry();
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-        if (box is not null && _runtime.BringBoxToFront(box.Box.Id))
-        {
-            RebuildGeometry();
-            box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-        }
         var item = GetItemAtPoint(box, point);
         DiagnosticLog.Info(
             $"Surface mouse down monitor={_monitor.Id} button={eventArgs.Button} x={point.X:0} y={point.Y:0} box={box?.Box.Id} itemKind={item?.Item.Key.Kind}");
@@ -2404,9 +3152,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         else if (box.Body.Contains(point))
         {
             _selectionBox = box.Box;
+            _selectionGeometry = box;
             _selectionStart = point;
             _selectionRectangle = RectangleF.Empty;
             _selectionBase.Clear();
+            _marqueeSelectionItems.Clear();
+            _marqueeSelectionKeys.Clear();
             if ((Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
             {
                 _selectionBase.UnionWith(_selection);
@@ -2415,6 +3166,20 @@ internal sealed class DesktopBoxForm : Forms.Form
             {
                 _selection.Clear();
             }
+            _dynamicVisualVersion++;
+            // Establish the baseline before the first pointer move. The
+            // dynamic overlay then owns only the marquee and newly selected
+            // items instead of re-rendering the complete box.
+            RequestDragRender();
+        }
+        if (_movingBox is not null || _resizingBox is not null)
+        {
+            _dynamicVisualVersion++;
+            // Transfer the unchanged box to the icon surface's drag overlay
+            // before the first pointer move. This prevents the first moving
+            // frame from having to remove the settled box and show the overlay
+            // in separate compositor updates.
+            RequestDragRender();
         }
         Capture = _movingBox is not null || _resizingBox is not null || _selectionBox is not null;
     }
@@ -2432,34 +3197,13 @@ internal sealed class DesktopBoxForm : Forms.Form
             UpdateResizingBox(_resizingBox, point);
             return;
         }
-        UpdatePointerCursor(point);
-        UpdateHoverState(point);
         if (_selectionBox is not null)
         {
-            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == _selectionBox.Id);
-            if (geometry is null)
-            {
-                return;
-            }
-            var raw = RectangleFromPoints(_selectionStart, point);
-            _selectionRectangle = RectangleF.Intersect(raw, geometry.Body);
-            _selection.Clear();
-            _selection.UnionWith(_selectionBase);
-            var selectionBounds = new LayoutRect(
-                _selectionRectangle.X,
-                _selectionRectangle.Y,
-                _selectionRectangle.Width,
-                _selectionRectangle.Height);
-            foreach (var candidate in _items.Where(candidate =>
-                candidate.Box.Id == _selectionBox.Id &&
-                new LayoutRect(candidate.Bounds.X, candidate.Bounds.Y, candidate.Bounds.Width, candidate.Bounds.Height)
-                    .Intersects(selectionBounds)))
-            {
-                _selection.Add(candidate.Item.Key.ToString());
-            }
-            Invalidate();
+            UpdateSelectionFromPoint(point, requestRender: true);
             return;
         }
+        UpdatePointerCursor(point);
+        UpdateHoverState(point);
         if (_pressedItem is null || eventArgs.Button != Forms.MouseButtons.Left || _dragStarted)
         {
             return;
@@ -2469,6 +3213,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         _dragStarted = true;
+        _dynamicVisualVersion++;
         Invalidate();
         if (_pressedBoxId is not { } sourceBoxId)
         {
@@ -2492,7 +3237,8 @@ internal sealed class DesktopBoxForm : Forms.Form
         var sourceMapped = sourceBox?.IsMappedFolder == true;
         var sourceMappedReadOnly = sourceBox?.MappedFolder?.IsReadOnly == true;
         var paths = selected.Where(candidate => candidate.FileSystemPath is not null).Select(candidate => candidate.FileSystemPath!).ToArray();
-        if (paths.Length > 0 && BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped))
+        if (paths.Length > 0 &&
+            BoxDragCompletionPolicy.ShouldExposeFileDrop(paths.Length == selected.Length))
         {
             var collection = new StringCollection();
             collection.AddRange(paths);
@@ -2503,11 +3249,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         _showVirtualDesktopDropCursor = !sourceMapped;
         _runtime.SetVirtualBoxDesktopDropEnabled(!sourceMapped);
         var shouldReleaseToDesktop = false;
+        var dragEffect = Forms.DragDropEffects.None;
         try
         {
             try
             {
-                // Virtual box-to-desktop drops have a private data object, for
+                // Virtual box-to-desktop drops carry private metadata, for
                 // which Explorer does not reliably render IDragSourceHelper's
                 // image. The desktop surface owns that preview instead. Keep
                 // the shell image for mapped-folder file drags only.
@@ -2522,7 +3269,7 @@ internal sealed class DesktopBoxForm : Forms.Form
                 // Explorer selects Move by default for a same-volume FileDrop.
                 // A read-only mapping must therefore only advertise Copy; otherwise
                 // a drop onto the desktop silently removes the mapped source file.
-                DoDragDrop(
+                dragEffect = DoDragDrop(
                     data,
                     sourceMappedReadOnly
                         ? Forms.DragDropEffects.Copy
@@ -2546,7 +3293,8 @@ internal sealed class DesktopBoxForm : Forms.Form
                 _dragCancelled,
                 dragSession.HandledByBox || dragSession.HandledByDesktop,
                 sourceMapped,
-                IsPointerOverAnyBox(Forms.Cursor.Position));
+                IsPointerOverAnyBox(Forms.Cursor.Position),
+                dragEffect != Forms.DragDropEffects.None);
         }
         finally
         {
@@ -2559,8 +3307,78 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
+    // The icon compositor can render a frame after several mouse messages
+    // have been coalesced. Reconcile the captured selection against the real
+    // cursor immediately before that frame is painted.
+    internal void UpdateDynamicSelectionAtCursor()
+    {
+        if (_selectionBox is null || IsDisposed || _resourcesDisposed)
+        {
+            return;
+        }
+
+        var clientPoint = PointToClient(Forms.Cursor.Position);
+        UpdateSelectionFromPoint(ToDip(clientPoint), requestRender: false);
+    }
+
+    private void UpdateSelectionFromPoint(PointF point, bool requestRender)
+    {
+        if (_selectionBox is not { } selectionBox)
+        {
+            return;
+        }
+
+        EnsureGeometry();
+        var geometry = _boxes.FirstOrDefault(candidate => candidate.Box.Id == selectionBox.Id);
+        if (geometry is null)
+        {
+            return;
+        }
+
+        var geometryChanged = !ReferenceEquals(_selectionGeometry, geometry);
+        _selectionGeometry = geometry;
+
+        var nextRectangle = RectangleF.Intersect(
+            RectangleFromPoints(_selectionStart, point),
+            geometry.Body);
+        if (!geometryChanged && nextRectangle.Equals(_selectionRectangle))
+        {
+            return;
+        }
+
+        _selectionRectangle = nextRectangle;
+        _selection.Clear();
+        _selection.UnionWith(_selectionBase);
+        _marqueeSelectionItems.Clear();
+        _marqueeSelectionKeys.Clear();
+        foreach (var candidate in _items)
+        {
+            if (candidate.Box.Id == selectionBox.Id &&
+                candidate.Bounds.IntersectsWith(_selectionRectangle))
+            {
+                var itemKey = candidate.Item.Key.ToString();
+                _selection.Add(itemKey);
+                if (!_selectionBase.Contains(itemKey))
+                {
+                    _marqueeSelectionItems.Add(candidate);
+                    _marqueeSelectionKeys.Add(itemKey);
+                }
+            }
+        }
+
+        if (requestRender)
+        {
+            RequestDragRender();
+        }
+    }
+
     private void ResetBoxItemDragState()
     {
+        CancelPendingDragRender();
+        if (_dragStarted)
+        {
+            _dynamicVisualVersion++;
+        }
         _dragStarted = false;
         _dragDropCommitted = false;
         _dragCancelled = false;
@@ -2621,10 +3439,52 @@ internal sealed class DesktopBoxForm : Forms.Form
 
     private void OnMouseLeave(object? sender, EventArgs eventArgs)
     {
-        if (_movingBox is not null || _resizingBox is not null)
+        if (_runtime.IsDesktopIconPointerInteractionActive ||
+            _movingBox is not null || _resizingBox is not null)
         {
             return;
         }
+
+        QueueHoverReconcile();
+    }
+
+    private void QueueHoverReconcile()
+    {
+        if (_hoverReconcilePending || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        _hoverReconcilePending = true;
+        try
+        {
+            BeginInvoke((Action)ReconcileHoverAtCursor);
+        }
+        catch (InvalidOperationException)
+        {
+            _hoverReconcilePending = false;
+        }
+    }
+
+    private void ReconcileHoverAtCursor()
+    {
+        _hoverReconcilePending = false;
+        if (_runtime.IsDesktopIconPointerInteractionActive ||
+            _movingBox is not null || _resizingBox is not null || IsDisposed)
+        {
+            return;
+        }
+
+        // Reconcile against the latest pointer because a layered present can
+        // emit MouseLeave without the pointer leaving the current item. This
+        // also transfers hover cleanly when the pointer moves to a neighbour.
+        var clientPoint = PointToClient(Forms.Cursor.Position);
+        if (ClientRectangle.Contains(clientPoint))
+        {
+            UpdateHoverState(ToDip(clientPoint));
+            return;
+        }
+
         Cursor = Forms.Cursors.Default;
         ClearAutoExpandHover();
         if (_hoveredItemKey is not null)
@@ -2636,6 +3496,14 @@ internal sealed class DesktopBoxForm : Forms.Form
             _hoveredItemKey = null;
             InvalidateItem(previousHoveredItem);
         }
+    }
+
+    private bool IsPointerOverInteractiveBox()
+    {
+        var clientPoint = PointToClient(Forms.Cursor.Position);
+        return clientPoint.X >= 0 && clientPoint.Y >= 0 &&
+            clientPoint.X < ClientSize.Width && clientPoint.Y < ClientSize.Height &&
+            IsInteractivePointSafe(ToDip(clientPoint));
     }
 
     private void UpdatePointerCursor(PointF point)
@@ -2682,6 +3550,13 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         try
         {
+            // A desktop marquee owns the pointer capture. Do not let the
+            // 25 ms box-hover poll mutate box geometry or enqueue another
+            // layered presentation while that gesture is in progress.
+            if (_runtime.IsDesktopIconPointerInteractionActive)
+            {
+                return;
+            }
             if (_movingBox is not null || _resizingBox is not null)
             {
                 return;
@@ -2699,7 +3574,10 @@ internal sealed class DesktopBoxForm : Forms.Form
                 ClearHoverState();
                 return;
             }
-            UpdateHoverState(ToDip(clientPoint), updateItemHover: trackItemHover);
+            // MouseMove is the sole owner of item hover. Keeping the timer
+            // for expand-on-hover avoids a transient MouseLeave clearing and
+            // restoring the same icon every 25 ms around a layered present.
+            UpdateHoverState(ToDip(clientPoint), updateItemHover: false);
         }
         catch
         {
@@ -2747,6 +3625,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         else
         {
             _hoverExpandedBoxes.Clear();
+            _geometryDirty = true;
         }
         InvalidateItem(previousHoveredItem);
         if (expandedBoxIds.Length > 0)
@@ -2810,9 +3689,34 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         else if (hoverChanged)
         {
-            InvalidateItem(previousHoveredItem);
-            InvalidateItem(hoveredItem);
+            // Both item bounds live on the same shared icon layer. One
+            // coalesced frame updates the old and new hover state together.
+            RequestVisualLayerRender();
         }
+    }
+
+    private void FinishSelectionGesture()
+    {
+        if (_selectionBox is null)
+        {
+            return;
+        }
+
+        _selectionBox = null;
+        _selectionGeometry = null;
+        _selectionBase.Clear();
+        _marqueeSelectionItems.Clear();
+        _marqueeSelectionKeys.Clear();
+        _selectionRectangle = RectangleF.Empty;
+        _dynamicVisualVersion++;
+        if (Capture)
+        {
+            Capture = false;
+        }
+        // Rebuild the settled layer once with the final selection. The
+        // composited path queues this through the icon surface; the fallback
+        // path presents the ordinary box layer directly.
+        RequestVisualLayerRender();
     }
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
@@ -2821,11 +3725,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             $"Surface mouse up monitor={_monitor.Id} button={eventArgs.Button} moving={_movingBox is not null} resizing={_resizingBox is not null} selecting={_selectionBox is not null}");
         if (_selectionBox is not null)
         {
-            _selectionBox = null;
-            _selectionBase.Clear();
-            _selectionRectangle = RectangleF.Empty;
-            Capture = false;
-            Invalidate();
+            FinishSelectionGesture();
             return;
         }
         var movingBox = _movingBox;
@@ -2853,10 +3753,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         if (_selectionBox is not null)
         {
-            _selectionBox = null;
-            _selectionBase.Clear();
-            _selectionRectangle = RectangleF.Empty;
-            Invalidate();
+            FinishSelectionGesture();
         }
         if (_movingBox is null && _resizingBox is null)
         {
@@ -2878,8 +3775,14 @@ internal sealed class DesktopBoxForm : Forms.Form
         double grabOffsetY,
         bool allowMonitorTransfer)
     {
+        CancelPendingDragRender();
+        if (_movingBox is not null || _resizingBox is not null)
+        {
+            _dynamicVisualVersion++;
+        }
         _movingBox = null;
         _resizingBox = null;
+        _geometryDirty = true;
         _resizeEdges = ResizeEdges.None;
         _pressedItem = null;
         _pressedBoxId = null;
@@ -2900,8 +3803,16 @@ internal sealed class DesktopBoxForm : Forms.Form
                 LayoutGrid.DefaultStep);
         }
 
+        if (movingBox is not null)
+        {
+            SnapBoxPositionForCommit(movingBox);
+        }
+
         UpdateWindowRegion();
-        FlushTransformTrail();
+        if (!_isCompositedByIconSurface)
+        {
+            FlushTransformTrail();
+        }
         if (movingBox is not null)
         {
             _runtime.BoxChanged(movingBox, true, bringToFront: true);
@@ -2915,14 +3826,33 @@ internal sealed class DesktopBoxForm : Forms.Form
     private void UpdateMovingBox(DesktopBox box, PointF point)
     {
         var nextBounds = new LayoutRect(
-            SnapDipToPixel(LayoutGrid.Snap(_startBounds.X + point.X - _pressPoint.X)),
-            SnapDipToPixel(LayoutGrid.Snap(_startBounds.Y + point.Y - _pressPoint.Y)),
+            SnapDipToPixel(_startBounds.X + point.X - _pressPoint.X),
+            SnapDipToPixel(_startBounds.Y + point.Y - _pressPoint.Y),
             _startBounds.Width,
             _startBounds.Height).Clamp(
                 new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height),
                 GetMinimumBoxWidth(box));
         ApplyBoxTransform(box, nextBounds);
     }
+
+    private void SnapBoxPositionForCommit(DesktopBox box)
+    {
+        var monitor = _runtime.Monitors.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase))
+            ?? _monitor;
+        var scale = Math.Max(monitor.DpiScale, 0.01d);
+        var snappedBounds = new LayoutRect(
+            SnapDipToMonitorPixel(LayoutGrid.Snap(box.Bounds.X), scale),
+            SnapDipToMonitorPixel(LayoutGrid.Snap(box.Bounds.Y), scale),
+            box.Bounds.Width,
+            box.Bounds.Height).Clamp(
+            new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
+            GetMinimumBoxWidth(box));
+        box.Bounds = snappedBounds;
+    }
+
+    private static double SnapDipToMonitorPixel(double value, double scale) =>
+        Math.Round(value * scale, MidpointRounding.AwayFromZero) / scale;
 
     private void UpdateResizingBox(DesktopBox box, PointF point)
     {
@@ -2958,7 +3888,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             box.ViewMode,
             box.Appearance.TitleBarHeight,
             box.Appearance.IconSize,
-            _runtime.State.Settings.Appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(_runtime.State.Settings.Appearance.IconVerticalSpacing, box.Appearance.IconSize),
             tabBarHeight));
         if (_resizeEdges.HasFlag(ResizeEdges.Left))
         {
@@ -2983,13 +3913,13 @@ internal sealed class DesktopBoxForm : Forms.Form
             box.ViewMode,
             requestedWidth,
             box.Appearance.IconSize,
-            _runtime.State.Settings.Appearance.IconHorizontalSpacing);
+            DesktopItemLayoutEngine.ScaleIconSpacing(_runtime.State.Settings.Appearance.IconHorizontalSpacing, box.Appearance.IconSize));
         var heightSlot = DesktopItemLayoutEngine.SnapBoxHeight(
             box.ViewMode,
             requestedHeight,
             box.Appearance.TitleBarHeight,
             box.Appearance.IconSize,
-            _runtime.State.Settings.Appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(_runtime.State.Settings.Appearance.IconVerticalSpacing, box.Appearance.IconSize),
             tabBarHeight);
         const double snapThreshold = DesktopItemLayoutEngine.SnapThreshold;
         if (Math.Abs(requestedWidth - widthSlot) <= snapThreshold)
@@ -3049,10 +3979,12 @@ internal sealed class DesktopBoxForm : Forms.Form
         AccumulateTransformDirtyBounds(ToVisualBounds(box, box.Bounds));
         box.Bounds = nextBounds;
         AccumulateTransformDirtyBounds(ToVisualBounds(box, nextBounds));
-        if (UpdateWindowRegion())
-        {
-            PresentLayer();
-        }
+        // A move keeps the active box's size and item layout intact. Its
+        // dynamic icon-layer pass translates the cached geometry, leaving the
+        // complete box/item rebuild for the final committed frame. Resizes do
+        // need a fresh layout because their content bounds change.
+        _geometryDirty = _resizingBox is not null;
+        RequestDragRender();
     }
 
     private LayoutRect ToVisualBounds(DesktopBox box, LayoutRect bounds) => new(
@@ -3131,13 +4063,17 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         var scrollKey = GetItemViewKey(box);
         _scrollOffsets[scrollKey] = Math.Max(0, _scrollOffsets.GetValueOrDefault(scrollKey) - eventArgs.Delta / 3d);
-        Invalidate();
+        _geometryDirty = true;
+        RequestLayerRender();
     }
 
     private void OnDragOver(object? sender, Forms.DragEventArgs eventArgs)
     {
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
-        RebuildGeometry();
+        // Box geometry is static during an OLE item drag; the shared compositor
+        // already rebuilt it on the previous frame. Rebuilding per DragOver
+        // event stalls the drag loop on fast mice.
+        EnsureGeometry();
         var targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (targetGeometry is null)
         {
@@ -3146,21 +4082,6 @@ internal sealed class DesktopBoxForm : Forms.Form
             return;
         }
         var target = targetGeometry.Box;
-
-        // A desktop icon drag is rendered and tracked by DesktopIconSurface,
-        // not by OLE. WinForms may nevertheless raise DragOver on this
-        // surface as the captured pointer crosses it. Leave the projected
-        // desktop slot preview untouched so the generic thumbnail path cannot
-        // paint a second, smaller icon over the drag image.
-        if (_runtime.IsDesktopIconPointerInteractionActive)
-        {
-            var acceptsDesktopDrop = !targetGeometry.Box.IsMappedFolder &&
-                                     targetGeometry.Box.MappedFolder?.IsReadOnly != true;
-            eventArgs.Effect = acceptsDesktopDrop
-                ? Forms.DragDropEffects.Copy
-                : Forms.DragDropEffects.None;
-            return;
-        }
 
         if (eventArgs.Data?.GetDataPresent(DesktopIconSurface.DesktopIconDragSessionFormat) == true &&
             eventArgs.Data.GetData(DesktopIconSurface.DesktopIconDragSessionFormat) is DesktopIconSurfaceDragSession desktopDrag)
@@ -3181,6 +4102,19 @@ internal sealed class DesktopBoxForm : Forms.Form
                 // duplicate the desktop drag image.
                 DropPreviewKind.DesktopAssign);
             eventArgs.Effect = acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
+            return;
+        }
+
+        // Legacy pointer-only desktop drags still render their preview from
+        // DesktopIconSurface. Keep that path out of the generic thumbnail
+        // renderer while an OLE session is not present.
+        if (_runtime.IsDesktopIconPointerInteractionActive)
+        {
+            var acceptsDesktopDrop = !targetGeometry.Box.IsMappedFolder &&
+                                     targetGeometry.Box.MappedFolder?.IsReadOnly != true;
+            eventArgs.Effect = acceptsDesktopDrop
+                ? Forms.DragDropEffects.Copy
+                : Forms.DragDropEffects.None;
             return;
         }
 
@@ -3385,11 +4319,12 @@ internal sealed class DesktopBoxForm : Forms.Form
                 }
                 try
                 {
-                    await _runtime.TransferBoxItemsAsync(
+                    var imported = await _runtime.TransferBoxItemsAsync(
                         sourceBoxId,
                         keys,
                         box.Box.Id,
                         transferEffect == BoxTransferEffect.MoveFiles);
+                    ShowImportFailures(imported);
                     if (manualTargetTab is not null)
                     {
                         _runtime.MoveItemsToManualTab(box.Box.Id, keys, manualTargetTab.Id);
@@ -3410,10 +4345,11 @@ internal sealed class DesktopBoxForm : Forms.Form
             {
                 try
                 {
-                    await _runtime.ImportFilesToBoxAsync(
+                    var imported = await _runtime.ImportFilesToBoxAsync(
                         paths,
                         box.Box.Id,
                         transferEffect == BoxTransferEffect.MoveFiles);
+                    ShowImportFailures(imported);
                 }
                 catch (Exception exception)
                 {
@@ -3442,13 +4378,24 @@ internal sealed class DesktopBoxForm : Forms.Form
             AssignDesktopItemsAtDrop(box, point, assignedKeys);
             if (external.Count > 0)
             {
-                await _runtime.ImportFilesAsync(
+                var imported = await _runtime.ImportFilesAsync(
                     external,
                     box.Box.Id,
                     transferEffect == BoxTransferEffect.MoveFiles);
+                ShowImportFailures(imported);
             }
             // Assigned desktop icons are parked outside the visible work area by
             // the runtime; no per-drop Explorer move is needed here.
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Desktop box drag-drop failed.", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "导入失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
         }
         finally
         {
@@ -3509,6 +4456,13 @@ internal sealed class DesktopBoxForm : Forms.Form
                 })));
             menu.Items.Add(new Forms.ToolStripSeparator());
         }
+        var paste = new Forms.ToolStripMenuItem("粘贴")
+        {
+            Enabled = _runtime.CanPasteIntoBox(box)
+        };
+        paste.Click += async (_, _) => await PasteIntoBoxAsync(box);
+        menu.Items.Add(paste);
+        menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("重命名", null, (_, _) =>
         {
             BeginInvoke((Action)(() => BeginTitleEdit(box)));
@@ -3573,19 +4527,25 @@ internal sealed class DesktopBoxForm : Forms.Form
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("设置", null, (_, _) => _runtime.RequestShowSettings("appearance"));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("删除盒子", null, (_, _) =>
+        menu.Items.Add("删除盒子", null, async (_, _) =>
         {
-            var detail = box.IsMappedFolder
-                ? "不会删除映射文件夹或其中的文件。"
-                : "盒子中的文件仍保留在桌面。";
-            if (!_runtime.State.Settings.ConfirmDeleteBox || DesktopConfirmationDialog.Show(
-                    this,
-                    _runtime.IsDarkTheme,
-                    $"删除“{box.Title}”？",
-                    detail,
-                    "删除盒子"))
+            try
             {
-                _runtime.DeleteBox(box);
+                var detail = box.IsMappedFolder
+                    ? "不会删除映射文件夹或其中的文件。"
+                    : "盒子中的文件仍保留在桌面。";
+                if (!_runtime.State.Settings.ConfirmDeleteBox ||
+                    await ConfirmDesktopAsync(
+                        $"删除“{box.Title}”？",
+                        detail,
+                        "删除盒子"))
+                {
+                    _runtime.DeleteBox(box);
+                }
+            }
+            catch (Exception exception)
+            {
+                DiagnosticLog.Error($"Delete box failed: {exception}", exception);
             }
         });
         return menu;
@@ -3607,7 +4567,7 @@ internal sealed class DesktopBoxForm : Forms.Form
             tabMenu.DropDownItems.Add("重命名当前标签…", null, (_, _) =>
                 BeginInvoke((Action)(() => RenameManualTab(box, activeTab))));
             tabMenu.DropDownItems.Add("删除当前标签", null, (_, _) =>
-                BeginInvoke((Action)(() => DeleteManualTab(box, activeTab))));
+                BeginInvoke((Action)(async () => await DeleteManualTab(box, activeTab))));
         }
 
         var selectedKeys = GetSelectedItemKeys(box.Id);
@@ -3657,11 +4617,9 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
     }
 
-    private void DeleteManualTab(DesktopBox box, DesktopBoxTab tab)
+    private async Task DeleteManualTab(DesktopBox box, DesktopBoxTab tab)
     {
-        if (!DesktopConfirmationDialog.Show(
-                this,
-                _runtime.IsDarkTheme,
+        if (!await ConfirmDesktopAsync(
                 $"删除“{tab.Title}”标签？",
                 "该标签中的图标会保留在盒子里，并回到“全部”。",
                 "删除标签"))
@@ -3675,6 +4633,75 @@ internal sealed class DesktopBoxForm : Forms.Form
             ClearBoxItemSelection(box.Id);
             Invalidate();
         }
+    }
+    private async Task<bool> ConfirmDesktopAsync(string title, string message, string primaryText)
+    {
+        if (_confirmationInProgress)
+        {
+            return false;
+        }
+        var handler = _runtime.DesktopConfirmationHandler;
+        if (handler is null)
+        {
+            return DesktopConfirmationDialog.Show(this, _runtime.IsDarkTheme, title, message, primaryText);
+        }
+        _confirmationInProgress = true;
+        try
+        {
+            return await handler(new DesktopConfirmationRequest(Handle, title, message, primaryText));
+        }
+        finally
+        {
+            _confirmationInProgress = false;
+        }
+    }
+
+    private async Task PasteIntoBoxAsync(DesktopBox box)
+    {
+        if (!_runtime.CanPasteIntoBox(box))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _runtime.PasteIntoBoxAsync(box.Id);
+            ShowImportFailures(result.ImportResult);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error($"Failed to paste files into box '{box.Title}'.", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "粘贴失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowImportFailures(FileImportBatchResult result)
+    {
+        if (!result.HasFailures)
+        {
+            return;
+        }
+
+        var details = string.Join(
+            Environment.NewLine,
+            result.FailedItems.Take(3).Select(item =>
+                $"- {Path.GetFileName(item.SourcePath)}: {item.ErrorMessage}"));
+        if (result.FailedCount > 3)
+        {
+            details += Environment.NewLine + $"另有 {result.FailedCount - 3} 项未导入。";
+        }
+
+        Forms.MessageBox.Show(
+            this,
+            $"已导入 {result.SucceededCount} 项，{result.FailedCount} 项未导入。{Environment.NewLine}{Environment.NewLine}{details}",
+            "导入未完成",
+            Forms.MessageBoxButtons.OK,
+            Forms.MessageBoxIcon.Warning);
     }
 
     private void MoveSelectedItemsToManualTab(DesktopBox box, IEnumerable<string> itemKeys, Guid? tabId)
@@ -3788,6 +4815,10 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             selectedItems = [item];
         }
+        if (selectedItems.Length == 0)
+        {
+            selectedItems = [item];
+        }
 
         var session = ShellContextMenuSession.TryCreate(
                 selectedItems.Select(candidate => candidate.ParsingName),
@@ -3797,16 +4828,61 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return;
         }
+        var canRename = box.MappedFolder?.IsReadOnly != true &&
+            selectedItems.Length == 1 && selectedItems[0].FileSystemPath is not null;
+        var command = ShellContextMenuCommand.None;
         _shellContextMenu = session;
         try
         {
             var screenPoint = PointToScreen(location);
-            session.Show(Handle, screenPoint.X, screenPoint.Y);
+            command = session.Show(
+                Handle,
+                screenPoint.X,
+                screenPoint.Y,
+                canRename,
+                box.MappedFolder?.IsReadOnly == true
+                    ? ShellContextMenuRestrictions.BlockFileMutations
+                    : ShellContextMenuRestrictions.None);
         }
         finally
         {
             _shellContextMenu = null;
             session.Dispose();
+        }
+
+        if (command == ShellContextMenuCommand.Rename && canRename)
+        {
+            _ = RenameItemAsync(box, selectedItems[0]);
+        }
+    }
+
+    private async Task RenameItemAsync(DesktopBox box, DesktopItemRef item)
+    {
+        if (box.MappedFolder?.IsReadOnly == true)
+        {
+            return;
+        }
+
+        var newName = DesktopRenameDialog.Show(this, _runtime.IsDarkTheme, item);
+        if (newName is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _runtime.RenameItemAsync(item, newName, box.Id);
+            ClearSelection();
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error($"Failed to rename box item '{item.DisplayName}'.", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "重命名失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
         }
     }
 
@@ -3958,6 +5034,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         var fromHeight = GetVisualBoxHeight(box);
         _hoverExpandedBoxes.Clear();
         _hoverExpandedBoxes.Add(boxId);
+        _geometryDirty = true;
         StartBoxHeightAnimation(box, fromHeight);
         UpdateWindowRegion();
     }
@@ -3972,6 +5049,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         }
         var fromHeight = GetVisualBoxHeight(box);
         _hoverExpandedBoxes.Remove(boxId);
+        _geometryDirty = true;
         StartBoxHeightAnimation(box, fromHeight);
         UpdateWindowRegion();
     }
@@ -3980,7 +5058,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         DesktopItemLayoutEngine.GetMinimumBoxWidth(
             box.ViewMode,
             box.Appearance.IconSize,
-            _runtime.State.Settings.Appearance.IconHorizontalSpacing);
+            DesktopItemLayoutEngine.ScaleIconSpacing(_runtime.State.Settings.Appearance.IconHorizontalSpacing, box.Appearance.IconSize));
 
     private static float GetTitleRightPadding(DesktopBox box) => 92;
 
@@ -4277,6 +5355,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         // IsCollapsed is retained in the persisted shape for compatibility,
         // but it is derived from the display mode rather than user-controlled.
         box.IsCollapsed = expandOnHover;
+        _geometryDirty = true;
         StartBoxHeightAnimation(box, fromHeight);
         UpdateWindowRegion();
         _runtime.BoxChanged(box);
@@ -4292,6 +5371,7 @@ internal sealed class DesktopBoxForm : Forms.Form
     {
         _transformDirtyBounds = ToVisualBounds(box, box.Bounds);
         _heightAnimations.Remove(box.Id);
+        _geometryDirty = true;
         if (_heightAnimations.Count == 0)
         {
             _animationTimer.Stop();
@@ -4357,6 +5437,7 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             _animationTimer.Stop();
         }
+        _geometryDirty = true;
         UpdateWindowRegion();
         foreach (var id in animatedBoxIds)
         {
@@ -4392,6 +5473,16 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return Color.FromArgb(40, 44, 50);
         }
+    }
+
+    private static Color BrightenColor(Color color, float amount)
+    {
+        amount = Math.Clamp(amount, 0f, 1f);
+        return Color.FromArgb(
+            color.A,
+            (int)Math.Round(color.R + (255 - color.R) * amount),
+            (int)Math.Round(color.G + (255 - color.G) * amount),
+            (int)Math.Round(color.B + (255 - color.B) * amount));
     }
 
     private static Color ResolveTitleColor(string value, Color boxBackground)

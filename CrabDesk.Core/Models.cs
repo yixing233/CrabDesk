@@ -306,6 +306,41 @@ public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move
     public bool HasFiles => Paths.Count > 0;
 }
 
+public sealed record FileImportItemResult(
+    string SourcePath,
+    string? DestinationPath,
+    string? ErrorMessage)
+{
+    public bool Succeeded => DestinationPath is not null && string.IsNullOrWhiteSpace(ErrorMessage);
+}
+
+public sealed record FileImportBatchResult(IReadOnlyList<FileImportItemResult> Items)
+{
+    public static FileImportBatchResult Empty { get; } = new([]);
+
+    public IReadOnlyList<FileImportItemResult> SuccessfulItems => Items
+        .Where(item => item.Succeeded)
+        .ToArray();
+
+    public IReadOnlyList<FileImportItemResult> FailedItems => Items
+        .Where(item => !item.Succeeded)
+        .ToArray();
+
+    public IReadOnlyList<string> ImportedPaths => SuccessfulItems
+        .Select(item => item.DestinationPath!)
+        .ToArray();
+
+    public int SucceededCount => Items.Count(item => item.Succeeded);
+    public int FailedCount => Items.Count - SucceededCount;
+    public bool HasFailures => FailedCount > 0;
+}
+
+public sealed record BoxPasteResult(int AssignedCount, FileImportBatchResult ImportResult)
+{
+    public int FailedCount => ImportResult.FailedCount;
+    public bool HasFailures => ImportResult.HasFailures;
+}
+
 public sealed class AppSettings
 {
     public bool StartWithWindows { get; set; }
@@ -455,6 +490,10 @@ public sealed class GlobalAppearanceSettings
     public string SelectionColor { get; set; } = "#FF4A5BB1";
     public bool HoverFeedback { get; set; } = true;
     public bool AnimationEnabled { get; set; } = true;
+    // Empty family/zero size keeps the system icon-title font; set both to
+    // override the desktop item label appearance.
+    public string IconLabelFontFamily { get; set; } = string.Empty;
+    public double IconLabelFontSize { get; set; }
 }
 
 public sealed class BackupSettings

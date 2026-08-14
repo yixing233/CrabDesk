@@ -12,6 +12,12 @@ public sealed class ShowSettingsRequestedEventArgs(string? page) : EventArgs
     public string? Page { get; } = page;
 }
 
+public sealed record DesktopConfirmationRequest(
+    IntPtr OwnerHandle,
+    string Title,
+    string Message,
+    string PrimaryText);
+
 public sealed class CrabDeskRuntime : IDisposable
 {
     private static readonly TimeSpan DesktopViewRefreshInterval = TimeSpan.FromMilliseconds(100);
@@ -109,13 +115,14 @@ public sealed class CrabDeskRuntime : IDisposable
             false,
             beginInvoke,
             RefreshAfterDesktopMenuCommandAsync);
-        _itemProvider.ItemsChanged += (_, _) => _beginInvoke(OnDesktopItemsChanged);
+        _itemProvider.ItemsChanged += (sender, args) => _beginInvoke(() => OnDesktopItemsChanged(sender, args));
         _mappedFolderProvider.ItemsChanged += (_, _) => _beginInvoke(async () => await RefreshMappedFoldersAsync());
         _hotkeyService.Pressed += OnGlobalHotkeyPressed;
     }
 
     public event EventHandler? Changed;
     public event EventHandler<ShowSettingsRequestedEventArgs>? ShowSettingsRequested;
+    public Func<DesktopConfirmationRequest, Task<bool>>? DesktopConfirmationHandler { get; set; }
     public event EventHandler? ExitRequested;
 
     public CrabDeskState State { get; private set; } = new();
@@ -1134,12 +1141,12 @@ public sealed class CrabDeskRuntime : IDisposable
         var minimumWidth = DesktopItemLayoutEngine.GetMinimumBoxWidth(
             box.ViewMode,
             box.Appearance.IconSize,
-            State.Settings.Appearance.IconHorizontalSpacing);
+            DesktopItemLayoutEngine.ScaleIconSpacing(State.Settings.Appearance.IconHorizontalSpacing, box.Appearance.IconSize));
         var minimumHeight = DesktopItemLayoutEngine.GetMinimumBoxHeight(
             box.ViewMode,
             box.Appearance.TitleBarHeight,
             box.Appearance.IconSize,
-            State.Settings.Appearance.IconVerticalSpacing,
+            DesktopItemLayoutEngine.ScaleIconSpacing(State.Settings.Appearance.IconVerticalSpacing, box.Appearance.IconSize),
             box.ManualTabs.Count > 0 ? DesktopItemLayoutEngine.TabBarHeight : 0);
         box.Bounds = box.Bounds.Clamp(
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
@@ -1152,27 +1159,32 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(rebuild);
     }
 
-    public async Task ImportFilesAsync(IEnumerable<string> paths, Guid boxId, bool move)
+    public async Task<FileImportBatchResult> ImportFilesAsync(IEnumerable<string> paths, Guid boxId, bool move)
     {
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var imported = await _fileOperations.ImportAsync(paths, desktop, move);
+        if (imported.SucceededCount == 0)
+        {
+            return imported;
+        }
+
         await RefreshItemsAsync();
-        var importedSet = imported.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var importedSet = imported.ImportedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var item in Items.Where(item => item.FileSystemPath is not null && importedSet.Contains(Path.GetFullPath(item.FileSystemPath))))
         {
             State.Assignments[item.Key.ToString()] = boxId;
             MoveItemOrderKey(item.Key.ToString(), boxId);
         }
         NotifyWorkspaceChanged(true);
+        return imported;
     }
 
-    public async Task ImportFilesToBoxAsync(IEnumerable<string> paths, Guid boxId, bool move)
+    public async Task<FileImportBatchResult> ImportFilesToBoxAsync(IEnumerable<string> paths, Guid boxId, bool move)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
         if (!box.IsMappedFolder)
         {
-            await ImportFilesAsync(paths, boxId, move);
-            return;
+            return await ImportFilesAsync(paths, boxId, move);
         }
         if (box.MappedFolder!.IsReadOnly)
         {
@@ -1183,11 +1195,15 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             throw new DirectoryNotFoundException(snapshot?.Message ?? "映射文件夹不可用。");
         }
-        await _fileOperations.ImportAsync(paths, box.MappedFolder.Path, move);
-        await RefreshMappedFoldersAsync();
+        var imported = await _fileOperations.ImportAsync(paths, box.MappedFolder.Path, move);
+        if (imported.SucceededCount > 0)
+        {
+            await RefreshMappedFoldersAsync();
+        }
+        return imported;
     }
 
-    public async Task TransferBoxItemsAsync(
+    public async Task<FileImportBatchResult> TransferBoxItemsAsync(
         Guid sourceBoxId,
         IEnumerable<string> itemKeys,
         Guid targetBoxId,
@@ -1195,7 +1211,7 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         if (sourceBoxId == targetBoxId)
         {
-            return;
+            return FileImportBatchResult.Empty;
         }
         var source = State.Boxes.First(candidate => candidate.Id == sourceBoxId);
         var target = State.Boxes.First(candidate => candidate.Id == targetBoxId);
@@ -1203,7 +1219,7 @@ public sealed class CrabDeskRuntime : IDisposable
         var items = GetItemsForBox(sourceBoxId).Where(item => keys.Contains(item.Key.ToString())).ToArray();
         if (items.Length == 0)
         {
-            return;
+            return FileImportBatchResult.Empty;
         }
 
         // Keep the runtime contract aligned with the drag surface. Callers
@@ -1217,27 +1233,36 @@ public sealed class CrabDeskRuntime : IDisposable
         if (!target.IsMappedFolder && !source.IsMappedFolder)
         {
             AssignItems(items.Select(item => item.Key.ToString()), targetBoxId);
-            return;
+            return FileImportBatchResult.Empty;
         }
 
         var paths = items.Select(item => item.FileSystemPath).OfType<string>().ToArray();
         if (paths.Length == 0)
         {
-            return;
+            return FileImportBatchResult.Empty;
         }
-        await ImportFilesToBoxAsync(paths, targetBoxId, move);
+        var imported = await ImportFilesToBoxAsync(paths, targetBoxId, move);
         if (move && !source.IsMappedFolder)
         {
-            foreach (var item in items)
+            var movedSources = imported.SuccessfulItems
+                .Select(result => Path.GetFullPath(result.SourcePath))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var movedItems = items.Where(item => item.FileSystemPath is not null &&
+                movedSources.Contains(Path.GetFullPath(item.FileSystemPath))).ToArray();
+            foreach (var item in movedItems)
             {
                 UnassignItemCore(item.Key.ToString());
             }
-            await RefreshItemsAsync(false);
+            if (movedItems.Length > 0)
+            {
+                await RefreshItemsAsync(false);
+            }
         }
         if (source.IsMappedFolder)
         {
             await RefreshMappedFoldersAsync();
         }
+        return imported;
     }
 
     public bool CanPasteIntoBox(DesktopBox box)
@@ -1256,7 +1281,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    public async Task<int> PasteIntoBoxAsync(Guid boxId)
+    public async Task<BoxPasteResult> PasteIntoBoxAsync(Guid boxId)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
         if (box.MappedFolder?.IsReadOnly == true)
@@ -1266,17 +1291,19 @@ public sealed class CrabDeskRuntime : IDisposable
         var clipboard = _fileOperations.GetClipboardFiles();
         if (!clipboard.HasFiles)
         {
-            return 0;
+            return new BoxPasteResult(0, FileImportBatchResult.Empty);
         }
 
         if (box.IsMappedFolder)
         {
-            await ImportFilesToBoxAsync(clipboard.Paths, boxId, clipboard.Move);
-            if (clipboard.Move)
+            var mappedImport = await ImportFilesToBoxAsync(clipboard.Paths, boxId, clipboard.Move);
+            if (clipboard.Move &&
+                mappedImport.FailedCount == 0 &&
+                mappedImport.SucceededCount == clipboard.Paths.Count)
             {
                 _fileOperations.ClearClipboardFiles();
             }
-            return clipboard.Paths.Count;
+            return new BoxPasteResult(mappedImport.SucceededCount, mappedImport);
         }
 
         var desktopItems = Items
@@ -1297,19 +1324,21 @@ public sealed class CrabDeskRuntime : IDisposable
             }
         }
         var assigned = AssignItems(assignedKeys, boxId);
+        var imported = FileImportBatchResult.Empty;
         if (external.Count > 0)
         {
-            await ImportFilesAsync(external, boxId, clipboard.Move);
-            assigned += external.Count;
+            imported = await ImportFilesAsync(external, boxId, clipboard.Move);
+            assigned += imported.SucceededCount;
         }
-        if (clipboard.Move && assigned > 0)
+        if (clipboard.Move &&
+            assignedKeys.Count + imported.SucceededCount == clipboard.Paths.Count)
         {
             _fileOperations.ClearClipboardFiles();
         }
-        return assigned;
+        return new BoxPasteResult(assigned, imported);
     }
 
-    public async Task RenameItemAsync(DesktopItemRef item, string newName, Guid boxId)
+    public async Task RenameItemAsync(DesktopItemRef item, string newName, Guid? boxId = null)
     {
         var oldKey = item.Key.ToString();
         var oldPath = item.FileSystemPath is null ? null : Path.GetFullPath(item.FileSystemPath);
@@ -1320,10 +1349,11 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             _originalFileAttributes[Path.GetFullPath(destination)] = originalAttributes;
         }
-        if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder == true)
+        if (boxId is { } mappedBoxId &&
+            State.Boxes.FirstOrDefault(box => box.Id == mappedBoxId)?.IsMappedFolder == true)
         {
             await RefreshMappedFoldersAsync();
-            var renamedMapped = GetItemsForBox(boxId).FirstOrDefault(candidate =>
+            var renamedMapped = GetItemsForBox(mappedBoxId).FirstOrDefault(candidate =>
                 candidate.FileSystemPath is not null &&
                 string.Equals(Path.GetFullPath(candidate.FileSystemPath), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase));
             if (renamedMapped is not null)
@@ -1341,9 +1371,13 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             return;
         }
+        if (boxId is not { } targetBoxId)
+        {
+            return;
+        }
         var newKey = renamed.Key.ToString();
         State.Assignments.Remove(oldKey);
-        State.Assignments[newKey] = boxId;
+        State.Assignments[newKey] = targetBoxId;
         ReplaceItemOrderKey(oldKey, newKey);
         NotifyWorkspaceChanged(true);
     }
@@ -1818,6 +1852,19 @@ public sealed class CrabDeskRuntime : IDisposable
     public void SetSelectionColor(string value)
     {
         State.Settings.Appearance.SelectionColor = value;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconLabelFontSize(double value)
+    {
+        State.Settings.Appearance.IconLabelFontSize = Math.Clamp(value, 6, 20);
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconLabelFontFamily(string value)
+    {
+        State.Settings.Appearance.IconLabelFontFamily =
+            string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         NotifyWorkspaceChanged(true);
     }
 
@@ -3149,14 +3196,42 @@ public sealed class CrabDeskRuntime : IDisposable
             _desktopInputMonitor.DesktopContextMenuRequested += OnDesktopContextMenuRequested;
             _desktopInputMonitor.DesktopContextMenuCommandRequested += OnDesktopContextMenuCommandRequested;
             _desktopInputMonitor.DesktopContextMenuRefreshRequested += OnDesktopContextMenuRefreshRequested;
+            _desktopInputMonitor.DesktopKeyboardCommandRequested += OnDesktopKeyboardCommandRequested;
         }
         _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
+        _desktopInputMonitor.IsPointerOverBox = (x, y) =>
+            _surfaceManager?.IsPointOverAnyBox(x, y) == true;
+        _desktopInputMonitor.CanDeleteDesktopItems = () =>
+            !_disposed && !IsPaused && _surfaceManager?.CanDeleteSelectedItems == true;
+        _desktopInputMonitor.CanRenameDesktopItems = () =>
+            !_disposed && !IsPaused && _surfaceManager?.CanRenameSelectedItem == true;
+        _desktopInputMonitor.CanHandleDesktopKeyboardCommand = command =>
+            !_disposed && !IsPaused && _surfaceManager?.CanHandleDesktopKeyboardCommand(command) == true;
         _desktopInputMonitor.Enabled = true;
     }
 
     private void OnDesktopIconZoomRequested(object? sender, DesktopIconZoomEventArgs eventArgs)
     {
-        _desktopZoomTimer.Start();
+        // The low-level hook can run outside the UI thread; route the zoom
+        // through the captured synchronization context like the other hook
+        // originated handlers.
+        _beginInvoke(() =>
+        {
+            if (_disposed || IsPaused)
+            {
+                return;
+            }
+
+            // Ctrl+wheel over a box scales the icons of that box only. The
+            // desktop path keeps feeding the native Explorer zoom synchronizer.
+            if (_surfaceManager is not null &&
+                _surfaceManager.TryZoomBoxIconsAt(eventArgs.X, eventArgs.Y, eventArgs.Delta))
+            {
+                return;
+            }
+
+            _desktopZoomTimer.Start();
+        });
     }
 
     private void OnDesktopSurfaceClicked(object? sender, EventArgs eventArgs)
@@ -3173,6 +3248,65 @@ public sealed class CrabDeskRuntime : IDisposable
 
             _surfaceManager?.ClearSelection();
         });
+    }
+
+    private void OnDesktopDeleteRequested(object? sender, EventArgs eventArgs)
+    {
+        _beginInvoke(() => _ = DeleteSelectedDesktopItemsAsync());
+    }
+
+    private void OnDesktopRenameRequested(object? sender, EventArgs eventArgs)
+    {
+        _beginInvoke(() =>
+        {
+            if (_disposed || IsPaused)
+            {
+                return;
+            }
+
+            _surfaceManager?.BeginRenameSelectedItem();
+        });
+    }
+
+    private void OnDesktopKeyboardCommandRequested(
+        object? sender,
+        DesktopKeyboardCommandEventArgs eventArgs)
+    {
+        _beginInvoke(() => _ = ExecuteDesktopKeyboardCommandAsync(eventArgs.Command));
+    }
+
+    private async Task ExecuteDesktopKeyboardCommandAsync(DesktopKeyboardCommand command)
+    {
+        try
+        {
+            if (_disposed || IsPaused || _surfaceManager is null)
+            {
+                return;
+            }
+
+            await _surfaceManager.ExecuteDesktopKeyboardCommandAsync(command);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error($"Desktop keyboard command '{command}' failed.", exception);
+        }
+    }
+
+    private async Task DeleteSelectedDesktopItemsAsync()
+    {
+        try
+        {
+            if (_disposed || IsPaused || _surfaceManager is null)
+            {
+                return;
+            }
+
+            await _surfaceManager.DeleteSelectedItemsAsync();
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Desktop selection deletion failed.", exception);
+        }
     }
 
     private void OnDesktopContextMenuRequested(object? sender, EventArgs eventArgs)
@@ -3921,14 +4055,20 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private async void OnDesktopItemsChanged()
+    private async void OnDesktopItemsChanged(object? sender, EventArgs eventArgs)
     {
         if (_disposed)
         {
             return;
         }
+        // New and deleted items must always appear or disappear on the
+        // replacement desktop, even when the 'refresh after rename'
+        // preference is off. Only a rename honors that gate so a manual
+        // layout stays stable while the user is typing a new name.
+        var isRename = eventArgs is FileSystemEventArgs fileArgs &&
+            fileArgs.ChangeType == WatcherChangeTypes.Renamed;
         var realtimeOrganization = State.Organization.Enabled && State.Organization.RunOnDesktopChanges;
-        if (!State.Settings.DesktopBehavior.RefreshAfterRename && !realtimeOrganization)
+        if (isRename && !State.Settings.DesktopBehavior.RefreshAfterRename && !realtimeOrganization)
         {
             return;
         }

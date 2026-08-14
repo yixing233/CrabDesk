@@ -186,12 +186,95 @@ public partial class OrganizationViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Apply()
+    private async Task ApplyAsync()
     {
+        var decisions = _service.PreviewOrganizationRules();
+        if (decisions.Count == 0)
+        {
+            ResultText = "没有匹配到需要整理的项目。";
+            return;
+        }
+
+        if (!await _dialogs.ConfirmAsync(
+                "整理预览",
+                BuildOrganizationPreview(decisions),
+                "确认整理"))
+        {
+            ResultText = "已取消整理。";
+            return;
+        }
+
         var result = _service.ApplyOrganizationRules();
         ResultText = $"已分配 {result.Assigned} 项，保留 {result.Unassigned} 项，忽略 {result.Ignored} 项" +
             (result.InvalidTargets > 0 ? $"，{result.InvalidTargets} 项缺少目标盒子" : string.Empty);
     }
+
+    private string BuildOrganizationPreview(IReadOnlyList<OrganizationDecision> decisions)
+    {
+        var boxes = _service.Boxes
+            .Where(box => !box.IsMappedFolder)
+            .ToDictionary(box => box.Id, box => box.Title);
+        var assignable = decisions.Where(decision =>
+            decision.Action == OrganizationRuleAction.AssignToBox &&
+            decision.TargetBoxId is { } target &&
+            boxes.ContainsKey(target)).ToArray();
+        var invalid = decisions.Where(decision =>
+            decision.Action == OrganizationRuleAction.AssignToBox &&
+            (decision.TargetBoxId is not { } target || !boxes.ContainsKey(target))).ToArray();
+        var keepUnassigned = decisions.Where(decision =>
+            decision.Action == OrganizationRuleAction.KeepUnassigned).ToArray();
+        var ignored = decisions.Where(decision =>
+            decision.Action == OrganizationRuleAction.Ignore).ToArray();
+
+        var lines = new List<string>
+        {
+            $"本次将评估 {decisions.Count} 个项目。"
+        };
+        if (assignable.Length > 0)
+        {
+            lines.Add($"分配到盒子: {assignable.Length} 项");
+            foreach (var group in assignable.GroupBy(decision => decision.TargetBoxId!.Value))
+            {
+                lines.Add($"  {boxes[group.Key]}: {group.Count()} 项");
+            }
+        }
+        if (keepUnassigned.Length > 0)
+        {
+            lines.Add($"保留未分配: {keepUnassigned.Length} 项");
+        }
+        if (ignored.Length > 0)
+        {
+            lines.Add($"忽略: {ignored.Length} 项");
+        }
+        if (invalid.Length > 0)
+        {
+            lines.Add($"目标盒子不可用: {invalid.Length} 项");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("项目预览:");
+        foreach (var decision in decisions.Take(8))
+        {
+            lines.Add($"- {decision.ItemName} -> {DescribeDecision(decision, boxes)}");
+        }
+        if (decisions.Count > 8)
+        {
+            lines.Add($"另有 {decisions.Count - 8} 项。");
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string DescribeDecision(
+        OrganizationDecision decision,
+        IReadOnlyDictionary<Guid, string> boxes) => decision.Action switch
+    {
+        OrganizationRuleAction.AssignToBox when decision.TargetBoxId is { } target && boxes.TryGetValue(target, out var title) =>
+            $"放入“{title}”",
+        OrganizationRuleAction.AssignToBox => "目标盒子不可用",
+        OrganizationRuleAction.KeepUnassigned => "保留在桌面",
+        OrganizationRuleAction.Ignore => "忽略",
+        _ => "不处理"
+    };
 
     [RelayCommand] private void Undo() => _service.UndoLastOrganization();
     [RelayCommand] private void InstallDefaults() => _service.InstallDefaultOrganizationRules();

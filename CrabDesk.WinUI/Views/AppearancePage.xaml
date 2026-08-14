@@ -1,5 +1,6 @@
 <Page
     x:Class="CrabDesk.WinUI.Views.AppearancePage"
+    x:Name="Page"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:CrabDesk.WinUI.Controls"
@@ -39,7 +40,7 @@
                                 <TextBlock Grid.Column="1" Text="{Binding Background}" VerticalAlignment="Center" />
                             </Grid>
                             <Button.Flyout>
-                                <Flyout Placement="BottomEdgeAlignedLeft">
+                                <Flyout Placement="BottomEdgeAlignedLeft" Opening="OnColorFlyoutOpening">
                                     <ColorPicker Width="{StaticResource ColorPickerWidth}"
                                                  IsAlphaEnabled="False"
                                                  IsColorPreviewVisible="True"
@@ -52,7 +53,7 @@
                             </Button.Flyout>
                         </Button>
                     </StackPanel>
-                    <StackPanel Grid.Column="1">
+                    <StackPanel Grid.Row="1">
                         <Grid>
                             <TextBlock Text="不透明度" />
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
@@ -66,7 +67,7 @@
                                 Value="{Binding Opacity, Mode=TwoWay}"
                                 AutomationProperties.Name="不透明度" />
                     </StackPanel>
-                    <StackPanel Grid.Row="1">
+                    <StackPanel Grid.Row="1" Grid.Column="1">
                         <Grid>
                             <TextBlock Text="圆角" />
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
@@ -80,7 +81,7 @@
                                 Value="{Binding CornerRadius, Mode=TwoWay}"
                                 AutomationProperties.Name="圆角" />
                     </StackPanel>
-                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                    <StackPanel Grid.Column="1" Spacing="4">
                         <TextBlock Text="选择颜色" />
                         <Button Style="{StaticResource ColorPickerButtonStyle}"
                                 AutomationProperties.Name="选择项目选中颜色">
@@ -98,7 +99,7 @@
                                 <TextBlock Grid.Column="1" Text="{Binding SelectionColor}" VerticalAlignment="Center" />
                             </Grid>
                             <Button.Flyout>
-                                <Flyout Placement="BottomEdgeAlignedRight">
+                                <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
                                     <ColorPicker Width="{StaticResource ColorPickerWidth}"
                                                  IsAlphaEnabled="False"
                                                  IsColorPreviewVisible="True"
@@ -181,7 +182,7 @@
                                     <TextBlock Grid.Column="1" Text="{Binding ManualTitleColor}" VerticalAlignment="Center" />
                                 </Grid>
                                 <Button.Flyout>
-                                    <Flyout Placement="BottomEdgeAlignedRight">
+                                    <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
                                         <ColorPicker Width="{StaticResource ColorPickerWidth}"
                                                      IsAlphaEnabled="False"
                                                      IsColorPreviewVisible="True"
@@ -273,6 +274,29 @@
                               ItemsSource="{Binding SortModes}"
                               ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
                               SelectedItem="{Binding SortMode, Mode=TwoWay}" />
+                </Grid>
+            </Expander>
+            <Expander Header="桌面图标名称" IsExpanded="True" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <ToggleSwitch Grid.ColumnSpan="2" Header="使用自定义字体" IsOn="{Binding IconLabelCustomEnabled, Mode=TwoWay}" AutomationProperties.Name="使用自定义字体" />
+                    <controls:FontPickerControl Grid.Row="1"
+                                                Header="名称字体"
+                                                FontFamilies="{Binding FontFamilies}"
+                                                SelectedFont="{Binding IconLabelFontFamily, Mode=TwoWay}"
+                                                IsEnabled="{Binding IconLabelCustomEnabled}"
+                                                AutomationProperties.Name="桌面图标名称字体" />
+                    <NumberBox Grid.Row="1"
+                               Grid.Column="1"
+                               Header="字号"
+                               Minimum="6"
+                               Maximum="20"
+                               SmallChange="0.5"
+                               SpinButtonPlacementMode="Compact"
+                               Value="{Binding IconLabelFontSize, Mode=TwoWay}"
+                               IsEnabled="{Binding IconLabelCustomEnabled}"
+                               AutomationProperties.Name="桌面图标名称字号" />
                 </Grid>
             </Expander>
             <Border Height="24" Background="Transparent" />

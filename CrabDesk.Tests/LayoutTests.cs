@@ -285,7 +285,7 @@ public sealed class LayoutTests
 
         LayoutCoordinator.NormalizeForMonitors(state, [Monitor("primary", true, 1920, 1040)]);
 
-        Assert.Equal(164, state.Boxes[0].Bounds.Height);
+        Assert.Equal(158, state.Boxes[0].Bounds.Height);
     }
 
     [Fact]
@@ -545,6 +545,34 @@ public sealed class LayoutTests
     public void CollapseAnimationUsesClampedEaseOutCubic(double progress, double expected)
     {
         Assert.Equal(expected, AnimationMath.Interpolate(300, 52, progress), 0);
+    }
+
+    [Fact]
+    public void GridCellsFollowBoxIconSizeWhenSpacingIsScaled()
+    {
+        var small = DesktopItemLayoutEngine.GetGridCellWidth(
+            24,
+            DesktopItemLayoutEngine.ScaleIconSpacing(76, 24));
+        var anchor = DesktopItemLayoutEngine.GetGridCellWidth(
+            42,
+            DesktopItemLayoutEngine.ScaleIconSpacing(76, 42));
+        var large = DesktopItemLayoutEngine.GetGridCellWidth(
+            96,
+            DesktopItemLayoutEngine.ScaleIconSpacing(76, 96));
+
+        Assert.True(small < anchor);
+        Assert.True(large > anchor);
+        Assert.Equal(76, anchor, 0);
+
+        var smallV = DesktopItemLayoutEngine.GetGridCellHeight(
+            24,
+            DesktopItemLayoutEngine.ScaleIconSpacing(80, 24));
+        var anchorV = DesktopItemLayoutEngine.GetGridCellHeight(
+            42,
+            DesktopItemLayoutEngine.ScaleIconSpacing(80, 42));
+
+        Assert.Equal(80, anchorV, 0);
+        Assert.True(smallV < anchorV);
     }
 
     private static MonitorLayout Monitor(string id, bool primary, double width, double height) => new()

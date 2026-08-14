@@ -2,6 +2,19 @@ using System.Runtime.InteropServices;
 
 namespace CrabDesk.Native;
 
+public enum ShellContextMenuCommand
+{
+    None,
+    Rename
+}
+
+[Flags]
+public enum ShellContextMenuRestrictions
+{
+    None = 0,
+    BlockFileMutations = 1
+}
+
 public sealed class ShellContextMenuSession : IDisposable
 {
     private const uint CommandFirst = 1;
@@ -9,7 +22,10 @@ public sealed class ShellContextMenuSession : IDisposable
     private const uint TpmRightButton = 0x0002;
     private const uint TpmReturnCommand = 0x0100;
     private const uint CmicMaskUnicode = 0x00004000;
+    private const uint GcsVerbW = 0x00000004;
+    private const uint MfByPosition = 0x0400;
     private const int SwShowNormal = 1;
+    private const int CommandVerbBufferLength = 260;
     private const int WmDrawItem = 0x002b;
     private const int WmMeasureItem = 0x002c;
     private const int WmInitMenuPopup = 0x0117;
@@ -21,6 +37,21 @@ public sealed class ShellContextMenuSession : IDisposable
     private readonly IContextMenu2? _contextMenu2;
     private readonly IContextMenu3? _contextMenu3;
     private bool _disposed;
+
+    private static readonly HashSet<string> FileMutationCanonicalVerbs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cut",
+        "delete",
+        "rename",
+        "paste",
+        "pasteshortcut",
+        "new",
+        "create",
+        "copyto",
+        "moveto",
+        "compress",
+        "compressandemail"
+    };
 
     private ShellContextMenuSession(
         List<IntPtr> absoluteItemIds,
@@ -153,13 +184,18 @@ public sealed class ShellContextMenuSession : IDisposable
         }
     }
 
-    public void Show(IntPtr ownerWindow, int screenX, int screenY)
+    public ShellContextMenuCommand Show(
+        IntPtr ownerWindow,
+        int screenX,
+        int screenY,
+        bool interceptRename = false,
+        ShellContextMenuRestrictions restrictions = ShellContextMenuRestrictions.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var menu = CreatePopupMenu();
         if (menu == IntPtr.Zero)
         {
-            return;
+            return ShellContextMenuCommand.None;
         }
         try
         {
@@ -171,7 +207,11 @@ public sealed class ShellContextMenuSession : IDisposable
                 0);
             if (result < 0)
             {
-                return;
+                return ShellContextMenuCommand.None;
+            }
+            if ((restrictions & ShellContextMenuRestrictions.BlockFileMutations) != 0)
+            {
+                RemoveRestrictedCommands(menu);
             }
             var command = TrackPopupMenuEx(
                 menu,
@@ -182,25 +222,92 @@ public sealed class ShellContextMenuSession : IDisposable
                 IntPtr.Zero);
             if (command < CommandFirst)
             {
-                return;
+                return ShellContextMenuCommand.None;
             }
 
-            var commandOffset = new IntPtr(command - CommandFirst);
+            var commandOffset = command - CommandFirst;
+            var canonicalVerb = GetCanonicalVerb(commandOffset);
+            if ((restrictions & ShellContextMenuRestrictions.BlockFileMutations) != 0 &&
+                IsFileMutationCanonicalVerb(canonicalVerb))
+            {
+                return ShellContextMenuCommand.None;
+            }
+            if (interceptRename &&
+                string.Equals(canonicalVerb, "rename", StringComparison.OrdinalIgnoreCase))
+            {
+                return ShellContextMenuCommand.Rename;
+            }
+
+            var commandOffsetPointer = new IntPtr(commandOffset);
             var invoke = new CommandInvokeInfo
             {
                 Size = Marshal.SizeOf<CommandInvokeInfo>(),
                 Mask = CmicMaskUnicode,
                 Owner = ownerWindow,
-                Verb = commandOffset,
+                Verb = commandOffsetPointer,
                 Show = SwShowNormal,
-                VerbUnicode = commandOffset,
+                VerbUnicode = commandOffsetPointer,
                 InvokePoint = new NativePoint { X = screenX, Y = screenY }
             };
             _contextMenu.InvokeCommand(ref invoke);
+            return ShellContextMenuCommand.None;
         }
         finally
         {
             DestroyMenu(menu);
+        }
+    }
+
+    private void RemoveRestrictedCommands(IntPtr menu)
+    {
+        for (var index = GetMenuItemCount(menu) - 1; index >= 0; index--)
+        {
+            var submenu = GetSubMenu(menu, index);
+            if (submenu != IntPtr.Zero)
+            {
+                RemoveRestrictedCommands(submenu);
+                if (GetMenuItemCount(submenu) == 0)
+                {
+                    DeleteMenu(menu, (uint)index, MfByPosition);
+                }
+                continue;
+            }
+
+            var command = GetMenuItemID(menu, index);
+            if (command < CommandFirst || command > CommandLast)
+            {
+                continue;
+            }
+
+            var canonicalVerb = GetCanonicalVerb(command - CommandFirst);
+            if (IsFileMutationCanonicalVerb(canonicalVerb))
+            {
+                DeleteMenu(menu, (uint)index, MfByPosition);
+            }
+        }
+    }
+
+    private static bool IsFileMutationCanonicalVerb(string? canonicalVerb) =>
+        !string.IsNullOrWhiteSpace(canonicalVerb) &&
+        FileMutationCanonicalVerbs.Contains(canonicalVerb);
+
+    private string? GetCanonicalVerb(uint commandOffset)
+    {
+        var buffer = Marshal.AllocCoTaskMem(CommandVerbBufferLength * sizeof(char));
+        try
+        {
+            return _contextMenu.GetCommandString(
+                    new UIntPtr(commandOffset),
+                    GcsVerbW,
+                    IntPtr.Zero,
+                    buffer,
+                    CommandVerbBufferLength) < 0
+                ? null
+                : Marshal.PtrToStringUni(buffer);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(buffer);
         }
     }
 
@@ -275,6 +382,19 @@ public sealed class ShellContextMenuSession : IDisposable
         int y,
         IntPtr owner,
         IntPtr parameters);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMenuItemCount(IntPtr menu);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetSubMenu(IntPtr menu, int position);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetMenuItemID(IntPtr menu, int position);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteMenu(IntPtr menu, uint position, uint flags);
 
     [ComImport]
     [Guid("000214E6-0000-0000-C000-000000000046")]

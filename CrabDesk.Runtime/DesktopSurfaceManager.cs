@@ -1,3 +1,4 @@
+using System.Drawing;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -7,11 +8,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
 {
     private readonly List<DesktopBoxForm> _surfaces = [];
     private readonly List<DesktopIconSurface> _iconSurfaces = [];
+    private readonly CrabDeskRuntime _runtime;
     private readonly DesktopHostService _host;
     private readonly IntPtr _desktopListView;
     private bool _desktopIconViewWasVisible;
     private bool _desktopIconViewHidden;
     private bool _desktopIconsVisible = true;
+    private bool _deleteInProgress;
 
     internal int SurfaceCount => _surfaces.Count;
 
@@ -20,6 +23,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         DesktopHostService host,
         IReadOnlyList<MonitorLayout> monitors)
     {
+        _runtime = runtime;
         _host = host;
         _desktopListView = host.DesktopListView;
         try
@@ -288,12 +292,51 @@ internal sealed class DesktopSurfaceManager : IDisposable
             {
                 foreach (var boxSurface in monitorBoxes)
                 {
-                    boxSurface.RenderOnIconLayer(graphics, clipBounds);
+                    boxSurface.RenderStaticOnIconLayer(graphics, clipBounds);
+                }
+            });
+            iconSurface.SetDragBoxRenderer((graphics, clipBounds) =>
+            {
+                foreach (var boxSurface in monitorBoxes)
+                {
+                    boxSurface.RenderDragOnIconLayer(graphics, clipBounds);
+                }
+            });
+            iconSurface.SetBoxTransformActive(() => monitorBoxes.Any(surface => surface.HasDynamicVisual));
+            iconSurface.SetBoxDynamicBounds(() =>
+            {
+                RectangleF? bounds = null;
+                foreach (var boxSurface in monitorBoxes)
+                {
+                    if (boxSurface.GetDynamicVisualBounds() is not { } candidate)
+                    {
+                        continue;
+                    }
+                    bounds = bounds is { } existing
+                        ? RectangleF.Union(existing, candidate)
+                        : candidate;
+                }
+                return bounds;
+            });
+            iconSurface.SetBoxDynamicVersion(() =>
+            {
+                var version = 17;
+                foreach (var boxSurface in monitorBoxes)
+                {
+                    version = unchecked(version * 31 + boxSurface.DynamicVisualVersion);
+                }
+                return version;
+            });
+            iconSurface.SetBoxDynamicStateUpdater(() =>
+            {
+                foreach (var boxSurface in monitorBoxes)
+                {
+                    boxSurface.UpdateDynamicSelectionAtCursor();
                 }
             });
             foreach (var boxSurface in monitorBoxes)
             {
-                boxSurface.SetIconLayerRenderRequest(() => _ = iconSurface.RequestRender());
+                boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
             }
         }
     }
@@ -333,9 +376,39 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    internal bool IsPointOverAnyBox(int x, int y)
+    {
+        var point = new Point(x, y);
+        foreach (var surface in _surfaces)
+        {
+            if (surface.IsPointOverBox(point))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    internal bool TryZoomBoxIconsAt(int x, int y, int delta)
+    {
+        var point = new Point(x, y);
+        foreach (var surface in _surfaces)
+        {
+            if (surface.TryZoomBoxIconsAt(point, delta))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     internal int ClearIconCaches()
     {
         var cleared = 0;
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            cleared += iconSurface.ClearIconCache();
+        }
         foreach (var surface in _surfaces)
         {
             cleared += surface.ClearIconCache();
@@ -355,6 +428,229 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    internal bool CanDeleteSelectedItems =>
+        !_deleteInProgress &&
+        !_surfaces.Any(surface => surface.IsTitleEditing) &&
+        GetSelectedFileSystemItems().Count > 0;
+
+    internal bool CanRenameSelectedItem =>
+        !_deleteInProgress &&
+        !_surfaces.Any(surface => surface.IsTitleEditing) &&
+        GetRenameSelectionCount() == 1;
+
+    internal bool CanHandleDesktopKeyboardCommand(DesktopKeyboardCommand command)
+    {
+        if (_deleteInProgress || _surfaces.Any(surface => surface.IsTitleEditing))
+        {
+            return false;
+        }
+
+        return command switch
+        {
+            DesktopKeyboardCommand.Delete => CanDeleteSelectedItems,
+            DesktopKeyboardCommand.Rename => CanRenameSelectedItem,
+            DesktopKeyboardCommand.SelectAll => CanSelectAllItems(),
+            DesktopKeyboardCommand.Copy => GetSelectedFileSystemItems(includeReadOnly: true).Count > 0,
+            DesktopKeyboardCommand.Cut => CanCutSelectedItems(),
+            DesktopKeyboardCommand.Paste => GetPasteTargetSurface() is not null,
+            DesktopKeyboardCommand.Open => GetSelectedItems().Count == 1,
+            _ => false
+        };
+    }
+
+    internal async Task ExecuteDesktopKeyboardCommandAsync(DesktopKeyboardCommand command)
+    {
+        if (!CanHandleDesktopKeyboardCommand(command))
+        {
+            return;
+        }
+
+        switch (command)
+        {
+            case DesktopKeyboardCommand.Delete:
+                await DeleteSelectedItemsAsync();
+                break;
+            case DesktopKeyboardCommand.Rename:
+                BeginRenameSelectedItem();
+                break;
+            case DesktopKeyboardCommand.SelectAll:
+                SelectAllItems();
+                break;
+            case DesktopKeyboardCommand.Copy:
+                _runtime.FileOperations.SetClipboardFiles(
+                    GetSelectedFileSystemItems(includeReadOnly: true),
+                    move: false);
+                break;
+            case DesktopKeyboardCommand.Cut:
+                _runtime.FileOperations.SetClipboardFiles(
+                    GetSelectedFileSystemItems(),
+                    move: true);
+                break;
+            case DesktopKeyboardCommand.Paste:
+            {
+                var target = GetPasteTargetSurface();
+                if (target is not null)
+                {
+                    await target.PasteIntoSelectedOrHoveredBoxAsync(System.Windows.Forms.Cursor.Position);
+                }
+                break;
+            }
+            case DesktopKeyboardCommand.Open:
+            {
+                var item = GetSelectedItems().SingleOrDefault();
+                if (item is not null)
+                {
+                    try
+                    {
+                        _runtime.FileOperations.Open(item);
+                    }
+                    catch (Exception exception)
+                    {
+                        DiagnosticLog.Error($"Failed to open selected desktop item '{item.DisplayName}'.", exception);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    internal bool BeginRenameSelectedItem()
+    {
+        if (!CanRenameSelectedItem)
+        {
+            return false;
+        }
+
+        var iconSurface = _iconSurfaces.FirstOrDefault(surface => surface.RenameSelectionCount == 1);
+        if (iconSurface is not null)
+        {
+            return iconSurface.BeginRenameSelectedItem();
+        }
+
+        var boxSurface = _surfaces.FirstOrDefault(surface => surface.RenameSelectionCount == 1);
+        return boxSurface?.BeginRenameSelectedItem() == true;
+    }
+
+    internal async Task DeleteSelectedItemsAsync()
+    {
+        if (_deleteInProgress || _surfaces.Any(surface => surface.IsTitleEditing))
+        {
+            return;
+        }
+
+        var selectedItems = GetSelectedFileSystemItems();
+        if (selectedItems.Count == 0)
+        {
+            return;
+        }
+
+        _deleteInProgress = true;
+        ClearSelection();
+        try
+        {
+            await _runtime.FileOperations.DeleteAsync(selectedItems);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to delete selected desktop items.", exception);
+        }
+        finally
+        {
+            try
+            {
+                await _runtime.RefreshItemsAsync(false);
+            }
+            catch (Exception exception)
+            {
+                DiagnosticLog.Error("Failed to refresh desktop items after deletion.", exception);
+            }
+            finally
+            {
+                _deleteInProgress = false;
+            }
+        }
+    }
+
+    private IReadOnlyList<DesktopItemRef> GetSelectedFileSystemItems(bool includeReadOnly = false) => _iconSurfaces
+        .SelectMany(surface => surface.GetSelectedFileSystemItems())
+        .Concat(_surfaces.SelectMany(surface => surface.GetSelectedFileSystemItems(includeReadOnly)))
+        .GroupBy(item => item.FileSystemPath!, StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .ToArray();
+
+    private IReadOnlyList<DesktopItemRef> GetSelectedItems() => _iconSurfaces
+        .SelectMany(surface => surface.GetSelectedItems())
+        .Concat(_surfaces.SelectMany(surface => surface.GetSelectedItems()))
+        .GroupBy(item => item.FileSystemPath ?? item.Key.ToString(), StringComparer.OrdinalIgnoreCase)
+        .Select(group => group.First())
+        .ToArray();
+
+    private bool CanCutSelectedItems()
+    {
+        var selected = GetSelectedFileSystemItems(includeReadOnly: true);
+        return selected.Count > 0 && selected.Count == GetSelectedFileSystemItems().Count;
+    }
+
+    private bool CanSelectAllItems()
+    {
+        var selectedBoxes = _surfaces.Where(surface => surface.HasSelection).ToArray();
+        if (selectedBoxes.Length > 0)
+        {
+            return selectedBoxes.Length == 1 &&
+                selectedBoxes[0].CanSelectAllSelectedOrHoveredItems(System.Windows.Forms.Cursor.Position);
+        }
+
+        return _iconSurfaces.Any(surface => surface.HasSelection);
+    }
+
+    private void SelectAllItems()
+    {
+        var selectedBoxes = _surfaces.Where(surface => surface.HasSelection).ToArray();
+        if (selectedBoxes.Length == 1 &&
+            selectedBoxes[0].SelectAllSelectedOrHoveredItems(System.Windows.Forms.Cursor.Position))
+        {
+            foreach (var iconSurface in _iconSurfaces)
+            {
+                iconSurface.ClearSelection();
+            }
+            foreach (var surface in _surfaces.Where(surface => surface != selectedBoxes[0]))
+            {
+                surface.ClearSelection();
+            }
+            return;
+        }
+
+        if (_iconSurfaces.Any(surface => surface.HasSelection))
+        {
+            ClearBoxSelection();
+            foreach (var iconSurface in _iconSurfaces)
+            {
+                iconSurface.SelectAllItems();
+            }
+        }
+    }
+
+    private DesktopBoxForm? GetPasteTargetSurface()
+    {
+        var selectedSurfaces = _surfaces.Where(surface => surface.HasSelection).ToArray();
+        if (selectedSurfaces.Length == 1)
+        {
+            return selectedSurfaces[0].CanPasteSelectedOrHoveredBox(System.Windows.Forms.Cursor.Position)
+                ? selectedSurfaces[0]
+                : null;
+        }
+        if (selectedSurfaces.Length > 1)
+        {
+            return null;
+        }
+
+        var pointer = System.Windows.Forms.Cursor.Position;
+        return _surfaces.FirstOrDefault(surface => surface.CanPasteSelectedOrHoveredBox(pointer));
+    }
+
+    private int GetRenameSelectionCount() => _iconSurfaces.Sum(surface => surface.RenameSelectionCount) +
+        _surfaces.Sum(surface => surface.RenameSelectionCount);
+
     internal void ClearBoxSelection()
     {
         foreach (var surface in _surfaces)
@@ -364,7 +660,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
     }
 
     internal bool IsDesktopIconPointerInteractionActive =>
-        _iconSurfaces.Any(surface => surface.IsPointerInteractionActive);
+        _iconSurfaces.Any(surface => surface.IsPointerInteractionActive) ||
+        _surfaces.Any(surface => surface.IsMarqueeSelectionActive);
 
     internal void SetVirtualBoxDropTargetEnabled(bool enabled)
     {

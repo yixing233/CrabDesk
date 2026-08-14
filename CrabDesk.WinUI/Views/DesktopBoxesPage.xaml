@@ -4,15 +4,17 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:views="using:CrabDesk.WinUI.Views"
     NavigationCacheMode="Enabled">
-    <TabView TabWidthMode="SizeToContent"
-             IsAddTabButtonVisible="False"
-             CanReorderTabs="False"
-             CanDragTabs="False">
-        <TabViewItem Header="管理盒子" IsClosable="False">
-            <views:BoxesPage />
-        </TabViewItem>
-        <TabViewItem Header="外观与图标" IsClosable="False">
-            <views:AppearancePage />
-        </TabViewItem>
-    </TabView>
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <SelectorBar x:Name="PageSelectorBar"
+                     SelectionChanged="PageSelectorBar_SelectionChanged"
+                     HorizontalAlignment="Left">
+            <SelectorBarItem Text="外观与图标" Tag="appearance" IsSelected="True" AutomationProperties.Name="外观与图标" />
+            <SelectorBarItem Text="管理盒子" Tag="boxes" AutomationProperties.Name="管理盒子" />
+        </SelectorBar>
+        <Frame x:Name="ContentFrame" Grid.Row="1" />
+    </Grid>
 </Page>

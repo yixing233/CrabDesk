@@ -93,6 +93,7 @@ public sealed class CrabDeskService : ICrabDeskService
         _runtime.TestAiModelConnectivityAsync(cancellationToken);
     public Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default) =>
         _runtime.ApplyAiClassificationAsync(cancellationToken);
+    public IReadOnlyList<OrganizationDecision> PreviewOrganizationRules() => _runtime.PreviewOrganizationRules();
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true) => _runtime.ApplyOrganizationRules(notify);
     public void UndoLastOrganization() => _runtime.UndoLastOrganization();
     public void InstallDefaultOrganizationRules() => _runtime.InstallDefaultOrganizationRules();
@@ -108,6 +109,8 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetHoverFeedback(bool enabled) => _runtime.SetHoverFeedback(enabled);
     public void SetIconSpacing(double horizontal, double vertical) => _runtime.SetIconSpacing(horizontal, vertical);
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
+    public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);
+    public void SetIconLabelFontFamily(string value) => _runtime.SetIconLabelFontFamily(value);
     public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment) => _runtime.SetBoxTitleAlignment(boxId, alignment);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);

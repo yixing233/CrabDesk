@@ -22,7 +22,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        _changeTimer = new System.Threading.Timer(_ => ItemsChanged?.Invoke(this, EventArgs.Empty));
+        _changeTimer = new System.Threading.Timer(_ => { var change = _pendingChange; _pendingChange = null; if (change is not null) ItemsChanged?.Invoke(this, change); });
         foreach (var directory in _desktopDirectories)
         {
             var watcher = new FileSystemWatcher(directory)
@@ -40,6 +40,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
     }
 
     public event EventHandler? ItemsChanged;
+    private FileSystemEventArgs? _pendingChange;
 
     public Task<IReadOnlyList<DesktopItemRef>> EnumerateAsync(CancellationToken cancellationToken = default)
     {
@@ -129,6 +130,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
 
     private void OnChanged(object sender, FileSystemEventArgs args)
     {
+        _pendingChange = args;
         _changeTimer.Change(250, Timeout.Infinite);
     }
 

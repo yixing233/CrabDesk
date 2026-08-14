@@ -115,7 +115,7 @@ public static class LayoutCoordinator
             var minimumWidth = DesktopItemLayoutEngine.GetMinimumBoxWidth(
                 box.ViewMode,
                 box.Appearance.IconSize,
-                state.Settings.Appearance.IconHorizontalSpacing);
+                DesktopItemLayoutEngine.ScaleIconSpacing(state.Settings.Appearance.IconHorizontalSpacing, box.Appearance.IconSize));
             var tabBarHeight = box.ManualTabs.Count > 0
                 ? DesktopItemLayoutEngine.TabBarHeight
                 : 0;
@@ -130,7 +130,7 @@ public static class LayoutCoordinator
                     box.Bounds.Height,
                     box.Appearance.TitleBarHeight,
                     box.Appearance.IconSize,
-                    state.Settings.Appearance.IconVerticalSpacing);
+                    DesktopItemLayoutEngine.ScaleIconSpacing(state.Settings.Appearance.IconVerticalSpacing, box.Appearance.IconSize));
                 if (Math.Abs(box.Bounds.Height - legacyHeight) <= DesktopItemLayoutEngine.SnapThreshold)
                 {
                     box.Bounds = new LayoutRect(
@@ -144,7 +144,7 @@ public static class LayoutCoordinator
                 box.ViewMode,
                 box.Appearance.TitleBarHeight,
                 box.Appearance.IconSize,
-                state.Settings.Appearance.IconVerticalSpacing,
+                DesktopItemLayoutEngine.ScaleIconSpacing(state.Settings.Appearance.IconVerticalSpacing, box.Appearance.IconSize),
                 tabBarHeight);
             box.Bounds = box.Bounds.Clamp(localBounds, minimumWidth, minimumHeight);
         }
@@ -324,20 +324,23 @@ public static class BoxTransferPolicy
 
 public static class BoxDragCompletionPolicy
 {
-    // Normal boxes are virtual groupings. Exposing their desktop source paths
-    // to Explorer would make a drop back onto the same desktop copy a file
-    // onto itself. Mapped folders, by contrast, represent real file moves.
-    public static bool ShouldExposeFileDrop(bool sourceMapped) => sourceMapped;
+    // A FileDrop payload is valid only when every selected item has a real
+    // filesystem path. This lets external applications accept box items while
+    // preventing a mixed shell/file selection from silently dropping a subset.
+    public static bool ShouldExposeFileDrop(bool allSelectedItemsHavePaths) =>
+        allSelectedItemsHavePaths;
 
     public static bool ShouldUnassign(
         bool dropCommitted,
         bool cancelled,
         bool handledByBox,
         bool sourceMapped,
-        bool pointerOverBox) =>
+        bool pointerOverBox,
+        bool externalDropAccepted) =>
         dropCommitted &&
         !cancelled &&
         !handledByBox &&
         !sourceMapped &&
-        !pointerOverBox;
+        !pointerOverBox &&
+        !externalDropAccepted;
 }

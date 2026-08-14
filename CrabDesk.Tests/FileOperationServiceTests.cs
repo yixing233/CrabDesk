@@ -68,18 +68,20 @@ public sealed class FileOperationServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true, false, false, false, false, true)]
-    [InlineData(false, false, false, false, false, false)]
-    [InlineData(true, true, false, false, false, false)]
-    [InlineData(true, false, true, false, false, false)]
-    [InlineData(true, false, false, true, false, false)]
-    [InlineData(true, false, false, false, true, false)]
+    [InlineData(true, false, false, false, false, false, true)]
+    [InlineData(false, false, false, false, false, false, false)]
+    [InlineData(true, true, false, false, false, false, false)]
+    [InlineData(true, false, true, false, false, false, false)]
+    [InlineData(true, false, false, true, false, false, false)]
+    [InlineData(true, false, false, false, true, false, false)]
+    [InlineData(true, false, false, false, false, true, false)]
     public void DragCompletionOnlyUnassignsCommittedDropOutsideEveryBox(
         bool committed,
         bool cancelled,
         bool handledByBox,
         bool sourceMapped,
         bool pointerOverBox,
+        bool externalDropAccepted,
         bool expected)
     {
         Assert.Equal(expected, BoxDragCompletionPolicy.ShouldUnassign(
@@ -87,14 +89,18 @@ public sealed class FileOperationServiceTests : IDisposable
             cancelled,
             handledByBox,
             sourceMapped,
-            pointerOverBox));
+            pointerOverBox,
+            externalDropAccepted));
     }
 
-    [Fact]
-    public void OnlyMappedFolderDragExposesNativeFileDropFormat()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void FileDropRequiresFileSystemPathForEverySelectedItem(
+        bool allSelectedItemsHavePaths,
+        bool expected)
     {
-        Assert.False(BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped: false));
-        Assert.True(BoxDragCompletionPolicy.ShouldExposeFileDrop(sourceMapped: true));
+        Assert.Equal(expected, BoxDragCompletionPolicy.ShouldExposeFileDrop(allSelectedItemsHavePaths));
     }
 
     [Fact]
@@ -182,11 +188,36 @@ public sealed class FileOperationServiceTests : IDisposable
             destination,
             true);
 
-        Assert.Equal(2, imported.Count);
+        Assert.Equal(2, imported.SucceededCount);
+        Assert.Equal(0, imported.FailedCount);
         Assert.False(File.Exists(sourceFile));
         Assert.False(Directory.Exists(sourceFolder));
         Assert.Equal("document", await File.ReadAllTextAsync(Path.Combine(destination, "document.txt")));
         Assert.Equal("nested", await File.ReadAllTextAsync(Path.Combine(destination, "folder", "nested.txt")));
+    }
+
+    [Fact]
+    public async Task ImportContinuesAfterAnIndividualPathFails()
+    {
+        var sources = Path.Combine(_root, "sources");
+        var destination = Path.Combine(_root, "destination");
+        var first = Path.Combine(sources, "first.txt");
+        var missing = Path.Combine(sources, "missing.txt");
+        var second = Path.Combine(sources, "second.txt");
+        Directory.CreateDirectory(sources);
+        await File.WriteAllTextAsync(first, "first");
+        await File.WriteAllTextAsync(second, "second");
+
+        var imported = await new FileOperationService().ImportAsync(
+            [first, missing, second],
+            destination,
+            false);
+
+        Assert.Equal(2, imported.SucceededCount);
+        Assert.Equal(1, imported.FailedCount);
+        Assert.Equal(missing, imported.FailedItems.Single().SourcePath);
+        Assert.True(File.Exists(Path.Combine(destination, "first.txt")));
+        Assert.True(File.Exists(Path.Combine(destination, "second.txt")));
     }
 
     public void Dispose()

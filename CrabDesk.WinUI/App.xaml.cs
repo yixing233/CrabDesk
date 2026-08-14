@@ -3,6 +3,7 @@ using CrabDesk.Core;
 using CrabDesk.Native;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Services;
+using CrabDesk.WinUI.Windows;
 using CrabDesk.WinUI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Dispatching;
@@ -119,6 +120,35 @@ public partial class App : Application
                 _window.NavigateTo(eventArgs.Page);
             }
             ActivateWindow();
+        };
+        runtime.DesktopConfirmationHandler = request =>
+        {
+            var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var queue = _window?.DispatcherQueue;
+            if (queue is null)
+            {
+                completion.TrySetResult(false);
+                return completion.Task;
+            }
+            queue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    var confirmed = await DesktopConfirmWindow.ShowAsync(
+                        request.OwnerHandle,
+                        request.Title,
+                        request.Message,
+                        request.PrimaryText,
+                        runtime.IsDarkTheme);
+                    completion.TrySetResult(confirmed);
+                }
+                catch (Exception exception)
+                {
+                    AppDiagnostic.Error("Desktop confirmation dialog failed: " + exception.Message, exception);
+                    completion.TrySetResult(false);
+                }
+            });
+            return completion.Task;
         };
         runtime.ExitRequested += (_, _) => Shutdown();
         StartCommandListeners(runtime, _window.DispatcherQueue);
