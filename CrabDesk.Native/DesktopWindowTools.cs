@@ -30,6 +30,22 @@ public static class DesktopWindowTools
             new IntPtr(unchecked((int)coordinates)));
     }
 
+    /// <summary>
+    /// Restores the native desktop as the foreground target after a click on a
+    /// no-activate CrabDesk child. This scopes keyboard actions such as F2 to
+    /// the desktop rather than the previously active application.
+    /// </summary>
+    public static bool TryActivateDesktopInput(IntPtr desktopListView)
+    {
+        if (desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
+        {
+            return false;
+        }
+
+        var root = NativeMethods.GetAncestor(desktopListView, NativeMethods.GaRoot);
+        return root != IntPtr.Zero && NativeMethods.SetForegroundWindow(root);
+    }
+
     public static void ToggleDesktop()
     {
         var shellType = Type.GetTypeFromProgID("Shell.Application");

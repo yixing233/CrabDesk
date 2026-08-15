@@ -28,6 +28,7 @@ internal static class NativeMethods
     internal const int SwHide = 0;
     internal const int SwShowNoActivate = 4;
     internal const uint GwHwndNext = 2;
+    internal const uint GaRoot = 2;
     internal const int RgnOr = 2;
     internal const int RgnDiff = 4;
     internal const int Error = 0;
@@ -54,6 +55,13 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr GetParent(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);

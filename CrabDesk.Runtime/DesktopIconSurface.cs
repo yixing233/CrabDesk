@@ -19,6 +19,10 @@ internal sealed class DesktopIconSurface : Forms.Form
     // Carries CrabDesk's stable item keys alongside the standard FileDrop
     // payload used by external applications.
     internal const string DesktopIconDragSessionFormat = "CrabDesk.DesktopIconDragSession";
+    // Browser uploads normally choose Copy, while Recycle Bin requires Move.
+    // Advertise both so each target can negotiate its supported operation.
+    internal static Forms.DragDropEffects ExternalFileDropEffects =>
+        Forms.DragDropEffects.Copy | Forms.DragDropEffects.Move;
     private const int WmMouseActivate = 0x0021;
     private const int WmContextMenu = 0x007B;
     private const int WsClipSiblings = 0x04000000;
@@ -38,6 +42,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private const int DesktopHitTestAlpha = 1;
     // Let a layered-window MouseLeave settle before recalculating hover.
     private const int HoverReconcileDelayMilliseconds = 32;
+    private const int SlowDoubleClickRenameLimitMilliseconds = 900;
     private static readonly IntPtr MaNoActivate = new(3);
     private readonly CrabDeskRuntime _runtime;
     private readonly MonitorLayout _monitor;
@@ -47,8 +52,6 @@ internal sealed class DesktopIconSurface : Forms.Form
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _dragItemKeys = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, GridCell> _dragPreviewCells = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, GridCell> _dragTargetCells = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, GridCell> _boxDropPreviewCells = new(StringComparer.OrdinalIgnoreCase);
     // A highlighted long label can extend beyond its grid cell. Retain that
     // visual footprint while the pointer crosses the expanded label.
@@ -95,8 +98,31 @@ internal sealed class DesktopIconSurface : Forms.Form
     private Func<RectangleF?>? _boxDynamicBounds;
     private Func<int>? _boxDynamicVersion;
     private Action? _boxDynamicStateUpdate;
+    private Func<Point, bool>? _boxPointerHitTest;
+    private Func<bool>? _boxHeightAnimationOnly;
     private readonly Forms.Timer _hoverReconcileTimer;
     private readonly DesktopDragOverlay _dragOverlay;
+    private readonly DesktopHoverOverlay _hoverOverlay;
+    private DesktopRenameEditor? _renameEditor;
+    private bool _overRecycleBin;
+    // Slow double-click rename: the second click on the same icon inside the
+    // window between the system double-click time and this limit enters
+    // rename mode, exactly like Explorer's label edit.
+    private string? _lastRenameClickKey;
+    private DateTime _lastRenameClickUtc = DateTime.MinValue;
+    // A slow double-click qualifies for rename on the second press, but the
+    // rename is deferred until mouse up: if that press turns into a drag the
+    // drag wins and no rename editor opens.
+    private DesktopIconGeometry? _pendingRenameItem;
+    private DateTime _pendingRenamePressUtc;
+    // External file drags paint their own ghost (Explorer's drag image is not
+    // shown over the replacement layer), so the dragged content stays visible
+    // next to the cursor like the native desktop.
+    private string[]? _externalDragPaths;
+    private PointF _externalDragPointer;
+    private Bitmap? _externalDragIcon;
+    private string? _externalDragIconPath;
+    private readonly DesktopHoverRenderState _hoverRenderState = new();
     private bool _geometryDirty = true;
     private bool _dragRenderPending;
     private bool _hoverReconcilePending;
@@ -104,6 +130,8 @@ internal sealed class DesktopIconSurface : Forms.Form
     private bool _presentRequested;
     private Bitmap? _layerBitmap;
     private Bitmap? _staticLayerBitmap;
+    private RectangleF? _lastHoverOverlayBounds;
+    private bool _hoverOverlayUnavailable;
     private bool _dragBaseReady;
     private int _lastBoxDynamicVersion = int.MinValue;
 
@@ -135,16 +163,19 @@ internal sealed class DesktopIconSurface : Forms.Form
         MouseDoubleClick += OnMouseDoubleClick;
         MouseLeave += OnMouseLeave;
         MouseCaptureChanged += OnMouseCaptureChanged;
-        // Register as an OLE target only for the short virtual box-to-desktop
-        // drag window. Ordinary Explorer file drops must continue to target
-        // the native desktop underneath this presentation layer.
-        AllowDrop = false;
+        // The replacement layer sits above Explorer's (hidden) list view, so
+        // it must stay registered as an OLE target from startup: external
+        // file drops land here and are routed to the desktop folder (or the
+        // Recycle Bin) by OnDragOver/OnDragDrop.
+        AllowDrop = true;
         DragEnter += OnDragOver;
         DragOver += OnDragOver;
         DragLeave += OnDragLeave;
         DragDrop += OnDragDrop;
         _dragOverlay = new DesktopDragOverlay();
         Controls.Add(_dragOverlay);
+        _hoverOverlay = new DesktopHoverOverlay();
+        Controls.Add(_hoverOverlay);
         _hoverReconcileTimer = new Forms.Timer { Interval = HoverReconcileDelayMilliseconds };
         _hoverReconcileTimer.Tick += OnHoverReconcileTimerTick;
     }
@@ -213,6 +244,10 @@ internal sealed class DesktopIconSurface : Forms.Form
             _staticLayerBitmap?.Dispose();
             _staticLayerBitmap = null;
             _dragOverlay.Dispose();
+            _hoverOverlay.Dispose();
+            _renameEditor?.Dispose();
+            _renameEditor = null;
+            ReleaseExternalDragIcon();
             LayeredWindowPresenter.Release(Handle);
             _shellContextMenu?.Dispose();
             _shellContextMenu = null;
@@ -227,10 +262,9 @@ internal sealed class DesktopIconSurface : Forms.Form
             _layerBitmap.Height != ClientSize.Height)
         {
             _layerBitmap?.Dispose();
-            _layerBitmap = new Bitmap(
+            _layerBitmap = DesktopLayerBitmapFactory.Create(
                 ClientSize.Width,
-                ClientSize.Height,
-                System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                ClientSize.Height);
         }
     }
 
@@ -241,10 +275,9 @@ internal sealed class DesktopIconSurface : Forms.Form
             _staticLayerBitmap.Height != ClientSize.Height)
         {
             _staticLayerBitmap?.Dispose();
-            _staticLayerBitmap = new Bitmap(
+            _staticLayerBitmap = DesktopLayerBitmapFactory.Create(
                 ClientSize.Width,
-                ClientSize.Height,
-                System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+                ClientSize.Height);
             _dragBaseReady = false;
         }
     }
@@ -276,6 +309,12 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal void SetBoxDynamicStateUpdater(Action? updater) =>
         _boxDynamicStateUpdate = updater;
+
+    internal void SetBoxPointerHitTest(Func<Point, bool>? hitTest) =>
+        _boxPointerHitTest = hitTest;
+
+    internal void SetBoxHeightAnimationOnly(Func<bool>? provider) =>
+        _boxHeightAnimationOnly = provider;
 
     internal bool RequestRender() => PresentLayer();
 
@@ -371,6 +410,55 @@ internal sealed class DesktopIconSurface : Forms.Form
     private void CancelPendingDragRender()
     {
         _dragRenderPending = false;
+    }
+
+    private void RequestHoverRender()
+    {
+        if (IsDisposed || !IsHandleCreated || IsDragCompositeActive)
+        {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            return;
+        }
+
+        if (_hoverOverlayUnavailable)
+        {
+            RequestDragRender();
+            return;
+        }
+
+        if (!_hoverRenderState.Publish(_hoveredItemKey))
+        {
+            return;
+        }
+
+        try
+        {
+            BeginInvoke((Action)RenderQueuedHoverFrame);
+        }
+        catch (InvalidOperationException)
+        {
+            _hoverRenderState.TryTake(out _);
+        }
+    }
+
+    private void RenderQueuedHoverFrame()
+    {
+        if (!_hoverRenderState.TryTake(out _) || IsDisposed)
+        {
+            return;
+        }
+
+        if (_geometryDirty)
+        {
+            PresentLayer();
+            return;
+        }
+
+        if (!PresentHoverOverlay(GetDesktopWorkAreaBounds()))
+        {
+            RequestDragRender();
+        }
     }
 
     // The full-monitor layered window accepts input only in the Windows work
@@ -550,6 +638,8 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         if (IsDragCompositeActive)
         {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
             EnsureStaticLayerBitmap();
             var staticFrameChanged = !_dragBaseReady;
             if (staticFrameChanged)
@@ -558,11 +648,22 @@ internal sealed class DesktopIconSurface : Forms.Form
                 DrawSettledLayer(
                     baseGraphics,
                     workAreaBounds,
-                    includeDragPreview: false,
                     includeBoxDropPreview: false,
                     selectedItemKeys: _selecting ? _selectionBase : null,
                     includeSelectionRectangle: !_selecting);
                 _dragBaseReady = true;
+            }
+
+            // A pure hover-expand height animation stays inside the parent
+            // bitmap so the box never crosses between the settled layer and
+            // the drag overlay. That handoff is what flashes for one
+            // compositor frame at the start and end of the animation.
+            if (_boxHeightAnimationOnly?.Invoke() == true &&
+                !_selecting &&
+                !_dragStarted &&
+                _boxDropItemKeys.Count == 0)
+            {
+                return PresentHeightAnimationFrame(workAreaBounds);
             }
 
             // The overlay is a child of this surface. Present it while the
@@ -596,7 +697,10 @@ internal sealed class DesktopIconSurface : Forms.Form
         EnsureLayerBitmap();
         using (var graphics = Graphics.FromImage(_layerBitmap!))
         {
-            DrawSettledLayer(graphics, workAreaBounds, includeDragPreview: true);
+            DrawSettledLayer(
+                graphics,
+                workAreaBounds,
+                includeHoverFeedback: _hoverOverlayUnavailable);
         }
         EnsureStaticLayerBitmap();
         using (var baseGraphics = Graphics.FromImage(_staticLayerBitmap!))
@@ -624,11 +728,22 @@ internal sealed class DesktopIconSurface : Forms.Form
             // flash users can see on a compositor frame boundary.
             _dragOverlay.HideOverlay();
         }
+        if (!PresentHoverOverlay(workAreaBounds))
+        {
+            RequestDragRender();
+        }
         return _lastPresentSucceeded;
     }
 
+    // Icon drags keep the grabbed icons attached to the pointer through the
+    // small drag overlay (no squeeze markers, no grid reflow preview). The
+    // composite path is shared with marquee selection, dynamic box visuals,
+    // and external file drops (whose ghost card is drawn by the overlay).
     private bool IsDragCompositeActive =>
-        _selecting || _dragStarted || _boxTransformActive?.Invoke() == true;
+        _selecting ||
+        _dragStarted ||
+        _externalDragPaths is { Length: > 0 } ||
+        _boxTransformActive?.Invoke() == true;
 
     private bool PresentDragOverlay(RectangleF workAreaBounds)
     {
@@ -676,6 +791,217 @@ internal sealed class DesktopIconSurface : Forms.Form
         return _lastPresentSucceeded;
     }
 
+    /// <summary>
+    /// Presents a hover-expand height animation entirely through the parent
+    /// layered window. The static base (desktop icons and settled boxes) is
+    /// copied and the animated box is drawn on top, so one atomic
+    /// UpdateLayeredWindow per tick carries the whole frame. Unlike the drag
+    /// overlay channel this never hands the box between two windows, which
+    /// avoids the single-frame flash at the start and end of the animation.
+    /// </summary>
+    private bool PresentHeightAnimationFrame(RectangleF workAreaBounds)
+    {
+        _dragOverlay.HideOverlay();
+        EnsureLayerBitmap();
+        using (var graphics = Graphics.FromImage(_layerBitmap!))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.DrawImageUnscaled(_staticLayerBitmap!, 0, 0);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            ConfigureLayerGraphics(graphics, workAreaBounds, fastRender: false);
+            DrawDynamicDragVisuals(graphics, workAreaBounds);
+            graphics.ResetTransform();
+        }
+
+        _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
+            Handle,
+            _layerBitmap!,
+            PointToScreen(Point.Empty),
+            out _lastPresentDiagnostic);
+        if (!_lastPresentSucceeded)
+        {
+            DiagnosticLog.Error(
+                $"Desktop icon height animation presentation failed monitor={_monitor.Id}: {_lastPresentDiagnostic}",
+                new InvalidOperationException(_lastPresentDiagnostic));
+        }
+        return _lastPresentSucceeded;
+    }
+
+    private bool PresentHoverOverlay(RectangleF workAreaBounds)
+    {
+        if (_hoverOverlayUnavailable)
+        {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            return true;
+        }
+
+        if (_selecting || _dragStarted || _boxTransformActive?.Invoke() == true ||
+            !DesktopIconHoverPolicy.CanHoverDesktopIcon(IsPointerOverBox(Forms.Cursor.Position)) ||
+            !_runtime.State.Settings.Appearance.HoverFeedback || _hoveredItemKey is null)
+        {
+            if (IsPointerOverBox(Forms.Cursor.Position))
+            {
+                SetHoveredItem(null);
+            }
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            return true;
+        }
+
+        var item = FindHoveredItem();
+        if (item is null)
+        {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            return true;
+        }
+
+        EnsureLayerBitmap();
+        RectangleF currentBounds;
+        using (var measureGraphics = Graphics.FromImage(_layerBitmap!))
+        {
+            ConfigureLayerGraphics(measureGraphics, workAreaBounds, fastRender: false);
+            currentBounds = GetHoverVisualBounds(measureGraphics, item);
+            measureGraphics.ResetTransform();
+        }
+
+        var surfaceBounds = new RectangleF(
+            0,
+            0,
+            (float)(ClientSize.Width / Math.Max(_scale, 0.01d)),
+            (float)(ClientSize.Height / Math.Max(_scale, 0.01d)));
+        currentBounds = RectangleF.Intersect(surfaceBounds, currentBounds);
+        if (currentBounds.Width <= 0 || currentBounds.Height <= 0)
+        {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            return true;
+        }
+
+        var requestedBounds = _lastHoverOverlayBounds is { } previousBounds
+            ? RectangleF.Union(previousBounds, currentBounds)
+            : currentBounds;
+        if (!_hoverOverlay.Present(
+                requestedBounds,
+                _scale,
+                (graphics, alignedBounds) => DrawHoverOverlay(graphics, alignedBounds),
+                out var diagnostic))
+        {
+            _hoverOverlay.HideOverlay();
+            _lastHoverOverlayBounds = null;
+            _hoverOverlayUnavailable = true;
+            DiagnosticLog.Error(
+                $"Desktop icon hover overlay presentation failed monitor={_monitor.Id}: {diagnostic}",
+                new InvalidOperationException(diagnostic));
+            return false;
+        }
+
+        var itemKey = item.Item.Key.ToString();
+        if (_selection.Contains(itemKey))
+        {
+            _expandedItemHitBounds[itemKey] = currentBounds;
+        }
+        else
+        {
+            _expandedItemHitBounds.Remove(itemKey);
+        }
+        _lastHoverOverlayBounds = currentBounds;
+        return true;
+    }
+
+    private DesktopIconGeometry? FindHoveredItem() =>
+        _items.FirstOrDefault(item => string.Equals(
+            item.Item.Key.ToString(),
+            _hoveredItemKey,
+            StringComparison.OrdinalIgnoreCase));
+
+    private RectangleF GetHoverVisualBounds(Graphics graphics, DesktopIconGeometry item)
+    {
+        var iconBounds = GetIconBounds(item.Bounds);
+        var selected = _selection.Contains(item.Item.Key.ToString());
+        using var font = ResolveIconLabelFont();
+        var textBounds = GetItemTextBounds(
+            graphics,
+            item.Item.DisplayName,
+            item.Bounds,
+            iconBounds,
+            font,
+            selected: DesktopIconLabelDisplayPolicy.ShowsFullLabel(selected, isHovered: true));
+        var textHitBounds = GetTextHitBounds(graphics, item.Item.DisplayName, textBounds, font);
+        return GetItemVisualBounds(iconBounds, textHitBounds);
+    }
+
+    private void DrawHoverOverlay(Graphics graphics, RectangleF overlayBounds)
+    {
+        var item = FindHoveredItem();
+        if (item is null)
+        {
+            return;
+        }
+
+        graphics.CompositingQuality = CompositingQuality.HighSpeed;
+        graphics.SmoothingMode = SmoothingMode.HighSpeed;
+        graphics.InterpolationMode = InterpolationMode.Low;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        graphics.TextContrast = 4;
+        graphics.Transform = new Matrix(
+            (float)_scale,
+            0,
+            0,
+            (float)_scale,
+            -(float)(overlayBounds.X * _scale),
+            -(float)(overlayBounds.Y * _scale));
+        graphics.SetClip(overlayBounds, CombineMode.Replace);
+
+        var selectionColor = ParseColor(
+            _runtime.State.Settings.Appearance.SelectionColor,
+            Color.FromArgb(74, 91, 177));
+        var hoverColor = BrightenColor(selectionColor, HoverBrightness);
+        var iconBounds = GetIconBounds(item.Bounds);
+        var selected = _selection.Contains(item.Item.Key.ToString());
+        using var font = ResolveIconLabelFont();
+        using var textFormat = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.LineLimit
+        };
+        var textBounds = GetItemTextBounds(
+            graphics,
+            item.Item.DisplayName,
+            item.Bounds,
+            iconBounds,
+            font,
+            selected: DesktopIconLabelDisplayPolicy.ShowsFullLabel(selected, isHovered: true));
+        var textHitBounds = GetTextHitBounds(graphics, item.Item.DisplayName, textBounds, font);
+        var visualBounds = GetItemVisualBounds(iconBounds, textHitBounds);
+        using var fill = new SolidBrush(Color.FromArgb(HoverFillAlpha, hoverColor));
+        using var border = new Pen(Color.FromArgb(HoverBorderAlpha, hoverColor), 1);
+        using var path = RoundedRectangle(visualBounds, SelectionCornerRadius);
+        graphics.FillPath(fill, path);
+        graphics.DrawPath(border, path);
+
+        var bitmap = GetDesktopIconBitmap(
+            item.Item,
+            Math.Clamp((int)Math.Round(_iconSize * _scale), 16, 256))
+            ?? ShellIconProvider.GetGenericFileIcon();
+        if (bitmap is not null)
+        {
+            DrawImageWithAlpha(graphics, bitmap, iconBounds, 1f);
+        }
+
+        using var textBrush = new SolidBrush(Color.FromArgb(248, Color.White));
+        using var shadowBrush = new SolidBrush(Color.FromArgb(190, Color.Black));
+        var shadowBounds = textBounds;
+        shadowBounds.Offset(1, 1);
+        graphics.DrawString(item.Item.DisplayName, font, shadowBrush, shadowBounds, textFormat);
+        graphics.DrawString(item.Item.DisplayName, font, textBrush, textBounds, textFormat);
+        graphics.ResetTransform();
+    }
+
     private void DrawDragOverlay(Graphics graphics, RectangleF overlayBounds)
     {
         graphics.CompositingQuality = CompositingQuality.HighSpeed;
@@ -700,15 +1026,26 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             DrawMarqueeOverlay(graphics);
         }
-        if (_dragStarted)
+        if (_overRecycleBin)
         {
-            DrawDesktopDragPreview(graphics);
+            DrawRecycleBinHighlight(graphics);
         }
         DrawBoxItemDropPreview(graphics);
         if (_dragStarted || _boxDropItemKeys.Count > 0 ||
             _boxTransformActive?.Invoke() == true)
         {
             _dragBoxRenderer?.Invoke(graphics, clipBounds);
+        }
+        // Ghost cards float above the box visuals so the dragged item stays
+        // visible while the pointer is over a box (the box forwards its drag
+        // state to this surface, which owns all dynamic rendering).
+        if (_dragStarted)
+        {
+            DrawFloatingDragPreview(graphics);
+        }
+        if (_externalDragPaths is { Length: > 0 })
+        {
+            DrawExternalDragPreview(graphics);
         }
     }
 
@@ -729,9 +1066,22 @@ internal sealed class DesktopIconSurface : Forms.Form
             }
         }
 
+        if (_overRecycleBin &&
+            _items.FirstOrDefault(item => IsRecycleBinItem(item.Item)) is { } recycleBin)
+        {
+            bounds = UnionVisualBounds(
+                bounds,
+                RectangleF.Inflate(GetIconBounds(recycleBin.Bounds), 12, 12));
+        }
+        if (_externalDragPaths is { Length: > 0 })
+        {
+            bounds = UnionVisualBounds(
+                bounds,
+                new RectangleF(_externalDragPointer.X - 34, _externalDragPointer.Y + 2, 150, 64));
+        }
+
         if (_dragStarted)
         {
-            var grid = CreateCurrentGrid();
             var anchor = _items.FirstOrDefault(item =>
                 string.Equals(item.Item.Key.ToString(), _dragAnchorKey, StringComparison.OrdinalIgnoreCase));
             if (anchor is not null)
@@ -752,16 +1102,6 @@ internal sealed class DesktopIconSurface : Forms.Form
                         entry.Bounds.Width,
                         entry.Bounds.Height + labelAllowance);
                     bounds = UnionVisualBounds(bounds, RectangleF.Inflate(floatingBounds, 12, 12));
-                }
-            }
-
-            if (!_dragPointerOverBox)
-            {
-                foreach (var cell in _dragTargetCells.Values)
-                {
-                    bounds = UnionVisualBounds(
-                        bounds,
-                        RectangleF.Inflate(GetIconBounds(GetCellBounds(grid, cell)), 10, 10));
                 }
             }
         }
@@ -816,10 +1156,10 @@ internal sealed class DesktopIconSurface : Forms.Form
     private void DrawSettledLayer(
         Graphics graphics,
         RectangleF workAreaBounds,
-        bool includeDragPreview,
         bool includeBoxDropPreview = true,
         IReadOnlySet<string>? selectedItemKeys = null,
-        bool includeSelectionRectangle = true)
+        bool includeSelectionRectangle = true,
+        bool includeHoverFeedback = false)
     {
         graphics.Clear(Color.Transparent);
         graphics.CompositingMode = CompositingMode.SourceOver;
@@ -828,9 +1168,9 @@ internal sealed class DesktopIconSurface : Forms.Form
         graphics.FillRectangle(hitTestBackground, workAreaBounds);
         DrawDesktopItems(
             graphics,
-            includeDragPreview,
             selectedItemKeys,
-            includeSelectionRectangle);
+            includeSelectionRectangle,
+            includeHoverFeedback);
         if (includeBoxDropPreview)
         {
             DrawBoxItemDropPreview(graphics);
@@ -849,19 +1189,6 @@ internal sealed class DesktopIconSurface : Forms.Form
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         graphics.ScaleTransform((float)_scale, (float)_scale);
         graphics.SetClip(workAreaBounds, CombineMode.Replace);
-    }
-
-    private void DrawDesktopDragPreview(Graphics graphics)
-    {
-        using var font = ResolveIconLabelFont();
-        using var textFormat = new StringFormat
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Near,
-            Trimming = StringTrimming.EllipsisCharacter,
-            FormatFlags = StringFormatFlags.LineLimit
-        };
-        DrawDragPreview(graphics, font, textFormat);
     }
 
     private void RebuildGeometry()
@@ -976,9 +1303,31 @@ internal sealed class DesktopIconSurface : Forms.Form
         // them once so marquee movement does not repeatedly recompute the
         // monitor work area and icon/text rectangles for every item.
         var workAreaBounds = GetDesktopWorkAreaBounds();
-        foreach (var entry in _items)
+        // Measure on the same logical (96-DPI) canvas the layer renderer
+        // uses. A bare Bitmap inherits the monitor DPI on PerMonitorV2
+        // threads, which would inflate every label metric by the scale factor.
+        using var measureBitmap = DesktopLayerBitmapFactory.Create(1, 1);
+        using (var measureGraphics = Graphics.FromImage(measureBitmap))
+        using (var measureFont = ResolveIconLabelFont())
         {
-            entry.HitBounds = CalculateItemHitBounds(entry.Bounds, workAreaBounds);
+            foreach (var entry in _items)
+            {
+                entry.HitBounds = CalculateItemHitBounds(
+                    entry.Bounds,
+                    workAreaBounds,
+                    measureGraphics,
+                    measureFont,
+                    entry.Item.DisplayName);
+            }
+        }
+        DiagnosticLog.Info(
+            $"Icon geometry iconSize={_iconSize:0.#} spacing={_horizontalSpacing:0.#}x{_verticalSpacing:0.#} " +
+            $"workArea={workAreaBounds.Width:0.#}x{workAreaBounds.Height:0.#}");
+        foreach (var entry in _items.Take(30))
+        {
+            DiagnosticLog.Info(
+                $"Icon geometry name={entry.Item.DisplayName} cell={entry.Cell.Column},{entry.Cell.Row} " +
+                $"hit={entry.HitBounds.X:0.#},{entry.HitBounds.Y:0.#},{entry.HitBounds.Width:0.#}x{entry.HitBounds.Height:0.#}");
         }
 
         var visibleKeys = _items.Select(item => item.Item.Key.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1126,9 +1475,9 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void DrawDesktopItems(
         Graphics graphics,
-        bool includeDragPreview = true,
         IReadOnlySet<string>? selectedItemKeys = null,
-        bool includeSelectionRectangle = true)
+        bool includeSelectionRectangle = true,
+        bool includeHoverFeedback = false)
     {
         selectedItemKeys ??= _selection;
         using var font = ResolveIconLabelFont();
@@ -1142,7 +1491,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         using var textBrush = new SolidBrush(Color.FromArgb(248, Color.White));
         using var shadowBrush = new SolidBrush(Color.FromArgb(190, Color.Black));
         var selectionColor = ParseColor(_runtime.State.Settings.Appearance.SelectionColor, Color.FromArgb(74, 91, 177));
-        var previewGrid = _dragStarted || _boxDropPreviewCells.Count > 0
+        var previewGrid = _boxDropPreviewCells.Count > 0
             ? CreateCurrentGrid()
             : (DesktopGrid?)null;
         // Icon backgrounds and glyphs are painted first, then every label is
@@ -1164,20 +1513,15 @@ internal sealed class DesktopIconSurface : Forms.Form
             }
 
             var drawBounds = entry.Bounds;
-            if (previewGrid is { } grid)
+            if (previewGrid is { } grid &&
+                _boxDropPreviewCells.TryGetValue(itemKey, out var boxPreviewCell))
             {
-                if (_dragPreviewCells.TryGetValue(itemKey, out var previewCell))
-                {
-                    drawBounds = GetCellBounds(grid, previewCell);
-                }
-                else if (_boxDropPreviewCells.TryGetValue(itemKey, out var boxPreviewCell))
-                {
-                    drawBounds = GetCellBounds(grid, boxPreviewCell);
-                }
+                drawBounds = GetCellBounds(grid, boxPreviewCell);
             }
-            var hovered =
+            var hoverTarget =
                 _runtime.State.Settings.Appearance.HoverFeedback &&
                 string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
+            var hovered = includeHoverFeedback && hoverTarget;
             var iconBounds = GetIconBounds(drawBounds);
             var textBounds = GetItemTextBounds(
                 graphics,
@@ -1185,10 +1529,15 @@ internal sealed class DesktopIconSurface : Forms.Form
                 drawBounds,
                 iconBounds,
                 font,
-                selected || hovered);
+                DesktopIconLabelDisplayPolicy.ShowsFullLabel(selected, hovered));
             labelBoundsByKey[itemKey] = textBounds;
-            var visualBounds = GetItemVisualBounds(iconBounds, textBounds);
-            if (selected || hovered)
+            var textHitBounds = GetTextHitBounds(
+                graphics,
+                entry.Item.DisplayName,
+                textBounds,
+                font);
+            var visualBounds = GetItemVisualBounds(iconBounds, textHitBounds);
+            if (selected)
             {
                 _expandedItemHitBounds[itemKey] = visualBounds;
             }
@@ -1240,11 +1589,6 @@ internal sealed class DesktopIconSurface : Forms.Form
             shadowBounds.Offset(1, 1);
             graphics.DrawString(entry.Item.DisplayName, font, shadowBrush, shadowBounds, textFormat);
             graphics.DrawString(entry.Item.DisplayName, font, textBrush, textBounds, textFormat);
-        }
-
-        if (includeDragPreview && _dragStarted)
-        {
-            DrawDragPreview(graphics, font, textFormat);
         }
 
         if (includeSelectionRectangle && _selecting && !_selectionRectangle.IsEmpty)
@@ -1371,46 +1715,11 @@ internal sealed class DesktopIconSurface : Forms.Form
         return count;
     }
 
-    private void DrawDragPreview(Graphics graphics, Font font, StringFormat textFormat)
+    // The grabbed icons stay attached to the pointer, like the native
+    // desktop ghost. Only the icons and labels follow the cursor - no
+    // insertion markers and no grid reflow preview.
+    private void DrawFloatingDragPreview(Graphics graphics)
     {
-        var selectionColor = ParseColor(_runtime.State.Settings.Appearance.SelectionColor, Color.FromArgb(74, 91, 177));
-        var grid = CreateCurrentGrid();
-
-        // The target cells stay visible as a quiet insertion preview while
-        // the selected icons themselves remain attached to the pointer. When
-        // the pointer is still over the source cells, the floating preview is
-        // sufficient and the extra layer only creates visual noise.
-        var sourceCells = _items
-            .Where(item => _dragItemKeys.Contains(item.Item.Key.ToString()))
-            .ToDictionary(item => item.Item.Key.ToString(), item => item.Cell,
-                StringComparer.OrdinalIgnoreCase);
-        var showTargetPreview = _dragTargetCells.Any(entry =>
-            !sourceCells.TryGetValue(entry.Key, out var sourceCell) ||
-            sourceCell != entry.Value);
-        if (!_dragPointerOverBox && showTargetPreview)
-        {
-            foreach (var entry in _items.Where(item => _dragTargetCells.ContainsKey(item.Item.Key.ToString())))
-            {
-                var key = entry.Item.Key.ToString();
-                if (!_dragTargetCells.TryGetValue(key, out var cell))
-                {
-                    continue;
-                }
-
-                var bounds = GetCellBounds(grid, cell);
-                // The insertion marker follows the same visual bounds as the
-                // icon itself. Drawing a border around the whole cell makes
-                // it appear shifted because the icon is centered inside the
-                // wider native spacing rectangle.
-                var previewBounds = RectangleF.Inflate(GetIconBounds(bounds), 4, 4);
-                using var fill = new SolidBrush(Color.FromArgb(78, selectionColor));
-                using var border = new Pen(Color.FromArgb(238, selectionColor), 2f);
-                using var path = RoundedRectangle(previewBounds, 5);
-                graphics.FillPath(fill, path);
-                graphics.DrawPath(border, path);
-            }
-        }
-
         var anchor = _items.FirstOrDefault(item =>
             string.Equals(item.Item.Key.ToString(), _dragAnchorKey, StringComparison.OrdinalIgnoreCase));
         if (anchor is null)
@@ -1418,6 +1727,14 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
 
+        using var font = ResolveIconLabelFont();
+        using var textFormat = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.LineLimit
+        };
         using var floatingText = new SolidBrush(Color.FromArgb(238, Color.White));
         using var floatingShadow = new SolidBrush(Color.FromArgb(180, Color.Black));
         var anchorIconBounds = GetIconBounds(anchor.Bounds);
@@ -1480,74 +1797,28 @@ internal sealed class DesktopIconSurface : Forms.Form
             graphics.DrawPath(border, path);
         }
 
-        DrawBoxDragFloatingPreview(graphics, pointer, accent);
+        DrawBoxDragFloatingPreview(graphics, pointer);
     }
 
-    private void DrawBoxDragFloatingPreview(Graphics graphics, PointF pointer, Color accent)
+    private void DrawBoxDragFloatingPreview(Graphics graphics, PointF pointer)
     {
         var primaryItem = _boxDragPrimaryKey is null
             ? null
-            : _runtime.Items.FirstOrDefault(item =>
-                string.Equals(item.Key.ToString(), _boxDragPrimaryKey, StringComparison.OrdinalIgnoreCase));
+            : _runtime.FindItemByKey(_boxDragPrimaryKey);
         var icon = primaryItem is null
             ? ShellIconProvider.GetGenericFileIcon()
             : GetDesktopIconBitmap(
                     primaryItem,
                     Math.Clamp((int)Math.Round(_iconSize * _scale), 16, 256))
                 ?? ShellIconProvider.GetGenericFileIcon();
-        var iconSize = Math.Clamp(_iconSize, 32f, 56f);
-        var stackCount = Math.Min(3, Math.Max(1, _boxDropItemKeys.Count));
-        var stackOffset = (stackCount - 1) * 3f;
-        var origin = new PointF(
-            pointer.X - iconSize * 0.3f - stackOffset,
-            pointer.Y - iconSize * 0.3f - stackOffset);
-        for (var index = stackCount - 1; index >= 0; index--)
-        {
-            var offset = index * 3f;
-            var tile = new RectangleF(
-                origin.X + offset - 3,
-                origin.Y + offset - 3,
-                iconSize + 6,
-                iconSize + 6);
-            using var tileFill = new SolidBrush(Color.FromArgb(42 + index * 10, accent));
-            using var tileBorder = new Pen(Color.FromArgb(176, accent), 1.2f);
-            using var tilePath = RoundedRectangle(tile, 5);
-            graphics.FillPath(tileFill, tilePath);
-            graphics.DrawPath(tileBorder, tilePath);
-        }
-
-        if (icon is not null)
-        {
-            DrawImageWithAlpha(
-                graphics,
-                icon,
-                new RectangleF(origin.X, origin.Y, iconSize, iconSize),
-                0.9f);
-        }
-
-        if (_boxDropItemKeys.Count <= 1)
-        {
-            return;
-        }
-
-        var badgeText = _boxDropItemKeys.Count.ToString();
-        using var badgeFont = new Font("Segoe UI", 8, FontStyle.Bold, GraphicsUnit.Point);
-        using var badgeFill = new SolidBrush(Color.FromArgb(242, accent));
-        using var badgeTextBrush = new SolidBrush(Color.White);
-        using var badgeFormat = new StringFormat
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center
-        };
-        var badgeSize = Math.Max(17, graphics.MeasureString(badgeText, badgeFont).Width + 8);
-        var badge = new RectangleF(
-            origin.X + iconSize - badgeSize / 2,
-            origin.Y + iconSize - 12,
-            badgeSize,
-            17);
-        using var badgePath = RoundedRectangle(badge, badge.Height / 2);
-        graphics.FillPath(badgeFill, badgePath);
-        graphics.DrawString(badgeText, badgeFont, badgeTextBrush, badge, badgeFormat);
+        using var font = ResolveIconLabelFont();
+        DragGhostRenderer.Draw(
+            graphics,
+            pointer,
+            icon,
+            primaryItem?.DisplayName ?? _boxDropItemKeys.FirstOrDefault() ?? string.Empty,
+            _boxDropItemKeys.Count,
+            font);
     }
 
     private DesktopGrid CreateCurrentGrid()
@@ -1646,15 +1917,22 @@ internal sealed class DesktopIconSurface : Forms.Form
             return RectangleF.Empty;
         }
 
-        // The layout rectangle is intentionally wide enough for wrapping, but
-        // it should not make the surrounding blank desktop area behave like a
-        // click target. Use the measured label width for short names and only
-        // fall back to the full width when the label actually needs wrapping.
-        var unconstrained = graphics.MeasureString(displayName, font);
-        var width = Math.Min(textBounds.Width, Math.Max(font.Size, unconstrained.Width + 4));
-        var lineHeight = Math.Max(1, font.GetHeight(graphics));
-        var lineCount = Math.Max(1, (int)Math.Ceiling(unconstrained.Width / Math.Max(1, textBounds.Width)));
-        var height = Math.Min(textBounds.Height, lineHeight * lineCount + 4);
+        // Measure the label with the exact format used for drawing, so the
+        // hit footprint matches the rendered text: real line count, widest
+        // line, and ellipsis instead of the whole layout rectangle. The
+        // layout rectangle is intentionally wide enough for wrapping, but it
+        // must not make the surrounding blank desktop area behave like a
+        // click target.
+        using var format = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.LineLimit
+        };
+        var measured = graphics.MeasureString(displayName, font, textBounds.Size, format);
+        var width = Math.Min(textBounds.Width, Math.Max(font.Size, measured.Width));
+        var height = Math.Min(textBounds.Height, Math.Max(0, measured.Height));
         return new RectangleF(
             textBounds.X + (textBounds.Width - width) / 2,
             textBounds.Y,
@@ -1684,8 +1962,16 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        // A click on the desktop while an inline rename is open commits the
+        // edit (the surface never activates, so Deactivate does not fire).
+        _renameEditor?.CommitExternally();
         var point = ToDip(eventArgs.Location);
         var item = GetItemAt(point);
+        if (item is not null)
+        {
+            _runtime.ActivateDesktopKeyboardInput();
+            TryBeginSlowDoubleClickRename(item);
+        }
         DiagnosticLog.Info(
             $"Icon surface mouse down monitor={_monitor.Id} button={eventArgs.Button} " +
             $"x={point.X:0} y={point.Y:0} item={item?.Item.DisplayName ?? "<desktop>"}");
@@ -1700,7 +1986,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                 }
                 else if (hoverChanged)
                 {
-                    PresentLayer();
+                    RequestHoverRender();
                 }
 
                 var screenPoint = PointToScreen(eventArgs.Location);
@@ -1722,9 +2008,13 @@ internal sealed class DesktopIconSurface : Forms.Form
                 _selection.Add(key);
                 selectionChanged = true;
             }
-            if (selectionChanged || hoverChanged)
+            if (selectionChanged)
             {
                 PresentLayer();
+            }
+            else if (hoverChanged)
+            {
+                RequestHoverRender();
             }
             ShowItemContextMenu(item.Item, eventArgs.Location);
             return;
@@ -1814,9 +2104,13 @@ internal sealed class DesktopIconSurface : Forms.Form
             {
                 _hoverReconcileTimer.Stop();
                 _hoverReconcilePending = false;
-                if (SetHoveredItem(GetHoverItemAt(ToDip(cursorClientPoint))))
+                var currentItem = DesktopIconHoverPolicy.CanHoverDesktopIcon(
+                    IsPointerOverBox(Forms.Cursor.Position))
+                    ? GetHoverItemAt(ToDip(cursorClientPoint))
+                    : null;
+                if (SetHoveredItem(currentItem))
                 {
-                    RequestDragRender();
+                    RequestHoverRender();
                 }
             }
             else
@@ -1854,25 +2148,19 @@ internal sealed class DesktopIconSurface : Forms.Form
             PointToScreen(eventArgs.Location),
             _dragItemKeys.ToArray(),
             out _dragPointerOverBox);
-        if (_dragPointerOverBox)
-        {
-            if (_dragPreviewCells.Count > 0 || _dragTargetCells.Count > 0)
-            {
-                _dragBaseReady = false;
-            }
-            _dragPreviewCells.Clear();
-            _dragTargetCells.Clear();
-        }
-        else
-        {
-            UpdateDesktopDragPreview(point);
-        }
+        // The grabbed icons follow the pointer through the small drag
+        // overlay; only that overlay repaints per move.
+        UpdateDesktopDragPreview(point);
         RequestDragRender();
     }
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
     {
         var point = ToDip(eventArgs.Location);
+        if (eventArgs.Button == Forms.MouseButtons.Left)
+        {
+            CommitPendingSlowDoubleClickRename();
+        }
         if (_selecting && eventArgs.Button == Forms.MouseButtons.Left)
         {
             CancelPendingDragRender();
@@ -1888,15 +2176,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             var itemKeys = _dragItemKeys.ToArray();
             _dragPointer = point;
             _runtime.UpdateDesktopItemDropPreview(screenPoint, itemKeys, out _dragPointerOverBox);
-            if (_dragPointerOverBox)
-            {
-                _dragPreviewCells.Clear();
-                _dragTargetCells.Clear();
-            }
-            else
-            {
-                UpdateDesktopDragPreview(point);
-            }
+            UpdateDesktopDragPreview(point);
             CancelPendingDragRender();
             var droppedIntoBox = _runtime.TryDropDesktopItemsIntoBox(screenPoint, itemKeys);
             _runtime.ClearDesktopItemDropPreviews();
@@ -1919,6 +2199,17 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         if (_pressedItem is not null || _selecting || _dragStarted)
         {
+            return;
+        }
+
+        if (!DesktopIconHoverPolicy.CanHoverDesktopIcon(IsPointerOverBox(Forms.Cursor.Position)))
+        {
+            _hoverReconcileTimer.Stop();
+            _hoverReconcilePending = false;
+            if (SetHoveredItem(null))
+            {
+                RequestHoverRender();
+            }
             return;
         }
 
@@ -1957,12 +2248,13 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         var clientPoint = PointToClient(Forms.Cursor.Position);
-        var currentItem = ClientRectangle.Contains(clientPoint)
+        var currentItem = ClientRectangle.Contains(clientPoint) &&
+            DesktopIconHoverPolicy.CanHoverDesktopIcon(IsPointerOverBox(Forms.Cursor.Position))
             ? GetHoverItemAt(ToDip(clientPoint))
             : null;
         if (SetHoveredItem(currentItem))
         {
-            RequestDragRender();
+            RequestHoverRender();
         }
     }
 
@@ -1990,16 +2282,42 @@ internal sealed class DesktopIconSurface : Forms.Form
                 return;
             }
 
+            var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+            var overRecycleBin = IsOverRecycleBin(dropPoint) && DraggedKeysAreFileSystemItems(desktopDrag);
+            if (overRecycleBin != _overRecycleBin)
+            {
+                _overRecycleBin = overRecycleBin;
+                if (!overRecycleBin)
+                {
+                    ClearBoxDropPreview();
+                }
+                RequestDragRender();
+            }
             UpdateDesktopOleDropPreview(new Point(eventArgs.X, eventArgs.Y));
-            eventArgs.Effect = (eventArgs.AllowedEffect & Forms.DragDropEffects.Copy) != 0
-                ? Forms.DragDropEffects.Copy
-                : Forms.DragDropEffects.None;
+            eventArgs.Effect = _overRecycleBin
+                ? (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
+                    ? Forms.DragDropEffects.Move
+                    : Forms.DragDropEffects.None
+                : (eventArgs.AllowedEffect & Forms.DragDropEffects.Copy) != 0
+                    ? Forms.DragDropEffects.Copy
+                    : Forms.DragDropEffects.None;
             return;
         }
 
         if (!TryGetVirtualBoxDrag(eventArgs, out var itemKeys, out _))
         {
+            if (TryGetExternalFileDrop(eventArgs, out var externalPaths))
+            {
+                OnExternalFileDragOver(eventArgs, externalPaths);
+                return;
+            }
             ClearBoxDropPreview();
+            if (_externalDragPaths is not null || _dragRenderPending)
+            {
+                DiagnosticLog.Info(
+                    "Icon surface drag over: no payload recognized " +
+                    $"external={_externalDragPaths?.Length ?? 0}");
+            }
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
         }
@@ -2010,9 +2328,88 @@ internal sealed class DesktopIconSurface : Forms.Form
                            (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
             ? Forms.DragDropEffects.Move
             : Forms.DragDropEffects.None;
+        return;
     }
 
-    private void OnDragLeave(object? sender, EventArgs eventArgs) => ClearBoxDropPreview();
+    private void OnExternalFileDragOver(Forms.DragEventArgs eventArgs, string[] paths)
+    {
+        var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+        var overRecycleBin = IsOverRecycleBin(dropPoint);
+        var wasEmpty = _externalDragPaths is null;
+        _externalDragPaths = paths;
+        _externalDragPointer = dropPoint;
+        if (overRecycleBin != _overRecycleBin)
+        {
+            _overRecycleBin = overRecycleBin;
+        }
+        DiagnosticLog.Info(
+            $"External drag over restore={wasEmpty} count={paths.Length} " +
+            $"point={dropPoint.X:0},{dropPoint.Y:0} recycle={overRecycleBin}");
+        RequestDragRender();
+        eventArgs.Effect = overRecycleBin
+            ? (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
+                ? Forms.DragDropEffects.Move
+                : Forms.DragDropEffects.None
+            : (eventArgs.AllowedEffect & Forms.DragDropEffects.Copy) != 0
+                ? Forms.DragDropEffects.Copy
+                : (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
+                    ? Forms.DragDropEffects.Move
+                    : Forms.DragDropEffects.None;
+    }
+
+    // The box window owns the OLE drag route while the pointer is over it,
+    // so this surface receives no DragOver there and its ghost would freeze
+    // (or be cleared by DragLeave). The box forwards its drag state here so
+    // the dragged card keeps following the pointer into the box.
+    internal void ForwardDragFromBox(
+        PointF pointDip,
+        IReadOnlyList<string>? externalPaths,
+        IReadOnlyList<string>? desktopItemKeys)
+    {
+        if (IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        // A desktop icon drag also carries FileDrop paths in its payload, so
+        // the active desktop OLE drag must win over the external-file branch:
+        // otherwise the real drag ghost freezes at its last position outside
+        // the box while a stray external card takes over inside it.
+        if (desktopItemKeys is { Count: > 0 } && _dragStarted && _desktopOleDragActive)
+        {
+            _dragPointer = pointDip;
+            _dragPointerOverBox = true;
+            UpdateDesktopDragPreview(_dragPointer);
+            RequestDragRender();
+            return;
+        }
+
+        if (externalPaths is { Count: > 0 })
+        {
+            _externalDragPaths = externalPaths.ToArray();
+            _externalDragPointer = pointDip;
+            RequestDragRender();
+            return;
+        }
+
+        // The drag left the box surface (or ended over it). Drop the external
+        // ghost state so no stale card lingers after the OLE loop is gone.
+        if (_externalDragPaths is not null)
+        {
+            _externalDragPaths = null;
+            RequestDragRender();
+        }
+    }
+
+    private void OnDragLeave(object? sender, EventArgs eventArgs)
+    {
+        DiagnosticLog.Info(
+            $"Icon surface drag leave external={_externalDragPaths?.Length ?? 0} " +
+            $"recycle={_overRecycleBin} pending={_dragRenderPending}");
+        _overRecycleBin = false;
+        ClearExternalDragPreview();
+        ClearBoxDropPreview();
+    }
 
     private async void OnDragDrop(object? sender, Forms.DragEventArgs eventArgs)
     {
@@ -2022,13 +2419,41 @@ internal sealed class DesktopIconSurface : Forms.Form
             {
                 if (ReferenceEquals(desktopDrag.Source, this))
                 {
-                    CompleteDesktopOleDrop(desktopDrag, new Point(eventArgs.X, eventArgs.Y));
+                    var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+                    if (_overRecycleBin && IsOverRecycleBin(dropPoint))
+                    {
+                        CompleteRecycleBinDrop(desktopDrag);
+                    }
+                    else
+                    {
+                        CompleteDesktopOleDrop(desktopDrag, new Point(eventArgs.X, eventArgs.Y));
+                    }
                 }
                 return;
             }
 
             if (!TryGetVirtualBoxDrag(eventArgs, out var itemKeys, out var dragSession))
             {
+                if (TryGetExternalFileDrop(eventArgs, out var externalPaths))
+                {
+                    _overRecycleBin = false;
+                    ClearExternalDragPreview();
+                    var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+                    DiagnosticLog.Info(
+                        $"Icon surface external drop monitor={_monitor.Id} paths={externalPaths.Length} " +
+                        $"point={dropPoint.X:0},{dropPoint.Y:0} move={eventArgs.Effect == Forms.DragDropEffects.Move}");
+                    if (IsOverRecycleBin(dropPoint))
+                    {
+                        await DeleteExternalDropToRecycleBinAsync(externalPaths);
+                    }
+                    else
+                    {
+                        await ImportExternalDropToDesktopAsync(
+                            externalPaths,
+                            eventArgs.Effect == Forms.DragDropEffects.Move,
+                            dropPoint);
+                    }
+                }
                 return;
             }
 
@@ -2198,8 +2623,6 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         _dragItemKeys.Clear();
-        _dragPreviewCells.Clear();
-        _dragTargetCells.Clear();
         foreach (var item in _items.Where(item => _selection.Contains(item.Item.Key.ToString())))
         {
             var key = item.Item.Key.ToString();
@@ -2213,6 +2636,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         _dragAnchorCell = anchor.Cell;
         _dragAnchorKey = anchorKey;
         _lastDragPreviewAnchorCell = null;
+        _pendingRenameItem = null;
         var anchorIconBounds = GetIconBounds(anchor.Bounds);
         _dragIconGrabOffset = new PointF(
             _pressPoint.X - anchorIconBounds.X,
@@ -2220,6 +2644,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         _dragStarted = true;
         _dragPointer = _pressPoint;
         _dragPointerOverBox = false;
+        _dragBaseReady = false;
         Forms.Cursor.Current = Forms.Cursors.SizeAll;
         UpdateDesktopDragPreview(_pressPoint);
         _runtime.UpdateDesktopItemDropPreview(
@@ -2228,85 +2653,37 @@ internal sealed class DesktopIconSurface : Forms.Form
                 (int)Math.Round(_pressPoint.Y * _scale))),
             _dragItemKeys.ToArray(),
             out _dragPointerOverBox);
-        if (_dragPointerOverBox)
-        {
-            _dragPreviewCells.Clear();
-            _dragTargetCells.Clear();
-        }
     }
 
+    // Tracks only the drop anchor cell while the pointer moves. The reflow
+    // itself is computed once on drop (CommitDesktopDrop), so dragging stays
+    // cheap and no preview is painted - matching the native desktop.
     private void UpdateDesktopDragPreview(PointF point)
     {
-        if (_dragAnchorCell is not { } anchorCell ||
-            _dragAnchorKey is null)
+        if (_dragAnchorCell is null || _dragAnchorKey is null)
         {
-            _dragPreviewCells.Clear();
-            _dragTargetCells.Clear();
             _lastDragPreviewAnchorCell = null;
             return;
         }
 
         var grid = CreateCurrentGrid();
-        // Resolve the insertion cell from the visual center of the floating
-        // icon. Using the cell's top-left grab offset makes the marker lag by
-        // one column/row while the icon itself has already crossed the grid
-        // boundary, especially when the pointer grabbed an icon off-center.
+        // Resolve the insertion cell from the visual center of the grabbed
+        // icon so the drop lands where the icon appears to be, not where the
+        // pointer happened to press.
         var floatingIconTopLeft = new PointF(
             point.X - _dragIconGrabOffset.X,
             point.Y - _dragIconGrabOffset.Y);
         var targetPoint = new PointF(
             floatingIconTopLeft.X + _iconSize / 2,
             floatingIconTopLeft.Y + _iconSize / 2);
-        var targetCell = GetCellAtPoint(targetPoint);
-        if (targetCell is not { } requestedTarget)
-        {
-            if (_dragPreviewCells.Count > 0 || _dragTargetCells.Count > 0)
-            {
-                _dragBaseReady = false;
-            }
-            _dragPreviewCells.Clear();
-            _dragTargetCells.Clear();
-            _lastDragPreviewAnchorCell = null;
-            return;
-        }
-
-        if (_lastDragPreviewAnchorCell == requestedTarget && _dragPreviewCells.Count > 0)
-        {
-            return;
-        }
-
-        _dragPreviewCells.Clear();
-        _dragTargetCells.Clear();
-        _dragBaseReady = false;
-        _lastDragPreviewAnchorCell = requestedTarget;
-
-        var result = DesktopIconDragLayoutEngine.Calculate(
-            _items.Select(item => new DesktopIconGridItem(
-                item.Item.Key.ToString(),
-                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row))),
-            _dragItemKeys,
-            anchorKey: _dragAnchorKey,
-            requestedAnchor: new DesktopIconGridCell(requestedTarget.Column, requestedTarget.Row),
-            columnCount: grid.ColumnCount,
-            rowCount: grid.RowCount);
-        if (!result.IsValid)
-        {
-            return;
-        }
-
-        foreach (var (key, cell) in result.Placements)
-        {
-            _dragPreviewCells[key] = new GridCell(cell.Column, cell.Row);
-        }
-        foreach (var (key, cell) in result.DraggedPlacements)
-        {
-            _dragTargetCells[key] = new GridCell(cell.Column, cell.Row);
-        }
+        _lastDragPreviewAnchorCell = GetCellAtPoint(targetPoint);
     }
 
     private void CommitDesktopDrop()
     {
-        if (_dragPreviewCells.Count == 0 || _dragTargetCells.Count == 0)
+        if (_dragAnchorKey is null ||
+            _lastDragPreviewAnchorCell is not { } targetCell ||
+            _dragItemKeys.Count == 0)
         {
             return;
         }
@@ -2317,7 +2694,26 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
 
-        var layout = _dragPreviewCells.ToDictionary(
+        var grid = CreateCurrentGrid();
+        var (direction, columnOffset, rowOffset) = ResolveSqueeze(grid, targetCell);
+        var result = DesktopIconDragLayoutEngine.Calculate(
+            _items.Select(item => new DesktopIconGridItem(
+                item.Item.Key.ToString(),
+                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row))),
+            _dragItemKeys,
+            anchorKey: _dragAnchorKey,
+            requestedAnchor: new DesktopIconGridCell(
+                targetCell.Column + columnOffset,
+                targetCell.Row + rowOffset),
+            columnCount: grid.ColumnCount,
+            rowCount: grid.RowCount,
+            direction: direction);
+        if (!result.IsValid)
+        {
+            return;
+        }
+
+        var layout = result.Placements.ToDictionary(
             entry => entry.Key,
             entry => new DesktopIconLayoutSnapshot
             {
@@ -2329,8 +2725,58 @@ internal sealed class DesktopIconSurface : Forms.Form
         _runtime.SetDesktopIconLayout(layout);
     }
 
+    // Decides where the dragged icon is inserted based on where its center
+    // sits inside the target cell, and which way the displaced icons give
+    // way. Dropping onto the left half of an occupied cell inserts at that
+    // cell and pushes the row to the right (the dragged icon takes the cell,
+    // its former occupant moves right - "ACBX" when C replaces B). Dropping
+    // onto the right half inserts one cell further right. A dead-center drop
+    // keeps the classic column-major downward cascade.
+    private (DesktopIconSqueezeDirection Direction, int ColumnOffset, int RowOffset) ResolveSqueeze(
+        DesktopGrid grid,
+        GridCell targetCell)
+    {
+        var cellBounds = GetCellBounds(grid, targetCell);
+        var floatingIconTopLeft = new PointF(
+            _dragPointer.X - _dragIconGrabOffset.X,
+            _dragPointer.Y - _dragIconGrabOffset.Y);
+        var targetPoint = new PointF(
+            floatingIconTopLeft.X + _iconSize / 2,
+            floatingIconTopLeft.Y + _iconSize / 2);
+        // A single icon dropped onto one of the four orthogonal neighbours
+        // of its own cell swaps the two icons (the engine's swap path), so
+        // the anchor must stay on the neighbour itself instead of shifting
+        // half a cell sideways.
+        if (_dragItemKeys.Count == 1 &&
+            _dragAnchorCell is { } sourceCell &&
+            Math.Abs(targetCell.Column - sourceCell.Column) +
+            Math.Abs(targetCell.Row - sourceCell.Row) == 1)
+        {
+            return (DesktopIconSqueezeDirection.Down, 0, 0);
+        }
+
+        var dx = cellBounds.Width > 0
+            ? (targetPoint.X - cellBounds.Left) / cellBounds.Width - 0.5
+            : 0;
+        var dy = cellBounds.Height > 0
+            ? (targetPoint.Y - cellBounds.Top) / cellBounds.Height - 0.5
+            : 0;
+        const float CenterBand = 0.25f;
+        if (Math.Abs(dx) <= CenterBand && Math.Abs(dy) <= CenterBand)
+        {
+            return (DesktopIconSqueezeDirection.Down, 0, 0);
+        }
+        if (Math.Abs(dx) >= Math.Abs(dy))
+        {
+            return (DesktopIconSqueezeDirection.Right, dx > 0 ? 1 : 0, 0);
+        }
+        return (DesktopIconSqueezeDirection.Down, 0, dy > 0 ? 1 : 0);
+    }
+
     private void EndDesktopDrag()
     {
+        _overRecycleBin = false;
+        ClearExternalDragPreview();
         _runtime.ClearDesktopItemDropPreviews();
         _dragStarted = false;
         _dragAnchorCell = null;
@@ -2339,8 +2785,6 @@ internal sealed class DesktopIconSurface : Forms.Form
         _dragIconGrabOffset = PointF.Empty;
         _dragPointerOverBox = false;
         _dragItemKeys.Clear();
-        _dragPreviewCells.Clear();
-        _dragTargetCells.Clear();
         _geometryDirty = true;
         Forms.Cursor.Current = Forms.Cursors.Default;
     }
@@ -2397,22 +2841,45 @@ internal sealed class DesktopIconSurface : Forms.Form
             return entry.HitBounds;
         }
 
-        return CalculateItemHitBounds(entry.Bounds, GetDesktopWorkAreaBounds());
+        // Defensive fallback for a geometry that was never cached. Measure on
+        // a logical (96-DPI) canvas so the metrics match the DIP drawing space.
+        using var measureBitmap = DesktopLayerBitmapFactory.Create(1, 1);
+        using var measureGraphics = Graphics.FromImage(measureBitmap);
+        using var measureFont = ResolveIconLabelFont();
+        return CalculateItemHitBounds(
+            entry.Bounds,
+            GetDesktopWorkAreaBounds(),
+            measureGraphics,
+            measureFont,
+            entry.Item.DisplayName);
     }
 
-    private RectangleF CalculateItemHitBounds(RectangleF itemBounds, RectangleF workAreaBounds)
+    private RectangleF CalculateItemHitBounds(
+        RectangleF itemBounds,
+        RectangleF workAreaBounds,
+        Graphics measureGraphics,
+        Font measureFont,
+        string displayName)
     {
         var iconBounds = GetIconBounds(itemBounds);
-        var textTop = iconBounds.Bottom + 3;
-        var textHeight = Math.Max(0, itemBounds.Bottom - textTop - 3);
-        var textBounds = new RectangleF(
-            itemBounds.X + 2,
-            textTop,
-            Math.Max(0, itemBounds.Width - 4),
-            textHeight);
+        // Only the actual label footprint should react to the pointer; the
+        // remainder of the grid cell (the blank gap between rows and columns)
+        // must stay a neutral hit area like the surrounding desktop.
+        var textBounds = GetItemTextBounds(
+            measureGraphics,
+            displayName,
+            itemBounds,
+            iconBounds,
+            measureFont,
+            selected: false);
+        var textHitBounds = GetTextHitBounds(
+            measureGraphics,
+            displayName,
+            textBounds,
+            measureFont);
         return RectangleF.Intersect(
             workAreaBounds,
-            RectangleF.Inflate(RectangleF.Union(iconBounds, textBounds), 2, 2));
+            RectangleF.Inflate(RectangleF.Union(iconBounds, textHitBounds), 2, 2));
     }
 
     private RectangleF GetItemVisualBounds(RectangleF iconBounds, RectangleF textBounds)
@@ -2487,7 +2954,11 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void UpdateDropTargetRegistration()
     {
-        AllowDrop = _virtualBoxDropTargetEnabled || _desktopOleDragActive;
+        // The full-monitor layer sits above Explorer's (hidden) list view, so
+        // external file drops would be swallowed by this window and never
+        // reach the desktop. Keep the surface registered as an OLE target at
+        // all times and handle FileDrop payloads in OnDragOver/OnDragDrop.
+        AllowDrop = true;
     }
 
     private bool TryStartDesktopOleDrag()
@@ -2507,6 +2978,10 @@ internal sealed class DesktopIconSurface : Forms.Form
         var data = new Forms.DataObject();
         var dragSession = new DesktopIconSurfaceDragSession(this, _dragItemKeys.ToArray());
         data.SetData(DesktopIconDragSessionFormat, false, dragSession);
+        // Expose the full multi-select key list on the OLE payload as well,
+        // so every drop target resolves the complete group even if the
+        // session object is not reachable through the data formats.
+        data.SetData(DesktopBoxForm.ItemKeysFormat, _dragItemKeys.ToArray());
         var collection = new StringCollection();
         collection.AddRange(paths);
         data.SetFileDropList(collection);
@@ -2519,7 +2994,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             // CrabDesk's private drop targets use the accompanying session to
             // perform virtual placement and assignment without moving files.
             Forms.Cursor.Current = Forms.Cursors.Default;
-            DoDragDrop(data, Forms.DragDropEffects.Copy);
+            DoDragDrop(data, ExternalFileDropEffects);
         }
         catch (Exception exception)
         {
@@ -2561,6 +3036,350 @@ internal sealed class DesktopIconSurface : Forms.Form
         CommitDesktopDrop();
     }
 
+    private bool IsOverRecycleBin(PointF point) =>
+        GetItemAt(point) is { } item && IsRecycleBinItem(item.Item);
+
+    private static bool IsRecycleBinItem(DesktopItemRef item) =>
+        item.Kind == DesktopItemKind.Shell &&
+        item.ParsingName.Contains(
+            "645FF040-5081-101B-9F08-00AA002F954E",
+            StringComparison.OrdinalIgnoreCase);
+
+    private bool DraggedKeysAreFileSystemItems(DesktopIconSurfaceDragSession dragSession) =>
+        dragSession.ItemKeys.Count > 0 &&
+        dragSession.ItemKeys.All(key => _items.Any(item =>
+            string.Equals(item.Item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase) &&
+            item.Item.FileSystemPath is not null));
+
+    // A drop on the Recycle Bin moves the dragged files there instead of
+    // placing them in the grid. The OLE drag loop owns the state cleanup
+    // (EndDesktopDrag runs in TryStartDesktopOleDrag's finally block).
+    private async void CompleteRecycleBinDrop(DesktopIconSurfaceDragSession dragSession)
+    {
+        _overRecycleBin = false;
+        dragSession.HandledByDesktop = true;
+        var items = _items
+            .Where(item => dragSession.ItemKeys.Contains(
+                item.Item.Key.ToString(),
+                StringComparer.OrdinalIgnoreCase))
+            .Select(item => item.Item)
+            .Where(item => item.FileSystemPath is not null)
+            .ToArray();
+        if (items.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _runtime.FileOperations.DeleteAsync(items);
+            await _runtime.RefreshItemsAsync(false);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to move desktop items to the recycle bin", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "删除失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+        }
+    }
+
+    private static bool TryGetExternalFileDrop(
+        Forms.DragEventArgs eventArgs,
+        out string[] paths)
+    {
+        paths = [];
+        if (eventArgs.Data?.GetDataPresent(Forms.DataFormats.FileDrop) != true ||
+            eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is not string[] files ||
+            files.Length == 0)
+        {
+            return false;
+        }
+
+        paths = files
+            .Where(path => !string.IsNullOrWhiteSpace(path) &&
+                (Directory.Exists(path) || File.Exists(path)))
+            .ToArray();
+        return paths.Length > 0;
+    }
+
+    // External files dropped on the desktop land in the real desktop folder,
+    // restoring the native Explorer behavior under the replacement layer.
+    private async Task ImportExternalDropToDesktopAsync(
+        IReadOnlyList<string> paths,
+        bool move,
+        PointF dropPointDip)
+    {
+        try
+        {
+            var desktopDirectory = Environment.GetFolderPath(
+                Environment.SpecialFolder.DesktopDirectory);
+            var result = await _runtime.FileOperations.ImportAsync(
+                paths,
+                desktopDirectory,
+                move);
+            await _runtime.RefreshItemsAsync(applyDesktopRules: false);
+            PlaceDroppedItemsAtPoint(result.ImportedPaths, dropPointDip);
+            if (result.FailedItems.Count > 0)
+            {
+                DiagnosticLog.Info(
+                    $"External desktop drop imported {result.SuccessfulItems.Count} " +
+                    $"failed={result.FailedItems.Count} move={move}");
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to import dropped files to the desktop", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "导入失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+        }
+    }
+
+    // Newly imported desktop files land at the drop point (native "place
+    // where you point" behavior) when a manual layout is active: the first
+    // item takes the cell under the pointer and the rest fill the next free
+    // cells in reading order.
+    private void PlaceDroppedItemsAtPoint(
+        IReadOnlyList<string> importedPaths,
+        PointF dropPointDip)
+    {
+        DiagnosticLog.Info(
+            $"Place dropped items paths={importedPaths.Count} point={dropPointDip.X:0},{dropPointDip.Y:0} " +
+            $"autoArrange={_runtime.IsDesktopAutoArrangeEnabled} primary={_monitor.IsPrimary} " +
+            $"layoutKeys={_runtime.State.DesktopIconLayout.Count}");
+        if (importedPaths.Count == 0 ||
+            _runtime.IsDesktopAutoArrangeEnabled ||
+            !_monitor.IsPrimary)
+        {
+            DiagnosticLog.Info(
+                $"Place dropped items skipped: empty={importedPaths.Count == 0} " +
+                $"autoArrange={_runtime.IsDesktopAutoArrangeEnabled} primary={_monitor.IsPrimary}");
+            return;
+        }
+
+        var grid = CreateCurrentGrid();
+        if (grid.ColumnCount == 0 || grid.RowCount == 0)
+        {
+            DiagnosticLog.Info(
+                $"Place dropped items skipped: no grid {grid.ColumnCount}x{grid.RowCount}");
+            return;
+        }
+        if (GetCellAtPoint(dropPointDip) is not { } targetCell)
+        {
+            DiagnosticLog.Info(
+                $"Place dropped items skipped: point outside grid bounds " +
+                $"grid={grid.Bounds.X:0},{grid.Bounds.Y:0},{grid.Bounds.Width:0},{grid.Bounds.Height:0}");
+            return;
+        }
+
+        var importedSet = importedPaths
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var newItems = _runtime.Items
+            .Where(item => item.FileSystemPath is not null &&
+                           importedSet.Contains(Path.GetFullPath(item.FileSystemPath!)))
+            .ToArray();
+        if (newItems.Length == 0)
+        {
+            DiagnosticLog.Info(
+                $"Place dropped items skipped: no matching items in runtime snapshot " +
+                $"items={_runtime.Items.Count}");
+            return;
+        }
+        DiagnosticLog.Info(
+            $"Place dropped items target cell={targetCell.Column},{targetCell.Row} matched={newItems.Length}");
+
+        var occupied = _runtime.State.DesktopIconLayout.Values
+            .Where(placement =>
+                string.IsNullOrWhiteSpace(placement.MonitorId) ||
+                string.Equals(placement.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase))
+            .Select(placement => new GridCell(placement.Column, placement.Row))
+            .ToHashSet();
+        var next = new Dictionary<string, DesktopIconLayoutSnapshot>(
+            _runtime.State.DesktopIconLayout,
+            StringComparer.OrdinalIgnoreCase);
+        GridCell? cell = targetCell;
+        foreach (var item in newItems)
+        {
+            cell = FindFirstFreeCellAtOrAfter(cell.Value, grid, occupied)
+                   ?? FindFirstFreeCell(grid, occupied);
+            if (cell is not { } freeCell)
+            {
+                break;
+            }
+
+            occupied.Add(freeCell);
+            next[item.Key.ToString()] = new DesktopIconLayoutSnapshot
+            {
+                MonitorId = _monitor.Id,
+                Column = freeCell.Column,
+                Row = freeCell.Row
+            };
+        }
+
+        // The refresh that followed the import already persisted the new
+        // items at their automatic cells, so the keys exist in the layout.
+        // Apply only when at least one imported item actually moved cells.
+        var changed = newItems.Any(item =>
+            !_runtime.State.DesktopIconLayout.TryGetValue(item.Key.ToString(), out var existing) ||
+            existing.Column != next[item.Key.ToString()].Column ||
+            existing.Row != next[item.Key.ToString()].Row);
+        if (changed)
+        {
+            DiagnosticLog.Info(
+                $"Place dropped items applying layout entries={next.Count} " +
+                $"cells={string.Join(",", newItems.Select(item => $"{item.Key}=({next[item.Key.ToString()].Column},{next[item.Key.ToString()].Row})"))}");
+            _runtime.SetDesktopIconLayout(next);
+        }
+        else
+        {
+            DiagnosticLog.Info(
+                "Place dropped items no-op: imported items already sit at the requested cells");
+        }
+    }
+
+    private static GridCell? FindFirstFreeCellAtOrAfter(
+        GridCell start,
+        DesktopGrid grid,
+        IReadOnlySet<GridCell> occupied)
+    {
+        for (var column = start.Column; column < grid.ColumnCount; column++)
+        {
+            for (var row = column == start.Column ? start.Row : 0;
+                 row < grid.RowCount;
+                 row++)
+            {
+                var cell = new GridCell(column, row);
+                if (!occupied.Contains(cell))
+                {
+                    return cell;
+                }
+            }
+        }
+        return null;
+    }
+
+    private async Task DeleteExternalDropToRecycleBinAsync(IReadOnlyList<string> paths)
+    {
+        try
+        {
+            var items = paths.Select(path => new DesktopItemRef
+            {
+                Key = new DesktopItemKey("file", path.ToUpperInvariant()),
+                DisplayName = Path.GetFileName(path),
+                ParsingName = path,
+                FileSystemPath = path,
+                Kind = Directory.Exists(path)
+                    ? DesktopItemKind.Folder
+                    : DesktopItemKind.File
+            }).ToArray();
+            await _runtime.FileOperations.DeleteAsync(items);
+            await _runtime.RefreshItemsAsync(applyDesktopRules: false);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to move dropped files to the recycle bin", exception);
+            Forms.MessageBox.Show(
+                this,
+                exception.Message,
+                "删除失败",
+                Forms.MessageBoxButtons.OK,
+                Forms.MessageBoxIcon.Error);
+        }
+    }
+
+    private void ClearExternalDragPreview()
+    {
+        _externalDragPaths = null;
+        // Keep the cached icon alive: a queued overlay frame may still render
+        // this preview after the drop/leave (the render is BeginInvoke'd).
+        // Disposing here lets DrawImage hit a disposed bitmap and throw.
+        _externalDragIconPath = null;
+    }
+
+    // A small ghost card next to the cursor for external file drops: the
+    // first file's icon, its name, and the remaining item count. Painted by
+    // the drag overlay so it follows the pointer without repainting the
+    // whole monitor layer.
+    private void DrawExternalDragPreview(Graphics graphics)
+    {
+        if (_externalDragPaths is not { Length: > 0 } paths)
+        {
+            return;
+        }
+        try
+        {
+            DrawExternalDragPreviewCore(graphics, paths);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("External drag preview drawing failed", exception);
+        }
+    }
+
+    private void DrawExternalDragPreviewCore(Graphics graphics, IReadOnlyList<string> paths)
+    {
+        var first = paths[0];
+        var icon = GetExternalDragIcon(first) ?? ShellIconProvider.GetGenericFileIcon();
+        using var font = ResolveIconLabelFont();
+        DragGhostRenderer.Draw(
+            graphics,
+            _externalDragPointer,
+            icon,
+            Path.GetFileName(first),
+            paths.Count,
+            font);
+    }
+
+    private Bitmap? GetExternalDragIcon(string path)
+    {
+        // ShellIconProvider hands out shared cached bitmap instances that it
+        // owns. Never dispose them here: disposing one poisons the provider
+        // cache and every later GetIcon for that key returns a dead bitmap,
+        // making the ghost vanish. Just swap the reference.
+        if (!string.Equals(_externalDragIconPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            _externalDragIcon = _runtime.IconProvider.GetIcon(path, 28);
+            _externalDragIconPath = path;
+        }
+        return _externalDragIcon;
+    }
+
+    private void ReleaseExternalDragIcon()
+    {
+        // Shared provider bitmap - drop the reference without disposing.
+        _externalDragIcon = null;
+        _externalDragIconPath = null;
+    }
+
+    // Explorer-style feedback while a drag hovers the Recycle Bin: a subtle
+    // accent backdrop behind the bin icon.
+    private void DrawRecycleBinHighlight(Graphics graphics)
+    {
+        var bin = _items.FirstOrDefault(item => IsRecycleBinItem(item.Item));
+        if (bin is null)
+        {
+            return;
+        }
+
+        var selectionColor = ParseColor(
+            _runtime.State.Settings.Appearance.SelectionColor,
+            Color.FromArgb(74, 91, 177));
+        var iconBounds = GetIconBounds(bin.Bounds);
+        using var fill = new SolidBrush(Color.FromArgb(86, selectionColor));
+        using var border = new Pen(Color.FromArgb(238, selectionColor), 2f);
+        using var path = RoundedRectangle(RectangleF.Inflate(iconBounds, 6, 6), 9);
+        graphics.FillPath(fill, path);
+        graphics.DrawPath(border, path);
+    }
+
     private static bool TryGetDesktopIconDrag(
         Forms.DragEventArgs eventArgs,
         out DesktopIconSurfaceDragSession dragSession)
@@ -2576,10 +3395,58 @@ internal sealed class DesktopIconSurface : Forms.Form
         return true;
     }
 
+    // Explorer's slow double-click: click an icon to select it, then click
+    // the same icon again after the double-click time but within the slow
+    // limit to start an inline rename. The rename only starts on mouse up if
+    // the second press did not turn into a drag.
+    private void TryBeginSlowDoubleClickRename(DesktopIconGeometry item)
+    {
+        var now = DateTime.UtcNow;
+        var key = item.Item.Key.ToString();
+        var elapsed = (now - _lastRenameClickUtc).TotalMilliseconds;
+        var isSlowDoubleClick =
+            string.Equals(_lastRenameClickKey, key, StringComparison.OrdinalIgnoreCase) &&
+            elapsed > Forms.SystemInformation.DoubleClickTime &&
+            elapsed < SlowDoubleClickRenameLimitMilliseconds;
+        _lastRenameClickKey = key;
+        _lastRenameClickUtc = now;
+        if (isSlowDoubleClick && item.Item.FileSystemPath is not null)
+        {
+            _pendingRenameItem = item;
+            _pendingRenamePressUtc = now;
+        }
+    }
+
+    private void CommitPendingSlowDoubleClickRename()
+    {
+        var pending = _pendingRenameItem;
+        _pendingRenameItem = null;
+        if (pending is null ||
+            _dragStarted ||
+            _selecting ||
+            _desktopOleDragActive ||
+            IsDisposed)
+        {
+            return;
+        }
+
+        // The press became neither a drag nor a marquee. Only rename while
+        // the slow double-click window is still open.
+        var elapsed = (DateTime.UtcNow - _pendingRenamePressUtc).TotalMilliseconds;
+        if (elapsed > SlowDoubleClickRenameLimitMilliseconds)
+        {
+            return;
+        }
+
+        _lastRenameClickKey = null;
+        _ = RenameItemAsync(pending.Item);
+    }
+
     private async Task RenameItemAsync(DesktopItemRef item)
     {
-        var newName = DesktopRenameDialog.Show(this, _runtime.IsDarkTheme, item);
-        if (newName is null)
+        var newName = await ShowInlineRenameAsync(item);
+        if (newName is null ||
+            string.Equals(newName, item.DisplayName, StringComparison.Ordinal))
         {
             return;
         }
@@ -2587,7 +3454,6 @@ internal sealed class DesktopIconSurface : Forms.Form
         try
         {
             await _runtime.RenameItemAsync(item, newName);
-            ClearSelection();
         }
         catch (Exception exception)
         {
@@ -2599,6 +3465,72 @@ internal sealed class DesktopIconSurface : Forms.Form
                 Forms.MessageBoxButtons.OK,
                 Forms.MessageBoxIcon.Error);
         }
+    }
+
+    private async Task<string?> ShowInlineRenameAsync(DesktopItemRef item)
+    {
+        var entry = _items.LastOrDefault(candidate => string.Equals(
+            candidate.Item.Key.ToString(),
+            item.Key.ToString(),
+            StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            return null;
+        }
+
+        _renameEditor ??= new DesktopRenameEditor();
+        var labelBounds = GetItemLabelEditBounds(entry);
+        var scale = (float)Math.Max(_scale, 0.01d);
+        var screenLocation = PointToScreen(new Point(
+            (int)Math.Round(labelBounds.X * scale),
+            (int)Math.Round(labelBounds.Y * scale)));
+        var selectStem = item.Kind == DesktopItemKind.File ||
+            item.Kind == DesktopItemKind.Shortcut;
+        using var labelFont = ResolveIconLabelFont();
+        return await _renameEditor.ShowAsync(
+            screenLocation,
+            new Size(
+                (int)Math.Round(labelBounds.Width * scale),
+                (int)Math.Round(labelBounds.Height * scale)),
+            item.DisplayName,
+            selectStem,
+            _runtime.IsDarkTheme,
+            labelFont);
+    }
+
+    private RectangleF GetItemLabelEditBounds(DesktopIconGeometry entry)
+    {
+        var iconBounds = GetIconBounds(entry.Bounds);
+        using var measureBitmap = DesktopLayerBitmapFactory.Create(1, 1);
+        using var measureGraphics = Graphics.FromImage(measureBitmap);
+        using var font = ResolveIconLabelFont();
+        var textBounds = GetItemTextBounds(
+            measureGraphics,
+            entry.Item.DisplayName,
+            entry.Bounds,
+            iconBounds,
+            font,
+            selected: false);
+        var hit = GetTextHitBounds(measureGraphics, entry.Item.DisplayName, textBounds, font);
+        var lineHeight = Math.Max(1, font.GetHeight(measureGraphics));
+        var maxWidth = Math.Max(0, entry.Bounds.Width - 6);
+        var width = hit.IsEmpty
+            ? maxWidth
+            : Math.Min(maxWidth, Math.Max(48, hit.Width + 10));
+        var centerX = hit.IsEmpty
+            ? textBounds.X + textBounds.Width / 2
+            : hit.X + hit.Width / 2;
+        var left = Math.Max(
+            entry.Bounds.X + 1,
+            Math.Min(centerX - width / 2, entry.Bounds.Right - width - 1));
+        var top = Math.Max(1, textBounds.Y - 3);
+        // Height follows the measured label so a wrapped (two-line) name gets
+        // a two-line editor instead of a clipped single line; the multiline
+        // input renders the full name centered.
+        var labelHeight = hit.IsEmpty
+            ? lineHeight
+            : Math.Max(lineHeight, hit.Height);
+        return new RectangleF(left, top, width, labelHeight + 8);
     }
 
     private DesktopIconGeometry? GetItemAt(PointF point)
@@ -2655,9 +3587,21 @@ internal sealed class DesktopIconSurface : Forms.Form
             return false;
         }
 
+        var cursorClient = PointToClient(Forms.Cursor.Position);
+        DiagnosticLog.Info(
+            $"Icon hover {_hoveredItemKey ?? "<none>"} -> {nextKey ?? "<none>"} " +
+            $"at={cursorClient.X},{cursorClient.Y} " +
+            $"hitBounds={item?.HitBounds ?? RectangleF.Empty}");
+        if (_hoveredItemKey is { } previousKey && !_selection.Contains(previousKey))
+        {
+            _expandedItemHitBounds.Remove(previousKey);
+        }
         _hoveredItemKey = nextKey;
         return true;
     }
+
+    private bool IsPointerOverBox(Point screenPoint) =>
+        _boxPointerHitTest?.Invoke(screenPoint) == true;
 
     private static Color BrightenColor(Color color, float amount)
     {

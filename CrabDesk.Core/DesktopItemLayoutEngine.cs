@@ -152,6 +152,38 @@ public static class DesktopItemLayoutEngine
         return new DesktopItemLayoutResult(gridItems, gridScroll, gridMaxScroll);
     }
 
+    /// <summary>
+    /// The maximum scroll offset for a view, without materializing any item
+    /// rectangles. Used by scroll controllers to clamp wheel targets.
+    /// </summary>
+    public static double GetScrollExtent(
+        BoxViewMode viewMode,
+        LayoutRect body,
+        int itemCount,
+        double iconSize,
+        double horizontalSpacing,
+        double verticalSpacing)
+    {
+        itemCount = Math.Max(0, itemCount);
+        iconSize = Math.Clamp(iconSize, 24, 96);
+        if (itemCount == 0 || body.Width <= 0 || body.Height <= 0)
+        {
+            return 0;
+        }
+
+        if (viewMode == BoxViewMode.List)
+        {
+            var rowHeight = Math.Max(48, iconSize + 12);
+            return Math.Max(0, itemCount * rowHeight - body.Height);
+        }
+
+        var cellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
+        var cellHeight = GetGridCellHeight(iconSize, verticalSpacing);
+        var columns = Math.Max(1, (int)(body.Width / cellWidth));
+        var rows = (int)Math.Ceiling(itemCount / (double)columns);
+        return Math.Max(0, rows * cellHeight - body.Height);
+    }
+
     public static VisibleDesktopItemLayoutResult CalculateVisible(
         BoxViewMode viewMode,
         LayoutRect body,

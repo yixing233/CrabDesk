@@ -6,25 +6,22 @@ using Forms = System.Windows.Forms;
 namespace CrabDesk.Runtime;
 
 /// <summary>
-/// A small, click-through layered child used for the mutable part of a desktop
-/// drag. Keeping it separate from the monitor-sized desktop layer prevents a
-/// pointer move from uploading an entire monitor bitmap.
+/// A small click-through layered child used for hover feedback. Keeping the
+/// mutable highlight separate from the monitor-sized icon layer avoids a full
+/// bitmap redraw and upload when the pointer crosses adjacent icons.
 /// </summary>
-internal sealed class DesktopDragOverlay : Forms.Form
+internal sealed class DesktopHoverOverlay : Forms.Form
 {
     private const int WmNcHitTest = 0x0084;
     private const int WmMouseActivate = 0x0021;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
-    // Keep the child bitmap and its native layered surface stable while a
-    // selection rectangle grows by a pixel at a time. The content is still
-    // positioned at its exact DIP coordinates inside this padded surface.
     private const int BoundsQuantizationPixels = 64;
     private static readonly IntPtr HtTransparent = new(-1);
     private static readonly IntPtr MaNoActivate = new(3);
     private Bitmap? _bitmap;
 
-    internal DesktopDragOverlay()
+    internal DesktopHoverOverlay()
     {
         FormBorderStyle = Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -84,7 +81,7 @@ internal sealed class DesktopDragOverlay : Forms.Form
         diagnostic = string.Empty;
         if (IsDisposed || Parent is null || requestedBounds.Width <= 0 || requestedBounds.Height <= 0)
         {
-            diagnostic = "The drag overlay has no valid parent or bounds.";
+            diagnostic = "The hover overlay has no valid parent or bounds.";
             return false;
         }
 
@@ -106,9 +103,9 @@ internal sealed class DesktopDragOverlay : Forms.Form
             (float)(height / effectiveScale));
 
         EnsureBitmap(width, height);
-        // UpdateLayeredWindow moves and replaces the pixels atomically. Moving
-        // a visible child with SetBounds first briefly shows its previous frame
-        // at the new location, which is visible as a drag twitch.
+        // Keep the moving surface and its new pixels in one layered-window
+        // submission. The managed bounds only need synchronization while the
+        // overlay is hidden, before Show() creates its first visible frame.
         if (!Visible && (Left != left || Top != top || Width != width || Height != height))
         {
             SetBounds(left, top, width, height);

@@ -347,6 +347,36 @@ public sealed class CrabDeskRuntime : IDisposable
         return OrderItemsForBox(box, query);
     }
 
+    // Resolves an item by its stable key anywhere it may live: the desktop
+    // folder snapshot first, then every box (including mapped folders), so
+    // drag ghosts can always show the real icon.
+    internal DesktopItemRef? FindItemByKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        var direct = Items.FirstOrDefault(item =>
+            string.Equals(item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase));
+        if (direct is not null)
+        {
+            return direct;
+        }
+
+        foreach (var box in State.Boxes)
+        {
+            var candidate = GetItemsForBox(box.Id).FirstOrDefault(item =>
+                string.Equals(item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase));
+            if (candidate is not null)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Produces the target box order that AssignItems would create without
     /// changing assignments, item order, or the current manual sort.
@@ -479,6 +509,14 @@ public sealed class CrabDeskRuntime : IDisposable
         _surfaceManager?.ClearDesktopItemDropPreviews();
 
     internal void ClearDesktopBoxSelection() => _surfaceManager?.ClearBoxSelection();
+
+    internal void ActivateDesktopKeyboardInput()
+    {
+        if (!_disposed && !IsPaused)
+        {
+            DesktopWindowTools.TryActivateDesktopInput(_desktopHost.DesktopListView);
+        }
+    }
 
     // The icon surface owns the pointer-captured desktop drag. Box OLE events
     // can still arrive while that capture crosses a box; callers use this bit
@@ -2542,7 +2580,10 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
         _disposed = true;
-        DiagnosticLog.Info("Runtime disposal started");
+        // Keep the caller stack so an unexpected shutdown can be traced back
+        // to its trigger (settings change, window close, update, crash path).
+        DiagnosticLog.Info(
+            "Runtime disposal started\n" + Environment.StackTrace);
         _hostTimer.Stop();
         _saveTimer.Stop();
         _desktopZoomTimer.Stop();
@@ -2976,13 +3017,23 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void NotifyWorkspaceChanged(bool rebuild)
     {
-        if (rebuild)
+        try
         {
-            _surfaceManager?.Refresh();
+            if (rebuild)
+            {
+                _surfaceManager?.Refresh();
+            }
+            else
+            {
+                _surfaceManager?.UpdateRegions();
+            }
         }
-        else
+        catch (Exception exception)
         {
-            _surfaceManager?.UpdateRegions();
+            // A failure to refresh a surface must never take down the whole
+            // process from a settings setter; log it and keep the state
+            // save flowing so the user's choice still persists.
+            DiagnosticLog.Error("Desktop surface refresh failed after a workspace change", exception);
         }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
@@ -3856,10 +3907,16 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         menu.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
         menu.Font = _menuFont;
-        menu.Padding = new System.Windows.Forms.Padding(5);
+        // Every metric below is authored in DIPs. WinForms renders the
+        // point-sized menu font at the monitor DPI, so the fixed row height,
+        // paddings and minimum width must scale together with it - otherwise
+        // the text overflows the rows and gets clipped on high-DPI displays.
+        var dpiScale = GetMenuDpiScale(menu);
+        menu.Padding = new System.Windows.Forms.Padding((int)Math.Round(5 * dpiScale));
         var minimumWidth = menu is FluentContextMenuStrip fluentMenu
             ? fluentMenu.MinimumMenuWidth
             : 112;
+        minimumWidth = (int)Math.Round(minimumWidth * dpiScale);
         var menuWidth = Math.Max(minimumWidth, menu.GetPreferredSize(System.Drawing.Size.Empty).Width);
         menu.MinimumSize = new System.Drawing.Size(menuWidth, 0);
         menu.ShowImageMargin = false;
@@ -3872,7 +3929,7 @@ public sealed class CrabDeskRuntime : IDisposable
         menu.ForeColor = IsDarkTheme
             ? System.Drawing.Color.FromArgb(244, 245, 247)
             : System.Drawing.Color.FromArgb(32, 36, 42);
-        ApplyMenuMetrics(menu.Items, menuWidth - menu.Padding.Horizontal);
+        ApplyMenuMetrics(menu.Items, menuWidth - menu.Padding.Horizontal, dpiScale);
         menu.PerformLayout();
         if (menu.Width > 0 && menu.Height > 0)
         {
@@ -3880,22 +3937,49 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    private static float GetMenuDpiScale(System.Windows.Forms.ContextMenuStrip menu)
+    {
+        try
+        {
+            return menu.IsHandleCreated && menu.DeviceDpi > 0
+                ? menu.DeviceDpi / 96f
+                : 1f;
+        }
+        catch
+        {
+            return 1f;
+        }
+    }
+
     private void ApplyMenuMetrics(
         System.Windows.Forms.ToolStripItemCollection items,
-        int availableWidth)
+        int availableWidth,
+        float dpiScale)
     {
+        var horizontalPadding = (int)Math.Round(8 * dpiScale);
+        var itemMargin = (int)Math.Round(1 * dpiScale);
+        var itemHeight = (int)Math.Round(32 * dpiScale);
+        var separatorMarginX = (int)Math.Round(8 * dpiScale);
+        var separatorMarginY = (int)Math.Round(3 * dpiScale);
         foreach (System.Windows.Forms.ToolStripItem item in items)
         {
             if (item is System.Windows.Forms.ToolStripSeparator)
             {
-                item.Margin = new System.Windows.Forms.Padding(8, 3, 8, 3);
+                item.Margin = new System.Windows.Forms.Padding(
+                    separatorMarginX,
+                    separatorMarginY,
+                    separatorMarginX,
+                    separatorMarginY);
                 item.AutoSize = false;
                 item.Width = Math.Max(1, availableWidth - item.Margin.Horizontal);
                 continue;
             }
-            item.Padding = new System.Windows.Forms.Padding(8, 0, 8, 0);
-            item.Margin = new System.Windows.Forms.Padding(1, 0, 1, 0);
-            const int itemHeight = 32;
+            item.Padding = new System.Windows.Forms.Padding(
+                horizontalPadding,
+                0,
+                horizontalPadding,
+                0);
+            item.Margin = new System.Windows.Forms.Padding(itemMargin, 0, itemMargin, 0);
             item.AutoSize = false;
             item.Size = new System.Drawing.Size(
                 Math.Max(1, availableWidth - item.Margin.Horizontal),
@@ -3905,7 +3989,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 var dropDown = menuItem.DropDown;
                 dropDown.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
                 dropDown.Font = _menuFont;
-                dropDown.Padding = new System.Windows.Forms.Padding(5);
+                dropDown.Padding = new System.Windows.Forms.Padding((int)Math.Round(5 * dpiScale));
                 dropDown.BackColor = IsDarkTheme
                     ? System.Drawing.Color.FromArgb(37, 40, 45)
                     : System.Drawing.Color.FromArgb(252, 252, 252);
@@ -3917,11 +4001,14 @@ public sealed class CrabDeskRuntime : IDisposable
                     dropDownMenu.ShowImageMargin = false;
                     dropDownMenu.ShowCheckMargin = true;
                 }
-                var dropDownWidth = Math.Max(96, dropDown.GetPreferredSize(System.Drawing.Size.Empty).Width);
+                var dropDownWidth = Math.Max(
+                    (int)Math.Round(96 * dpiScale),
+                    dropDown.GetPreferredSize(System.Drawing.Size.Empty).Width);
                 dropDown.MinimumSize = new System.Drawing.Size(dropDownWidth, 0);
                 ApplyMenuMetrics(
                     menuItem.DropDownItems,
-                    dropDownWidth - dropDown.Padding.Horizontal);
+                    dropDownWidth - dropDown.Padding.Horizontal,
+                    dpiScale);
                 dropDown.PerformLayout();
                 _ = _configuredSubmenus.GetValue(dropDown, candidate =>
                 {

@@ -523,6 +523,26 @@ try {
     if ($expandedAfterAnimation -lt 295) {
         throw "Expand animation did not reach the full box height."
     }
+    $itemProbe = [DesktopVerifier+Point]::new()
+    $itemProbe.X = $surfaceBounds.Left + $boxX + 46
+    $itemProbe.Y = $surfaceBounds.Top + $boxY + 100
+    [void][DesktopVerifier]::SetCursorPos($itemProbe.X, $itemProbe.Y)
+    [DesktopVerifier]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    [DesktopVerifier]::keybd_event(0x71, 0, 0, [UIntPtr]::Zero)
+    [DesktopVerifier]::keybd_event(0x71, 0, 2, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 450
+    $renameDialog = Find-VisibleProcessPopup $process.Id
+    if ($renameDialog -eq [IntPtr]::Zero) {
+        throw "Selecting a box icon and pressing F2 did not open the rename dialog."
+    }
+    [void][DesktopVerifier]::PostMessage($renameDialog, 0x0100, [IntPtr]0x1B, [IntPtr]::Zero)
+    [void][DesktopVerifier]::PostMessage($renameDialog, 0x0101, [IntPtr]0x1B, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 350
+    if ((Find-VisibleProcessPopup $process.Id) -ne [IntPtr]::Zero) {
+        throw "Escape did not close the icon rename dialog."
+    }
     [void][DesktopVerifier]::SendMessage($surface, 0x0201, [IntPtr]1, $collapsePoint)
     [void][DesktopVerifier]::SendMessage($surface, 0x0202, [IntPtr]::Zero, $collapsePoint)
     [void][DesktopVerifier]::SetCursorPos($surfaceBounds.Right - 10, $surfaceBounds.Bottom - 10)

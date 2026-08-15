@@ -37,6 +37,8 @@
                 <AppBarButton Label="上移" Command="{Binding MoveUpCommand}" ToolTipService.ToolTip="上移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowUp" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="下移" Command="{Binding MoveDownCommand}" ToolTipService.ToolTip="下移"><AppBarButton.Icon><icons:FluentIcon Icon="ArrowDown" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="删除" Command="{Binding DeleteRulesCommand}" ToolTipService.ToolTip="删除选中的规则"><AppBarButton.Icon><icons:FluentIcon Icon="Delete" /></AppBarButton.Icon></AppBarButton>
+                <AppBarSeparator />
+                <AppBarButton Label="预览" Command="{Binding PreviewCommand}" ToolTipService.ToolTip="预览本次整理将移动的项目"><AppBarButton.Icon><icons:FluentIcon Icon="Eye" /></AppBarButton.Icon></AppBarButton>
                 <CommandBar.SecondaryCommands>
                     <AppBarButton Label="安装默认规则" Command="{Binding InstallDefaultsCommand}" />
                 </CommandBar.SecondaryCommands>
@@ -96,6 +98,91 @@
                     </DataTemplate>
                 </ItemsRepeater.ItemTemplate>
             </ItemsRepeater>
+
+            <Border Style="{StaticResource SectionCardStyle}"
+                    Padding="16"
+                    Visibility="{Binding IsPreviewVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <icons:FluentIcon Icon="Eye" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock Grid.Column="1" Text="整理预览" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button Grid.Column="2"
+                                Padding="6"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Command="{Binding ClosePreviewCommand}"
+                                ToolTipService.ToolTip="关闭预览">
+                            <icons:FluentIcon Icon="Dismiss" FontSize="14" />
+                        </Button>
+                    </Grid>
+                    <TextBlock Text="{Binding PreviewSummaryText}" Style="{StaticResource SecondaryBodyStyle}" />
+                    <ScrollViewer MaxHeight="360" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsRepeater ItemsSource="{Binding PreviewSections}" AutomationProperties.Name="整理预览分组">
+                            <ItemsRepeater.Layout>
+                                <StackLayout Spacing="12" />
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Spacing="4">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            <Border Grid.Column="1"
+                                                    Background="{ThemeResource SubtleBorderBrush}"
+                                                    CornerRadius="8"
+                                                    Padding="7,1"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Count}"
+                                                           FontSize="11"
+                                                           Foreground="{ThemeResource SecondaryTextBrush}" />
+                                            </Border>
+                                        </Grid>
+                                        <ItemsRepeater ItemsSource="{Binding Items}">
+                                            <ItemsRepeater.Layout>
+                                                <StackLayout Spacing="2" />
+                                            </ItemsRepeater.Layout>
+                                            <ItemsRepeater.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Padding="8,6" ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding ItemName}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1"
+                                                                   Text="{Binding MatchedByText}"
+                                                                   Style="{StaticResource SecondaryBodyStyle}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsRepeater.ItemTemplate>
+                                        </ItemsRepeater>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+                    </ScrollViewer>
+                    <Grid ColumnSpacing="8" HorizontalAlignment="Right">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="重新预览" Command="{Binding PreviewCommand}" />
+                        <Button Grid.Column="1" Content="应用整理" Style="{StaticResource AccentButtonStyle}" Command="{Binding ApplyPreviewCommand}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
 
             <Grid ColumnSpacing="8">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

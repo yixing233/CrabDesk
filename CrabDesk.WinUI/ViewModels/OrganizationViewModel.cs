@@ -106,6 +106,32 @@ public sealed class OrganizationRuleListItem : INotifyPropertyChanged
     };
 }
 
+public sealed class OrganizationPreviewItem
+{
+    public OrganizationPreviewItem(string itemName, string ruleTitle)
+    {
+        ItemName = itemName;
+        RuleTitle = ruleTitle;
+    }
+
+    public string ItemName { get; }
+    public string RuleTitle { get; }
+    public string MatchedByText => $"由「{RuleTitle}」匹配";
+}
+
+public sealed class OrganizationPreviewSection
+{
+    public OrganizationPreviewSection(string title, IReadOnlyList<OrganizationPreviewItem> items)
+    {
+        Title = title;
+        Items = items;
+    }
+
+    public string Title { get; }
+    public int Count => Items.Count;
+    public IReadOnlyList<OrganizationPreviewItem> Items { get; }
+}
+
 public partial class OrganizationViewModel : ObservableObject
 {
     private readonly ICrabDeskService _service;
@@ -113,6 +139,8 @@ public partial class OrganizationViewModel : ObservableObject
 
     [ObservableProperty] private OrganizationRuleListItem? _selectedRule;
     [ObservableProperty] private string _resultText = string.Empty;
+    [ObservableProperty] private bool _isPreviewVisible;
+    [ObservableProperty] private string _previewSummaryText = string.Empty;
 
     public IReadOnlyList<OrganizationRuleListItem> SelectedRules { get; private set; } = [];
 
@@ -155,6 +183,7 @@ public partial class OrganizationViewModel : ObservableObject
     }
 
     public ObservableCollection<OrganizationRuleListItem> Rules { get; } = [];
+    public ObservableCollection<OrganizationPreviewSection> PreviewSections { get; } = [];
     public bool OrganizationEnabled
     {
         get => _service.State.Organization.Enabled;
@@ -204,9 +233,118 @@ public partial class OrganizationViewModel : ObservableObject
             return;
         }
 
+        ApplyDecisions();
+    }
+
+    [RelayCommand]
+    private void Preview()
+    {
+        var decisions = _service.PreviewOrganizationRules();
+        if (decisions.Count == 0)
+        {
+            ResultText = "没有匹配到需要整理的项目。";
+            IsPreviewVisible = false;
+            return;
+        }
+
+        BuildPreview(decisions);
+        ResultText = string.Empty;
+        IsPreviewVisible = true;
+    }
+
+    [RelayCommand]
+    private void ClosePreview() => IsPreviewVisible = false;
+
+    [RelayCommand]
+    private void ApplyPreview()
+    {
+        ApplyDecisions();
+        IsPreviewVisible = false;
+    }
+
+    private void ApplyDecisions()
+    {
         var result = _service.ApplyOrganizationRules();
         ResultText = $"已分配 {result.Assigned} 项，保留 {result.Unassigned} 项，忽略 {result.Ignored} 项" +
             (result.InvalidTargets > 0 ? $"，{result.InvalidTargets} 项缺少目标盒子" : string.Empty);
+    }
+
+    private void BuildPreview(IReadOnlyList<OrganizationDecision> decisions)
+    {
+        PreviewSections.Clear();
+        var boxes = _service.Boxes
+            .Where(box => !box.IsMappedFolder)
+            .ToDictionary(box => box.Id, box => box.Title);
+        var boxOrder = _service.Boxes
+            .Where(box => !box.IsMappedFolder)
+            .Select((box, index) => (box.Id, Index: index))
+            .ToDictionary(entry => entry.Id, entry => entry.Index);
+
+        var assignable = decisions
+            .Where(decision =>
+                decision.Action == OrganizationRuleAction.AssignToBox &&
+                decision.TargetBoxId is { } target &&
+                boxes.ContainsKey(target))
+            .GroupBy(decision => decision.TargetBoxId!.Value)
+            .OrderBy(group => boxOrder.GetValueOrDefault(group.Key, int.MaxValue))
+            .ToArray();
+        foreach (var group in assignable)
+        {
+            PreviewSections.Add(new OrganizationPreviewSection(
+                $"放入「{boxes[group.Key]}」",
+                group.Select(decision => new OrganizationPreviewItem(decision.ItemName, decision.RuleTitle)).ToArray()));
+        }
+
+        var keepUnassigned = decisions
+            .Where(decision => decision.Action == OrganizationRuleAction.KeepUnassigned)
+            .ToArray();
+        if (keepUnassigned.Length > 0)
+        {
+            PreviewSections.Add(new OrganizationPreviewSection(
+                "保留在桌面",
+                keepUnassigned.Select(decision => new OrganizationPreviewItem(decision.ItemName, decision.RuleTitle)).ToArray()));
+        }
+
+        var ignored = decisions
+            .Where(decision => decision.Action == OrganizationRuleAction.Ignore)
+            .ToArray();
+        if (ignored.Length > 0)
+        {
+            PreviewSections.Add(new OrganizationPreviewSection(
+                "忽略，不整理",
+                ignored.Select(decision => new OrganizationPreviewItem(decision.ItemName, decision.RuleTitle)).ToArray()));
+        }
+
+        var invalid = decisions
+            .Where(decision =>
+                decision.Action == OrganizationRuleAction.AssignToBox &&
+                (decision.TargetBoxId is not { } target || !boxes.ContainsKey(target)))
+            .ToArray();
+        if (invalid.Length > 0)
+        {
+            PreviewSections.Add(new OrganizationPreviewSection(
+                "目标盒子不可用",
+                invalid.Select(decision => new OrganizationPreviewItem(decision.ItemName, decision.RuleTitle)).ToArray()));
+        }
+
+        var parts = new List<string> { $"共 {decisions.Count} 项" };
+        if (assignable.Sum(group => group.Count()) > 0)
+        {
+            parts.Add($"分配 {assignable.Sum(group => group.Count())} 项");
+        }
+        if (keepUnassigned.Length > 0)
+        {
+            parts.Add($"保留 {keepUnassigned.Length} 项");
+        }
+        if (ignored.Length > 0)
+        {
+            parts.Add($"忽略 {ignored.Length} 项");
+        }
+        if (invalid.Length > 0)
+        {
+            parts.Add($"目标不可用 {invalid.Length} 项");
+        }
+        PreviewSummaryText = string.Join(" · ", parts);
     }
 
     private string BuildOrganizationPreview(IReadOnlyList<OrganizationDecision> decisions)
@@ -354,6 +492,10 @@ public partial class OrganizationViewModel : ObservableObject
 
     private void Refresh()
     {
+        // Rule or box changes invalidate an open preview; close it so the
+        // user cannot act on stale decisions.
+        IsPreviewVisible = false;
+        PreviewSections.Clear();
         var selectedIds = SelectedRules.Select(item => item.Id).ToHashSet();
         Rules.Clear();
         foreach (var rule in _service.State.OrganizationRules.OrderBy(rule => rule.Priority))

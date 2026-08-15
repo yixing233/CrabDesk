@@ -133,8 +133,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    // Refreshes every surface after a workspace change (e.g. an appearance
+    // setting was adjusted). Failures are recorded instead of thrown: an
+    // exception here would propagate through the settings setter into the
+    // WinUI message loop and take the whole process down with it.
     internal void Refresh()
     {
+        var anyFailure = false;
         foreach (var iconSurface in _iconSurfaces)
         {
             if (!_desktopIconsVisible)
@@ -143,25 +148,38 @@ internal sealed class DesktopSurfaceManager : IDisposable
             }
             if (!iconSurface.RefreshWorkspace() || !iconSurface.IsLayerReady)
             {
-                throw new InvalidOperationException(
-                    $"The desktop icon surface could not be refreshed: {iconSurface.LayerDiagnostic}");
+                DiagnosticLog.Error(
+                    $"Desktop icon surface refresh failed: {iconSurface.LayerDiagnostic}",
+                    new InvalidOperationException("The desktop icon surface could not be refreshed."));
+                anyFailure = true;
+                continue;
             }
             // Explorer may raise its ListView after an unrelated shell change.
             // Reassert the icon layer first; box surfaces are restored below so
             // they remain the topmost interactive children.
             if (!DesktopWindowTools.RestoreAboveDesktop(iconSurface.Handle, _host.DesktopListView))
             {
-                throw new InvalidOperationException("The desktop icon surface could not be restored above Explorer.");
+                DiagnosticLog.Error(
+                    "The desktop icon surface could not be restored above Explorer.",
+                    new InvalidOperationException("RestoreAboveDesktop failed."));
+                anyFailure = true;
             }
         }
         foreach (var surface in _surfaces)
         {
             if (!surface.RefreshWorkspace() || !surface.IsLayerReady || !surface.ValidateWindowRegion())
             {
-                throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified.");
+                DiagnosticLog.Error(
+                    $"CrabDesk desktop surface region could not be verified: {surface.LayerDiagnostic}",
+                    new InvalidOperationException("The CrabDesk desktop surface region could not be verified."));
+                anyFailure = true;
             }
         }
         EnsureBoxesAboveDesktopIcons();
+        if (anyFailure)
+        {
+            DiagnosticLog.Info("Desktop surface refresh completed with failures.");
+        }
     }
 
     internal void SetDesktopIconsVisible(bool visible)
@@ -303,6 +321,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 }
             });
             iconSurface.SetBoxTransformActive(() => monitorBoxes.Any(surface => surface.HasDynamicVisual));
+            iconSurface.SetBoxPointerHitTest(screenPoint =>
+                monitorBoxes.Any(surface => surface.IsPointOverBox(screenPoint)));
             iconSurface.SetBoxDynamicBounds(() =>
             {
                 RectangleF? bounds = null;
@@ -334,9 +354,19 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     boxSurface.UpdateDynamicSelectionAtCursor();
                 }
             });
+            iconSurface.SetBoxHeightAnimationOnly(() =>
+            {
+                var dynamicBoxes = monitorBoxes
+                    .Where(surface => surface.HasDynamicVisual)
+                    .ToArray();
+                return dynamicBoxes.Length > 0 &&
+                    dynamicBoxes.All(surface => surface.IsHeightAnimationOnly);
+            });
             foreach (var boxSurface in monitorBoxes)
             {
                 boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
+                boxSurface.SetIconDragStateForward((point, paths, keys) =>
+                    iconSurface.ForwardDragFromBox(point, paths, keys));
             }
         }
     }
@@ -371,7 +401,9 @@ internal sealed class DesktopSurfaceManager : IDisposable
         {
             if (!surface.UpdateInteractionRegion() || !surface.IsLayerReady || !surface.ValidateWindowRegion())
             {
-                throw new InvalidOperationException("The CrabDesk desktop surface region could not be updated.");
+                DiagnosticLog.Error(
+                    $"CrabDesk desktop surface region could not be updated: {surface.LayerDiagnostic}",
+                    new InvalidOperationException("The CrabDesk desktop surface region could not be updated."));
             }
         }
     }

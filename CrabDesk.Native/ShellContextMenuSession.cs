@@ -24,6 +24,7 @@ public sealed class ShellContextMenuSession : IDisposable
     private const uint CmicMaskUnicode = 0x00004000;
     private const uint GcsVerbW = 0x00000004;
     private const uint MfByPosition = 0x0400;
+    private const uint MfString = 0x00000000;
     private const int SwShowNormal = 1;
     private const int CommandVerbBufferLength = 260;
     private const int WmDrawItem = 0x002b;
@@ -213,6 +214,18 @@ public sealed class ShellContextMenuSession : IDisposable
             {
                 RemoveRestrictedCommands(menu);
             }
+            // Explorer can omit "Rename" while the replacement layer owns the
+            // desktop; append our own entry so the verb stays available.
+            var appendedRenameId = 0u;
+            if (interceptRename && !MenuContainsRenameCommand(menu))
+            {
+                appendedRenameId = CommandFirst + (uint)(result & 0xFFFF);
+                AppendMenu(
+                    menu,
+                    MfString,
+                    new UIntPtr(appendedRenameId),
+                    "重命名(&M)");
+            }
             var command = TrackPopupMenuEx(
                 menu,
                 TpmRightButton | TpmReturnCommand,
@@ -223,6 +236,10 @@ public sealed class ShellContextMenuSession : IDisposable
             if (command < CommandFirst)
             {
                 return ShellContextMenuCommand.None;
+            }
+            if (appendedRenameId != 0 && command == appendedRenameId)
+            {
+                return ShellContextMenuCommand.Rename;
             }
 
             var commandOffset = command - CommandFirst;
@@ -256,6 +273,20 @@ public sealed class ShellContextMenuSession : IDisposable
         {
             DestroyMenu(menu);
         }
+    }
+
+    private bool MenuContainsRenameCommand(IntPtr menu)
+    {
+        var count = GetMenuItemCount(menu);
+        for (var index = 0; index < count; index++)
+        {
+            if (GetCanonicalVerb((uint)index) is { } verb &&
+                string.Equals(verb, "rename", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void RemoveRestrictedCommands(IntPtr menu)
@@ -385,6 +416,14 @@ public sealed class ShellContextMenuSession : IDisposable
 
     [DllImport("user32.dll")]
     private static extern int GetMenuItemCount(IntPtr menu);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AppendMenu(
+        IntPtr menu,
+        uint flags,
+        UIntPtr idNewItem,
+        string newItem);
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetSubMenu(IntPtr menu, int position);
