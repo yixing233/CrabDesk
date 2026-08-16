@@ -26,10 +26,6 @@ internal sealed class DesktopBoxForm : Forms.Form
     private const int WmMouseWheel = 0x020A;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
-    private const int SelectedItemFillAlpha = 112;
-    private const int BoxHoverFillAlpha = 156;
-    private const int BoxHoverBorderAlpha = 232;
-    private const float HoverBrightness = 0.30f;
     private const int HoverExpansionDelayMilliseconds = 120;
     private const int HoverCollapseDelayMilliseconds = 180;
     private const int HoverPollingIntervalMilliseconds = 25;
@@ -2661,23 +2657,24 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             _expandedItemHitBounds.Remove(visualKey);
         }
+        var cornerRadius = DesktopItemVisualStyle.SelectionCornerRadius(iconSize);
         if (isHovered)
         {
             // Hover remains visible while the item is selected and is kept
             // brighter than the settled selection treatment.
             var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
-            var hoverColor = BrightenColor(configuredSelection, HoverBrightness);
-            using var hovered = new SolidBrush(Color.FromArgb(BoxHoverFillAlpha, hoverColor));
-            using var hoverBorder = new Pen(Color.FromArgb(BoxHoverBorderAlpha, hoverColor), 1);
-            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), 4);
+            var hoverColor = DesktopItemVisualStyle.Brighten(configuredSelection);
+            using var hovered = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
+            using var hoverBorder = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
+            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
             graphics.FillPath(hovered, hoveredPath);
             graphics.DrawPath(hoverBorder, hoveredPath);
         }
         else if (isSelected)
         {
             var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
-            using var selected = new SolidBrush(Color.FromArgb(SelectedItemFillAlpha, configuredSelection));
-            using var selectedPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), 4);
+            using var selected = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, configuredSelection));
+            using var selectedPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
             graphics.FillPath(selected, selectedPath);
         }
 
@@ -6100,16 +6097,6 @@ internal sealed class DesktopBoxForm : Forms.Form
         {
             return Color.FromArgb(40, 44, 50);
         }
-    }
-
-    private static Color BrightenColor(Color color, float amount)
-    {
-        amount = Math.Clamp(amount, 0f, 1f);
-        return Color.FromArgb(
-            color.A,
-            (int)Math.Round(color.R + (255 - color.R) * amount),
-            (int)Math.Round(color.G + (255 - color.G) * amount),
-            (int)Math.Round(color.B + (255 - color.B) * amount));
     }
 
     private static Color ResolveTitleColor(string value, Color boxBackground)

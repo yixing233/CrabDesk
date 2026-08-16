@@ -32,10 +32,6 @@ internal sealed class DesktopIconSurface : Forms.Form
     private const float DefaultVerticalSpacing = 96;
     private const float DesktopGridEdgeInset = 8;
     private const int CompactLabelLineCount = 2;
-    private const int SelectedFillAlpha = 112;
-    private const int HoverFillAlpha = 156;
-    private const int HoverBorderAlpha = 232;
-    private const float HoverBrightness = 0.30f;
     // A per-pixel-alpha layered window is click-through where alpha is zero.
     // Keep the desktop background visually transparent while leaving it
     // targetable for blank-area marquee selection.
@@ -958,7 +954,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         var selectionColor = ParseColor(
             _runtime.State.Settings.Appearance.SelectionColor,
             Color.FromArgb(74, 91, 177));
-        var hoverColor = BrightenColor(selectionColor, HoverBrightness);
+        var hoverColor = DesktopItemVisualStyle.Brighten(selectionColor);
         var iconBounds = GetIconBounds(item.Bounds);
         var selected = _selection.Contains(item.Item.Key.ToString());
         using var font = ResolveIconLabelFont();
@@ -978,9 +974,9 @@ internal sealed class DesktopIconSurface : Forms.Form
             selected: DesktopIconLabelDisplayPolicy.ShowsFullLabel(selected, isHovered: true));
         var textHitBounds = GetTextHitBounds(graphics, item.Item.DisplayName, textBounds, font);
         var visualBounds = GetItemVisualBounds(iconBounds, textHitBounds);
-        using var fill = new SolidBrush(Color.FromArgb(HoverFillAlpha, hoverColor));
-        using var border = new Pen(Color.FromArgb(HoverBorderAlpha, hoverColor), 1);
-        using var path = RoundedRectangle(visualBounds, SelectionCornerRadius);
+        using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
+        using var border = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
+        using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
         graphics.FillPath(fill, path);
         graphics.DrawPath(border, path);
 
@@ -1550,17 +1546,17 @@ internal sealed class DesktopIconSurface : Forms.Form
                 // Hover is the active pointer feedback, including for an
                 // already-selected item. It intentionally takes precedence
                 // so the hover treatment remains brighter than selection.
-                var hoverColor = BrightenColor(selectionColor, HoverBrightness);
-                using var fill = new SolidBrush(Color.FromArgb(HoverFillAlpha, hoverColor));
-                using var border = new Pen(Color.FromArgb(HoverBorderAlpha, hoverColor), 1);
-                using var path = RoundedRectangle(visualBounds, SelectionCornerRadius);
+                var hoverColor = DesktopItemVisualStyle.Brighten(selectionColor);
+                using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
+                using var border = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
+                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
                 graphics.FillPath(fill, path);
                 graphics.DrawPath(border, path);
             }
             else if (selected)
             {
-                using var fill = new SolidBrush(Color.FromArgb(SelectedFillAlpha, selectionColor));
-                using var path = RoundedRectangle(visualBounds, SelectionCornerRadius);
+                using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, selectionColor));
+                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
                 graphics.FillPath(fill, path);
             }
 
@@ -1617,7 +1613,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         // marquee only the translucent selection treatment changes, so redraw
         // the highlight rectangles rather than fetching and painting all
         // selected bitmaps/text again on every pointer update.
-        using var highlightFill = new SolidBrush(Color.FromArgb(SelectedFillAlpha, selectionColor));
+        using var highlightFill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, selectionColor));
         using var highlightBorder = new Pen(Color.FromArgb(190, selectionColor), 1f);
         foreach (var entry in _items)
         {
@@ -1626,11 +1622,12 @@ internal sealed class DesktopIconSurface : Forms.Form
                 continue;
             }
 
+            var padding = DesktopItemVisualStyle.SelectionPadding(_iconSize);
             var visualBounds = RectangleF.Inflate(
                 entry.HitBounds.IsEmpty ? GetItemHitBounds(entry) : entry.HitBounds,
-                SelectionPadding,
-                SelectionPadding);
-            using var path = RoundedRectangle(visualBounds, SelectionCornerRadius);
+                padding,
+                padding);
+            using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
             graphics.FillPath(highlightFill, path);
             graphics.DrawPath(highlightBorder, path);
         }
@@ -2887,17 +2884,14 @@ internal sealed class DesktopIconSurface : Forms.Form
         var contentBounds = textBounds.IsEmpty
             ? iconBounds
             : RectangleF.Union(iconBounds, textBounds);
-        return RectangleF.Inflate(contentBounds, SelectionPadding, SelectionPadding);
+        var padding = DesktopItemVisualStyle.SelectionPadding(_iconSize);
+        return RectangleF.Inflate(contentBounds, padding, padding);
     }
 
     private bool IsRaisedVisual(string itemKey, IReadOnlySet<string>? selectedItemKeys = null) =>
         (selectedItemKeys ?? _selection).Contains(itemKey) ||
         (_runtime.State.Settings.Appearance.HoverFeedback &&
          string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase));
-
-    private float SelectionPadding => Math.Max(1f, _iconSize / 24f);
-
-    private float SelectionCornerRadius => Math.Max(2f, _iconSize / 12f);
 
     private void OnMouseDoubleClick(object? sender, Forms.MouseEventArgs eventArgs)
     {
@@ -3602,16 +3596,6 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private bool IsPointerOverBox(Point screenPoint) =>
         _boxPointerHitTest?.Invoke(screenPoint) == true;
-
-    private static Color BrightenColor(Color color, float amount)
-    {
-        amount = Math.Clamp(amount, 0f, 1f);
-        return Color.FromArgb(
-            color.A,
-            (int)Math.Round(color.R + (255 - color.R) * amount),
-            (int)Math.Round(color.G + (255 - color.G) * amount),
-            (int)Math.Round(color.B + (255 - color.B) * amount));
-    }
 
     private void SynchronizeNativeMetrics(DesktopIconViewState desktopViewState)
     {
