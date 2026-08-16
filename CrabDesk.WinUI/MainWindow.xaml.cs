@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Services;
 using CrabDesk.WinUI.Views;
@@ -25,6 +26,16 @@ public sealed partial class MainWindow : Window
     private Storyboard? _infoBarAnimation;
     private bool? _validationPaneOpen;
     private bool? _paneTransitionOpen;
+    private bool _validationViewport;
+    private WindowProcDelegate? _windowProcDelegate;
+    private IntPtr _originalWndProc;
+
+    private const double InitialWidthDips = 1040;
+    private const double InitialHeightDips = 720;
+    private const double MinimumWidthDips = 760;
+    private const double MinimumHeightDips = 520;
+    private const uint WmGetMinMaxInfo = 0x0024;
+    private const int GwlWndProc = -4;
 
     public MainWindow(
         IThemeService themeService,
@@ -50,8 +61,12 @@ public sealed partial class MainWindow : Window
         Title = "CrabDesk 设置";
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.Resize(new SizeInt32(1040, 720));
+        InstallMinimumSizeTracking();
+        var initialScale = GetWindowDpiScale();
         AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+        AppWindow.Resize(new SizeInt32(
+            (int)Math.Ceiling(InitialWidthDips * initialScale),
+            (int)Math.Ceiling(InitialHeightDips * initialScale)));
         AppWindow.Changed += OnAppWindowChanged;
         AppWindow.Closing += OnAppWindowClosing;
         var backdrop = Enum.TryParse<BackdropKind>(_runtime.State.Settings.WindowBackdrop, true, out var configuredBackdrop)
@@ -139,6 +154,7 @@ public sealed partial class MainWindow : Window
         UpdateNavigationMode(AppWindow.Size.Width / scale);
         UpdateContentFrameLayout();
         ApplyValidationPaneState();
+        EnforceMinimumWindowSize();
         if (ContentFrame.CurrentSourcePageType is null)
         {
             Navigate(typeof(GeneralPage));
@@ -317,15 +333,17 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
+        _validationViewport = true;
         RootGrid.Width = width;
         RootGrid.Height = height;
         RootGrid.HorizontalAlignment = HorizontalAlignment.Left;
         RootGrid.VerticalAlignment = VerticalAlignment.Top;
         RootGrid.RenderTransform = new ScaleTransform { ScaleX = scale, ScaleY = scale };
         UpdateNavigationMode(width);
+        var dpiScale = GetWindowDpiScale();
         AppWindow.Resize(new SizeInt32(
-            (int)Math.Ceiling(width * scale),
-            (int)Math.Ceiling(height * scale)));
+            (int)Math.Ceiling(width * scale * dpiScale),
+            (int)Math.Ceiling(height * scale * dpiScale)));
     }
 
     internal void ApplyValidationPane(string? paneState)
@@ -360,9 +378,9 @@ public sealed partial class MainWindow : Window
         {
             return;
         }
-        var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1;
-        var minimumWidth = (int)Math.Ceiling(760 * scale);
-        var minimumHeight = (int)Math.Ceiling(520 * scale);
+        var scale = RootGrid.XamlRoot?.RasterizationScale ?? GetWindowDpiScale();
+        var minimumWidth = (int)Math.Ceiling(MinimumWidthDips * scale);
+        var minimumHeight = (int)Math.Ceiling(MinimumHeightDips * scale);
         var size = sender.Size;
         var effectiveWidth = Math.Max(size.Width, minimumWidth);
         UpdateNavigationMode(effectiveWidth / scale);
@@ -371,6 +389,90 @@ public sealed partial class MainWindow : Window
             sender.Resize(new SizeInt32(Math.Max(size.Width, minimumWidth), Math.Max(size.Height, minimumHeight)));
         }
     }
+
+    private void EnforceMinimumWindowSize()
+    {
+        if (_validationViewport)
+        {
+            return;
+        }
+        var scale = RootGrid.XamlRoot?.RasterizationScale ?? GetWindowDpiScale();
+        var minimumWidth = (int)Math.Ceiling(MinimumWidthDips * scale);
+        var minimumHeight = (int)Math.Ceiling(MinimumHeightDips * scale);
+        var size = AppWindow.Size;
+        if (size.Width < minimumWidth || size.Height < minimumHeight)
+        {
+            AppWindow.Resize(new SizeInt32(
+                Math.Max(size.Width, minimumWidth),
+                Math.Max(size.Height, minimumHeight)));
+        }
+    }
+
+    private double GetWindowDpiScale()
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 0u;
+        return dpi > 0 ? dpi / 96.0 : 1.0;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    private void InstallMinimumSizeTracking()
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        _windowProcDelegate = WindowProc;
+        _originalWndProc = SetWindowLongPtr(hwnd, GwlWndProc,
+            Marshal.GetFunctionPointerForDelegate(_windowProcDelegate));
+    }
+
+    private IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (message == WmGetMinMaxInfo && !_validationViewport)
+        {
+            var info = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            var dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 0u;
+            var scale = dpi > 0 ? dpi / 96.0 : 1.0;
+            info.MinTrackSize = new NativePoint(
+                (int)Math.Ceiling(MinimumWidthDips * scale),
+                (int)Math.Ceiling(MinimumHeightDips * scale));
+            Marshal.StructureToPtr(info, lParam, false);
+            return IntPtr.Zero;
+        }
+        return CallWindowProc(_originalWndProc, hwnd, message, wParam, lParam);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr newProc);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
+    private static extern IntPtr CallWindowProc(IntPtr previousProc, IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+
+        public NativePoint(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint Reserved;
+        public NativePoint MaxSize;
+        public NativePoint MaxPosition;
+        public NativePoint MinTrackSize;
+        public NativePoint MaxTrackSize;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Winapi)]
+    private delegate IntPtr WindowProcDelegate(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
 
     private void UpdateNavigationMode(double logicalWidth)
     {
