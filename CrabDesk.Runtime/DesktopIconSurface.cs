@@ -2343,14 +2343,24 @@ internal sealed class DesktopIconSurface : Forms.Form
             $"External drag over restore={wasEmpty} count={paths.Length} " +
             $"point={dropPoint.X:0},{dropPoint.Y:0} recycle={overRecycleBin}");
         RequestDragRender();
+        // External folder drags default to a filesystem move (matching
+        // Explorer); holding Ctrl forces a copy. The recycle bin always
+        // advertises Move so a drop there deletes the sources.
+        var controlPressed = (eventArgs.KeyState & 8) != 0;
+        var preferredEffect = controlPressed
+            ? Forms.DragDropEffects.Copy
+            : Forms.DragDropEffects.Move;
+        var fallbackEffect = controlPressed
+            ? Forms.DragDropEffects.Move
+            : Forms.DragDropEffects.Copy;
         eventArgs.Effect = overRecycleBin
             ? (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
                 ? Forms.DragDropEffects.Move
                 : Forms.DragDropEffects.None
-            : (eventArgs.AllowedEffect & Forms.DragDropEffects.Copy) != 0
-                ? Forms.DragDropEffects.Copy
-                : (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
-                    ? Forms.DragDropEffects.Move
+            : (eventArgs.AllowedEffect & preferredEffect) != 0
+                ? preferredEffect
+                : (eventArgs.AllowedEffect & fallbackEffect) != 0
+                    ? fallbackEffect
                     : Forms.DragDropEffects.None;
     }
 

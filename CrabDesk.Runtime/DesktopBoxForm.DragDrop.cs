@@ -399,9 +399,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // A desktop file dropped into a normal box is a virtual assignment,
         // not a filesystem move. Advertising Move makes Explorer dim the
         // source icon as a cut operation until its delayed shell refresh.
+        // External folder imports default to Move, matching Explorer; the
+        // Ctrl key forces a Copy.
         eventArgs.Effect = desktopVirtualAssignment
             ? Forms.DragDropEffects.Copy
-            : ToDragDropEffects(effect);
+            : IsControlPressed(eventArgs)
+                ? Forms.DragDropEffects.Copy
+                : Forms.DragDropEffects.Move;
         // Grid insertion/Restock projections are intentionally omitted: the
         // drop lands in the box body and ordering is still resolved from the
         // pointer at drop time.
@@ -665,7 +669,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     var imported = await _runtime.ImportFilesToBoxAsync(
                         paths,
                         box.Box.Id,
-                        transferEffect == BoxTransferEffect.MoveFiles);
+                        !IsControlPressed(eventArgs));
                     ShowImportFailures(imported);
                 }
                 catch (Exception exception)
@@ -698,7 +702,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 var imported = await _runtime.ImportFilesAsync(
                     external,
                     box.Box.Id,
-                    transferEffect == BoxTransferEffect.MoveFiles);
+                    !IsControlPressed(eventArgs));
                 ShowImportFailures(imported);
             }
             // Assigned desktop icons are parked outside the visible work area by
