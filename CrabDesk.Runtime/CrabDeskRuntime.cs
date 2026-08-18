@@ -1271,6 +1271,26 @@ public sealed class CrabDeskRuntime : IDisposable
         return imported;
     }
 
+    /// <summary>
+    /// Copies/moves files and folders into an arbitrary folder path (a folder
+    /// item shown inside any box, or a mapped box's subfolder). Refreshes both
+    /// the desktop item list and the mapped-folder snapshots afterwards so the
+    /// new items appear immediately.
+    /// </summary>
+    public async Task<FileImportBatchResult> ImportFilesIntoFolderAsync(
+        IEnumerable<string> paths,
+        string targetFolderPath,
+        bool move)
+    {
+        var imported = await _fileOperations.ImportAsync(paths, targetFolderPath, move);
+        if (imported.SucceededCount > 0)
+        {
+            await RefreshItemsAsync();
+            await RefreshMappedFoldersAsync();
+        }
+        return imported;
+    }
+
     public async Task<FileImportBatchResult> TransferBoxItemsAsync(
         Guid sourceBoxId,
         IEnumerable<string> itemKeys,

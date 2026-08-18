@@ -844,8 +844,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var iconBounds = GetItemIconBounds(item);
         var isFolderDropTarget =
             item.Item.Kind == DesktopItemKind.Folder &&
-            !string.IsNullOrEmpty(_mappedFolderDropTargetName) &&
-            string.Equals(_mappedFolderDropTargetName, item.Item.DisplayName, StringComparison.Ordinal);
+            !string.IsNullOrEmpty(_folderDropTargetName) &&
+            string.Equals(_folderDropTargetName, item.Item.DisplayName, StringComparison.Ordinal);
         var showsFullLabel = DesktopIconLabelDisplayPolicy.ShowsFullLabel(
             isSelected || isFolderDropTarget,
             isHovered);

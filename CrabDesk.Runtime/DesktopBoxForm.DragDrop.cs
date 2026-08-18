@@ -17,15 +17,16 @@ namespace CrabDesk.Runtime;
 internal sealed partial class DesktopBoxForm : Forms.Form
 {
 
-    private string? _mappedFolderDropTargetName;
+    private string? _folderDropTargetName;
+    private string? _lastLoggedFolderDropTarget;
 
     /// <summary>
     /// The mapped-folder item under the pointer, when the drop point lands on
     /// a real subfolder. Files dropped there import into that subfolder.
     /// </summary>
-    private DesktopItemRef? GetMappedFolderDropTarget(BoxGeometry box, PointF point)
+    private DesktopItemRef? GetFolderDropTarget(BoxGeometry box, PointF point)
     {
-        if (!box.Box.IsMappedFolder || box.Box.MappedFolder?.IsReadOnly == true)
+        if (box.Box.MappedFolder?.IsReadOnly == true)
         {
             return null;
         }
@@ -64,16 +65,37 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 .ToArray();
         }
 
+        DiagnosticLog.Info(
+            $"FolderImport box={box.Box.Id:N} folder={folderTarget.DisplayName} " +
+            $"path={folderTarget.FileSystemPath} move={move} paths={(paths is null ? 0 : paths.Count)}");
         if (paths is not { Count: > 0 })
+        {
+            DiagnosticLog.Info("FolderImport skipped: no filesystem paths resolved");
+            return;
+        }
+        var imported = await _runtime.ImportFilesIntoFolderAsync(
+            paths,
+            folderTarget.FileSystemPath!,
+            move);
+        DiagnosticLog.Info(
+            $"FolderImport result ok={imported.SucceededCount} failed={imported.FailedCount}");
+        ShowImportFailures(imported);
+    }
+
+    private void LogFolderDropProbe(
+        string source,
+        string? folderTargetName,
+        PointF point)
+    {
+        if (string.Equals(_lastLoggedFolderDropTarget, folderTargetName, StringComparison.Ordinal) &&
+            !string.IsNullOrEmpty(folderTargetName))
         {
             return;
         }
-        var imported = await _runtime.ImportFilesToMappedFolderSubfolderAsync(
-            paths,
-            box.Box.Id,
-            folderTarget.DisplayName,
-            move);
-        ShowImportFailures(imported);
+        _lastLoggedFolderDropTarget = folderTargetName;
+        DiagnosticLog.Info(
+            $"FolderDropProbe source={source} box={_runtime.State.Boxes.FirstOrDefault(b => b.Id == _boxes.LastOrDefault(x => x.Bounds.Contains(point))?.Box.Id)?.IsMappedFolder} " +
+            $"folderTarget={folderTargetName ?? "(none)"} point=({point.X:0},{point.Y:0}) items={_items.Count}");
     }
 
     private int AssignDesktopItemsAtDrop(
@@ -129,7 +151,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ClearDropPreview()
     {
-        _mappedFolderDropTargetName = null;
+        _folderDropTargetName = null;
         _lastDesktopDropTargetKey = null;
         if (_dropPreview is null)
         {
@@ -261,8 +283,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
         // Every frame recomputes the drop-target folder highlight; branches
-        // that accept a mapped subfolder set it again before returning.
-        _mappedFolderDropTargetName = null;
+        // that accept a folder item set it again before returning.
+        _folderDropTargetName = null;
         ForwardDragStateToIconSurface(eventArgs, point);
         // Box geometry is static during an OLE item drag; the shared compositor
         // already rebuilt it on the previous frame. Rebuilding per DragOver
@@ -285,10 +307,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // box and then return to the desktop before the button is released.
             // A mapped folder only accepts the drag when it lands on a real
             // subfolder (an internal drop there imports into that folder).
-            var deskDropFolderTarget = GetMappedFolderDropTarget(targetGeometry, point);
-            _mappedFolderDropTargetName = deskDropFolderTarget?.DisplayName;
+            var deskDropFolderTarget = GetFolderDropTarget(targetGeometry, point);
+            _folderDropTargetName = deskDropFolderTarget?.DisplayName;
+            LogFolderDropProbe("DeskIconDrag", deskDropFolderTarget?.DisplayName, point);
             var acceptsDrop = deskDropFolderTarget is not null ||
-                              (!target!.IsMappedFolder && target.MappedFolder?.IsReadOnly != true);
+                              target.MappedFolder?.IsReadOnly != true;
             UpdateOleDropPreview(
                 targetGeometry,
                 point,
@@ -332,13 +355,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         var effect = ResolveTransferEffect(eventArgs, target);
-        var mappedFolderTarget = GetMappedFolderDropTarget(targetGeometry, point);
-        _mappedFolderDropTargetName = mappedFolderTarget?.DisplayName;
+        var mappedFolderTarget = GetFolderDropTarget(targetGeometry, point);
+        _folderDropTargetName = mappedFolderTarget?.DisplayName;
+        LogFolderDropProbe("FileDrop", mappedFolderTarget?.DisplayName, point);
         if (mappedFolderTarget is not null && targetGeometry is not null)
         {
-            // Dropping onto a subfolder inside a mapped box imports into that
-            // folder instead of the box root; TransferEffect already resolved
-            // Copy versus Move from the Shift/Control state.
+            // Dropping onto a folder item inside any box imports into that
+            // real folder; TransferEffect already resolved Copy versus Move
+            // from the Shift/Control state.
             UpdateOleDropPreview(
                 targetGeometry,
                 point,
@@ -546,13 +570,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             var manualTargetTab = GetManualBoxTabAtPoint(box, point);
             var mappedTargetTab = GetMappedFolderTabAtPoint(box, point);
-            var mappedFolderTarget = GetMappedFolderDropTarget(box, point);
+            var mappedFolderTarget = GetFolderDropTarget(box, point);
+            DiagnosticLog.Info(
+                $"FolderDrop point=({point.X:0},{point.Y:0}) boxMapped={box.Box.IsMappedFolder} " +
+                $"target={mappedFolderTarget?.DisplayName ?? "(none)"} items={_items.Count}");
             if (mappedFolderTarget is not null)
             {
-                // A drop on a real folder shown inside a mapped box imports the
-                // payload into that folder (external FileDrop or a CrabDesk
-                // desktop-icon drag). ResolveTransferEffect already decided
-                // Copy versus Move from the Shift/Control state.
+                // A drop on a real folder item (inside any box, or a mapped
+                // box's subfolder) imports the payload into that folder:
+                // external FileDrop, or a CrabDesk desktop-icon drag.
                 var move = ResolveTransferEffect(eventArgs, box.Box) == BoxTransferEffect.MoveFiles;
                 await ImportIntoTargetFolderAsync(box, mappedFolderTarget, eventArgs, move);
                 return;
