@@ -1482,6 +1482,7 @@ public sealed class CrabDeskRuntime : IDisposable
             DiagnosticLog.Info("Desktop enumeration returned no items; keeping previous snapshot.");
             items = _allDesktopItems;
         }
+        MigrateAssignmentsForReplacedPaths(items);
         _allDesktopItems = items;
         Items = State.Settings.ShowSystemItems
             ? items
@@ -1494,6 +1495,47 @@ public sealed class CrabDeskRuntime : IDisposable
         _surfaceManager?.Refresh();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
+    }
+
+    // Documents saved "in place" via a temporary-file replace (Office/WPS do
+    // this) get a new file identity, so their stable key changes while the
+    // path stays the same. Without a migration the stored assignment (which
+    // box the item belongs to) silently stops matching and the item drops
+    // back onto the plain desktop. Rebind assignments that only changed
+    // identity so the icon stays grouped after editing.
+    private void MigrateAssignmentsForReplacedPaths(IReadOnlyList<DesktopItemRef> nextItems)
+    {
+        if (_allDesktopItems.Count == 0 || State.Assignments.Count == 0)
+        {
+            return;
+        }
+        var nextByPath = nextItems
+            .Where(item => item.FileSystemPath is not null)
+            .ToDictionary(
+                item => Path.GetFullPath(item.FileSystemPath!).ToUpperInvariant(),
+                StringComparer.Ordinal);
+        foreach (var previous in _allDesktopItems)
+        {
+            if (previous.FileSystemPath is null)
+            {
+                continue;
+            }
+            var previousKey = previous.Key.ToString();
+            if (!State.Assignments.TryGetValue(previousKey, out var boxId))
+            {
+                continue;
+            }
+            var pathKey = Path.GetFullPath(previous.FileSystemPath!).ToUpperInvariant();
+            if (!nextByPath.TryGetValue(pathKey, out var next) ||
+                string.Equals(next.Key.ToString(), previousKey, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            // Same path, new identity: move the assignment to the new key.
+            State.Assignments.Remove(previousKey);
+            State.Assignments[next.Key.ToString()] = boxId;
+            ReplaceItemOrderKey(previousKey, next.Key.ToString());
+        }
     }
 
     public void SetPaused(bool paused)
@@ -4204,6 +4246,9 @@ public sealed class CrabDeskRuntime : IDisposable
         // layout stays stable while the user is typing a new name.
         var isRename = eventArgs is FileSystemEventArgs fileArgs &&
             fileArgs.ChangeType == WatcherChangeTypes.Renamed;
+        DiagnosticLog.Info(
+            $"Desktop change type={(eventArgs as FileSystemEventArgs)?.ChangeType}" +
+            $"{(eventArgs is FileSystemEventArgs fe ? $" path={fe.FullPath}" : "")}");
         var realtimeOrganization = State.Organization.Enabled && State.Organization.RunOnDesktopChanges;
         if (isRename && !State.Settings.DesktopBehavior.RefreshAfterRename && !realtimeOrganization)
         {

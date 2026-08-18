@@ -2927,6 +2927,9 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             selectedItems = [item];
         }
+        DiagnosticLog.Info(
+            $"Desktop context menu selection={_selection.Count} shells={selectedItems.Length} " +
+            $"clicked={item.DisplayName}");
         var session = ShellContextMenuSession.TryCreate(
                 selectedItems.Select(candidate => candidate.ParsingName),
                 Handle)

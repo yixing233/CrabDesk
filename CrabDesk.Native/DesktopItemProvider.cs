@@ -163,8 +163,36 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         StandardSystemItems.Select(item =>
             $"{item.Clsid}:{(DesktopSystemIconVisibility.IsVisible(item.Clsid) ? 1 : 0)}"));
 
-    private static bool IsDesktopMetadataFile(string path) =>
-        string.Equals(Path.GetFileName(path), "desktop.ini", StringComparison.OrdinalIgnoreCase);
+    private static bool IsDesktopMetadataFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        if (string.Equals(fileName, "desktop.ini", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        // Office lock files created while a document is open (~$name.docx).
+        if (fileName.StartsWith("~$", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        // Explorer's desktop does not show hidden or system files; keep the
+        // replacement layer consistent instead of surfacing e.g. desktop.ini.
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+            {
+                return true;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        return false;
+    }
 
     private static IReadOnlyList<DesktopItemRef> GetVisibleSystemItems() =>
         StandardSystemItems

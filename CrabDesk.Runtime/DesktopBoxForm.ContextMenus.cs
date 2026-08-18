@@ -373,6 +373,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             selectedItems = [item];
         }
+        DiagnosticLog.Info(
+            $"Box context menu box={box.Id:N} selection={_selection.Count} items={selectedItems.Length} " +
+            $"clicked={item.DisplayName}");
         if (item.FileSystemPath is { } clickedPath)
         {
             var clickedParent = Path.GetDirectoryName(Path.GetFullPath(clickedPath));

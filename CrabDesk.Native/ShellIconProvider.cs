@@ -187,11 +187,17 @@ public sealed class ShellIconProvider
         IntPtr bitmapHandle = IntPtr.Zero;
         try
         {
+            // Image files render their thumbnail preview; everything else
+            // keeps the type icon (folders, executables, unknown documents).
+            var flags = ShellItemImageFlags.BiggerSizeOk |
+                        ShellItemImageFlags.ScaleUp;
+            if (!IsPreviewableImage(parsingName))
+            {
+                flags |= ShellItemImageFlags.IconOnly;
+            }
             result = factory.GetImage(
                 new NativeSize(pixelSize, pixelSize),
-                ShellItemImageFlags.BiggerSizeOk |
-                ShellItemImageFlags.IconOnly |
-                ShellItemImageFlags.ScaleUp,
+                flags,
                 out bitmapHandle);
             if (result != 0 || bitmapHandle == IntPtr.Zero)
             {
@@ -211,6 +217,22 @@ public sealed class ShellIconProvider
             }
             Marshal.FinalReleaseComObject(factory);
         }
+    }
+
+    private static readonly HashSet<string> PreviewableImageExtensions = new(
+        StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico",
+        ".tif", ".tiff", ".jfif", ".heic", ".heif", ".avif"
+    };
+
+    private static bool IsPreviewableImage(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return false;
+        }
+        return PreviewableImageExtensions.Contains(Path.GetExtension(path));
     }
 
     private static Bitmap? LoadLegacyIcon(string parsingName)
