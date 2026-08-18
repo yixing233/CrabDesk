@@ -323,7 +323,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 // reflows the item grid visually.
                 DropPreviewKind.Assign,
                 floatingCard: false);
-            eventArgs.Effect = acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
+            // A box body accepts the drag as a plain virtual assignment
+            // (Copy). Entering a folder item under the pointer turns it into
+            // a real filesystem move (Ctrl = copy), matching Explorer.
+            eventArgs.Effect = deskDropFolderTarget is not null
+                ? (IsControlPressed(eventArgs) ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.Move)
+                : acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
             return;
         }
 
@@ -361,8 +366,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (mappedFolderTarget is not null && targetGeometry is not null)
         {
             // Dropping onto a folder item inside any box imports into that
-            // real folder; TransferEffect already resolved Copy versus Move
-            // from the Shift/Control state.
+            // real folder: default Move, Ctrl forces Copy.
             UpdateOleDropPreview(
                 targetGeometry,
                 point,
@@ -371,7 +375,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 true,
                 DropPreviewKind.Assign,
                 floatingCard: false);
-            eventArgs.Effect = ToDragDropEffects(effect);
+            eventArgs.Effect = IsControlPressed(eventArgs)
+                ? Forms.DragDropEffects.Copy
+                : Forms.DragDropEffects.Move;
             InvalidateDropPreview(target.Id);
             return;
         }
@@ -579,7 +585,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 // A drop on a real folder item (inside any box, or a mapped
                 // box's subfolder) imports the payload into that folder:
                 // external FileDrop, or a CrabDesk desktop-icon drag.
-                var move = ResolveTransferEffect(eventArgs, box.Box) == BoxTransferEffect.MoveFiles;
+                // Default is Move; holding Ctrl forces a Copy.
+                var move = !IsControlPressed(eventArgs);
                 await ImportIntoTargetFolderAsync(box, mappedFolderTarget, eventArgs, move);
                 return;
             }
@@ -711,6 +718,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             ClearDropPreview();
         }
+    }
+
+    private static bool IsControlPressed(Forms.DragEventArgs eventArgs)
+    {
+        const int controlKeyState = 8;
+        return (eventArgs.KeyState & controlKeyState) != 0;
     }
 
     private BoxTransferEffect ResolveTransferEffect(Forms.DragEventArgs eventArgs, DesktopBox target)
