@@ -295,10 +295,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 desktopDrag.ItemKeys,
                 desktopDrag.ItemKeys.Count,
                 acceptsDrop,
-                // Desktop drags use the same projected placement marker as
-                // the in-process pointer drag. The dragged icons already
-                // follow the pointer, so no floating card is drawn here.
-                DropPreviewKind.DesktopAssign,
+                // Normal boxes project the drop as a grid insertion marker.
+                // A mapped folder has no insertable grid: its files land in a
+                // subfolder (highlighted by DrawItem) or the box root, so it
+                // must not draw the exaggerated reflow preview.
+                target.IsMappedFolder ? DropPreviewKind.Assign : DropPreviewKind.DesktopAssign,
                 floatingCard: false);
             eventArgs.Effect = acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
             return;
