@@ -295,11 +295,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 desktopDrag.ItemKeys,
                 desktopDrag.ItemKeys.Count,
                 acceptsDrop,
-                // Normal boxes project the drop as a grid insertion marker.
-                // A mapped folder has no insertable grid: its files land in a
-                // subfolder (highlighted by DrawItem) or the box root, so it
-                // must not draw the exaggerated reflow preview.
-                target.IsMappedFolder ? DropPreviewKind.Assign : DropPreviewKind.DesktopAssign,
+                // No grid insertion projection: a box receives the drop into
+                // its body (or a highlighted mapped subfolder), it never
+                // reflows the item grid visually.
+                DropPreviewKind.Assign,
                 floatingCard: false);
             eventArgs.Effect = acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
             return;
@@ -327,7 +326,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 GetDragItemKeys(eventArgs),
                 GetDragItemCount(eventArgs),
                 false,
-                desktopVirtualAssignment ? DropPreviewKind.DesktopAssign : DropPreviewKind.Assign,
+                DropPreviewKind.Assign,
                 floatingCard: false);
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
@@ -362,7 +361,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 GetDragItemKeys(eventArgs),
                 GetDragItemCount(eventArgs),
                 false,
-                desktopVirtualAssignment ? DropPreviewKind.DesktopAssign : DropPreviewKind.Assign,
+                DropPreviewKind.Assign,
                 floatingCard: false);
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
@@ -373,16 +372,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         eventArgs.Effect = desktopVirtualAssignment
             ? Forms.DragDropEffects.Copy
             : ToDragDropEffects(effect);
-        var previewKind = desktopVirtualAssignment
-            ? DropPreviewKind.DesktopAssign
-            : effect == BoxTransferEffect.VirtualMove &&
-                          eventArgs.Data?.GetDataPresent(ItemKeysFormat) == true &&
-                          eventArgs.Data.GetData(SourceBoxFormat) is string sourceValue &&
-                          Guid.TryParse(sourceValue, out var sourceBoxId) &&
-                          sourceBoxId == target.Id &&
-                          GetManualBoxTabAtPoint(targetGeometry!, point) is null
-            ? DropPreviewKind.Reorder
-            : DropPreviewKind.Assign;
+        // Grid insertion/Restock projections are intentionally omitted: the
+        // drop lands in the box body and ordering is still resolved from the
+        // pointer at drop time.
+        var previewKind = DropPreviewKind.Assign;
         UpdateOleDropPreview(
             targetGeometry!,
             point,
