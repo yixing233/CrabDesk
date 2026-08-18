@@ -5,6 +5,18 @@ namespace CrabDesk.Native;
 
 public sealed class DesktopItemProvider : IDesktopItemProvider
 {
+    private bool _showHiddenFiles;
+
+    /// <summary>
+    /// When false (default) enumeration skips Office ~$ lock files and
+    /// Hidden/System files, matching Explorer's desktop. Set to true to
+    /// surface them on the replacement desktop.
+    /// </summary>
+    public bool ShowHiddenFiles
+    {
+        get => _showHiddenFiles;
+        set => _showHiddenFiles = value;
+    }
     private readonly string[] _desktopDirectories;
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly System.Threading.Timer _changeTimer;
@@ -64,7 +76,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                         try
                         {
                             var attributes = File.GetAttributes(fullPath);
-                            if (IsDesktopMetadataFile(fullPath))
+                            if (IsDesktopMetadataFile(fullPath, _showHiddenFiles))
                             {
                                 continue;
                             }
@@ -163,20 +175,24 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         StandardSystemItems.Select(item =>
             $"{item.Clsid}:{(DesktopSystemIconVisibility.IsVisible(item.Clsid) ? 1 : 0)}"));
 
-    private static bool IsDesktopMetadataFile(string path)
+    private static bool IsDesktopMetadataFile(string path, bool showHiddenFiles)
     {
         var fileName = Path.GetFileName(path);
         if (string.Equals(fileName, "desktop.ini", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
+        // The remaining filters are configurable: Explorer hides Office ~$
+        // lock files and Hidden/System files, but the setting can surface them.
+        if (showHiddenFiles)
+        {
+            return false;
+        }
         // Office lock files created while a document is open (~$name.docx).
         if (fileName.StartsWith("~$", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
-        // Explorer's desktop does not show hidden or system files; keep the
-        // replacement layer consistent instead of surfacing e.g. desktop.ini.
         try
         {
             var attributes = File.GetAttributes(path);

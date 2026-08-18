@@ -60,6 +60,17 @@ public partial class GeneralViewModel : ObservableObject
         }
     }
 
+    public bool ShowHiddenFiles
+    {
+        get => _service.State.Settings.ShowHiddenFiles;
+        set
+        {
+            if (value == ShowHiddenFiles) return;
+            _ = _service.SetShowHiddenFilesAsync(value);
+            OnPropertyChanged();
+        }
+    }
+
 
     public bool RefreshAfterRename
     {

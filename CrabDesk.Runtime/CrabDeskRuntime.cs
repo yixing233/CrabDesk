@@ -230,6 +230,7 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         DiagnosticLog.Info("Runtime initialization started");
         State = await _layoutStore.LoadAsync();
+        _itemProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
         State.Settings.AiClassification.ApiKey = AiApiKeyStore.Load(GetAiApiKeyPath());
         MigrateGlobalHoverExpansionSetting();
         SynchronizeBoxStyles();
@@ -1587,6 +1588,13 @@ public sealed class CrabDeskRuntime : IDisposable
     public async Task SetShowSystemItemsAsync(bool enabled)
     {
         State.Settings.ShowSystemItems = enabled;
+        await RefreshItemsAsync();
+    }
+
+    public async Task SetShowHiddenFilesAsync(bool enabled)
+    {
+        State.Settings.ShowHiddenFiles = enabled;
+        _itemProvider.ShowHiddenFiles = enabled;
         await RefreshItemsAsync();
     }
 

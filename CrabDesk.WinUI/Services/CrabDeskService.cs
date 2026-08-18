@@ -34,6 +34,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public Task ReconnectDesktopAsync() => _runtime.ReconnectDesktopAsync();
     public void SetStartWithWindows(bool enabled) => _runtime.SetStartWithWindows(enabled);
     public Task SetShowSystemItemsAsync(bool enabled) => _runtime.SetShowSystemItemsAsync(enabled);
+    public Task SetShowHiddenFilesAsync(bool enabled) => _runtime.SetShowHiddenFilesAsync(enabled);
     public void SetConfirmDeleteBox(bool enabled) => _runtime.SetConfirmDeleteBox(enabled);
     public void SetLaunchToTray(bool enabled) => _runtime.SetLaunchToTray(enabled);
     public void SetExpandBoxOnHover(bool enabled) => _runtime.SetExpandBoxOnHover(enabled);

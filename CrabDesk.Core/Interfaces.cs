@@ -4,6 +4,12 @@ public interface IDesktopItemProvider : IDisposable
 {
     event EventHandler? ItemsChanged;
     Task<IReadOnlyList<DesktopItemRef>> EnumerateAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// When false (default) enumeration skips Office ~$ lock files and
+    /// Hidden/System files, matching Explorer's desktop.
+    /// </summary>
+    bool ShowHiddenFiles { get; set; }
 }
 
 public interface IMappedFolderProvider : IDisposable

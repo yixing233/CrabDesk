@@ -346,6 +346,9 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
     public bool TakeOverDesktop { get; set; }
     public bool ShowSystemItems { get; set; } = true;
+    // When false (default) the replacement desktop hides Office ~$ lock files
+    // and files with Hidden/System attributes, matching Explorer.
+    public bool ShowHiddenFiles { get; set; }
     public bool ConfirmDeleteBox { get; set; } = true;
     public ApplicationThemeMode ThemeMode { get; set; } = ApplicationThemeMode.System;
     public string WindowBackdrop { get; set; } = "Mica";

@@ -21,6 +21,7 @@ public interface ICrabDeskService
     Task ReconnectDesktopAsync();
     void SetStartWithWindows(bool enabled);
     Task SetShowSystemItemsAsync(bool enabled);
+    Task SetShowHiddenFilesAsync(bool enabled);
     void SetConfirmDeleteBox(bool enabled);
     void SetLaunchToTray(bool enabled);
     void SetExpandBoxOnHover(bool enabled);
