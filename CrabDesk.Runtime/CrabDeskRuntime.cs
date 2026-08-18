@@ -1241,6 +1241,36 @@ public sealed class CrabDeskRuntime : IDisposable
         return imported;
     }
 
+    /// <summary>
+    /// Imports files/folders into a subfolder shown inside a mapped box. The
+    /// subfolder name comes from a folder item enumerated from the box root, so
+    /// it is relative to that root and cannot escape it.
+    /// </summary>
+    public async Task<FileImportBatchResult> ImportFilesToMappedFolderSubfolderAsync(
+        IEnumerable<string> paths,
+        Guid boxId,
+        string subfolderName,
+        bool move)
+    {
+        var box = State.Boxes.First(candidate => candidate.Id == boxId);
+        if (!box.IsMappedFolder || box.MappedFolder!.IsReadOnly)
+        {
+            throw new InvalidOperationException("此映射盒子已设为只读。");
+        }
+        var snapshot = GetMappedFolderSnapshot(boxId);
+        if (snapshot?.IsAvailable != true)
+        {
+            throw new DirectoryNotFoundException(snapshot?.Message ?? "映射文件夹不可用。");
+        }
+        var targetDirectory = Path.Combine(box.MappedFolder.Path, subfolderName);
+        var imported = await _fileOperations.ImportAsync(paths, targetDirectory, move);
+        if (imported.SucceededCount > 0)
+        {
+            await RefreshMappedFoldersAsync();
+        }
+        return imported;
+    }
+
     public async Task<FileImportBatchResult> TransferBoxItemsAsync(
         Guid sourceBoxId,
         IEnumerable<string> itemKeys,

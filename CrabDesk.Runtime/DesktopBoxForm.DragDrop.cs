@@ -17,6 +17,65 @@ namespace CrabDesk.Runtime;
 internal sealed partial class DesktopBoxForm : Forms.Form
 {
 
+    private string? _mappedFolderDropTargetName;
+
+    /// <summary>
+    /// The mapped-folder item under the pointer, when the drop point lands on
+    /// a real subfolder. Files dropped there import into that subfolder.
+    /// </summary>
+    private DesktopItemRef? GetMappedFolderDropTarget(BoxGeometry box, PointF point)
+    {
+        if (!box.Box.IsMappedFolder || box.Box.MappedFolder?.IsReadOnly == true)
+        {
+            return null;
+        }
+        var item = GetItemAtPoint(box, point)?.Item;
+        return item is { Kind: DesktopItemKind.Folder, FileSystemPath: not null }
+            ? item
+            : null;
+    }
+
+    /// <summary>
+    /// Imports the active drag payload into a mapped folder's subfolder. The
+    /// payload may be an external FileDrop or a CrabDesk desktop-icon drag;
+    /// both carry filesystem paths that can be moved or copied into the target.
+    /// </summary>
+    private async Task ImportIntoTargetFolderAsync(
+        BoxGeometry box,
+        DesktopItemRef folderTarget,
+        Forms.DragEventArgs eventArgs,
+        bool move)
+    {
+        IReadOnlyList<string>? paths = null;
+        if (eventArgs.Data?.GetDataPresent(Forms.DataFormats.FileDrop) == true &&
+            eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is string[] droppedPaths)
+        {
+            paths = droppedPaths;
+        }
+        else if (eventArgs.Data?.GetDataPresent(DesktopIconSurface.DesktopIconDragSessionFormat) == true &&
+                 eventArgs.Data.GetData(DesktopIconSurface.DesktopIconDragSessionFormat) is DesktopIconSurfaceDragSession desktopDrag)
+        {
+            var itemsByKey = _runtime.Items
+                .Where(item => item.FileSystemPath is not null)
+                .ToDictionary(item => item.Key.ToString(), StringComparer.OrdinalIgnoreCase);
+            paths = desktopDrag.ItemKeys
+                .Where(key => itemsByKey.ContainsKey(key))
+                .Select(key => itemsByKey[key].FileSystemPath!)
+                .ToArray();
+        }
+
+        if (paths is not { Count: > 0 })
+        {
+            return;
+        }
+        var imported = await _runtime.ImportFilesToMappedFolderSubfolderAsync(
+            paths,
+            box.Box.Id,
+            folderTarget.DisplayName,
+            move);
+        ShowImportFailures(imported);
+    }
+
     private int AssignDesktopItemsAtDrop(
         BoxGeometry target,
         PointF point,
@@ -70,6 +129,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ClearDropPreview()
     {
+        _mappedFolderDropTargetName = null;
         _lastDesktopDropTargetKey = null;
         if (_dropPreview is null)
         {
@@ -200,6 +260,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnDragOver(object? sender, Forms.DragEventArgs eventArgs)
     {
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+        // Every frame recomputes the drop-target folder highlight; branches
+        // that accept a mapped subfolder set it again before returning.
+        _mappedFolderDropTargetName = null;
         ForwardDragStateToIconSurface(eventArgs, point);
         // Box geometry is static during an OLE item drag; the shared compositor
         // already rebuilt it on the previous frame. Rebuilding per DragOver
@@ -220,7 +283,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // This private payload only represents a CrabDesk desktop item.
             // Do not mark it handled until DragDrop: a pointer may pass over a
             // box and then return to the desktop before the button is released.
-            var acceptsDrop = !target!.IsMappedFolder && target.MappedFolder?.IsReadOnly != true;
+            // A mapped folder only accepts the drag when it lands on a real
+            // subfolder (an internal drop there imports into that folder).
+            var deskDropFolderTarget = GetMappedFolderDropTarget(targetGeometry, point);
+            _mappedFolderDropTargetName = deskDropFolderTarget?.DisplayName;
+            var acceptsDrop = deskDropFolderTarget is not null ||
+                              (!target!.IsMappedFolder && target.MappedFolder?.IsReadOnly != true);
             UpdateOleDropPreview(
                 targetGeometry,
                 point,
@@ -264,6 +332,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         var effect = ResolveTransferEffect(eventArgs, target);
+        var mappedFolderTarget = GetMappedFolderDropTarget(targetGeometry, point);
+        _mappedFolderDropTargetName = mappedFolderTarget?.DisplayName;
+        if (mappedFolderTarget is not null && targetGeometry is not null)
+        {
+            // Dropping onto a subfolder inside a mapped box imports into that
+            // folder instead of the box root; TransferEffect already resolved
+            // Copy versus Move from the Shift/Control state.
+            UpdateOleDropPreview(
+                targetGeometry,
+                point,
+                GetDragItemKeys(eventArgs),
+                GetDragItemCount(eventArgs),
+                true,
+                DropPreviewKind.Assign,
+                floatingCard: false);
+            eventArgs.Effect = ToDragDropEffects(effect);
+            InvalidateDropPreview(target.Id);
+            return;
+        }
         if (effect == BoxTransferEffect.VirtualMove && targetGeometry is not null &&
             GetMappedFolderTabAtPoint(targetGeometry, point) is not null)
         {
@@ -465,6 +552,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             var manualTargetTab = GetManualBoxTabAtPoint(box, point);
             var mappedTargetTab = GetMappedFolderTabAtPoint(box, point);
+            var mappedFolderTarget = GetMappedFolderDropTarget(box, point);
+            if (mappedFolderTarget is not null)
+            {
+                // A drop on a real folder shown inside a mapped box imports the
+                // payload into that folder (external FileDrop or a CrabDesk
+                // desktop-icon drag). ResolveTransferEffect already decided
+                // Copy versus Move from the Shift/Control state.
+                var move = ResolveTransferEffect(eventArgs, box.Box) == BoxTransferEffect.MoveFiles;
+                await ImportIntoTargetFolderAsync(box, mappedFolderTarget, eventArgs, move);
+                return;
+            }
             if (eventArgs.Data.GetDataPresent(DesktopIconSurface.DesktopIconDragSessionFormat) &&
                 eventArgs.Data.GetData(DesktopIconSurface.DesktopIconDragSessionFormat) is DesktopIconSurfaceDragSession desktopDrag)
             {

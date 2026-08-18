@@ -842,7 +842,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
         var iconSize = (float)item.Box.Appearance.IconSize;
         var iconBounds = GetItemIconBounds(item);
-        var showsFullLabel = DesktopIconLabelDisplayPolicy.ShowsFullLabel(isSelected, isHovered);
+        var isFolderDropTarget =
+            item.Item.Kind == DesktopItemKind.Folder &&
+            !string.IsNullOrEmpty(_mappedFolderDropTargetName) &&
+            string.Equals(_mappedFolderDropTargetName, item.Item.DisplayName, StringComparison.Ordinal);
+        var showsFullLabel = DesktopIconLabelDisplayPolicy.ShowsFullLabel(
+            isSelected || isFolderDropTarget,
+            isHovered);
         var textBounds = item.Box.Appearance.ShowItemLabels
             ? GetItemTextBounds(graphics, item, iconBounds, labelFont!, showsFullLabel, contentBounds)
             : RectangleF.Empty;
@@ -850,7 +856,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ? item.Bounds
             : RectangleF.Union(item.Bounds, textBounds);
         var visualKey = (item.Box.Id, itemKey);
-        if (isSelected || isHovered)
+        if (isSelected || isHovered || isFolderDropTarget)
         {
             _expandedItemHitBounds[visualKey] = RectangleF.Intersect(visualBounds, contentBounds);
         }
@@ -859,7 +865,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _expandedItemHitBounds.Remove(visualKey);
         }
         var cornerRadius = DesktopItemVisualStyle.SelectionCornerRadius(iconSize);
-        if (isHovered)
+        if (isFolderDropTarget)
+        {
+            // The drop target folder inside a mapped box is highlighted with
+            // the selection fill plus an accent border so the destination is
+            // unambiguous while an item hovers over it.
+            var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
+            using var folderFill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, configuredSelection));
+            using var folderBorder = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, configuredSelection), 1.5f);
+            using var folderPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
+            graphics.FillPath(folderFill, folderPath);
+            graphics.DrawPath(folderBorder, folderPath);
+        }
+        else if (isHovered)
         {
             // Hover remains visible while the item is selected and is kept
             // brighter than the settled selection treatment.
