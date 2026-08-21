@@ -290,6 +290,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // already rebuilt it on the previous frame. Rebuilding per DragOver
         // event stalls the drag loop on fast mice.
         EnsureGeometry();
+        // Desktop-item OLE drags keep the icon surface in an active pointer
+        // interaction state, which intentionally pauses the normal hover
+        // timer. Feed the current drag position into the expansion controller
+        // here as well; the timer above continues the delay while stationary.
+        UpdateHoverState(point, updateItemHover: false);
+        EnsureGeometry();
         var targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (targetGeometry is null)
         {

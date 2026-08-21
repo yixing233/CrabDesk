@@ -405,12 +405,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var now = DateTimeOffset.UtcNow;
         var animatedBoxIds = _heightAnimations.Keys.ToArray();
-        foreach (var id in _heightAnimations
+        var completedBoxIds = _heightAnimations
             .Where(pair => now - pair.Value.StartedAt >= pair.Value.Duration)
             .Select(pair => pair.Key)
-            .ToArray())
+            .ToArray();
+        foreach (var id in completedBoxIds)
         {
             _heightAnimations.Remove(id);
+        }
+        if (completedBoxIds.Length > 0)
+        {
+            // The shared icon layer caches a settled base that excludes every
+            // animated box. When one of multiple overlapping height animations
+            // finishes, rebuild that base so the completed box is immediately
+            // restored while the remaining box continues animating.
+            _dynamicVisualVersion++;
         }
         if (_heightAnimations.Count == 0)
         {

@@ -834,6 +834,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool includeItemHoverFeedback = true)
     {
         var itemKey = item.Item.Key.ToString();
+        var isRenaming = _renamingBoxId == item.Box.Id &&
+                         string.Equals(_renamingItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
         var isSelected = (selectedItemKeys ?? _selection).Contains(itemKey);
         var isHovered =
             includeItemHoverFeedback &&
@@ -903,6 +905,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             graphics.DrawImage(bitmap, iconBounds);
         }
         if (!item.Box.Appearance.ShowItemLabels)
+        {
+            return;
+        }
+        if (isRenaming)
         {
             return;
         }

@@ -94,6 +94,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private DateTime _scrollAnimationStartedUtc;
     private readonly DesktopHoverOverlay _itemHoverOverlay;
     private DesktopRenameEditor? _renameEditor;
+    private Guid? _renamingBoxId;
+    private string? _renamingItemKey;
     private DateTime _lastDragRenderUtc = DateTime.MinValue;
     private bool _dragRenderPending;
     private bool _hoverReconcilePending;
@@ -444,6 +446,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal int DynamicVisualVersion => _dynamicVisualVersion;
 
+    internal static bool ShouldPollHoverDuringDesktopInteraction(
+        bool desktopPointerInteractionActive,
+        bool desktopItemDragActive) =>
+        !desktopPointerInteractionActive ||
+        desktopItemDragActive;
+
+    internal static bool ShouldRenderDropPreviewSeparately(
+        Guid previewBoxId,
+        Guid? transformBoxId,
+        IReadOnlySet<Guid> animatedBoxIds) =>
+        previewBoxId != transformBoxId &&
+        !animatedBoxIds.Contains(previewBoxId);
+
     internal RectangleF? GetDynamicVisualBounds()
     {
         if (IsDisposed || _resourcesDisposed || !HasDynamicVisual)
@@ -463,7 +478,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        if (_dropPreview is { } preview && preview.BoxId != transformBox?.Id)
+        if (_dropPreview is { } preview &&
+            ShouldRenderDropPreviewSeparately(
+                preview.BoxId,
+                transformBox?.Id,
+                _heightAnimations.Keys.ToHashSet()))
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == preview.BoxId);
             if (geometry is not null)
@@ -622,7 +641,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        if (_dropPreview is { } preview && preview.BoxId != transformBox?.Id)
+        if (_dropPreview is { } preview &&
+            ShouldRenderDropPreviewSeparately(
+                preview.BoxId,
+                transformBox?.Id,
+                _heightAnimations.Keys.ToHashSet()))
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == preview.BoxId);
             if (geometry is not null)
@@ -820,6 +843,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _itemHoverOverlay.Dispose();
             _renameEditor?.Dispose();
             _renameEditor = null;
+            _renamingBoxId = null;
+            _renamingItemKey = null;
             _hitMaskBitmap?.Dispose();
             _hitMaskBitmap = null;
             LayeredWindowPresenter.Release(Handle);

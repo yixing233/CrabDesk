@@ -91,6 +91,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private Action<Graphics, RectangleF>? _boxRenderer;
     private Action<Graphics, RectangleF>? _dragBoxRenderer;
     private Func<bool>? _boxTransformActive;
+    private Func<bool>? _boxVisualsInParent;
     private Func<RectangleF?>? _boxDynamicBounds;
     private Func<int>? _boxDynamicVersion;
     private Action? _boxDynamicStateUpdate;
@@ -100,6 +101,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private readonly DesktopDragOverlay _dragOverlay;
     private readonly DesktopHoverOverlay _hoverOverlay;
     private DesktopRenameEditor? _renameEditor;
+    private string? _renamingItemKey;
     private bool _overRecycleBin;
     // Slow double-click rename: the second click on the same icon inside the
     // window between the system double-click time and this limit enters
@@ -243,6 +245,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             _hoverOverlay.Dispose();
             _renameEditor?.Dispose();
             _renameEditor = null;
+            _renamingItemKey = null;
             ReleaseExternalDragIcon();
             LayeredWindowPresenter.Release(Handle);
             _shellContextMenu?.Dispose();
@@ -297,6 +300,9 @@ internal sealed class DesktopIconSurface : Forms.Form
     internal void SetBoxTransformActive(Func<bool>? provider) =>
         _boxTransformActive = provider;
 
+    internal void SetBoxVisualsInParent(Func<bool>? provider) =>
+        _boxVisualsInParent = provider;
+
     internal void SetBoxDynamicBounds(Func<RectangleF?>? provider) =>
         _boxDynamicBounds = provider;
 
@@ -311,6 +317,9 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal void SetBoxHeightAnimationOnly(Func<bool>? provider) =>
         _boxHeightAnimationOnly = provider;
+
+    private bool AreBoxVisualsInParent =>
+        _boxVisualsInParent?.Invoke() == true && _dragBoxRenderer is not null;
 
     internal bool RequestRender() => PresentLayer();
 
@@ -477,6 +486,8 @@ internal sealed class DesktopIconSurface : Forms.Form
     // still delivering captured mouse events.
     internal bool IsPointerInteractionActive =>
         _selecting || _dragStarted || _pressedItem is not null;
+
+    internal bool IsItemDragActive => _dragStarted;
 
     internal string LayerDiagnostic =>
         _lastPresentSucceeded && _lastRegionSucceeded
@@ -650,6 +661,16 @@ internal sealed class DesktopIconSurface : Forms.Form
                 _dragBaseReady = true;
             }
 
+            // Keep changing box pixels on the monitor-sized parent while the
+            // small child overlay owns only drag ghosts and desktop previews.
+            // A translucent box therefore never crosses between two layered
+            // windows at transform or hover-animation boundaries.
+            if (AreBoxVisualsInParent &&
+                !_selecting)
+            {
+                return PresentBoxVisualsInParentFrame(workAreaBounds);
+            }
+
             // A pure hover-expand height animation stays inside the parent
             // bitmap so the box never crosses between the settled layer and
             // the drag overlay. That handoff is what flashes for one
@@ -741,7 +762,9 @@ internal sealed class DesktopIconSurface : Forms.Form
         _externalDragPaths is { Length: > 0 } ||
         _boxTransformActive?.Invoke() == true;
 
-    private bool PresentDragOverlay(RectangleF workAreaBounds)
+    private bool PresentDragOverlay(
+        RectangleF workAreaBounds,
+        Bitmap? fallbackBaseBitmap = null)
     {
         var overlayBounds = GetDragOverlayBounds(workAreaBounds);
         if (overlayBounds is not { } bounds)
@@ -762,11 +785,36 @@ internal sealed class DesktopIconSurface : Forms.Form
         // A layered child overlay is supported on the target Windows versions,
         // but preserve rendering if a host or shell variant rejects it.
         _dragOverlay.HideOverlay();
-        EnsureLayerBitmap();
-        using (var graphics = Graphics.FromImage(_layerBitmap!))
+        Bitmap fallbackBitmap;
+        Bitmap? baseBitmap;
+        if (fallbackBaseBitmap is not null)
+        {
+            // The parent already contains the complete dynamic box frame.
+            // Reuse the other monitor-sized bitmap as the combined fallback
+            // so drawing the ghost cannot read from and write to one bitmap.
+            EnsureStaticLayerBitmap();
+            fallbackBitmap = _staticLayerBitmap!;
+            baseBitmap = fallbackBaseBitmap;
+            _dragBaseReady = false;
+        }
+        else
+        {
+            EnsureLayerBitmap();
+            fallbackBitmap = _layerBitmap!;
+            baseBitmap = _staticLayerBitmap;
+        }
+
+        if (baseBitmap is null)
+        {
+            _lastPresentSucceeded = false;
+            _lastPresentDiagnostic = $"overlay={overlayDiagnostic}; fallback base unavailable";
+            return false;
+        }
+
+        using (var graphics = Graphics.FromImage(fallbackBitmap))
         {
             graphics.CompositingMode = CompositingMode.SourceCopy;
-            graphics.DrawImageUnscaled(_staticLayerBitmap!, 0, 0);
+            graphics.DrawImageUnscaled(baseBitmap, 0, 0);
             graphics.CompositingMode = CompositingMode.SourceOver;
             ConfigureLayerGraphics(graphics, workAreaBounds, fastRender: true);
             DrawDynamicDragVisuals(graphics, workAreaBounds);
@@ -774,7 +822,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
         _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
             Handle,
-            _layerBitmap!,
+            fallbackBitmap,
             PointToScreen(Point.Empty),
             out _lastPresentDiagnostic);
         if (!_lastPresentSucceeded)
@@ -785,6 +833,42 @@ internal sealed class DesktopIconSurface : Forms.Form
                 new InvalidOperationException(_lastPresentDiagnostic));
         }
         return _lastPresentSucceeded;
+    }
+
+    private bool PresentBoxVisualsInParentFrame(RectangleF workAreaBounds)
+    {
+        EnsureLayerBitmap();
+        using (var graphics = Graphics.FromImage(_layerBitmap!))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.DrawImageUnscaled(_staticLayerBitmap!, 0, 0);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            ConfigureLayerGraphics(graphics, workAreaBounds, fastRender: false);
+            _dragBoxRenderer?.Invoke(graphics, workAreaBounds);
+            graphics.ResetTransform();
+        }
+
+        _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
+            Handle,
+            _layerBitmap!,
+            PointToScreen(Point.Empty),
+            out _lastPresentDiagnostic);
+        if (!_lastPresentSucceeded)
+        {
+            DiagnosticLog.Error(
+                $"Desktop icon dynamic box presentation failed monitor={_monitor.Id}: {_lastPresentDiagnostic}",
+                new InvalidOperationException(_lastPresentDiagnostic));
+            return false;
+        }
+
+        // The parent now contains the complete box frame. Only the drag ghost
+        // remains in the child overlay, so no box pixels are handed between
+        // windows at animation or transform boundaries.
+        if (!PresentDragOverlay(workAreaBounds, _layerBitmap!))
+        {
+            return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -989,6 +1073,12 @@ internal sealed class DesktopIconSurface : Forms.Form
             DrawImageWithAlpha(graphics, bitmap, iconBounds, 1f);
         }
 
+        if (string.Equals(_renamingItemKey, item.Item.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            graphics.ResetTransform();
+            return;
+        }
+
         using var textBrush = new SolidBrush(Color.FromArgb(248, Color.White));
         using var shadowBrush = new SolidBrush(Color.FromArgb(190, Color.Black));
         var shadowBounds = textBounds;
@@ -1027,8 +1117,9 @@ internal sealed class DesktopIconSurface : Forms.Form
             DrawRecycleBinHighlight(graphics);
         }
         DrawBoxItemDropPreview(graphics);
-        if (_dragStarted || _boxDropItemKeys.Count > 0 ||
-            _boxTransformActive?.Invoke() == true)
+        if (!AreBoxVisualsInParent &&
+            (_dragStarted || _boxDropItemKeys.Count > 0 ||
+             _boxTransformActive?.Invoke() == true))
         {
             _dragBoxRenderer?.Invoke(graphics, clipBounds);
         }
@@ -1119,6 +1210,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         if ((!_selecting || _dragStarted || _boxDropItemKeys.Count > 0 ||
              _boxTransformActive?.Invoke() == true) &&
+            !AreBoxVisualsInParent &&
             _boxDynamicBounds?.Invoke() is { } boxBounds)
         {
             bounds = UnionVisualBounds(bounds, RectangleF.Inflate(boxBounds, 10, 10));
@@ -1578,6 +1670,10 @@ internal sealed class DesktopIconSurface : Forms.Form
                 continue;
             }
             if (!labelBoundsByKey.TryGetValue(itemKey, out var textBounds))
+            {
+                continue;
+            }
+            if (string.Equals(_renamingItemKey, itemKey, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -3494,15 +3590,26 @@ internal sealed class DesktopIconSurface : Forms.Form
         var selectStem = item.Kind == DesktopItemKind.File ||
             item.Kind == DesktopItemKind.Shortcut;
         using var labelFont = ResolveIconLabelFont();
-        return await _renameEditor.ShowAsync(
-            screenLocation,
-            new Size(
-                (int)Math.Round(labelBounds.Width * scale),
-                (int)Math.Round(labelBounds.Height * scale)),
-            item.DisplayName,
-            selectStem,
-            _runtime.IsDarkTheme,
-            labelFont);
+        _renamingItemKey = item.Key.ToString();
+        RequestRender();
+        try
+        {
+            return await _renameEditor.ShowAsync(
+                screenLocation,
+                new Size(
+                    (int)Math.Round(labelBounds.Width * scale),
+                    (int)Math.Round(labelBounds.Height * scale)),
+                item.DisplayName,
+                selectStem,
+                _runtime.IsDarkTheme,
+                labelFont,
+                wordWrap: true);
+        }
+        finally
+        {
+            _renamingItemKey = null;
+            RequestRender();
+        }
     }
 
     private RectangleF GetItemLabelEditBounds(DesktopIconGeometry entry)
@@ -3518,26 +3625,32 @@ internal sealed class DesktopIconSurface : Forms.Form
             iconBounds,
             font,
             selected: false);
-        var hit = GetTextHitBounds(measureGraphics, entry.Item.DisplayName, textBounds, font);
         var lineHeight = Math.Max(1, font.GetHeight(measureGraphics));
-        var maxWidth = Math.Max(0, entry.Bounds.Width - 6);
-        var width = hit.IsEmpty
-            ? maxWidth
-            : Math.Min(maxWidth, Math.Max(48, hit.Width + 10));
-        var centerX = hit.IsEmpty
-            ? textBounds.X + textBounds.Width / 2
-            : hit.X + hit.Width / 2;
+        var workArea = GetDesktopWorkAreaBounds();
+        var width = DesktopRenameEditor.CalculateEditorWidth(
+            Math.Max(1, textBounds.Width),
+            Math.Max(48, workArea.Width - 8));
+        var centerX = textBounds.X + textBounds.Width / 2;
         var left = Math.Max(
-            entry.Bounds.X + 1,
-            Math.Min(centerX - width / 2, entry.Bounds.Right - width - 1));
-        var top = Math.Max(1, textBounds.Y - 3);
-        // Height follows the measured label so a wrapped (two-line) name gets
-        // a two-line editor instead of a clipped single line; the multiline
-        // input renders the full name centered.
-        var labelHeight = hit.IsEmpty
-            ? lineHeight
-            : Math.Max(lineHeight, hit.Height);
-        return new RectangleF(left, top, width, labelHeight + 8);
+            workArea.Left + 2,
+            Math.Min(centerX - width / 2, workArea.Right - width - 2));
+        // Keep the static label width, then grow only downward for however
+        // many lines the complete name needs at that same wrap width.
+        var wrappedTextHeight = MeasureFullLabelHeight(
+            measureGraphics,
+            entry.Item.DisplayName,
+            font,
+            width);
+        var height = DesktopRenameEditor.CalculateEditorHeight(
+            wrappedTextHeight,
+            lineHeight,
+            Math.Max(1, workArea.Height - 2));
+        var top = Math.Max(workArea.Top + 1, textBounds.Y);
+        if (top + height > workArea.Bottom - 1)
+        {
+            top = Math.Max(workArea.Top + 1, workArea.Bottom - height - 1);
+        }
+        return new RectangleF(left, top, width, height);
     }
 
     private DesktopIconGeometry? GetItemAt(PointF point)

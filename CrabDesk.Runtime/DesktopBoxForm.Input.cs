@@ -520,9 +520,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         try
         {
             // A desktop marquee owns the pointer capture. Do not let the
-            // 25 ms box-hover poll mutate box geometry or enqueue another
-            // layered presentation while that gesture is in progress.
-            if (_runtime.IsDesktopIconPointerInteractionActive)
+            // 25 ms box-hover poll mutate box geometry while that gesture is
+            // in progress. An OLE file drag is different: its DragOver route
+            // is owned by this form, so hover expansion must keep ticking
+            // while the pointer is held over a collapsed box.
+            if (!ShouldPollHoverDuringDesktopInteraction(
+                    _runtime.IsDesktopIconPointerInteractionActive,
+                    _runtime.IsDesktopIconDragActive))
             {
                 return;
             }

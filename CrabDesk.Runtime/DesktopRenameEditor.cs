@@ -25,14 +25,13 @@ internal sealed class DesktopRenameEditor : Forms.Form
         Padding = new Forms.Padding(BorderPixels);
         _input = new Forms.TextBox
         {
-            // A single-line TextBox is height-clamped by WinForms and does
-            // not support horizontal centering. Multiline lifts both limits:
-            // the editor sizes the form to the label height (one or two
-            // lines) and the name stays centered like Explorer's rename box.
             BorderStyle = Forms.BorderStyle.None,
             Dock = Forms.DockStyle.Fill,
+            AutoSize = false,
             Multiline = true,
             ScrollBars = Forms.ScrollBars.None,
+            WordWrap = true,
+            AcceptsReturn = false,
             TextAlign = Forms.HorizontalAlignment.Center,
             TabStop = true
         };
@@ -64,7 +63,8 @@ internal sealed class DesktopRenameEditor : Forms.Form
         string initialText,
         bool selectNameStem,
         bool isDarkTheme,
-        Font labelFont)
+        Font labelFont,
+        bool wordWrap = true)
     {
         if (_completion is not null)
         {
@@ -75,16 +75,55 @@ internal sealed class DesktopRenameEditor : Forms.Form
         _input.BackColor = isDarkTheme ? Color.FromArgb(50, 50, 50) : Color.White;
         _input.ForeColor = isDarkTheme ? Color.FromArgb(245, 245, 245) : Color.FromArgb(31, 31, 31);
         _input.Font = labelFont ?? new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        SetBounds(screenLocation.X, screenLocation.Y, size.Width, size.Height);
+        _input.Multiline = wordWrap;
+        _input.WordWrap = wordWrap;
+        // The caller already converts the label's DIP geometry to monitor
+        // pixels. Create the PerMonitorV2 handle before applying those bounds
+        // so WinForms does not scale the first rename window a second time.
+        EnsureHandle();
+        var requestedBounds = new Rectangle(screenLocation, size);
+        Bounds = requestedBounds;
         _input.Text = initialText;
+        _input.TextAlign = Forms.HorizontalAlignment.Center;
         _completion = new TaskCompletionSource<string?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         _finished = false;
         Show();
+        // Reapply after Show in case the target monitor completed its first
+        // DPI negotiation while the hidden tool window became visible.
+        Bounds = requestedBounds;
         Activate();
         _input.Focus();
+        DiagnosticLog.Info(
+            $"Rename editor shown requested={requestedBounds} actual={Bounds} dpi={DeviceDpi} wrap={wordWrap}");
         SelectStem(initialText, selectNameStem);
         return _completion.Task;
+    }
+
+    private void EnsureHandle()
+    {
+        if (!IsDisposed && !IsHandleCreated)
+        {
+            CreateControl();
+        }
+    }
+
+    internal static float CalculateEditorWidth(
+        float labelLayoutWidth,
+        float availableWidth)
+    {
+        var available = Math.Max(1f, availableWidth);
+        return Math.Min(available, Math.Max(1f, labelLayoutWidth));
+    }
+
+    internal static float CalculateEditorHeight(
+        float wrappedTextHeight,
+        float lineHeight,
+        float availableHeight)
+    {
+        var available = Math.Max(1f, availableHeight);
+        var contentHeight = Math.Max(Math.Max(1f, lineHeight), wrappedTextHeight);
+        return Math.Min(available, contentHeight + BorderPixels * 2);
     }
 
     /// <summary>

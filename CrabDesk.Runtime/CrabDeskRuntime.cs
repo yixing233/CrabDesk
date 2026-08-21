@@ -526,6 +526,9 @@ public sealed class CrabDeskRuntime : IDisposable
     internal bool IsDesktopIconPointerInteractionActive =>
         _surfaceManager?.IsDesktopIconPointerInteractionActive == true;
 
+    internal bool IsDesktopIconDragActive =>
+        _surfaceManager?.IsDesktopIconDragActive == true;
+
     internal bool IsVirtualBoxDesktopDropEnabled => _virtualBoxDesktopDropEnabled;
 
     internal void SetVirtualBoxDesktopDropEnabled(bool enabled)

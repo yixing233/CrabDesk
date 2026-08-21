@@ -488,15 +488,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             (float)geometry.Box.Appearance.LabelFontSize,
             FontStyle.Regular,
             GraphicsUnit.Point);
-        return await _renameEditor.ShowAsync(
-            screenLocation,
-            new Size(
-                (int)Math.Round(labelBounds.Width * scale),
-                (int)Math.Round(labelBounds.Height * scale)),
-            item.DisplayName,
-            selectStem,
-            _runtime.IsDarkTheme,
-            labelFont);
+        _renamingBoxId = box.Id;
+        _renamingItemKey = item.Key.ToString();
+        RequestVisualLayerRender();
+        try
+        {
+            return await _renameEditor.ShowAsync(
+                screenLocation,
+                new Size(
+                    (int)Math.Round(labelBounds.Width * scale),
+                    (int)Math.Round(labelBounds.Height * scale)),
+                item.DisplayName,
+                selectStem,
+                _runtime.IsDarkTheme,
+                labelFont,
+                wordWrap: geometry.Box.ViewMode != BoxViewMode.List);
+        }
+        finally
+        {
+            _renamingBoxId = null;
+            _renamingItemKey = null;
+            RequestVisualLayerRender();
+        }
     }
 
     private RectangleF GetItemLabelEditBounds(ItemGeometry item)
@@ -509,16 +522,35 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             (float)item.Box.Appearance.LabelFontSize,
             FontStyle.Regular,
             GraphicsUnit.Point);
+        var lineHeight = Math.Max(1, labelFont.GetHeight(measureGraphics));
 
         if (item.Box.ViewMode == BoxViewMode.List)
         {
             // The list row keeps the full text column as the edit area, like
             // Explorer's list-view rename box.
-            return new RectangleF(
-                iconBounds.Right + 10,
-                item.Bounds.Y + 1,
-                Math.Max(40, item.Bounds.Right - iconBounds.Right - 18),
-                Math.Max(20, item.Bounds.Height - 2));
+            var listRelativeWorkArea = MonitorCoordinateConverter.GetMonitorRelativeWorkArea(_monitor);
+            var listWorkArea = new RectangleF(
+                (float)listRelativeWorkArea.X,
+                (float)listRelativeWorkArea.Y,
+                (float)listRelativeWorkArea.Width,
+                (float)listRelativeWorkArea.Height);
+            var textColumnWidth = Math.Max(40, item.Bounds.Right - iconBounds.Right - 18);
+            var listWidth = DesktopRenameEditor.CalculateEditorWidth(
+                textColumnWidth,
+                Math.Max(48, listWorkArea.Width - 8));
+            var listCenterX = iconBounds.Right + 10 + textColumnWidth / 2;
+            var listLeft = Math.Max(
+                listWorkArea.Left + 2,
+                Math.Min(listCenterX - listWidth / 2, listWorkArea.Right - listWidth - 2));
+            var listHeight = Math.Max(lineHeight + 2, item.Bounds.Height - 2);
+            var listTop = Math.Max(
+                listWorkArea.Top + 1,
+                item.Bounds.Y + (item.Bounds.Height - listHeight) / 2);
+            if (listTop + listHeight > listWorkArea.Bottom - 1)
+            {
+                listTop = Math.Max(listWorkArea.Top + 1, listWorkArea.Bottom - listHeight - 1);
+            }
+            return new RectangleF(listLeft, listTop, listWidth, listHeight);
         }
 
         var textTop = iconBounds.Bottom + 3;
@@ -532,24 +564,37 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 Math.Min(
                     item.Bounds.Bottom - textTop - 3,
                     labelFont.GetHeight(measureGraphics) * CompactGridLabelLineCount + 2)));
-        var hit = MeasureLabelFootprint(measureGraphics, item.Item.DisplayName, layout, labelFont);
-        var lineHeight = Math.Max(1, labelFont.GetHeight(measureGraphics));
-        var maxWidth = Math.Max(0, item.Bounds.Width - 6);
-        var width = hit.IsEmpty
-            ? maxWidth
-            : Math.Min(maxWidth, Math.Max(48, hit.Width + 10));
-        var centerX = hit.IsEmpty
-            ? layout.X + layout.Width / 2
-            : hit.X + hit.Width / 2;
+        var relativeWorkArea = MonitorCoordinateConverter.GetMonitorRelativeWorkArea(_monitor);
+        var workArea = new RectangleF(
+            (float)relativeWorkArea.X,
+            (float)relativeWorkArea.Y,
+            (float)relativeWorkArea.Width,
+            (float)relativeWorkArea.Height);
+        var width = DesktopRenameEditor.CalculateEditorWidth(
+            Math.Max(1, layout.Width),
+            Math.Max(48, workArea.Width - 8));
+        var centerX = layout.X + layout.Width / 2;
         var left = Math.Max(
-            item.Bounds.X + 1,
-            Math.Min(centerX - width / 2, item.Bounds.Right - width - 1));
-        // Match the measured label height so wrapped names get a two-line
-        // editor with the full name centered (the multiline input).
-        var labelHeight = hit.IsEmpty
-            ? lineHeight
-            : Math.Max(lineHeight, hit.Height);
-        return new RectangleF(left, Math.Max(1, textTop - 3), width, labelHeight + 8);
+            workArea.Left + 2,
+            Math.Min(centerX - width / 2, workArea.Right - width - 2));
+        // Keep the grid label width, then grow only downward for however many
+        // lines the complete name needs at that same wrap width. List mode is
+        // handled above with its native single-row label region.
+        var wrappedTextHeight = MeasureFullGridLabelHeight(
+            measureGraphics,
+            item.Item.DisplayName,
+            labelFont,
+            width);
+        var height = DesktopRenameEditor.CalculateEditorHeight(
+            wrappedTextHeight,
+            lineHeight,
+            Math.Max(1, workArea.Height - 2));
+        var top = Math.Max(workArea.Top + 1, textTop);
+        if (top + height > workArea.Bottom - 1)
+        {
+            top = Math.Max(workArea.Top + 1, workArea.Bottom - height - 1);
+        }
+        return new RectangleF(left, top, width, height);
     }
 
     private static RectangleF MeasureLabelFootprint(
