@@ -20,7 +20,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool IsEffectivelyCollapsed(DesktopBox box) =>
         box.ExpandOnHover && !_hoverExpandedBoxes.Contains(box.Id);
 
-    private void ExpandHoveredBox(Guid boxId)
+    private void ExpandHoveredBox(Guid boxId, bool updateRegion = true)
     {
         var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == boxId);
         if (box is null || _hoverExpandedBoxes.Contains(boxId))
@@ -32,10 +32,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _hoverExpandedBoxes.Add(boxId);
         _geometryDirty = true;
         StartBoxHeightAnimation(box, fromHeight);
-        UpdateWindowRegion();
+        if (updateRegion)
+        {
+            UpdateWindowRegion();
+        }
     }
 
-    private void CollapseHoverExpandedBox(Guid boxId)
+    private void CollapseHoverExpandedBox(Guid boxId, bool updateRegion = true)
     {
         var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == boxId);
         if (box is null || !_hoverExpandedBoxes.Contains(boxId))
@@ -47,7 +50,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _hoverExpandedBoxes.Remove(boxId);
         _geometryDirty = true;
         StartBoxHeightAnimation(box, fromHeight);
-        UpdateWindowRegion();
+        if (updateRegion)
+        {
+            UpdateWindowRegion();
+        }
     }
 
     private double GetMinimumBoxWidth(DesktopBox box) =>
@@ -325,7 +331,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _hoverExpansion.Reset();
         foreach (var expandedBoxId in previouslyExpandedBoxIds.Where(id => id != box.Id))
         {
-            CollapseHoverExpandedBox(expandedBoxId);
+            CollapseHoverExpandedBox(expandedBoxId, updateRegion: false);
         }
         _hoverExpandedBoxes.Remove(box.Id);
 
@@ -347,6 +353,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void PrepareBoxTransform(DesktopBox box)
     {
+        ReleaseMovingBoxVisualCache();
+        ReleaseHeightAnimationVisualCache(box.Id);
         _transformDirtyBounds = ToVisualBounds(box, box.Bounds);
         _heightAnimations.Remove(box.Id);
         _geometryDirty = true;
@@ -364,13 +372,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (!_runtime.State.Settings.Appearance.AnimationEnabled || Math.Abs(targetHeight - fromHeight) < 0.5)
         {
             _heightAnimations.Remove(box.Id);
+            ReleaseHeightAnimationVisualCache(box.Id);
             return;
         }
+        PrepareHeightAnimationVisualCache(box);
         _heightAnimations[box.Id] = new BoxHeightAnimation(
             fromHeight,
             targetHeight,
             DateTimeOffset.UtcNow,
-            TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds));
+            AnimationMath.ScaleDurationByDistance(
+                Math.Abs(targetHeight - fromHeight),
+                Math.Abs(box.Bounds.Height - box.Appearance.TitleBarHeight),
+                TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds),
+                TimeSpan.FromMilliseconds(MinimumBoxHeightAnimationMilliseconds)));
         _dynamicVisualVersion++;
         _animationTimer.Start();
     }
@@ -392,6 +406,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (Math.Abs(animation.ToHeight - targetHeight) > 0.5)
         {
             _heightAnimations.Remove(box.Id);
+            ReleaseHeightAnimationVisualCache(box.Id);
             return targetHeight;
         }
         var progress = (DateTimeOffset.UtcNow - animation.StartedAt).TotalMilliseconds /
@@ -400,6 +415,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ? animation.ToHeight
             : AnimationMath.Interpolate(animation.FromHeight, animation.ToHeight, progress);
     }
+
+    private double GetInteractionBoxHeight(DesktopBox box) =>
+        _heightAnimations.TryGetValue(box.Id, out var animation)
+            ? Math.Max(animation.FromHeight, animation.ToHeight)
+            : GetVisualBoxHeight(box);
 
     private void OnAnimationTick(object? sender, EventArgs eventArgs)
     {
@@ -412,6 +432,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         foreach (var id in completedBoxIds)
         {
             _heightAnimations.Remove(id);
+            ReleaseHeightAnimationVisualCache(id);
         }
         if (completedBoxIds.Length > 0)
         {
@@ -425,11 +446,24 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             _animationTimer.Stop();
         }
-        _geometryDirty = true;
-        UpdateWindowRegion();
-        foreach (var id in animatedBoxIds)
+        if (ShouldRebuildHeightAnimationGeometry(
+                _isCompositedByIconSurface,
+                completedBoxIds.Length > 0))
         {
-            InvalidateBoxVisualArea(id);
+            _geometryDirty = true;
+        }
+        else
+        {
+            UpdateHeightAnimationGeometry(animatedBoxIds);
+        }
+        if (!_isCompositedByIconSurface || completedBoxIds.Length > 0)
+        {
+            UpdateWindowRegion();
+            RequestLayerRender();
+        }
+        else if (animatedBoxIds.Length > 0)
+        {
+            RequestVisualLayerRender();
         }
     }
 

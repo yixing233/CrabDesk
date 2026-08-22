@@ -61,6 +61,80 @@ public sealed class LayoutTests
         Assert.Null(controller.ExpandedBoxId);
     }
 
+    [Fact]
+    public void HoverExpansionSwitchesDirectlyBetweenBoxHeaders()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+        var firstBoxId = Guid.NewGuid();
+        var secondBoxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+        controller.AdoptExpanded(firstBoxId);
+
+        Assert.False(controller.Update(secondBoxId, false, started).Changed);
+        Assert.False(controller.Update(secondBoxId, false, started.AddMilliseconds(119)).Changed);
+        var transition = controller.Update(secondBoxId, false, started.AddMilliseconds(120));
+
+        Assert.Equal(secondBoxId, transition.ExpandedBoxId);
+        Assert.Equal(firstBoxId, transition.CollapsedBoxId);
+        Assert.Equal(secondBoxId, controller.ExpandedBoxId);
+    }
+
+    [Fact]
+    public void TopmostHeaderCanTakeHoverFromAnOverlappingExpandedBox()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+        var firstBoxId = Guid.NewGuid();
+        var secondBoxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+        controller.AdoptExpanded(firstBoxId);
+
+        controller.Update(secondBoxId, true, started);
+        var transition = controller.Update(secondBoxId, true, started.AddMilliseconds(120));
+
+        Assert.Equal(secondBoxId, transition.ExpandedBoxId);
+        Assert.Equal(firstBoxId, transition.CollapsedBoxId);
+    }
+
+    [Fact]
+    public void ReturningToExpandedBoxCancelsPendingHeaderSwitch()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+        var firstBoxId = Guid.NewGuid();
+        var secondBoxId = Guid.NewGuid();
+        var started = DateTimeOffset.UtcNow;
+        controller.AdoptExpanded(firstBoxId);
+
+        controller.Update(secondBoxId, false, started);
+        Assert.False(controller.Update(null, true, started.AddMilliseconds(80)).Changed);
+        Assert.False(controller.Update(secondBoxId, false, started.AddMilliseconds(121)).Changed);
+
+        Assert.Equal(firstBoxId, controller.ExpandedBoxId);
+    }
+
+    [Theory]
+    [InlineData(248, 248, 220)]
+    [InlineData(124, 248, 110)]
+    [InlineData(20, 248, 80)]
+    public void HeightAnimationDurationTracksRemainingDistance(
+        double remainingDistance,
+        double fullDistance,
+        double expectedMilliseconds)
+    {
+        var duration = AnimationMath.ScaleDurationByDistance(
+            remainingDistance,
+            fullDistance,
+            TimeSpan.FromMilliseconds(220),
+            TimeSpan.FromMilliseconds(80));
+
+        Assert.Equal(expectedMilliseconds, duration.TotalMilliseconds, 3);
+    }
+
     [Theory]
     [InlineData(121.9, 120)]
     [InlineData(122, 124)]
@@ -105,6 +179,26 @@ public sealed class LayoutTests
         Assert.True(BoxStacking.Move(boxes, middle.Id, BoxStackMove.ToBack));
         Assert.Equal([middle, back, front], BoxStacking.OrderBackToFront(boxes, "primary"));
         Assert.False(BoxStacking.Move(boxes, middle.Id, BoxStackMove.ToBack));
+    }
+
+    [Fact]
+    public void FocusedBoxRendersAboveThePersistentStackWithoutMutatingIt()
+    {
+        var back = new DesktopBox { MonitorId = "primary", StackOrder = 0 };
+        var middle = new DesktopBox { MonitorId = "primary", StackOrder = 1 };
+        var front = new DesktopBox { MonitorId = "primary", StackOrder = 2 };
+        var otherMonitor = new DesktopBox { MonitorId = "secondary", StackOrder = 0 };
+        IReadOnlyList<DesktopBox> boxes = [back, middle, front, otherMonitor];
+
+        var focusedStack = BoxStacking.OrderBackToFront(boxes, "primary", back.Id);
+
+        Assert.Equal([middle, front, back], focusedStack);
+        Assert.Equal(0, back.StackOrder);
+        Assert.Equal(1, middle.StackOrder);
+        Assert.Equal(2, front.StackOrder);
+        Assert.Equal(
+            [back, middle, front],
+            BoxStacking.OrderBackToFront(boxes, "primary"));
     }
 
     [Fact]

@@ -44,6 +44,190 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         graphics.ResetTransform();
     }
 
+    private void PrepareMovingBoxVisualCache(DesktopBox box)
+    {
+        if (!_isCompositedByIconSurface || IsDisposed || _resourcesDisposed)
+        {
+            return;
+        }
+
+        EnsureGeometry();
+        var geometry = _boxes.FirstOrDefault(candidate => candidate.Box.Id == box.Id);
+        if (geometry is not null)
+        {
+            CreateMovingBoxVisualCache(GetTransformGeometry(geometry), box);
+        }
+    }
+
+    private bool DrawMovingBoxVisualCache(
+        Graphics graphics,
+        BoxGeometry geometry,
+        RectangleF clipBounds)
+    {
+        if (_movingBoxVisualCache is null || _movingBoxVisualCacheBoxId != geometry.Box.Id)
+        {
+            CreateMovingBoxVisualCache(geometry, geometry.Box);
+        }
+        if (_movingBoxVisualCache is null || _movingBoxVisualCacheBoxId != geometry.Box.Id)
+        {
+            return false;
+        }
+
+        var destination = _movingBoxVisualCacheBounds;
+        destination.Offset(
+            (float)(geometry.Box.Bounds.X - _movingBoxVisualCacheAnchor.X),
+            (float)(geometry.Box.Bounds.Y - _movingBoxVisualCacheAnchor.Y));
+        if (!destination.IntersectsWith(clipBounds))
+        {
+            return true;
+        }
+
+        graphics.DrawImage(
+            _movingBoxVisualCache,
+            destination,
+            new RectangleF(0, 0, _movingBoxVisualCache.Width, _movingBoxVisualCache.Height),
+            GraphicsUnit.Pixel);
+        return true;
+    }
+
+    private void CreateMovingBoxVisualCache(BoxGeometry geometry, DesktopBox box)
+    {
+        ReleaseMovingBoxVisualCache();
+        var cacheBounds = CalculateMovingBoxVisualCacheBounds(geometry.Bounds, _scale);
+        var pixelWidth = Math.Max(1, (int)Math.Round(cacheBounds.Width * _scale));
+        var pixelHeight = Math.Max(1, (int)Math.Round(cacheBounds.Height * _scale));
+        var bitmap = DesktopLayerBitmapFactory.Create(pixelWidth, pixelHeight);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            graphics.TextContrast = 4;
+            graphics.Transform = new Matrix(
+                (float)_scale,
+                0,
+                0,
+                (float)_scale,
+                -(float)(cacheBounds.X * _scale),
+                -(float)(cacheBounds.Y * _scale));
+            graphics.SetClip(cacheBounds, CombineMode.Replace);
+            DrawBox(
+                graphics,
+                geometry,
+                cacheBounds,
+                includeItemHoverFeedback: false);
+            graphics.ResetTransform();
+        }
+
+        _movingBoxVisualCache = bitmap;
+        _movingBoxVisualCacheBoxId = box.Id;
+        _movingBoxVisualCacheBounds = cacheBounds;
+        _movingBoxVisualCacheAnchor = new PointF((float)box.Bounds.X, (float)box.Bounds.Y);
+    }
+
+    private void ReleaseMovingBoxVisualCache()
+    {
+        _movingBoxVisualCache?.Dispose();
+        _movingBoxVisualCache = null;
+        _movingBoxVisualCacheBoxId = null;
+        _movingBoxVisualCacheBounds = RectangleF.Empty;
+        _movingBoxVisualCacheAnchor = PointF.Empty;
+    }
+
+    private void PrepareHeightAnimationVisualCache(DesktopBox box)
+    {
+        ReleaseHeightAnimationVisualCache(box.Id);
+        if (!_isCompositedByIconSurface || IsDisposed || _resourcesDisposed)
+        {
+            return;
+        }
+
+        var geometry = CreateBoxGeometry(box, (float)box.Bounds.Height, isCollapsed: false);
+        var cacheBounds = CalculateMovingBoxVisualCacheBounds(geometry.Bounds, _scale);
+        var pixelWidth = Math.Max(1, (int)Math.Round(cacheBounds.Width * _scale));
+        var pixelHeight = Math.Max(1, (int)Math.Round(cacheBounds.Height * _scale));
+        var bitmap = DesktopLayerBitmapFactory.Create(pixelWidth, pixelHeight);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            graphics.TextContrast = 4;
+            graphics.Transform = new Matrix(
+                (float)_scale,
+                0,
+                0,
+                (float)_scale,
+                -(float)(cacheBounds.X * _scale),
+                -(float)(cacheBounds.Y * _scale));
+            graphics.SetClip(cacheBounds, CombineMode.Replace);
+            DrawBox(
+                graphics,
+                geometry,
+                cacheBounds,
+                includeDropPreview: true,
+                includeSelectionRectangle: false,
+                includeItemHoverFeedback: false);
+            graphics.ResetTransform();
+        }
+
+        _heightAnimationVisualCaches[box.Id] = new BoxHeightVisualCache(bitmap, cacheBounds);
+    }
+
+    private bool DrawHeightAnimationVisualCache(
+        Graphics graphics,
+        BoxGeometry geometry,
+        RectangleF clipBounds)
+    {
+        if (!_heightAnimationVisualCaches.TryGetValue(geometry.Box.Id, out var cache))
+        {
+            PrepareHeightAnimationVisualCache(geometry.Box);
+            if (!_heightAnimationVisualCaches.TryGetValue(geometry.Box.Id, out cache))
+            {
+                return false;
+            }
+        }
+
+        if (!geometry.Bounds.IntersectsWith(clipBounds))
+        {
+            return true;
+        }
+
+        var state = graphics.Save();
+        using var path = RoundedRectangle(
+            RectangleF.Inflate(geometry.Bounds, -0.5f, -0.5f),
+            (float)_runtime.State.Settings.Appearance.CornerRadius);
+        graphics.SetClip(path, CombineMode.Intersect);
+        graphics.DrawImage(
+            cache.Bitmap,
+            cache.Bounds,
+            new RectangleF(0, 0, cache.Bitmap.Width, cache.Bitmap.Height),
+            GraphicsUnit.Pixel);
+        graphics.Restore(state);
+        return true;
+    }
+
+    private void ReleaseHeightAnimationVisualCache(Guid boxId)
+    {
+        if (_heightAnimationVisualCaches.Remove(boxId, out var cache))
+        {
+            cache.Bitmap.Dispose();
+        }
+    }
+
+    private void ClearHeightAnimationVisualCaches()
+    {
+        foreach (var cache in _heightAnimationVisualCaches.Values)
+        {
+            cache.Bitmap.Dispose();
+        }
+        _heightAnimationVisualCaches.Clear();
+    }
+
     private void DrawDropTargetFeedback(
         Graphics graphics,
         BoxGeometry geometry,
@@ -471,7 +655,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             DrawDropInsertionFeedback(graphics, geometry, clipBounds);
         }
         if (!_runtime.AreDesktopItemsHidden && geometry.Box.IsMappedFolder &&
-            !_items.Any(item => item.Box.Id == geometry.Box.Id))
+            visibleItems.Length == 0)
         {
             DrawMappedFolderState(graphics, geometry, textColor);
         }
@@ -1121,22 +1305,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private static void DrawMenuIcon(Graphics graphics, RectangleF bounds, Color color)
     {
-        var centerX = bounds.Left + bounds.Width / 2;
-        var centerY = bounds.Top + bounds.Height / 2;
-        using var pen = new Pen(color, 1.6f)
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round
-        };
-        for (var offset = -3; offset <= 3; offset += 3)
-        {
-            graphics.DrawLine(
-                pen,
-                centerX - 4,
-                centerY + offset,
-                centerX + 4,
-                centerY + offset);
-        }
+        LucideRuntimeIcons.Draw(
+            graphics,
+            LucideRuntimeIcon.Menu,
+            bounds,
+            color,
+            15f);
     }
 
     private static void DrawAutoExpandButton(
@@ -1163,40 +1337,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        var iconColor = enabled ? accent : textColor;
-        // Keep the hit target at 26x28 DIP, but render the glyph at the
-        // compact Fluent icon size used by the other header buttons.
-        var scale = Math.Min(bounds.Width, bounds.Height) / 20f * 0.72f;
-        var originX = bounds.Left + (bounds.Width - 20 * scale) / 2;
-        var originY = bounds.Top + (bounds.Height - 20 * scale) / 2;
-        PointF Point(float x, float y) => new(originX + x * scale, originY + y * scale);
-        using var iconPen = new Pen(iconColor, Math.Max(1, scale))
-        {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-            LineJoin = LineJoin.Round
-        };
-        using var bracket = new GraphicsPath();
-        bracket.AddLine(Point(9.5f, 3.5f), Point(5, 3.5f));
-        bracket.AddBezier(Point(5, 3.5f), Point(4.17f, 3.5f), Point(3.5f, 4.17f), Point(3.5f, 5));
-        bracket.AddLine(Point(3.5f, 5), Point(3.5f, 15));
-        bracket.AddBezier(Point(3.5f, 15), Point(3.5f, 15.83f), Point(4.17f, 16.5f), Point(5, 16.5f));
-        bracket.AddLine(Point(5, 16.5f), Point(9.5f, 16.5f));
-        graphics.DrawPath(iconPen, bracket);
-        graphics.DrawLines(iconPen,
-        [
-            Point(12.5f, 4.5f),
-            Point(14.5f, 2.5f),
-            Point(16.5f, 4.5f)
-        ]);
-        graphics.DrawLine(iconPen, Point(14.5f, 2.75f), Point(14.5f, 7.5f));
-        graphics.DrawLine(iconPen, Point(14.5f, 12.5f), Point(14.5f, 17.25f));
-        graphics.DrawLines(iconPen,
-        [
-            Point(12.5f, 15.5f),
-            Point(14.5f, 17.5f),
-            Point(16.5f, 15.5f)
-        ]);
+        LucideRuntimeIcons.Draw(
+            graphics,
+            LucideRuntimeIcon.ChevronsUpDown,
+            bounds,
+            enabled ? accent : textColor,
+            15f);
     }
 
     private static Font CreateFont(

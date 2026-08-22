@@ -659,7 +659,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 }
                 catch (Exception exception)
                 {
-                    Forms.MessageBox.Show(exception.Message, "CrabDesk", Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
+                    DesktopConfirmationDialog.ShowMessage(
+                        this,
+                        _runtime.IsDarkTheme,
+                        "CrabDesk",
+                        exception.Message,
+                        DesktopDialogKind.Error);
                 }
                 return;
             }
@@ -680,7 +685,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 }
                 catch (Exception exception)
                 {
-                    Forms.MessageBox.Show(exception.Message, "CrabDesk", Forms.MessageBoxButtons.OK, Forms.MessageBoxIcon.Error);
+                    DesktopConfirmationDialog.ShowMessage(
+                        this,
+                        _runtime.IsDarkTheme,
+                        "CrabDesk",
+                        exception.Message,
+                        DesktopDialogKind.Error);
                 }
                 return;
             }
@@ -717,12 +727,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error("Desktop box drag-drop failed.", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "导入失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
         finally
         {

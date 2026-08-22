@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:core="using:CrabDesk.Core"
-    xmlns:icons="using:FluentIcons.WinUI">
+    xmlns:lucide="using:CrabDesk.WinUI.Controls">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
         <StackPanel Padding="{StaticResource PagePadding}"
                     HorizontalAlignment="Stretch" Spacing="24">
@@ -58,20 +58,20 @@
                                             Style="{StaticResource AccentButtonStyle}"
                                             ToolTipService.ToolTip="下载、验证并安装新版本">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <icons:FluentIcon Icon="ArrowDownload" />
+                                            <lucide:LucideIcon Icon="Download" />
                                             <TextBlock Text="下载并安装" />
                                         </StackPanel>
                                     </Button>
                                     <Button Command="{Binding OpenReleaseCommand}" IsEnabled="{Binding CanOpenRelease}"
                                             ToolTipService.ToolTip="查看发布页">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <icons:FluentIcon Icon="Open" />
+                                            <lucide:LucideIcon Icon="ExternalLink" />
                                             <TextBlock Text="发布页" />
                                         </StackPanel>
                                     </Button>
                                     <Button Command="{Binding CheckForUpdatesCommand}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <icons:FluentIcon Icon="ArrowSync" />
+                                            <lucide:LucideIcon Icon="RefreshCw" />
                                             <TextBlock Text="检查更新" />
                                         </StackPanel>
                                     </Button>

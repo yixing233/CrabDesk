@@ -321,7 +321,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 }
             });
             iconSurface.SetBoxTransformActive(() => monitorBoxes.Any(surface => surface.HasDynamicVisual));
-            iconSurface.SetBoxVisualsInParent(() => monitorBoxes.Any(surface => surface.HasDynamicVisual));
+            iconSurface.SetBoxVisualsInParent(() => monitorBoxes.Any(surface =>
+                    DesktopBoxForm.ShouldCompositeBoxVisualsInParent(
+                        surface.HasDynamicVisual,
+                        surface.IsPartialAnimationOnly)));
             iconSurface.SetBoxPointerHitTest(screenPoint =>
                 monitorBoxes.Any(surface => surface.IsPointOverBox(screenPoint)));
             iconSurface.SetBoxDynamicBounds(() =>
@@ -355,13 +358,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     boxSurface.UpdateDynamicSelectionAtCursor();
                 }
             });
-            iconSurface.SetBoxHeightAnimationOnly(() =>
+            iconSurface.SetBoxPartialAnimationOnly(() =>
             {
                 var dynamicBoxes = monitorBoxes
                     .Where(surface => surface.HasDynamicVisual)
                     .ToArray();
                 return dynamicBoxes.Length > 0 &&
-                    dynamicBoxes.All(surface => surface.IsHeightAnimationOnly);
+                    dynamicBoxes.All(surface => surface.IsPartialAnimationOnly);
             });
             foreach (var boxSurface in monitorBoxes)
             {

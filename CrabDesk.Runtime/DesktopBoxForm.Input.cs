@@ -33,6 +33,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (item is not null)
         {
             _runtime.ActivateDesktopKeyboardInput();
+            TryBeginSlowDoubleClickRename(item);
         }
         DiagnosticLog.Info(
             $"Surface mouse down monitor={_monitor.Id} button={eventArgs.Button} x={point.X:0} y={point.Y:0} box={box?.Box.Id} itemKind={item?.Item.Key.Kind}");
@@ -119,6 +120,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             FinishTitleEdit(true);
             PrepareBoxTransform(box.Box);
             _movingBox = box.Box;
+            PrepareMovingBoxVisualCache(box.Box);
         }
         else if (box.Body.Contains(point))
         {
@@ -183,6 +185,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return;
         }
+        _pendingRenameItem = null;
+        _pendingRenameBoxId = null;
         _dragStarted = true;
         _dynamicVisualVersion++;
         Invalidate();
@@ -615,26 +619,27 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var expandedBoxId = _hoverExpansion.Reset();
         if (expandedBoxId is { } id)
         {
-            CollapseHoverExpandedBox(id);
+            CollapseHoverExpandedBox(id, updateRegion: false);
         }
         else
         {
             _hoverExpandedBoxes.Clear();
             _geometryDirty = true;
         }
-        InvalidateItem(previousHoveredItem);
         if (expandedBoxIds.Length > 0)
         {
             UpdateWindowRegion();
-            foreach (var boxId in expandedBoxIds)
-            {
-                InvalidateBoxVisualArea(boxId);
-            }
+            RequestLayerRender();
+            return;
         }
+        InvalidateItem(previousHoveredItem);
     }
 
     private void UpdateHoverState(PointF point, bool updateItemHover = true)
     {
+        EnsureGeometry();
+        var hoveredBoxId = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point))?.Box.Id;
+        var focusChanged = FocusBoxOnHover(hoveredBoxId);
         var hoverChanged = false;
         ItemGeometry? previousHoveredItem = null;
         ItemGeometry? hoveredItem = null;
@@ -646,8 +651,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     candidate.Item.Key.ToString(),
                     _hoveredItemKey,
                     StringComparison.OrdinalIgnoreCase));
-            var hoveredBox = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-            hoveredItem = GetItemAtPoint(hoveredBox, point);
+            if (ShouldTrackItemHoverDuringScroll(
+                    _scrollAnimationKey is not null,
+                    _scrollHoverResumeTimer.Enabled))
+            {
+                var hoveredBox = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+                hoveredItem = GetItemAtPoint(hoveredBox, point);
+            }
             var itemKey = hoveredItem?.Item.Key.ToString();
             hoverChanged = !string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
             _hoveredItemKey = itemKey;
@@ -669,27 +679,50 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             : new HoverExpansionTransition(null, _hoverExpansion.Reset());
         if (transition.CollapsedBoxId is { } collapsedBoxId)
         {
-            CollapseHoverExpandedBox(collapsedBoxId);
+            CollapseHoverExpandedBox(collapsedBoxId, updateRegion: false);
             structureChanged = true;
         }
         if (transition.ExpandedBoxId is { } boxId)
         {
-            ExpandHoveredBox(boxId);
+            ExpandHoveredBox(boxId, updateRegion: false);
             structureChanged = true;
         }
         if (structureChanged)
         {
+            UpdateWindowRegion();
             HideItemHoverOverlay();
-            InvalidateBoxVisualArea(transition.CollapsedBoxId);
-            InvalidateBoxVisualArea(transition.ExpandedBoxId);
+            RequestLayerRender();
         }
-        else if (hoverChanged)
+        else
         {
-            // The shared icon layer contains only settled box pixels. Keep
-            // pointer feedback in a small child layer so crossing items does
-            // not upload the entire monitor-sized bitmap.
-            RequestItemHoverVisualUpdate();
+            if (focusChanged)
+            {
+                RequestVisualLayerRender();
+            }
+            if (hoverChanged)
+            {
+                // The shared icon layer contains only settled box pixels. Keep
+                // pointer feedback in a small child layer so crossing items does
+                // not upload the entire monitor-sized bitmap.
+                RequestItemHoverVisualUpdate();
+            }
         }
+    }
+
+    private bool FocusBoxOnHover(Guid? boxId)
+    {
+        if (boxId is not { } focusedBoxId || _focusedBoxId == focusedBoxId)
+        {
+            return false;
+        }
+
+        var previousBoxId = _focusedBoxId;
+        _focusedBoxId = focusedBoxId;
+        _geometryDirty = true;
+        RebuildGeometry();
+        DiagnosticLog.Info(
+            $"Box hover focus monitor={_monitor.Id} {previousBoxId?.ToString("N") ?? "<none>"} -> {focusedBoxId:N}");
+        return true;
     }
 
     private void FinishSelectionGesture()
@@ -724,6 +757,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         DiagnosticLog.Info(
             $"Surface mouse up monitor={_monitor.Id} button={eventArgs.Button} moving={_movingBox is not null} resizing={_resizingBox is not null} selecting={_selectionBox is not null}");
+        if (eventArgs.Button == Forms.MouseButtons.Left)
+        {
+            CommitPendingSlowDoubleClickRename();
+        }
         if (_selectionBox is not null)
         {
             FinishSelectionGesture();
@@ -743,6 +780,63 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var grabOffsetX = _pressPoint.X - _startBounds.X;
         var grabOffsetY = _pressPoint.Y - _startBounds.Y;
         CompleteBoxTransform(movingBox, resizingBox, grabOffsetX, grabOffsetY, true);
+    }
+
+    // Match Explorer's slow double-click behavior used by desktop icons.
+    // A drag clears the pending state so dragging always wins.
+    private void TryBeginSlowDoubleClickRename(ItemGeometry item)
+    {
+        var now = DateTime.UtcNow;
+        var key = item.Item.Key.ToString();
+        var isSlowDoubleClick = SlowDoubleClickRenamePolicy.IsSlowDoubleClick(
+            _lastRenameClickKey,
+            _lastRenameClickUtc,
+            key,
+            now,
+            Forms.SystemInformation.DoubleClickTime);
+        _lastRenameClickKey = key;
+        _lastRenameClickUtc = now;
+        if (isSlowDoubleClick &&
+            item.Item.FileSystemPath is not null &&
+            item.Box.MappedFolder?.IsReadOnly != true)
+        {
+            _pendingRenameItem = item.Item;
+            _pendingRenameBoxId = item.Box.Id;
+            _pendingRenamePressUtc = now;
+        }
+    }
+
+    private void CommitPendingSlowDoubleClickRename()
+    {
+        var item = _pendingRenameItem;
+        var boxId = _pendingRenameBoxId;
+        _pendingRenameItem = null;
+        _pendingRenameBoxId = null;
+        if (item is null ||
+            boxId is not { } targetBoxId ||
+            _dragStarted ||
+            _selectionBox is not null ||
+            _movingBox is not null ||
+            _resizingBox is not null ||
+            IsDisposed)
+        {
+            return;
+        }
+
+        var elapsed = (DateTime.UtcNow - _pendingRenamePressUtc).TotalMilliseconds;
+        if (elapsed > SlowDoubleClickRenamePolicy.RenameLimitMilliseconds)
+        {
+            return;
+        }
+
+        var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == targetBoxId);
+        if (box is null)
+        {
+            return;
+        }
+
+        _lastRenameClickKey = null;
+        _ = RenameItemAsync(box, item);
     }
 
     protected override void OnMouseCaptureChanged(EventArgs eventArgs)
@@ -783,6 +877,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         _movingBox = null;
         _resizingBox = null;
+        ReleaseMovingBoxVisualCache();
         _geometryDirty = true;
         _resizeEdges = ResizeEdges.None;
         _pressedItem = null;
@@ -816,11 +911,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         if (movingBox is not null)
         {
-            _runtime.BoxChanged(movingBox, true, bringToFront: true);
+            _runtime.BoxChanged(movingBox, true);
         }
         else if (resizingBox is not null)
         {
-            _runtime.BoxChanged(resizingBox, true, bringToFront: true);
+            _runtime.BoxChanged(resizingBox, true);
         }
     }
 
@@ -1086,39 +1181,50 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var current = _scrollAnimationKey == scrollKey && _scrollAnimationTimer.Enabled
             ? GetAnimatedScrollOffset()
             : _scrollOffsets.GetValueOrDefault(scrollKey);
-        // A standard notch is 120 units; high-resolution touchpads deliver
-        // smaller deltas more often, so scale the step proportionally.
-        var step = GetScrollStep(box) * (Math.Abs(eventArgs.Delta) / 120d);
-        step = Math.Max(step, 4d);
+        // A standard notch is 120 units. Map the configured wheel lines onto
+        // thirds of an item cell, then apply a small reduction so the default
+        // three-line setting advances about 0.75 cell instead of jumping three
+        // complete rows. High-resolution touchpads keep their proportional
+        // delta and therefore remain finer than a mouse wheel.
+        var step = CalculateSmoothScrollStep(
+            GetScrollUnit(box),
+            Forms.SystemInformation.MouseWheelScrollLines,
+            Math.Abs(eventArgs.Delta));
         var target = Math.Clamp(current - Math.Sign(eventArgs.Delta) * step, 0, extent);
         if (Math.Abs(target - current) < 0.5)
         {
             return;
         }
 
-        // The wheel moves the content under the cursor, so the previously
-        // highlighted item no longer matches the pointer. Clear it here;
-        // the next MouseMove re-establishes hover for whatever is under the
-        // cursor after the scroll settles.
-        ClearItemHover();
         StartScrollAnimation(scrollKey, current, target);
     }
 
-    private double GetScrollStep(BoxGeometry box)
+    private double GetScrollUnit(BoxGeometry box)
     {
-        var lines = Forms.SystemInformation.MouseWheelScrollLines;
-        if (lines <= 0)
-        {
-            lines = 3;
-        }
-        var step = box.Box.ViewMode == BoxViewMode.List
+        return box.Box.ViewMode == BoxViewMode.List
             ? Math.Max(48, box.Box.Appearance.IconSize + 12)
             : DesktopItemLayoutEngine.GetGridCellHeight(
                 box.Box.Appearance.IconSize,
                 DesktopItemLayoutEngine.ScaleIconSpacing(
                     _runtime.State.Settings.Appearance.IconVerticalSpacing,
                     box.Box.Appearance.IconSize));
-        return Math.Max(1, step * lines);
+    }
+
+    internal static double CalculateSmoothScrollStep(
+        double itemUnit,
+        int configuredScrollLines,
+        int wheelDelta)
+    {
+        if (itemUnit <= 0 || wheelDelta == 0)
+        {
+            return 0;
+        }
+
+        var lines = configuredScrollLines > 0 ? configuredScrollLines : 3;
+        var deltaScale = Math.Abs(wheelDelta) / 120d;
+        return Math.Max(
+            2d,
+            itemUnit * (lines / 3d) * ScrollWheelStepFraction * deltaScale);
     }
 
     private double GetAnimatedScrollOffset()
@@ -1133,12 +1239,22 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void StartScrollAnimation(ItemViewKey key, double from, double to)
     {
+        // Keep the independent hover overlay hidden for the complete scroll
+        // animation. Re-enabling it from MouseMove between animation frames
+        // leaves the highlight at an obsolete item position.
+        _scrollHoverResumeTimer.Stop();
+        ClearItemHover();
+        var startsNewDynamicPass = !IsScrollAnimationActive || _scrollAnimationKey != key;
         _scrollAnimationKey = key;
         _scrollAnimationFrom = from;
         _scrollAnimationTo = to;
         _scrollAnimationStartedUtc = DateTime.UtcNow;
         _scrollAnimationTimer.Stop();
         _scrollAnimationTimer.Start();
+        if (startsNewDynamicPass)
+        {
+            _dynamicVisualVersion++;
+        }
         ApplyScrollOffset(key, from);
     }
 
@@ -1156,18 +1272,33 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ScrollAnimationDurationMilliseconds);
         var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
         var offset = _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
-        if (progress >= 1)
+        var completed = progress >= 1;
+        if (completed)
         {
             offset = _scrollAnimationTo;
+        }
+        ApplyScrollOffset(key, offset, requestRender: !completed);
+        if (completed)
+        {
             _scrollAnimationKey = null;
             _scrollAnimationTimer.Stop();
+            _dynamicVisualVersion++;
+            _scrollHoverResumeTimer.Stop();
+            _scrollHoverResumeTimer.Start();
+            RequestVisualLayerRender();
         }
-        ApplyScrollOffset(key, offset);
     }
 
-    private void ApplyScrollOffset(ItemViewKey key, double offset)
+    private void OnScrollHoverResumeTimerTick(object? sender, EventArgs eventArgs)
+    {
+        _scrollHoverResumeTimer.Stop();
+        QueueHoverReconcile();
+    }
+
+    private void ApplyScrollOffset(ItemViewKey key, double offset, bool requestRender = true)
     {
         _scrollOffsets[key] = offset;
+        ClearExpandedItemHitBounds(key.BoxId);
         // Only the item rectangles depend on the scroll offset; the box
         // chrome (header, tabs, body) stays untouched. Skipping the full
         // geometry rebuild keeps each animation frame cheap enough to render
@@ -1175,7 +1306,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (_geometryDirty)
         {
             // A full rebuild is already queued; it picks up the offset.
-            RequestLayerRender();
+            if (requestRender)
+            {
+                RequestVisualLayerRender();
+            }
             return;
         }
         _items.Clear();
@@ -1183,7 +1317,23 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             BuildItemGeometry(box);
         }
-        RequestLayerRender();
+        if (requestRender)
+        {
+            // Scrolling never changes the box input region. In desktop
+            // composition mode, bypass the full-monitor hit-mask upload and
+            // let the icon layer update only the scrolling box rectangle.
+            RequestVisualLayerRender();
+        }
+    }
+
+    private void ClearExpandedItemHitBounds(Guid boxId)
+    {
+        foreach (var key in _expandedItemHitBounds.Keys
+                     .Where(candidate => candidate.BoxId == boxId)
+                     .ToArray())
+        {
+            _expandedItemHitBounds.Remove(key);
+        }
     }
 
 }

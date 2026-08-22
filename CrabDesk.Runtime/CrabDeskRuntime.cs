@@ -1175,7 +1175,7 @@ public sealed class CrabDeskRuntime : IDisposable
         return complete;
     }
 
-    public void BoxChanged(DesktopBox box, bool rebuild = false, bool bringToFront = false)
+    public void BoxChanged(DesktopBox box, bool rebuild = false)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
             ?? Monitors.FirstOrDefault(candidate => candidate.IsPrimary)
@@ -1194,10 +1194,6 @@ public sealed class CrabDeskRuntime : IDisposable
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
             minimumWidth,
             minimumHeight);
-        if (bringToFront)
-        {
-            BoxStacking.Move(State.Boxes, box.Id, BoxStackMove.ToFront);
-        }
         NotifyWorkspaceChanged(rebuild);
     }
 
@@ -3906,29 +3902,35 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         _trayMenu = new FluentContextMenuStrip
         {
-            MinimumMenuWidth = 210,
-            ShowRootCheckMargin = true
+            MinimumMenuWidth = 210
         };
         _trayMenu.Opening += (_, _) => UpdateTrayMenu();
         _trayMenu.Opened += (_, _) => ApplyContextMenuTheme(_trayMenu);
 
-        var showSettingsItem = new System.Windows.Forms.ToolStripMenuItem(
+        var showSettingsItem = new FluentToolStripMenuItem(
             "打开 CrabDesk",
             null,
             (_, _) => _beginInvoke(() => RequestShowSettings()));
+        LucideRuntimeIcons.SetMenuIcon(showSettingsItem, LucideRuntimeIcon.AppWindow);
         showSettingsItem.Font = new System.Drawing.Font(showSettingsItem.Font, System.Drawing.FontStyle.Bold);
         _trayMenu.Items.Add(showSettingsItem);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
-            "智能整理",
-            null,
-            (_, _) => _beginInvoke(() => SmartOrganize())));
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
-            "新建盒子",
-            null,
-            (_, _) => _beginInvoke(() => AddBox())));
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        _pauseTrayItem = new System.Windows.Forms.ToolStripMenuItem(
+        var newBoxItem = new FluentToolStripMenuItem(
+            "新建盒子",
+            null,
+            (_, _) => _beginInvoke(() => AddBox()));
+        LucideRuntimeIcons.SetMenuIcon(newBoxItem, LucideRuntimeIcon.PackagePlus);
+        _trayMenu.Items.Add(newBoxItem);
+        var organizeItem = new FluentToolStripMenuItem(
+            "智能整理",
+            null,
+            (_, _) => _beginInvoke(() => SmartOrganize()));
+        LucideRuntimeIcons.SetMenuIcon(organizeItem, LucideRuntimeIcon.Sparkles);
+        _trayMenu.Items.Add(organizeItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        _pauseTrayItem = new FluentToolStripMenuItem(
             "暂停桌面接管",
             null,
             (_, _) => _beginInvoke(() =>
@@ -3936,13 +3938,17 @@ public sealed class CrabDeskRuntime : IDisposable
                 SetPaused(!IsPaused);
                 UpdateTrayMenu();
             }));
+        LucideRuntimeIcons.SetMenuIcon(_pauseTrayItem, LucideRuntimeIcon.Pause);
         _trayMenu.Items.Add(_pauseTrayItem);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
+        var reconnectItem = new FluentToolStripMenuItem(
             "重新连接桌面",
             null,
-            (_, _) => _beginInvoke(async () => await ReconnectDesktopAsync())));
+            (_, _) => _beginInvoke(async () => await ReconnectDesktopAsync()));
+        LucideRuntimeIcons.SetMenuIcon(reconnectItem, LucideRuntimeIcon.RefreshCw);
+        _trayMenu.Items.Add(reconnectItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
 
-        _startupTrayItem = new System.Windows.Forms.ToolStripMenuItem(
+        _startupTrayItem = new FluentToolStripMenuItem(
             "开机启动",
             null,
             (_, _) => _beginInvoke(() =>
@@ -3950,18 +3956,26 @@ public sealed class CrabDeskRuntime : IDisposable
                 SetStartWithWindows(!State.Settings.StartWithWindows);
                 UpdateTrayMenu();
             }));
+        LucideRuntimeIcons.SetMenuIcon(
+            _startupTrayItem,
+            State.Settings.StartWithWindows
+                ? LucideRuntimeIcon.ToggleRight
+                : LucideRuntimeIcon.ToggleLeft);
         _trayMenu.Items.Add(_startupTrayItem);
 
-        var themeMenu = new System.Windows.Forms.ToolStripMenuItem("主题");
+        var themeMenu = new FluentToolStripMenuItem("主题");
+        LucideRuntimeIcons.SetMenuIcon(themeMenu, LucideRuntimeIcon.SunMoon);
         AddThemeTrayItem(themeMenu, "跟随系统", ApplicationThemeMode.System);
         AddThemeTrayItem(themeMenu, "浅色", ApplicationThemeMode.Light);
         AddThemeTrayItem(themeMenu, "深色", ApplicationThemeMode.Dark);
         _trayMenu.Items.Add(themeMenu);
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripMenuItem(
+        var exitItem = new FluentToolStripMenuItem(
             "退出 CrabDesk",
             null,
-            (_, _) => _beginInvoke(RequestExit)));
+            (_, _) => _beginInvoke(RequestExit));
+        LucideRuntimeIcons.SetMenuIcon(exitItem, LucideRuntimeIcon.LogOut);
+        _trayMenu.Items.Add(exitItem);
 
         _applicationIcon = LoadApplicationIcon();
         _trayIcon = new System.Windows.Forms.NotifyIcon
@@ -3987,11 +4001,19 @@ public sealed class CrabDeskRuntime : IDisposable
         if (_pauseTrayItem is not null)
         {
             _pauseTrayItem.Text = IsPaused ? "恢复桌面接管" : "暂停桌面接管";
+            LucideRuntimeIcons.SetMenuIcon(
+                _pauseTrayItem,
+                IsPaused ? LucideRuntimeIcon.Play : LucideRuntimeIcon.Pause);
             _pauseTrayItem.Checked = IsPaused;
         }
         if (_startupTrayItem is not null)
         {
             _startupTrayItem.Checked = State.Settings.StartWithWindows;
+            LucideRuntimeIcons.SetMenuIcon(
+                _startupTrayItem,
+                State.Settings.StartWithWindows
+                    ? LucideRuntimeIcon.ToggleRight
+                    : LucideRuntimeIcon.ToggleLeft);
         }
         foreach (var (mode, item) in _themeTrayItems)
         {
@@ -4015,15 +4037,18 @@ public sealed class CrabDeskRuntime : IDisposable
         // paddings and minimum width must scale together with it - otherwise
         // the text overflows the rows and gets clipped on high-DPI displays.
         var dpiScale = GetMenuDpiScale(menu);
-        menu.Padding = new System.Windows.Forms.Padding((int)Math.Round(5 * dpiScale));
+        menu.ShowImageMargin = false;
+        menu.ShowCheckMargin = false;
         var minimumWidth = menu is FluentContextMenuStrip fluentMenu
             ? fluentMenu.MinimumMenuWidth
             : 112;
         minimumWidth = (int)Math.Round(minimumWidth * dpiScale);
-        var menuWidth = Math.Max(minimumWidth, menu.GetPreferredSize(System.Drawing.Size.Empty).Width);
+        var menuWidth = CalculateMenuWidth(
+            menu.Items,
+            minimumWidth,
+            dpiScale,
+            menu.Padding.Horizontal);
         menu.MinimumSize = new System.Drawing.Size(menuWidth, 0);
-        menu.ShowImageMargin = false;
-        menu.ShowCheckMargin = menu is not FluentContextMenuStrip rootMenu || rootMenu.ShowRootCheckMargin;
         menu.DropShadowEnabled = true;
         ApplyTrayColors(menu.Items, IsDarkTheme);
         menu.BackColor = IsDarkTheme
@@ -4054,14 +4079,47 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    private int CalculateMenuWidth(
+        System.Windows.Forms.ToolStripItemCollection items,
+        int minimumWidth,
+        float dpiScale,
+        int horizontalMenuPadding)
+    {
+        var widestText = 0;
+        var hasSubmenu = false;
+        foreach (System.Windows.Forms.ToolStripItem item in items)
+        {
+            if (item is System.Windows.Forms.ToolStripSeparator)
+            {
+                continue;
+            }
+
+            widestText = Math.Max(
+                widestText,
+                System.Windows.Forms.TextRenderer.MeasureText(
+                    item.Text,
+                    item.Font ?? _menuFont,
+                    System.Drawing.Size.Empty,
+                    System.Windows.Forms.TextFormatFlags.SingleLine |
+                    System.Windows.Forms.TextFormatFlags.NoPadding).Width);
+            hasSubmenu |= item is System.Windows.Forms.ToolStripMenuItem { HasDropDownItems: true };
+        }
+
+        var leadingSlot = (int)Math.Ceiling(32 * dpiScale);
+        var trailingSlot = (int)Math.Ceiling((hasSubmenu ? 30 : 10) * dpiScale);
+        var itemMargins = (int)Math.Ceiling(2 * dpiScale);
+        return Math.Max(
+            minimumWidth,
+            leadingSlot + widestText + trailingSlot + horizontalMenuPadding + itemMargins);
+    }
+
     private void ApplyMenuMetrics(
         System.Windows.Forms.ToolStripItemCollection items,
         int availableWidth,
         float dpiScale)
     {
-        var horizontalPadding = (int)Math.Round(8 * dpiScale);
         var itemMargin = (int)Math.Round(1 * dpiScale);
-        var itemHeight = (int)Math.Round(32 * dpiScale);
+        var itemHeight = (int)Math.Round(30 * dpiScale);
         var separatorMarginX = (int)Math.Round(8 * dpiScale);
         var separatorMarginY = (int)Math.Round(3 * dpiScale);
         foreach (System.Windows.Forms.ToolStripItem item in items)
@@ -4074,14 +4132,12 @@ public sealed class CrabDeskRuntime : IDisposable
                     separatorMarginX,
                     separatorMarginY);
                 item.AutoSize = false;
-                item.Width = Math.Max(1, availableWidth - item.Margin.Horizontal);
+                item.Size = new System.Drawing.Size(
+                    Math.Max(1, availableWidth - item.Margin.Horizontal),
+                    Math.Max(1, (int)Math.Round(dpiScale)));
                 continue;
             }
-            item.Padding = new System.Windows.Forms.Padding(
-                horizontalPadding,
-                0,
-                horizontalPadding,
-                0);
+            item.Padding = System.Windows.Forms.Padding.Empty;
             item.Margin = new System.Windows.Forms.Padding(itemMargin, 0, itemMargin, 0);
             item.AutoSize = false;
             item.Size = new System.Drawing.Size(
@@ -4092,21 +4148,22 @@ public sealed class CrabDeskRuntime : IDisposable
                 var dropDown = menuItem.DropDown;
                 dropDown.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
                 dropDown.Font = _menuFont;
-                dropDown.Padding = new System.Windows.Forms.Padding((int)Math.Round(5 * dpiScale));
+                if (dropDown is System.Windows.Forms.ToolStripDropDownMenu dropDownMenu)
+                {
+                    dropDownMenu.ShowImageMargin = false;
+                    dropDownMenu.ShowCheckMargin = false;
+                }
                 dropDown.BackColor = IsDarkTheme
                     ? System.Drawing.Color.FromArgb(37, 40, 45)
                     : System.Drawing.Color.FromArgb(252, 252, 252);
                 dropDown.ForeColor = IsDarkTheme
                     ? System.Drawing.Color.FromArgb(244, 245, 247)
                     : System.Drawing.Color.FromArgb(32, 36, 42);
-                if (dropDown is System.Windows.Forms.ToolStripDropDownMenu dropDownMenu)
-                {
-                    dropDownMenu.ShowImageMargin = false;
-                    dropDownMenu.ShowCheckMargin = true;
-                }
-                var dropDownWidth = Math.Max(
-                    (int)Math.Round(96 * dpiScale),
-                    dropDown.GetPreferredSize(System.Drawing.Size.Empty).Width);
+                var dropDownWidth = CalculateMenuWidth(
+                    menuItem.DropDownItems,
+                    (int)Math.Round(112 * dpiScale),
+                    dpiScale,
+                    dropDown.Padding.Horizontal);
                 dropDown.MinimumSize = new System.Drawing.Size(dropDownWidth, 0);
                 ApplyMenuMetrics(
                     menuItem.DropDownItems,
@@ -4162,7 +4219,7 @@ public sealed class CrabDeskRuntime : IDisposable
         string title,
         ApplicationThemeMode mode)
     {
-        var item = new System.Windows.Forms.ToolStripMenuItem(
+        var item = new FluentToolStripMenuItem(
             title,
             null,
             (_, _) => _beginInvoke(() => SetThemeMode(mode)));

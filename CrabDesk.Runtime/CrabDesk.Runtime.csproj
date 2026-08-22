@@ -20,4 +20,8 @@
     <ProjectReference Include="..\CrabDesk.Native\CrabDesk.Native.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Assets\lucide.ttf" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

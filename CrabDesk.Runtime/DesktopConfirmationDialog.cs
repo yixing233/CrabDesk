@@ -13,6 +13,13 @@ using WpfShapes = System.Windows.Shapes;
 
 namespace CrabDesk.Runtime;
 
+internal enum DesktopDialogKind
+{
+    Confirmation,
+    Warning,
+    Error
+}
+
 /// <summary>
 /// A desktop-owned confirmation shell whose content is rendered with WPF.
 /// Keeping the small WinForms owner preserves correct modality for an
@@ -29,14 +36,17 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
     private const int DwmWindowCornerPreferenceRound = 2;
 
     private readonly Color _borderColor;
-    private readonly WpfControls.Button _cancelButton;
+    private readonly WpfControls.Button _focusButton;
+    private readonly bool _acceptOnEnter;
 
     private DesktopConfirmationDialog(
         bool isDarkTheme,
         string title,
         string message,
-        string primaryText)
+        string primaryText,
+        DesktopDialogKind kind)
     {
+        _acceptOnEnter = kind is not DesktopDialogKind.Confirmation;
         var background = isDarkTheme
             ? Color.FromArgb(37, 40, 45)
             : Color.FromArgb(255, 255, 255);
@@ -64,27 +74,31 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         var secondaryBorder = isDarkTheme
             ? Color.FromArgb(72, 77, 85)
             : Color.FromArgb(217, 221, 226);
-        var danger = isDarkTheme
-            ? Color.FromArgb(219, 80, 86)
-            : Color.FromArgb(198, 45, 36);
-        var dangerHover = isDarkTheme
-            ? Color.FromArgb(232, 94, 100)
-            : Color.FromArgb(180, 39, 31);
-        var dangerPressed = isDarkTheme
-            ? Color.FromArgb(193, 63, 69)
-            : Color.FromArgb(152, 33, 26);
-        var dangerTint = isDarkTheme
-            ? Color.FromArgb(44, 219, 80, 86)
-            : Color.FromArgb(30, 198, 45, 36);
+        var isWarning = kind is DesktopDialogKind.Warning;
+        var action = isWarning
+            ? isDarkTheme ? Color.FromArgb(240, 180, 60) : Color.FromArgb(166, 100, 0)
+            : isDarkTheme ? Color.FromArgb(219, 80, 86) : Color.FromArgb(198, 45, 36);
+        var actionHover = isWarning
+            ? isDarkTheme ? Color.FromArgb(248, 193, 82) : Color.FromArgb(145, 87, 0)
+            : isDarkTheme ? Color.FromArgb(232, 94, 100) : Color.FromArgb(180, 39, 31);
+        var actionPressed = isWarning
+            ? isDarkTheme ? Color.FromArgb(205, 145, 39) : Color.FromArgb(120, 72, 0)
+            : isDarkTheme ? Color.FromArgb(193, 63, 69) : Color.FromArgb(152, 33, 26);
+        var actionTint = Color.FromArgb(isDarkTheme ? 44 : 30, action);
+        var actionText = isWarning
+            ? Color.FromArgb(45, 33, 8)
+            : Color.White;
         var focusColor = isDarkTheme
             ? Color.FromArgb(138, 180, 248)
             : Color.FromArgb(0, 103, 192);
 
         Text = title;
-        AccessibleName = "CrabDesk confirmation dialog";
+        AccessibleName = "CrabDesk dialog";
         AutoScaleMode = Forms.AutoScaleMode.Dpi;
         BackColor = background;
-        ClientSize = new Size(DialogWidth, DialogHeight);
+        ClientSize = new Size(
+            DialogWidth,
+            kind is DesktopDialogKind.Confirmation ? DialogHeight : 250);
         FormBorderStyle = Forms.FormBorderStyle.None;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -97,6 +111,7 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
             title,
             message,
             primaryText,
+            kind,
             background,
             titleColor,
             bodyColor,
@@ -105,12 +120,13 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
             secondaryPressed,
             secondaryText,
             secondaryBorder,
-            danger,
-            dangerHover,
-            dangerPressed,
-            dangerTint,
+            action,
+            actionHover,
+            actionPressed,
+            actionTint,
+            actionText,
             focusColor,
-            out _cancelButton);
+            out _focusButton);
         var host = new FormsIntegration.ElementHost
         {
             Dock = Forms.DockStyle.Fill,
@@ -119,8 +135,8 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         };
         Controls.Add(host);
 
-        Shown += (_, _) => _cancelButton.Dispatcher.BeginInvoke(
-            (Action)(() => _cancelButton.Focus()));
+        Shown += (_, _) => _focusButton.Dispatcher.BeginInvoke(
+            (Action)(() => _focusButton.Focus()));
         KeyDown += OnDialogKeyDown;
     }
 
@@ -141,8 +157,24 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         string message,
         string primaryText)
     {
-        using var dialog = new DesktopConfirmationDialog(isDarkTheme, title, message, primaryText);
+        using var dialog = new DesktopConfirmationDialog(
+            isDarkTheme,
+            title,
+            message,
+            primaryText,
+            DesktopDialogKind.Confirmation);
         return dialog.ShowDialog(owner) == Forms.DialogResult.OK;
+    }
+
+    internal static void ShowMessage(
+        Forms.IWin32Window owner,
+        bool isDarkTheme,
+        string title,
+        string message,
+        DesktopDialogKind kind)
+    {
+        using var dialog = new DesktopConfirmationDialog(isDarkTheme, title, message, "确定", kind);
+        _ = dialog.ShowDialog(owner);
     }
 
     protected override void OnHandleCreated(EventArgs eventArgs)
@@ -175,6 +207,7 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         string title,
         string message,
         string primaryText,
+        DesktopDialogKind kind,
         Color background,
         Color titleColor,
         Color bodyColor,
@@ -183,12 +216,13 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         Color secondaryPressed,
         Color secondaryText,
         Color secondaryBorder,
-        Color danger,
-        Color dangerHover,
-        Color dangerPressed,
-        Color dangerTint,
+        Color action,
+        Color actionHover,
+        Color actionPressed,
+        Color actionTint,
+        Color actionText,
         Color focusColor,
-        out WpfControls.Button cancelButton)
+        out WpfControls.Button focusButton)
     {
         var root = new WpfControls.Grid
         {
@@ -214,13 +248,18 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
             VerticalAlignment = Wpf.VerticalAlignment.Top,
             Margin = new Wpf.Thickness(0, 0, 16, 0)
         };
-        var badgeFill = new WpfShapes.Ellipse { Fill = ToBrush(dangerTint) };
+        var badgeFill = new WpfShapes.Ellipse { Fill = ToBrush(actionTint) };
         var badgeGlyph = new WpfControls.TextBlock
         {
-            Text = "\uE74D",
-            FontFamily = CreateFontFamily("Segoe MDL2 Assets"),
+            Text = LucideRuntimeIcons.GetGlyph(kind switch
+            {
+                DesktopDialogKind.Warning => LucideRuntimeIcon.TriangleAlert,
+                DesktopDialogKind.Error => LucideRuntimeIcon.CircleAlert,
+                _ => LucideRuntimeIcon.Trash2
+            }),
+            FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(),
             FontSize = 20,
-            Foreground = ToBrush(danger),
+            Foreground = ToBrush(action),
             HorizontalAlignment = Wpf.HorizontalAlignment.Center,
             VerticalAlignment = Wpf.VerticalAlignment.Center
         };
@@ -277,7 +316,7 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         WpfControls.Grid.SetColumn(actions, 1);
         WpfControls.Grid.SetRow(actions, 2);
 
-        cancelButton = CreateButton(
+        var cancelButton = CreateButton(
             "取消",
             ToBrush(secondarySurface),
             ToBrush(secondaryHover),
@@ -291,13 +330,18 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         actions.Children.Add(cancelButton);
         WpfControls.Grid.SetColumn(cancelButton, 0);
 
+        if (kind is not DesktopDialogKind.Confirmation)
+        {
+            cancelButton.Visibility = Wpf.Visibility.Collapsed;
+        }
+
         var primaryButton = CreateButton(
             primaryText,
-            ToBrush(danger),
-            ToBrush(dangerHover),
-            ToBrush(dangerPressed),
-            WpfMedia.Brushes.White,
-            ToBrush(danger),
+            ToBrush(action),
+            ToBrush(actionHover),
+            ToBrush(actionPressed),
+            ToBrush(actionText),
+            ToBrush(action),
             ToBrush(focusColor));
         primaryButton.MinWidth = 96;
         WpfAutomation.SetName(primaryButton, primaryText);
@@ -305,11 +349,18 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         actions.Children.Add(primaryButton);
         WpfControls.Grid.SetColumn(primaryButton, 2);
 
+        focusButton = kind is DesktopDialogKind.Confirmation ? cancelButton : primaryButton;
+
         content.PreviewKeyDown += (_, eventArgs) =>
         {
-            if (eventArgs.Key is WpfInput.Key.Escape or WpfInput.Key.Enter)
+            if (eventArgs.Key == WpfInput.Key.Escape)
             {
                 Complete(false);
+                eventArgs.Handled = true;
+            }
+            else if (eventArgs.Key == WpfInput.Key.Enter)
+            {
+                Complete(_acceptOnEnter);
                 eventArgs.Handled = true;
             }
         };
@@ -422,9 +473,14 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
 
     private void OnDialogKeyDown(object? sender, Forms.KeyEventArgs eventArgs)
     {
-        if (eventArgs.KeyCode == Forms.Keys.Escape || eventArgs.KeyCode == Forms.Keys.Enter)
+        if (eventArgs.KeyCode == Forms.Keys.Escape)
         {
             Complete(false);
+            eventArgs.Handled = true;
+        }
+        else if (eventArgs.KeyCode == Forms.Keys.Enter)
+        {
+            Complete(_acceptOnEnter);
             eventArgs.Handled = true;
         }
     }

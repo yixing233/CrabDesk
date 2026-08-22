@@ -11,6 +11,7 @@
                 <ResourceDictionary Source="Resources/DesignTokens.xaml" />
                 <ResourceDictionary Source="Resources/ControlStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <FontFamily x:Key="LucideFontFamily">ms-appx:///Assets/lucide.ttf#lucide</FontFamily>
             <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:BooleanNegationConverter x:Key="BooleanNegationConverter" />
             <converters:BooleanNegationToVisibilityConverter x:Key="BooleanNegationToVisibilityConverter" />

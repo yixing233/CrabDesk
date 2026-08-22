@@ -1,8 +1,7 @@
 <Page
     x:Class="CrabDesk.WinUI.Views.AiClassificationPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:icons="using:FluentIcons.WinUI">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   HorizontalContentAlignment="Stretch">

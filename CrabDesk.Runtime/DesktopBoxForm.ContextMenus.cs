@@ -22,25 +22,30 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var menu = CreateContextMenu();
         if (box.IsMappedFolder)
         {
-            menu.Items.Add("打开映射文件夹", null, (_, _) =>
+            menu.Items.Add(CreateLucideMenuItem(
+                "打开映射文件夹",
+                LucideRuntimeIcon.FolderOpen,
+                (_, _) =>
                 TryAction(() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(box.MappedFolder!.Path)
                 {
                     UseShellExecute = true
-                })));
+                }))));
             menu.Items.Add(new Forms.ToolStripSeparator());
         }
-        var paste = new Forms.ToolStripMenuItem("粘贴")
+        var paste = new FluentToolStripMenuItem("粘贴")
         {
             Enabled = _runtime.CanPasteIntoBox(box)
         };
+        LucideRuntimeIcons.SetMenuIcon(paste, LucideRuntimeIcon.ClipboardPaste);
         paste.Click += async (_, _) => await PasteIntoBoxAsync(box);
         menu.Items.Add(paste);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("重命名", null, (_, _) =>
+        menu.Items.Add(CreateLucideMenuItem("重命名", LucideRuntimeIcon.Pencil, (_, _) =>
         {
             BeginInvoke((Action)(() => BeginTitleEdit(box)));
-        });
-        var displayModeMenu = new Forms.ToolStripMenuItem("显示模式");
+        }));
+        var displayModeMenu = new FluentToolStripMenuItem("显示模式");
+        LucideRuntimeIcons.SetMenuIcon(displayModeMenu, LucideRuntimeIcon.ChevronsUpDown);
         AddMenuChoice(
             displayModeMenu,
             "固定展开",
@@ -56,17 +61,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             AddManualTabMenu(menu, box);
         }
-        var accentMenu = new Forms.ToolStripMenuItem("颜色条颜色");
-        var stackMenu = new Forms.ToolStripMenuItem("层级");
-        stackMenu.DropDownItems.Add("置于顶层", null, (_, _) =>
-            _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToFront));
-        stackMenu.DropDownItems.Add("上移一层", null, (_, _) =>
-            _runtime.MoveBoxInStack(box.Id, BoxStackMove.Forward));
-        stackMenu.DropDownItems.Add("下移一层", null, (_, _) =>
-            _runtime.MoveBoxInStack(box.Id, BoxStackMove.Backward));
-        stackMenu.DropDownItems.Add("置于底层", null, (_, _) =>
-            _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToBack));
+        var accentMenu = new FluentToolStripMenuItem("颜色条颜色");
+        LucideRuntimeIcons.SetMenuIcon(accentMenu, LucideRuntimeIcon.Palette);
+        var stackMenu = new FluentToolStripMenuItem("层级");
+        LucideRuntimeIcons.SetMenuIcon(stackMenu, LucideRuntimeIcon.Layers);
+        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "置于顶层",
+            LucideRuntimeIcon.BringToFront,
+            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToFront)));
+        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "上移一层",
+            LucideRuntimeIcon.ArrowUp,
+            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.Forward)));
+        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "下移一层",
+            LucideRuntimeIcon.ArrowDown,
+            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.Backward)));
+        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "置于底层",
+            LucideRuntimeIcon.SendToBack,
+            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToBack)));
         menu.Items.Add(stackMenu);
+        menu.Items.Add(new Forms.ToolStripSeparator());
 
         foreach (var (name, hex) in AccentPalette)
         {
@@ -77,17 +93,22 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 () => _runtime.SetBoxAccent(box.Id, hex));
         }
         accentMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
-        accentMenu.DropDownItems.Add("自定义颜色…", null, (_, _) => ShowAccentColorDialog(box));
+        accentMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "自定义颜色…",
+            LucideRuntimeIcon.Palette,
+            (_, _) => ShowAccentColorDialog(box)));
         menu.Items.Add(accentMenu);
 
-        var viewMenu = new Forms.ToolStripMenuItem("视图");
+        var viewMenu = new FluentToolStripMenuItem("视图");
+        LucideRuntimeIcons.SetMenuIcon(viewMenu, LucideRuntimeIcon.LayoutGrid);
         AddMenuChoice(viewMenu, "图标", box.ViewMode == BoxViewMode.Grid,
             () => _runtime.SetBoxViewMode(box.Id, BoxViewMode.Grid));
         AddMenuChoice(viewMenu, "列表", box.ViewMode == BoxViewMode.List,
             () => _runtime.SetBoxViewMode(box.Id, BoxViewMode.List));
         menu.Items.Add(viewMenu);
 
-        var sortMenu = new Forms.ToolStripMenuItem("排序方式");
+        var sortMenu = new FluentToolStripMenuItem("排序方式");
+        LucideRuntimeIcons.SetMenuIcon(sortMenu, LucideRuntimeIcon.ArrowDownAz);
         AddMenuChoice(sortMenu, "手动", box.SortMode == BoxSortMode.Manual,
             () => _runtime.SetBoxSortMode(box.Id, BoxSortMode.Manual));
         AddMenuChoice(sortMenu, "名称", box.SortMode == BoxSortMode.Name,
@@ -98,9 +119,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             () => _runtime.SetBoxSortMode(box.Id, BoxSortMode.Modified));
         menu.Items.Add(sortMenu);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("设置", null, (_, _) => _runtime.RequestShowSettings("appearance"));
+        menu.Items.Add(CreateLucideMenuItem(
+            "设置",
+            LucideRuntimeIcon.Cog,
+            (_, _) => _runtime.RequestShowSettings("appearance")));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("删除盒子", null, async (_, _) =>
+        menu.Items.Add(CreateLucideMenuItem("删除盒子", LucideRuntimeIcon.Trash2, async (_, _) =>
         {
             try
             {
@@ -120,15 +144,18 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 DiagnosticLog.Error($"Delete box failed: {exception}", exception);
             }
-        });
+        }));
         return menu;
     }
 
     private void AddManualTabMenu(Forms.ContextMenuStrip menu, DesktopBox box)
     {
-        var tabMenu = new Forms.ToolStripMenuItem("子标签");
-        tabMenu.DropDownItems.Add("新建子标签…", null, (_, _) =>
-            BeginInvoke((Action)(() => CreateManualTab(box))));
+        var tabMenu = new FluentToolStripMenuItem("子标签");
+        LucideRuntimeIcons.SetMenuIcon(tabMenu, LucideRuntimeIcon.Tags);
+        tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+            "新建子标签…",
+            LucideRuntimeIcon.SquarePlus,
+            (_, _) => BeginInvoke((Action)(() => CreateManualTab(box)))));
 
         var activeTabId = _activeManualTabIds.GetValueOrDefault(box.Id);
         var activeTab = activeTabId is { } id
@@ -137,18 +164,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (activeTab is not null)
         {
             tabMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
-            tabMenu.DropDownItems.Add("重命名当前标签…", null, (_, _) =>
-                BeginInvoke((Action)(() => RenameManualTab(box, activeTab))));
-            tabMenu.DropDownItems.Add("删除当前标签", null, (_, _) =>
-                BeginInvoke((Action)(async () => await DeleteManualTab(box, activeTab))));
+            tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+                "重命名当前标签…",
+                LucideRuntimeIcon.Pencil,
+                (_, _) => BeginInvoke((Action)(() => RenameManualTab(box, activeTab)))));
+            tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+                "删除当前标签",
+                LucideRuntimeIcon.Trash2,
+                (_, _) => BeginInvoke((Action)(async () => await DeleteManualTab(box, activeTab)))));
         }
 
         var selectedKeys = GetSelectedItemKeys(box.Id);
         if (box.ManualTabs.Count > 0 && selectedKeys.Length > 0)
         {
-            var moveMenu = new Forms.ToolStripMenuItem("将选中图标移到");
-            moveMenu.DropDownItems.Add("全部（移出子标签）", null, (_, _) =>
-                MoveSelectedItemsToManualTab(box, selectedKeys, null));
+            var moveMenu = new FluentToolStripMenuItem("将选中图标移到");
+            LucideRuntimeIcons.SetMenuIcon(moveMenu, LucideRuntimeIcon.FolderInput);
+            moveMenu.DropDownItems.Add(CreateLucideMenuItem(
+                "全部（移出子标签）",
+                LucideRuntimeIcon.ArrowRight,
+                (_, _) => MoveSelectedItemsToManualTab(box, selectedKeys, null)));
             foreach (var tab in box.ManualTabs)
             {
                 var targetTab = tab;
@@ -244,12 +278,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error($"Failed to paste files into box '{box.Title}'.", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "粘贴失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 
@@ -269,12 +303,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             details += Environment.NewLine + $"另有 {result.FailedCount - 3} 项未导入。";
         }
 
-        Forms.MessageBox.Show(
+        DesktopConfirmationDialog.ShowMessage(
             this,
-            $"已导入 {result.SucceededCount} 项，{result.FailedCount} 项未导入。{Environment.NewLine}{Environment.NewLine}{details}",
+            _runtime.IsDarkTheme,
             "导入未完成",
-            Forms.MessageBoxButtons.OK,
-            Forms.MessageBoxIcon.Warning);
+            $"已导入 {result.SucceededCount} 项，{result.FailedCount} 项未导入。{Environment.NewLine}{Environment.NewLine}{details}",
+            DesktopDialogKind.Warning);
     }
 
     private void MoveSelectedItemsToManualTab(DesktopBox box, IEnumerable<string> itemKeys, Guid? tabId)
@@ -453,12 +487,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error($"Failed to rename box item '{item.DisplayName}'.", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "重命名失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 
@@ -651,13 +685,27 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool isChecked,
         Action action)
     {
-        var item = new Forms.ToolStripMenuItem(text)
+        var item = new FluentToolStripMenuItem(text)
         {
             Checked = isChecked,
             CheckOnClick = false
         };
         item.Click += (_, _) => action();
         parent.DropDownItems.Add(item);
+    }
+
+    private static Forms.ToolStripMenuItem CreateLucideMenuItem(
+        string text,
+        LucideRuntimeIcon icon,
+        EventHandler? onClick = null)
+    {
+        var item = new FluentToolStripMenuItem(text);
+        LucideRuntimeIcons.SetMenuIcon(item, icon);
+        if (onClick is not null)
+        {
+            item.Click += onClick;
+        }
+        return item;
     }
 
 }

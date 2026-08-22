@@ -38,7 +38,6 @@ internal sealed class DesktopIconSurface : Forms.Form
     private const int DesktopHitTestAlpha = 1;
     // Let a layered-window MouseLeave settle before recalculating hover.
     private const int HoverReconcileDelayMilliseconds = 32;
-    private const int SlowDoubleClickRenameLimitMilliseconds = 900;
     private static readonly IntPtr MaNoActivate = new(3);
     private readonly CrabDeskRuntime _runtime;
     private readonly MonitorLayout _monitor;
@@ -96,7 +95,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private Func<int>? _boxDynamicVersion;
     private Action? _boxDynamicStateUpdate;
     private Func<Point, bool>? _boxPointerHitTest;
-    private Func<bool>? _boxHeightAnimationOnly;
+    private Func<bool>? _boxPartialAnimationOnly;
     private readonly Forms.Timer _hoverReconcileTimer;
     private readonly DesktopDragOverlay _dragOverlay;
     private readonly DesktopHoverOverlay _hoverOverlay;
@@ -132,6 +131,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private bool _hoverOverlayUnavailable;
     private bool _dragBaseReady;
     private int _lastBoxDynamicVersion = int.MinValue;
+    private bool _boxRendererDiagnosticWritten;
 
     internal DesktopIconSurface(
         CrabDeskRuntime runtime,
@@ -315,8 +315,44 @@ internal sealed class DesktopIconSurface : Forms.Form
     internal void SetBoxPointerHitTest(Func<Point, bool>? hitTest) =>
         _boxPointerHitTest = hitTest;
 
-    internal void SetBoxHeightAnimationOnly(Func<bool>? provider) =>
-        _boxHeightAnimationOnly = provider;
+    internal void SetBoxPartialAnimationOnly(Func<bool>? provider) =>
+        _boxPartialAnimationOnly = provider;
+
+    internal static bool ShouldPresentPartialBoxAnimationInParent(
+        bool partialAnimationOnly,
+        bool selecting,
+        bool dragging,
+        int boxDropItemCount) =>
+        partialAnimationOnly &&
+        !selecting &&
+        !dragging &&
+        boxDropItemCount == 0;
+
+    internal static Rectangle CalculatePartialBoxAnimationDirtyPixels(
+        RectangleF dynamicBounds,
+        double scale,
+        Size surfaceSize)
+    {
+        if (dynamicBounds.Width <= 0 || dynamicBounds.Height <= 0 ||
+            surfaceSize.Width <= 0 || surfaceSize.Height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        const float antialiasAllowance = 2f;
+        var effectiveScale = Math.Max(scale, 0.01d);
+        var inflatedBounds = RectangleF.Inflate(
+            dynamicBounds,
+            antialiasAllowance,
+            antialiasAllowance);
+        var left = (int)Math.Floor(inflatedBounds.Left * effectiveScale);
+        var top = (int)Math.Floor(inflatedBounds.Top * effectiveScale);
+        var right = (int)Math.Ceiling(inflatedBounds.Right * effectiveScale);
+        var bottom = (int)Math.Ceiling(inflatedBounds.Bottom * effectiveScale);
+        return Rectangle.Intersect(
+            new Rectangle(0, 0, surfaceSize.Width, surfaceSize.Height),
+            Rectangle.FromLTRB(left, top, right, bottom));
+    }
 
     private bool AreBoxVisualsInParent =>
         _boxVisualsInParent?.Invoke() == true && _dragBoxRenderer is not null;
@@ -671,16 +707,16 @@ internal sealed class DesktopIconSurface : Forms.Form
                 return PresentBoxVisualsInParentFrame(workAreaBounds);
             }
 
-            // A pure hover-expand height animation stays inside the parent
-            // bitmap so the box never crosses between the settled layer and
-            // the drag overlay. That handoff is what flashes for one
-            // compositor frame at the start and end of the animation.
-            if (_boxHeightAnimationOnly?.Invoke() == true &&
-                !_selecting &&
-                !_dragStarted &&
-                _boxDropItemKeys.Count == 0)
+            // Keep box-local height and scroll animations on the same layered
+            // window as their settled frames. A dirty-rectangle update avoids
+            // repainting and uploading the full monitor for every frame.
+            if (ShouldPresentPartialBoxAnimationInParent(
+                    _boxPartialAnimationOnly?.Invoke() == true,
+                    _selecting,
+                    _dragStarted,
+                    _boxDropItemKeys.Count))
             {
-                return PresentHeightAnimationFrame(workAreaBounds);
+                return PresentPartialBoxAnimationFrame(workAreaBounds);
             }
 
             // The overlay is a child of this surface. Present it while the
@@ -691,7 +727,6 @@ internal sealed class DesktopIconSurface : Forms.Form
             {
                 return false;
             }
-
             if (staticFrameChanged)
             {
                 _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
@@ -872,16 +907,58 @@ internal sealed class DesktopIconSurface : Forms.Form
     }
 
     /// <summary>
-    /// Presents a hover-expand height animation entirely through the parent
-    /// layered window. The static base (desktop icons and settled boxes) is
-    /// copied and the animated box is drawn on top, so one atomic
-    /// UpdateLayeredWindow per tick carries the whole frame. Unlike the drag
-    /// overlay channel this never hands the box between two windows, which
-    /// avoids the single-frame flash at the start and end of the animation.
+    /// Presents a box-local height or scroll animation through a dirty
+    /// rectangle on the parent layered window. This keeps the box in one
+    /// compositor surface without repainting the full monitor per frame.
     /// </summary>
-    private bool PresentHeightAnimationFrame(RectangleF workAreaBounds)
+    private bool PresentPartialBoxAnimationFrame(RectangleF workAreaBounds)
     {
         _dragOverlay.HideOverlay();
+        EnsureLayerBitmap();
+        var dynamicBounds = _boxDynamicBounds?.Invoke();
+        var dirtyPixels = dynamicBounds is { } bounds
+            ? CalculatePartialBoxAnimationDirtyPixels(bounds, _scale, ClientSize)
+            : Rectangle.Empty;
+        if (dirtyPixels.Width <= 0 || dirtyPixels.Height <= 0)
+        {
+            return PresentPartialBoxAnimationFallbackFrame(workAreaBounds);
+        }
+
+        using (var graphics = Graphics.FromImage(_layerBitmap!))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.DrawImage(
+                _staticLayerBitmap!,
+                dirtyPixels,
+                dirtyPixels,
+                GraphicsUnit.Pixel);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            ConfigureLayerGraphics(graphics, workAreaBounds, fastRender: true);
+            var dirtyDipBounds = new RectangleF(
+                (float)(dirtyPixels.X / _scale),
+                (float)(dirtyPixels.Y / _scale),
+                (float)(dirtyPixels.Width / _scale),
+                (float)(dirtyPixels.Height / _scale));
+            graphics.SetClip(dirtyDipBounds, CombineMode.Intersect);
+            DrawDynamicDragVisuals(graphics, dirtyDipBounds);
+            graphics.ResetTransform();
+        }
+
+        _lastPresentSucceeded = LayeredWindowPresenter.TryPresentPartial(
+            Handle,
+            _layerBitmap!,
+            PointToScreen(Point.Empty),
+            dirtyPixels,
+            out _lastPresentDiagnostic);
+        if (!_lastPresentSucceeded)
+        {
+            return PresentPartialBoxAnimationFallbackFrame(workAreaBounds);
+        }
+        return _lastPresentSucceeded;
+    }
+
+    private bool PresentPartialBoxAnimationFallbackFrame(RectangleF workAreaBounds)
+    {
         EnsureLayerBitmap();
         using (var graphics = Graphics.FromImage(_layerBitmap!))
         {
@@ -901,7 +978,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (!_lastPresentSucceeded)
         {
             DiagnosticLog.Error(
-                $"Desktop icon height animation presentation failed monitor={_monitor.Id}: {_lastPresentDiagnostic}",
+                $"Desktop icon partial box animation presentation failed monitor={_monitor.Id}: {_lastPresentDiagnostic}",
                 new InvalidOperationException(_lastPresentDiagnostic));
         }
         return _lastPresentSucceeded;
@@ -1262,6 +1339,13 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (includeBoxDropPreview)
         {
             DrawBoxItemDropPreview(graphics);
+        }
+        if (!_boxRendererDiagnosticWritten)
+        {
+            _boxRendererDiagnosticWritten = true;
+            DiagnosticLog.Info(
+                $"Icon settled layer box renderer configured={_boxRenderer is not null} " +
+                $"monitor={_monitor.Id} clip={workAreaBounds}");
         }
         _boxRenderer?.Invoke(graphics, workAreaBounds);
         graphics.ResetTransform();
@@ -3181,12 +3265,12 @@ internal sealed class DesktopIconSurface : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error("Failed to move desktop items to the recycle bin", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "删除失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 
@@ -3236,12 +3320,12 @@ internal sealed class DesktopIconSurface : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error("Failed to import dropped files to the desktop", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "导入失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 
@@ -3389,12 +3473,12 @@ internal sealed class DesktopIconSurface : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error("Failed to move dropped files to the recycle bin", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "删除失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 
@@ -3506,11 +3590,12 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         var now = DateTime.UtcNow;
         var key = item.Item.Key.ToString();
-        var elapsed = (now - _lastRenameClickUtc).TotalMilliseconds;
-        var isSlowDoubleClick =
-            string.Equals(_lastRenameClickKey, key, StringComparison.OrdinalIgnoreCase) &&
-            elapsed > Forms.SystemInformation.DoubleClickTime &&
-            elapsed < SlowDoubleClickRenameLimitMilliseconds;
+        var isSlowDoubleClick = SlowDoubleClickRenamePolicy.IsSlowDoubleClick(
+            _lastRenameClickKey,
+            _lastRenameClickUtc,
+            key,
+            now,
+            Forms.SystemInformation.DoubleClickTime);
         _lastRenameClickKey = key;
         _lastRenameClickUtc = now;
         if (isSlowDoubleClick && item.Item.FileSystemPath is not null)
@@ -3536,7 +3621,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         // The press became neither a drag nor a marquee. Only rename while
         // the slow double-click window is still open.
         var elapsed = (DateTime.UtcNow - _pendingRenamePressUtc).TotalMilliseconds;
-        if (elapsed > SlowDoubleClickRenameLimitMilliseconds)
+        if (elapsed > SlowDoubleClickRenamePolicy.RenameLimitMilliseconds)
         {
             return;
         }
@@ -3561,12 +3646,12 @@ internal sealed class DesktopIconSurface : Forms.Form
         catch (Exception exception)
         {
             DiagnosticLog.Error($"Failed to rename desktop item '{item.DisplayName}'.", exception);
-            Forms.MessageBox.Show(
+            DesktopConfirmationDialog.ShowMessage(
                 this,
-                exception.Message,
+                _runtime.IsDarkTheme,
                 "重命名失败",
-                Forms.MessageBoxButtons.OK,
-                Forms.MessageBoxIcon.Error);
+                exception.Message,
+                DesktopDialogKind.Error);
         }
     }
 

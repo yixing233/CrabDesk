@@ -24,35 +24,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _expandedItemHitBounds.Clear();
         foreach (var box in DesktopBoxes)
         {
-            var titleBarHeight = (float)box.Appearance.TitleBarHeight;
             var height = (float)GetVisualBoxHeight(box);
             var isCollapsed = IsEffectivelyCollapsed(box);
-            var bounds = new RectangleF((float)box.Bounds.X, (float)box.Bounds.Y, (float)box.Bounds.Width, (float)height);
-            var manualTabs = isCollapsed ? [] : GetManualTabs(box);
-            var categoryTabs = manualTabs.Count == 0 && !isCollapsed ? GetMappedFolderTabs(box) : [];
-            var tabCount = categoryTabs.Count + manualTabs.Count;
-            var tabBar = tabCount == 0
-                ? RectangleF.Empty
-                : new RectangleF(
-                    bounds.X + 8,
-                    bounds.Y + titleBarHeight,
-                    Math.Max(0, bounds.Width - 16),
-                    MappedFolderTabBarHeight);
-            var bodyTop = tabBar.IsEmpty ? titleBarHeight + 8 : titleBarHeight + tabBar.Height + 8;
-            var geometry = new BoxGeometry(
-                box,
-                isCollapsed,
-                bounds,
-                new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight),
-                tabBar,
-                categoryTabs,
-                GetActiveMappedFolderCategory(box.Id, categoryTabs),
-                manualTabs,
-                GetActiveManualTabId(box.Id, manualTabs),
-                new RectangleF(bounds.X + 8, bounds.Y + bodyTop, bounds.Width - 16, Math.Max(0, bounds.Height - bodyTop - 8)),
-                new RectangleF(bounds.Right - 62, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
-                new RectangleF(bounds.Right - 32, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
-                new RectangleF(bounds.Right - 18, bounds.Bottom - 18, 18, 18));
+            var geometry = CreateBoxGeometry(box, height, isCollapsed);
             _boxes.Add(geometry);
             if (!isCollapsed)
             {
@@ -62,11 +36,89 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _geometryDirty = false;
     }
 
+    private BoxGeometry CreateBoxGeometry(DesktopBox box, float height, bool isCollapsed)
+    {
+        var titleBarHeight = (float)box.Appearance.TitleBarHeight;
+        var bounds = new RectangleF(
+            (float)box.Bounds.X,
+            (float)box.Bounds.Y,
+            (float)box.Bounds.Width,
+            height);
+        var manualTabs = isCollapsed ? [] : GetManualTabs(box);
+        var categoryTabs = manualTabs.Count == 0 && !isCollapsed ? GetMappedFolderTabs(box) : [];
+        var tabCount = categoryTabs.Count + manualTabs.Count;
+        var tabBar = tabCount == 0
+            ? RectangleF.Empty
+            : new RectangleF(
+                bounds.X + 8,
+                bounds.Y + titleBarHeight,
+                Math.Max(0, bounds.Width - 16),
+                MappedFolderTabBarHeight);
+        var bodyTop = tabBar.IsEmpty ? titleBarHeight + 8 : titleBarHeight + tabBar.Height + 8;
+        return new BoxGeometry(
+            box,
+            isCollapsed,
+            bounds,
+            new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight),
+            tabBar,
+            categoryTabs,
+            GetActiveMappedFolderCategory(box.Id, categoryTabs),
+            manualTabs,
+            GetActiveManualTabId(box.Id, manualTabs),
+            new RectangleF(
+                bounds.X + 8,
+                bounds.Y + bodyTop,
+                bounds.Width - 16,
+                Math.Max(0, bounds.Height - bodyTop - 8)),
+            new RectangleF(bounds.Right - 62, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
+            new RectangleF(bounds.Right - 32, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
+            new RectangleF(bounds.Right - 18, bounds.Bottom - 18, 18, 18));
+    }
+
     private void EnsureGeometry()
     {
         if (_geometryDirty || _boxes.Count == 0)
         {
             RebuildGeometry();
+        }
+    }
+
+    private void UpdateHeightAnimationGeometry(IEnumerable<Guid> animatedBoxIds)
+    {
+        if (_geometryDirty)
+        {
+            return;
+        }
+
+        foreach (var boxId in animatedBoxIds)
+        {
+            var index = _boxes.FindIndex(geometry => geometry.Box.Id == boxId);
+            if (index < 0)
+            {
+                continue;
+            }
+
+            var geometry = _boxes[index];
+            var height = (float)GetVisualBoxHeight(geometry.Box);
+            var bounds = new RectangleF(
+                geometry.Bounds.X,
+                geometry.Bounds.Y,
+                geometry.Bounds.Width,
+                height);
+            _boxes[index] = geometry with
+            {
+                Bounds = bounds,
+                Body = new RectangleF(
+                    geometry.Body.X,
+                    geometry.Body.Y,
+                    geometry.Body.Width,
+                    Math.Max(0, bounds.Bottom - geometry.Body.Y - 8)),
+                Resize = new RectangleF(
+                    bounds.Right - 18,
+                    bounds.Bottom - 18,
+                    18,
+                    18)
+            };
         }
     }
 

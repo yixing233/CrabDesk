@@ -2,7 +2,7 @@
     x:Class="CrabDesk.WinUI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:icons="using:FluentIcons.WinUI">
+    xmlns:lucide="using:CrabDesk.WinUI.Controls">
     <Grid x:Name="RootGrid" Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
@@ -37,32 +37,32 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="常规" Tag="general" AutomationProperties.Name="常规设置">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Home" />
+                        <lucide:LucideIcon Icon="House" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="桌面盒子" Tag="boxes" AutomationProperties.Name="桌面盒子">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="ViewAll" />
+                        <lucide:LucideIcon Icon="LayoutGrid" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="智能整理" Tag="smart-organization" AutomationProperties.Name="智能整理">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Filter" />
+                        <lucide:LucideIcon Icon="Sparkles" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="布局备份" Tag="backup" AutomationProperties.Name="布局备份">
                     <NavigationViewItem.Icon>
-                        <icons:FluentIcon Icon="Album" />
+                        <lucide:LucideIcon Icon="Archive" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="快捷键" Tag="hotkeys" AutomationProperties.Name="全局快捷键">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Keyboard" />
+                        <lucide:LucideIcon Icon="Keyboard" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="关于" Tag="about" AutomationProperties.Name="关于 CrabDesk">
                     <NavigationViewItem.Icon>
-                        <SymbolIcon Symbol="Help" />
+                        <lucide:LucideIcon Icon="Info" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>

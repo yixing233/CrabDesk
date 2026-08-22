@@ -6,8 +6,78 @@ using System.Windows.Forms;
 
 namespace CrabDesk.Runtime;
 
+internal sealed class FluentToolStripMenuItem : ToolStripMenuItem
+{
+    internal FluentToolStripMenuItem(string text)
+        : base(text)
+    {
+    }
+
+    internal FluentToolStripMenuItem(string text, Image? image, EventHandler? onClick)
+        : base(text, image, onClick)
+    {
+    }
+
+    protected override ToolStripDropDown CreateDefaultDropDown() =>
+        new FluentToolStripDropDownMenu();
+}
+
+internal sealed class FluentToolStripDropDownMenu : ToolStripDropDownMenu
+{
+    private const int GwlpHwndParent = -8;
+
+    internal int ExtendedWindowStyleForTesting => CreateParams.ExStyle;
+
+    protected override Padding DefaultPadding =>
+        FluentContextMenuStrip.CalculateOuterPadding(DeviceDpi);
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle = FluentContextMenuStrip.NormalizeExtendedWindowStyle(parameters.ExStyle);
+            return parameters;
+        }
+    }
+
+    protected override void OnOpening(CancelEventArgs eventArgs)
+    {
+        base.OnOpening(eventArgs);
+        AttachToParentMenu();
+    }
+
+    protected override void OnOpened(EventArgs eventArgs)
+    {
+        base.OnOpened(eventArgs);
+        AttachToParentMenu();
+    }
+
+    private void AttachToParentMenu()
+    {
+        if (!IsHandleCreated || OwnerItem?.Owner is not { IsHandleCreated: true } parentMenu)
+        {
+            return;
+        }
+
+        var parentHandle = parentMenu.Handle;
+        if (parentHandle != IntPtr.Zero && parentHandle != Handle)
+        {
+            SetWindowLongPtr(Handle, GwlpHwndParent, parentHandle);
+        }
+    }
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
+}
+
 internal sealed class FluentContextMenuStrip : ContextMenuStrip
 {
+    private const int GwlpHwndParent = -8;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExAppWindow = 0x00040000;
+    private const int WsExNoActivate = 0x08000000;
+    private const uint GaRoot = 2;
     private const int WhMouseLowLevel = 14;
     private const int WmLeftButtonDown = 0x0201;
     private const int WmRightButtonDown = 0x0204;
@@ -26,8 +96,9 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     private ToolStripDropDownCloseReason _pendingCloseReason;
 
     internal int MinimumMenuWidth { get; init; } = 112;
-    internal bool ShowRootCheckMargin { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
+
+    protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
 
     internal FluentContextMenuStrip()
     {
@@ -35,11 +106,33 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         _opacityTimer.Tick += OnOpacityTimerTick;
     }
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle = NormalizeExtendedWindowStyle(parameters.ExStyle);
+            return parameters;
+        }
+    }
+
+    internal static int NormalizeExtendedWindowStyle(int extendedStyle) =>
+        (extendedStyle | WsExToolWindow | WsExNoActivate) & ~WsExAppWindow;
+
+    internal static Padding CalculateOuterPadding(int deviceDpi)
+    {
+        var dpiScale = Math.Max(0.75f, deviceDpi / 96f);
+        var horizontal = (int)Math.Round(4 * dpiScale);
+        var vertical = (int)Math.Round(6 * dpiScale);
+        return new Padding(horizontal, vertical, horizontal, vertical);
+    }
+
     protected override void OnOpening(CancelEventArgs eventArgs)
     {
         StopOpacityAnimation();
         Opacity = AnimationsEnabled ? 0 : 1;
         base.OnOpening(eventArgs);
+        AttachToTopLevelOwner();
         if (eventArgs.Cancel)
         {
             Opacity = 1;
@@ -55,6 +148,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     protected override void OnOpened(EventArgs eventArgs)
     {
         base.OnOpened(eventArgs);
+        AttachToTopLevelOwner();
         StretchItemsToClientWidth();
         StartOutsideClickMonitor();
         Invalidate(true);
@@ -149,6 +243,24 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     {
         _opacityTimer.Stop();
         _closingAnimation = false;
+    }
+
+    private void AttachToTopLevelOwner()
+    {
+        if (SourceControl is not { IsHandleCreated: true } sourceControl ||
+            !IsHandleCreated)
+        {
+            return;
+        }
+
+        // DesktopBoxForm is an Explorer child window and cannot directly own
+        // a top-level popup. Use its root desktop host as the native owner so
+        // the menu remains grouped with the desktop instead of the taskbar.
+        var topLevelOwner = GetAncestor(sourceControl.Handle, GaRoot);
+        if (topLevelOwner != IntPtr.Zero && topLevelOwner != Handle)
+        {
+            SetWindowLongPtr(Handle, GwlpHwndParent, topLevelOwner);
+        }
     }
 
     private void StretchItemsToClientWidth()
@@ -266,4 +378,10 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? moduleName);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
 }

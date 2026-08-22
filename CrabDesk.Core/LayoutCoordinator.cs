@@ -15,16 +15,33 @@ public static class BoxStacking
     // hit testing inside a desktop surface.
     public static IReadOnlyList<DesktopBox> OrderBackToFront(
         IEnumerable<DesktopBox> boxes,
-        string monitorId) => boxes
-        .Select((box, index) => (box, index))
-        .Where(entry => string.Equals(
-            entry.box.MonitorId,
-            monitorId,
-            StringComparison.OrdinalIgnoreCase))
-        .OrderBy(entry => entry.box.StackOrder)
-        .ThenBy(entry => entry.index)
-        .Select(entry => entry.box)
-        .ToArray();
+        string monitorId,
+        Guid? focusedBoxId = null)
+    {
+        var stack = boxes
+            .Select((box, index) => (box, index))
+            .Where(entry => string.Equals(
+                entry.box.MonitorId,
+                monitorId,
+                StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.box.StackOrder)
+            .ThenBy(entry => entry.index)
+            .Select(entry => entry.box)
+            .ToList();
+        if (focusedBoxId is not { } focusedId)
+        {
+            return stack;
+        }
+
+        var focusedIndex = stack.FindIndex(box => box.Id == focusedId);
+        if (focusedIndex >= 0 && focusedIndex < stack.Count - 1)
+        {
+            var focusedBox = stack[focusedIndex];
+            stack.RemoveAt(focusedIndex);
+            stack.Add(focusedBox);
+        }
+        return stack;
+    }
 
     public static int GetFrontStackOrder(
         IEnumerable<DesktopBox> boxes,

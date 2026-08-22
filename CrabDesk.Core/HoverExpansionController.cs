@@ -36,6 +36,30 @@ public sealed class HoverExpansionController
     {
         if (ExpandedBoxId is { } expandedBoxId)
         {
+            // Keep the current box open while another header completes its
+            // expand delay, then hand off both states in one transition.
+            if (collapsedHeaderBoxId is { } switchCandidateBoxId && switchCandidateBoxId != expandedBoxId)
+            {
+                _outsideSince = null;
+                if (_candidateBoxId != switchCandidateBoxId)
+                {
+                    _candidateBoxId = switchCandidateBoxId;
+                    _candidateSince = now;
+                    return default;
+                }
+
+                _candidateSince ??= now;
+                if (now - _candidateSince < _expandDelay)
+                {
+                    return default;
+                }
+
+                ExpandedBoxId = switchCandidateBoxId;
+                _candidateBoxId = null;
+                _candidateSince = null;
+                return new HoverExpansionTransition(switchCandidateBoxId, expandedBoxId);
+            }
+
             _candidateBoxId = null;
             _candidateSince = null;
             if (pointerInsideExpandedBox)

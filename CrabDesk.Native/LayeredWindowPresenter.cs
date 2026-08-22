@@ -80,6 +80,81 @@ public static class LayeredWindowPresenter
     }
 
     /// <summary>
+    /// Updates only a physical-pixel rectangle of an already presented layered
+    /// surface. The persistent DIB keeps the pixels outside the dirty area, so
+    /// animation frames avoid another full-monitor bitmap copy and upload.
+    /// </summary>
+    public static bool TryPresentPartial(
+        IntPtr hwnd,
+        Bitmap bitmap,
+        Point screenLocation,
+        Rectangle dirtyPixels,
+        out string diagnostic)
+    {
+        diagnostic = string.Empty;
+        if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
+        {
+            diagnostic = "The layered desktop window is unavailable.";
+            return false;
+        }
+        if (bitmap.Width <= 0 || bitmap.Height <= 0)
+        {
+            diagnostic = "The layered desktop bitmap is empty.";
+            return false;
+        }
+
+        var bitmapBounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+        var clippedDirtyPixels = Rectangle.Intersect(bitmapBounds, dirtyPixels);
+        if (clippedDirtyPixels.Width <= 0 || clippedDirtyPixels.Height <= 0)
+        {
+            diagnostic = "The layered desktop dirty rectangle is empty.";
+            return true;
+        }
+        if (clippedDirtyPixels == bitmapBounds)
+        {
+            return TryPresent(hwnd, bitmap, screenLocation, out diagnostic);
+        }
+
+        var screenDc = GetDC(IntPtr.Zero);
+        if (screenDc == IntPtr.Zero)
+        {
+            diagnostic = $"GetDC failed error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+
+        try
+        {
+            lock (SurfaceLock)
+            {
+                if (!Surfaces.TryGetValue(hwnd, out var surface) ||
+                    !surface.Matches(bitmap.Width, bitmap.Height) ||
+                    !surface.HasPresented)
+                {
+                    diagnostic = "The layered desktop surface requires an initial full presentation.";
+                    return false;
+                }
+
+                return surface.PresentPartial(
+                    hwnd,
+                    bitmap,
+                    screenLocation,
+                    clippedDirtyPixels,
+                    screenDc,
+                    out diagnostic);
+            }
+        }
+        catch (Exception exception)
+        {
+            diagnostic = exception.Message;
+            return false;
+        }
+        finally
+        {
+            ReleaseDC(IntPtr.Zero, screenDc);
+        }
+    }
+
+    /// <summary>
     /// Releases the persistent DIB used by a surface. Call this when the
     /// associated window is disposed so a restart does not retain GDI memory.
     /// </summary>
@@ -105,10 +180,17 @@ public static class LayeredWindowPresenter
         private IntPtr _bitmapHandle;
         private IntPtr _previousBitmap;
         private IntPtr _bits;
+        private IntPtr _destinationPointer;
+        private IntPtr _sizePointer;
+        private IntPtr _sourcePointer;
+        private IntPtr _blendPointer;
+        private IntPtr _dirtyPointer;
         private int _width;
         private int _height;
+        private bool _hasPresented;
 
         internal bool Matches(int width, int height) => _width == width && _height == height;
+        internal bool HasPresented => _hasPresented;
 
         internal bool TryInitialize(
             int width,
@@ -161,6 +243,17 @@ public static class LayeredWindowPresenter
 
             _width = width;
             _height = height;
+            _destinationPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint>());
+            _sizePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeSize>());
+            _sourcePointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativePoint>());
+            _blendPointer = Marshal.AllocHGlobal(Marshal.SizeOf<BlendFunction>());
+            _dirtyPointer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeRect>());
+            Marshal.StructureToPtr(new NativeSize(width, height), _sizePointer, false);
+            Marshal.StructureToPtr(new NativePoint(0, 0), _sourcePointer, false);
+            Marshal.StructureToPtr(
+                new BlendFunction(AcSrcOver, 0, byte.MaxValue, AcSrcAlpha),
+                _blendPointer,
+                false);
             return true;
         }
 
@@ -196,40 +289,105 @@ public static class LayeredWindowPresenter
                 return false;
             }
 
+            _hasPresented = true;
             diagnostic = $"layered bitmap={_width}x{_height}";
             return true;
         }
 
+        internal bool PresentPartial(
+            IntPtr hwnd,
+            Bitmap sourceBitmap,
+            Point screenLocation,
+            Rectangle dirtyPixels,
+            IntPtr screenDc,
+            out string diagnostic)
+        {
+            diagnostic = string.Empty;
+            if (!CopyBitmap(sourceBitmap, dirtyPixels, out diagnostic))
+            {
+                return false;
+            }
+
+            Marshal.StructureToPtr(
+                new NativePoint(screenLocation.X, screenLocation.Y),
+                _destinationPointer,
+                false);
+            Marshal.StructureToPtr(
+                new NativeRect(
+                    dirtyPixels.Left,
+                    dirtyPixels.Top,
+                    dirtyPixels.Right,
+                    dirtyPixels.Bottom),
+                _dirtyPointer,
+                false);
+            var update = new UpdateLayeredWindowInfo
+            {
+                Size = (uint)Marshal.SizeOf<UpdateLayeredWindowInfo>(),
+                DestinationDeviceContext = screenDc,
+                DestinationPoint = _destinationPointer,
+                WindowSize = _sizePointer,
+                SourceDeviceContext = _memoryDc,
+                SourcePoint = _sourcePointer,
+                Blend = _blendPointer,
+                Flags = UlwAlpha,
+                DirtyRectangle = _dirtyPointer
+            };
+            if (!UpdateLayeredWindowIndirect(hwnd, ref update))
+            {
+                diagnostic = $"UpdateLayeredWindowIndirect failed error={Marshal.GetLastWin32Error()}";
+                return false;
+            }
+
+            _hasPresented = true;
+            diagnostic = $"layered bitmap={_width}x{_height} dirty={dirtyPixels}";
+            return true;
+        }
+
         private bool CopyBitmap(Bitmap sourceBitmap, out string diagnostic)
+        {
+            return CopyBitmap(
+                sourceBitmap,
+                new Rectangle(0, 0, _width, _height),
+                out diagnostic);
+        }
+
+        private bool CopyBitmap(
+            Bitmap sourceBitmap,
+            Rectangle copyBounds,
+            out string diagnostic)
         {
             diagnostic = string.Empty;
             BitmapData? data = null;
             try
             {
                 data = sourceBitmap.LockBits(
-                    new Rectangle(0, 0, _width, _height),
+                    copyBounds,
                     ImageLockMode.ReadOnly,
                     PixelFormat.Format32bppPArgb);
                 var sourceStride = Math.Abs(data.Stride);
-                var rowBytes = checked(_width * 4);
-                var totalBytes = checked((nuint)(rowBytes * _height));
+                var rowBytes = checked(copyBounds.Width * 4);
+                var totalBytes = checked((nuint)(rowBytes * copyBounds.Height));
 
                 // Format32bppPArgb bitmaps created by the runtime are normally
                 // tightly packed. Copy the whole block in one native call;
                 // the old row-by-row loop paid for one P/Invoke transition per
                 // scanline on every drag frame.
-                if (data.Stride == rowBytes)
+                if (copyBounds.X == 0 && copyBounds.Y == 0 &&
+                    copyBounds.Width == _width && copyBounds.Height == _height &&
+                    data.Stride == rowBytes)
                 {
                     CopyMemory(_bits, data.Scan0, totalBytes);
                     return true;
                 }
 
-                for (var row = 0; row < _height; row++)
+                for (var row = 0; row < copyBounds.Height; row++)
                 {
                     var sourceRow = data.Stride >= 0
                         ? IntPtr.Add(data.Scan0, row * sourceStride)
-                        : IntPtr.Add(data.Scan0, (_height - row - 1) * sourceStride);
-                    CopyMemory(_bits + row * rowBytes, sourceRow, (nuint)rowBytes);
+                        : IntPtr.Add(data.Scan0, (copyBounds.Height - row - 1) * sourceStride);
+                    var destinationOffset = checked(
+                        ((copyBounds.Top + row) * _width + copyBounds.Left) * 4);
+                    CopyMemory(IntPtr.Add(_bits, destinationOffset), sourceRow, (nuint)rowBytes);
                 }
                 return true;
             }
@@ -265,8 +423,24 @@ public static class LayeredWindowPresenter
                 _memoryDc = IntPtr.Zero;
             }
             _bits = IntPtr.Zero;
+            Free(ref _destinationPointer);
+            Free(ref _sizePointer);
+            Free(ref _sourcePointer);
+            Free(ref _blendPointer);
+            Free(ref _dirtyPointer);
             _width = 0;
             _height = 0;
+            _hasPresented = false;
+        }
+
+        private static void Free(ref IntPtr pointer)
+        {
+            if (pointer == IntPtr.Zero)
+            {
+                return;
+            }
+            Marshal.FreeHGlobal(pointer);
+            pointer = IntPtr.Zero;
         }
     }
 
@@ -342,6 +516,30 @@ public static class LayeredWindowPresenter
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect(int left, int top, int right, int bottom)
+    {
+        internal int Left = left;
+        internal int Top = top;
+        internal int Right = right;
+        internal int Bottom = bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UpdateLayeredWindowInfo
+    {
+        internal uint Size;
+        internal IntPtr DestinationDeviceContext;
+        internal IntPtr DestinationPoint;
+        internal IntPtr WindowSize;
+        internal IntPtr SourceDeviceContext;
+        internal IntPtr SourcePoint;
+        internal uint ColorKey;
+        internal IntPtr Blend;
+        internal uint Flags;
+        internal IntPtr DirtyRectangle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfo
     {
         internal BitmapInfoHeader Header;
@@ -383,6 +581,12 @@ public static class LayeredWindowPresenter
         int colorKey,
         ref BlendFunction blend,
         uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UpdateLayeredWindowIndirect(
+        IntPtr hwnd,
+        ref UpdateLayeredWindowInfo updateInfo);
 
     [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
