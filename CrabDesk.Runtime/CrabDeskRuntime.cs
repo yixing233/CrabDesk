@@ -4065,6 +4065,45 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    /// <summary>
+    /// Returns the menu levels whose metrics should be configured for the
+    /// current presentation pass. Root-menu configuration deliberately does
+    /// not traverse closed submenus: opening a submenu configures that level
+    /// on demand, so constructing a root menu does not eagerly create every
+    /// nested native popup.
+    /// </summary>
+    internal static IReadOnlyList<System.Windows.Forms.ToolStripDropDown> GetMenuLevelsToConfigure(
+        System.Windows.Forms.ContextMenuStrip root,
+        bool includeClosedSubmenus)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+
+        var levels = new List<System.Windows.Forms.ToolStripDropDown> { root };
+        if (!includeClosedSubmenus)
+        {
+            return levels;
+        }
+
+        AddSubmenuLevels(root.Items, levels);
+        return levels;
+    }
+
+    private static void AddSubmenuLevels(
+        System.Windows.Forms.ToolStripItemCollection items,
+        List<System.Windows.Forms.ToolStripDropDown> levels)
+    {
+        foreach (var item in items.OfType<System.Windows.Forms.ToolStripMenuItem>())
+        {
+            if (!item.HasDropDownItems)
+            {
+                continue;
+            }
+
+            levels.Add(item.DropDown);
+            AddSubmenuLevels(item.DropDownItems, levels);
+        }
+    }
+
     private static float GetMenuDpiScale(System.Windows.Forms.ContextMenuStrip menu)
     {
         try
