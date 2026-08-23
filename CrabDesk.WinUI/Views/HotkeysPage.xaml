@@ -10,7 +10,6 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="显示桌面" FontWeight="SemiBold" />
-                        <TextBlock Text="最小化或恢复普通窗口" Style="{StaticResource SecondaryBodyStyle}" />
                         <TextBlock Text="{Binding ShowDesktopStatus}" Margin="0,6,0,0" Foreground="{ThemeResource AccentBrush}"
                                    Visibility="{Binding ShowDesktopHasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>
@@ -30,7 +29,6 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="智能整理" FontWeight="SemiBold" />
-                        <TextBlock Text="应用当前启用的整理规则" Style="{StaticResource SecondaryBodyStyle}" />
                         <TextBlock Text="{Binding OrganizeStatus}" Margin="0,6,0,0" Foreground="{ThemeResource AccentBrush}"
                                    Visibility="{Binding OrganizeHasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     </StackPanel>

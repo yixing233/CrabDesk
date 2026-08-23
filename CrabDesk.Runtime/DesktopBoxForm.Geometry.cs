@@ -34,6 +34,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
         _geometryDirty = false;
+        ReconcileBoxSearch();
     }
 
     private BoxGeometry CreateBoxGeometry(DesktopBox box, float height, bool isCollapsed)
@@ -44,6 +45,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             (float)box.Bounds.Y,
             (float)box.Bounds.Width,
             height);
+        var header = new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight);
+        var headerActions = CalculateHeaderActionBounds(header);
         var manualTabs = isCollapsed ? [] : GetManualTabs(box);
         var categoryTabs = manualTabs.Count == 0 && !isCollapsed ? GetMappedFolderTabs(box) : [];
         var tabCount = categoryTabs.Count + manualTabs.Count;
@@ -59,7 +62,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             box,
             isCollapsed,
             bounds,
-            new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight),
+            header,
             tabBar,
             categoryTabs,
             GetActiveMappedFolderCategory(box.Id, categoryTabs),
@@ -70,8 +73,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 bounds.Y + bodyTop,
                 bounds.Width - 16,
                 Math.Max(0, bounds.Height - bodyTop - 8)),
-            new RectangleF(bounds.Right - 62, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
-            new RectangleF(bounds.Right - 32, bounds.Y + (titleBarHeight - 28) / 2, 26, 28),
+            headerActions.Search,
+            headerActions.AutoExpand,
+            headerActions.Menu,
             new RectangleF(bounds.Right - 18, bounds.Bottom - 18, 18, 18));
     }
 
@@ -142,6 +146,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Header = OffsetBounds(geometry.Header, offsetX, offsetY),
             TabBar = OffsetBounds(geometry.TabBar, offsetX, offsetY),
             Body = OffsetBounds(geometry.Body, offsetX, offsetY),
+            Search = OffsetBounds(geometry.Search, offsetX, offsetY),
             AutoExpand = OffsetBounds(geometry.AutoExpand, offsetX, offsetY),
             Menu = OffsetBounds(geometry.Menu, offsetX, offsetY),
             Resize = OffsetBounds(geometry.Resize, offsetX, offsetY)
@@ -189,21 +194,32 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private IReadOnlyList<DesktopItemRef> GetVisibleItemsForBox(BoxGeometry geometry)
     {
         var items = GetCachedItemsForBox(geometry.Box.Id);
+        IReadOnlyList<DesktopItemRef> visibleItems;
         if (geometry.ManualTabs.Count > 0)
         {
-            return geometry.ActiveManualTabId is not { } tabId
+            visibleItems = geometry.ActiveManualTabId is not { } tabId
                 ? items
                 : items.Where(item =>
                         geometry.Box.ItemTabAssignments.TryGetValue(item.Key.ToString(), out var assignedTabId) &&
                         assignedTabId == tabId)
                     .ToArray();
         }
-        return geometry.ActiveMappedFolderCategory == MappedFolderItemCategory.All
-            ? items
-            : items.Where(item => MappedFolderItemCategoryClassifier.Matches(
-                    geometry.ActiveMappedFolderCategory,
-                    item))
-                .ToArray();
+        else
+        {
+            visibleItems = geometry.ActiveMappedFolderCategory == MappedFolderItemCategory.All
+                ? items
+                : items.Where(item => MappedFolderItemCategoryClassifier.Matches(
+                        geometry.ActiveMappedFolderCategory,
+                        item))
+                    .ToArray();
+        }
+
+        return _searchingBoxId == geometry.Box.Id
+            ? visibleItems.Where(item => BoxItemSearchFilter.MatchesDisplayName(
+                    item.DisplayName,
+                    _searchQuery))
+                .ToArray()
+            : visibleItems;
     }
 
     private IReadOnlyList<MappedFolderTab> GetMappedFolderTabs(DesktopBox box)

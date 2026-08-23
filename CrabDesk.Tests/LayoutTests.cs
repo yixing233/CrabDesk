@@ -5,6 +5,29 @@ namespace CrabDesk.Tests;
 public sealed class LayoutTests
 {
     [Fact]
+    public void HoverExpansionExposesCandidateTransitionDeadline()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+        var started = DateTimeOffset.Parse("2026-08-23T00:00:00Z");
+
+        controller.Update(Guid.Parse("11111111-1111-1111-1111-111111111111"), false, started);
+
+        Assert.Equal(started.AddMilliseconds(120), controller.NextTransitionAt);
+    }
+
+    [Fact]
+    public void StableHoverExpansionHasNoTransitionDeadline()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+
+        Assert.Null(controller.NextTransitionAt);
+    }
+
+    [Fact]
     public void HoverExpansionWaitsBeforeOpeningCollapsedBox()
     {
         var controller = new HoverExpansionController(

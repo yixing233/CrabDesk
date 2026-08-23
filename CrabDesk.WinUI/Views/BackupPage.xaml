@@ -53,10 +53,7 @@
                 <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
                     <Grid ColumnSpacing="16">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="自动备份" FontWeight="SemiBold" />
-                            <TextBlock Text="按设定间隔保存当前桌面布局快照" Style="{StaticResource SecondaryBodyStyle}" />
-                        </StackPanel>
+                        <TextBlock Text="自动备份" FontWeight="SemiBold" VerticalAlignment="Center" />
                         <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding DailyBackup, Mode=TwoWay}"
                                       VerticalAlignment="Center" AutomationProperties.Name="自动备份" />
                     </Grid>

@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Controls;
@@ -36,6 +37,7 @@ public sealed class DesktopIconInteractionTests
 
     [Theory]
     [InlineData(nameof(LucideRuntimeIcon.Menu), "\uE115")]
+    [InlineData(nameof(LucideRuntimeIcon.Search), "\uE151")]
     [InlineData(nameof(LucideRuntimeIcon.ChevronsUpDown), "\uE211")]
     [InlineData(nameof(LucideRuntimeIcon.Check), "\uE06C")]
     [InlineData(nameof(LucideRuntimeIcon.ChevronRight), "\uE06F")]
@@ -59,6 +61,230 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
+    [InlineData(15f, 1f, 15f)]
+    [InlineData(15f, 1.25f, 15.2f)]
+    [InlineData(15f, 1.5f, 15.333333f)]
+    public void RuntimeLucideFontSizeAlignsToPhysicalPixels(
+        float requestedEmSize,
+        float dpiScale,
+        float expectedEmSize)
+    {
+        Assert.Equal(
+            expectedEmSize,
+            LucideRuntimeIcons.AlignEmSizeToPhysicalPixels(requestedEmSize, dpiScale),
+            precision: 3);
+    }
+
+    [Theory]
+    [InlineData("Quarterly Report.PDF", "report", true)]
+    [InlineData("Quarterly Report.PDF", "REPORT.PDF", true)]
+    [InlineData("Quarterly Report.PDF", "image", false)]
+    [InlineData("Quarterly Report.PDF", "  ", true)]
+    public void BoxSearchMatchesDisplayNamesCaseInsensitively(
+        string displayName,
+        string query,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            BoxItemSearchFilter.MatchesDisplayName(displayName, query));
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(false, false, false)]
+    public void HeaderActionsAppearOnlyForHoverOrActiveSearch(
+        bool isHovered,
+        bool isSearching,
+        bool expected)
+    {
+        var boxId = Guid.NewGuid();
+
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldShowHeaderActions(
+                boxId,
+                isHovered ? boxId : null,
+                isSearching ? boxId : null));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(true, false, false, false)]
+    public void HeaderActionOverlayIsRestoredOnlyWhenMissing(
+        bool hoverTargetUnchanged,
+        bool hasActiveHeaderActions,
+        bool overlayVisible,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldRestoreHeaderActionOverlay(
+                hoverTargetUnchanged,
+                hasActiveHeaderActions,
+                overlayVisible));
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void OpenBoxMenuSuspendsHoverStateUntilItCloses(
+        bool menuOpen,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldSuspendHoverState(
+                menuOpen ? Guid.NewGuid() : null));
+    }
+
+    [Theory]
+    [InlineData(120, 30, true)]
+    [InlineData(180, 150, true)]
+    [InlineData(99, 100, false)]
+    [InlineData(301, 100, false)]
+    public void HeaderActionsActivateAcrossTheEntireVisualBox(
+        float x,
+        float y,
+        bool expected)
+    {
+        var boxBounds = new RectangleF(100, 20, 200, 180);
+
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.IsPointerInsideVisualBox(boxBounds, new PointF(x, y)));
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    public void HeaderActionsStayOutOfCompositedBaseLayerWhenOverlayIsAvailable(
+        bool compositedByIconSurface,
+        bool overlayUnavailable,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldDrawHeaderActionsInBaseLayer(
+                compositedByIconSurface,
+                overlayUnavailable));
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    public void HeaderActionOverlayStaysVisibleDuringBoxLocalAnimation(
+        bool hasDynamicVisual,
+        bool partialAnimationOnly,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldPresentHeaderActionOverlay(
+                hasDynamicVisual,
+                partialAnimationOnly));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, false, false, true)]
+    public void DynamicBoxTransformCarriesItsHeaderActions(
+        bool compositedByIconSurface,
+        bool overlayUnavailable,
+        bool dynamicTransform,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldDrawHeaderActionsOnCurrentLayer(
+                compositedByIconSurface,
+                overlayUnavailable,
+                dynamicTransform));
+    }
+
+    [Fact]
+    public void BoxSearchEditorUsesWpfTextBoxToAvoidDisposedWinFormsFontHandles()
+    {
+        var searchInputField = typeof(DesktopBoxForm).GetField(
+            "_searchInput",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(searchInputField);
+        Assert.Equal(typeof(System.Windows.Controls.TextBox), searchInputField.FieldType);
+    }
+
+    [Fact]
+    public void CenteredBoxTitleUsesSymmetricHeaderBounds()
+    {
+        var header = new RectangleF(100, 20, 320, 38);
+
+        var title = DesktopBoxForm.CalculateTitleTextBounds(header, centered: true);
+
+        Assert.Equal(header.Left + header.Width / 2, title.Left + title.Width / 2);
+        Assert.Equal(title.Left - header.Left, header.Right - title.Right);
+    }
+
+    [Fact]
+    public void HeaderActionsAreDistributedAcrossBothSidesOfTitle()
+    {
+        var header = new RectangleF(100, 20, 320, 38);
+
+        var actions = DesktopBoxForm.CalculateHeaderActionBounds(header);
+        var center = header.Left + header.Width / 2;
+
+        Assert.True(actions.Search.Right < center);
+        Assert.True(actions.AutoExpand.Left > center);
+        Assert.True(actions.Menu.Left > center);
+        Assert.Equal(actions.Search.Left - header.Left, header.Right - actions.Menu.Right);
+        Assert.Equal(
+            actions.AutoExpand.Left + actions.AutoExpand.Width / 2,
+            actions.Menu.Left + actions.Menu.Width / 2 - 30);
+    }
+
+    [Fact]
+    public void HoverFocusInvalidatesOnlyPreviousAndCurrentBoxes()
+    {
+        var previous = new RectangleF(10, 20, 100, 80);
+        var current = new RectangleF(80, 40, 120, 100);
+
+        var dirtyBounds = DesktopBoxForm.CalculateFocusDirtyBounds(previous, current);
+
+        Assert.Equal(RectangleF.FromLTRB(10, 20, 200, 140), dirtyBounds);
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true, false, true)]
+    [InlineData(false, true, true, true, false, false)]
+    [InlineData(true, false, true, true, false, false)]
+    [InlineData(true, true, false, true, false, false)]
+    [InlineData(true, true, true, false, false, false)]
+    [InlineData(true, true, true, true, true, false)]
+    public void HeightAnimationCachePrewarmsOnlyForEligibleCollapsedBoxes(
+        bool compositedByIconSurface,
+        bool animationEnabled,
+        bool expandOnHover,
+        bool effectivelyCollapsed,
+        bool cacheExists,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldPrewarmHeightAnimationCache(
+                compositedByIconSurface,
+                animationEnabled,
+                expandOnHover,
+                effectivelyCollapsed,
+                cacheExists));
+    }
+
+    [Theory]
     [InlineData(0x00000000, 0x08000080)]
     [InlineData(0x00040000, 0x08000080)]
     [InlineData(0x00100008, 0x08100088)]
@@ -69,6 +295,46 @@ public sealed class DesktopIconInteractionTests
         Assert.Equal(
             expected,
             FluentContextMenuStrip.NormalizeExtendedWindowStyle(extendedStyle));
+    }
+
+    [Theory]
+    [InlineData(false, true, true, true, false)]
+    [InlineData(true, true, true, true, true)]
+    [InlineData(true, false, true, true, false)]
+    [InlineData(true, true, false, true, false)]
+    [InlineData(true, true, true, false, false)]
+    public void ContextMenuOpacityAnimationRequiresOwnerAndSystemOptIn(
+        bool allowedByOwner,
+        bool appAnimationsEnabled,
+        bool systemMenuAnimationEnabled,
+        bool systemMenuFadeEnabled,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            FluentContextMenuStrip.ShouldAnimateOpacity(
+                allowedByOwner,
+                appAnimationsEnabled,
+                systemMenuAnimationEnabled,
+                systemMenuFadeEnabled));
+    }
+
+    [Theory]
+    [InlineData(false, 96, 1.5f, 1.5f)]
+    [InlineData(true, 144, null, 1.5f)]
+    [InlineData(false, 144, null, 1f)]
+    public void ContextMenuMetricsPreferKnownMonitorDpiBeforeHandleCreation(
+        bool handleCreated,
+        int deviceDpi,
+        float? preferredDpiScale,
+        float expected)
+    {
+        Assert.Equal(
+            expected,
+            FluentContextMenuStrip.ResolveMetricsDpiScale(
+                handleCreated,
+                deviceDpi,
+                preferredDpiScale));
     }
 
     [Fact]
@@ -91,6 +357,18 @@ public sealed class DesktopIconInteractionTests
 
         AssertBalancedOuterVerticalSpace(rootMenu);
         AssertBalancedOuterVerticalSpace(subMenu);
+    }
+
+    [Fact]
+    public void CompositedBoxTransformCommitsThroughPartialFrame()
+    {
+        Assert.True(DesktopBoxForm.ShouldUsePartialTransformCommit(
+            isCompositedByIconSurface: true,
+            hasPartialRenderer: true));
+        Assert.False(DesktopBoxForm.ShouldRebuildWorkspaceAfterBoxTransform());
+        Assert.False(DesktopBoxForm.ShouldPresentAfterRegionUpdate(
+            isCompositedByIconSurface: true,
+            hitMaskPresented: true));
     }
 
     [Theory]

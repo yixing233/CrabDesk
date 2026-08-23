@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
 using System.Windows.Forms;
@@ -38,6 +40,7 @@ internal enum LucideRuntimeIcon
     Plus,
     Power,
     RefreshCw,
+    Search,
     SendToBack,
     Sparkles,
     SquarePlus,
@@ -54,6 +57,7 @@ internal static class LucideRuntimeIcons
     private static readonly object FontSync = new();
     private static PrivateFontCollection? _fontCollection;
     private static FontFamily? _drawingFontFamily;
+    private static readonly Dictionary<int, Font> DrawingFonts = [];
     private static WpfMedia.FontFamily? _wpfFontFamily;
     private static bool _fontLoadAttempted;
 
@@ -88,6 +92,7 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.Plus => "\uE13D",
         LucideRuntimeIcon.Power => "\uE140",
         LucideRuntimeIcon.RefreshCw => "\uE145",
+        LucideRuntimeIcon.Search => "\uE151",
         LucideRuntimeIcon.SendToBack => "\uE4F3",
         LucideRuntimeIcon.Sparkles => "\uE412",
         LucideRuntimeIcon.SquarePlus => "\uE173",
@@ -107,9 +112,11 @@ internal static class LucideRuntimeIcons
         Color color,
         float emSize)
     {
-        var family = GetDrawingFontFamily();
+        var font = GetDrawingFont(AlignEmSizeToPhysicalPixels(
+            emSize,
+            GetGraphicsScale(graphics)));
         var glyph = GetGlyph(icon);
-        if (family is null || glyph.Length == 0 || bounds.Width <= 0 || bounds.Height <= 0)
+        if (font is null || glyph.Length == 0 || bounds.Width <= 0 || bounds.Height <= 0)
         {
             return;
         }
@@ -117,12 +124,12 @@ internal static class LucideRuntimeIcons
         var state = graphics.Save();
         try
         {
+            // Lucide is an outline font. Its thin strokes need an integer
+            // physical-pixel grid on the transparent title-action overlay.
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            using var font = new Font(
-                family,
-                Math.Max(1, emSize),
-                FontStyle.Regular,
-                GraphicsUnit.Pixel);
             using var brush = new SolidBrush(color);
             using var format = new StringFormat(StringFormat.GenericTypographic)
             {
@@ -202,6 +209,56 @@ internal static class LucideRuntimeIcons
 
             return _drawingFontFamily;
         }
+    }
+
+    private static Font? GetDrawingFont(float emSize)
+    {
+        lock (FontSync)
+        {
+            var family = GetDrawingFontFamily();
+            if (family is null)
+            {
+                return null;
+            }
+
+            // Preserve the fractional logical size that maps to an integer
+            // physical size at the active monitor DPI.
+            var fontSizeHundredths = Math.Max(100, (int)Math.Round(emSize * 100f));
+            if (!DrawingFonts.TryGetValue(fontSizeHundredths, out var font))
+            {
+                font = new Font(
+                    family,
+                    fontSizeHundredths / 100f,
+                    FontStyle.Regular,
+                    GraphicsUnit.Pixel);
+                DrawingFonts[fontSizeHundredths] = font;
+            }
+            return font;
+        }
+    }
+
+    private static float GetGraphicsScale(Graphics graphics)
+    {
+        using var transform = graphics.Transform;
+        var elements = transform.Elements;
+        var horizontalScale = MathF.Sqrt(elements[0] * elements[0] + elements[1] * elements[1]);
+        var verticalScale = MathF.Sqrt(elements[2] * elements[2] + elements[3] * elements[3]);
+        var averageScale = (horizontalScale + verticalScale) / 2f;
+        return averageScale > 0 && float.IsFinite(averageScale) ? averageScale : 1f;
+    }
+
+    internal static float AlignEmSizeToPhysicalPixels(float requestedEmSize, float dpiScale)
+    {
+        if (!float.IsFinite(requestedEmSize) || requestedEmSize <= 0 ||
+            !float.IsFinite(dpiScale) || dpiScale <= 0)
+        {
+            return Math.Max(1f, requestedEmSize);
+        }
+
+        var physicalPixels = Math.Max(
+            1,
+            (int)Math.Round(requestedEmSize * dpiScale, MidpointRounding.AwayFromZero));
+        return physicalPixels / dpiScale;
     }
 
     private static string GetFontPath() =>

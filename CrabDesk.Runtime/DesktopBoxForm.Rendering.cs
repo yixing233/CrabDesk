@@ -117,7 +117,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 graphics,
                 geometry,
                 cacheBounds,
-                includeItemHoverFeedback: false);
+                includeItemHoverFeedback: false,
+                includeCompositedHeaderActions: true);
             graphics.ResetTransform();
         }
 
@@ -178,6 +179,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _heightAnimationVisualCaches[box.Id] = new BoxHeightVisualCache(bitmap, cacheBounds);
     }
 
+    private void EnsureHeightAnimationVisualCache(DesktopBox box)
+    {
+        if (!_heightAnimationVisualCaches.ContainsKey(box.Id))
+        {
+            PrepareHeightAnimationVisualCache(box);
+        }
+    }
+
     private bool DrawHeightAnimationVisualCache(
         Graphics graphics,
         BoxGeometry geometry,
@@ -185,7 +194,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         if (!_heightAnimationVisualCaches.TryGetValue(geometry.Box.Id, out var cache))
         {
-            PrepareHeightAnimationVisualCache(geometry.Box);
+            EnsureHeightAnimationVisualCache(geometry.Box);
             if (!_heightAnimationVisualCaches.TryGetValue(geometry.Box.Id, out cache))
             {
                 return false;
@@ -217,6 +226,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             cache.Bitmap.Dispose();
         }
+        if (_prewarmedHeightAnimationCacheBoxId == boxId)
+        {
+            _prewarmedHeightAnimationCacheBoxId = null;
+        }
     }
 
     private void ClearHeightAnimationVisualCaches()
@@ -226,6 +239,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             cache.Bitmap.Dispose();
         }
         _heightAnimationVisualCaches.Clear();
+        _pendingHeightAnimationCachePrewarmBoxId = null;
+        _prewarmedHeightAnimationCacheBoxId = null;
     }
 
     private void DrawDropTargetFeedback(
@@ -542,7 +557,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         IReadOnlySet<string>? selectedItemKeys = null,
         bool includeSelectionRectangle = true,
         IReadOnlySet<string>? suppressedHoverItemKeys = null,
-        bool includeItemHoverFeedback = true)
+        bool includeItemHoverFeedback = true,
+        bool includeCompositedHeaderActions = false)
     {
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
         var opacity = Math.Clamp(geometry.Box.Appearance.Opacity, 0.35, 1);
@@ -556,11 +572,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         using var fill = new SolidBrush(boxColor);
         graphics.FillPath(fill, path);
 
-        using var accentPath = RoundedRectangle(
-            new RectangleF(geometry.Header.X + 8, geometry.Header.Y + 9, 4, geometry.Header.Height - 18),
-            2);
-        using var accent = new SolidBrush(ParseOpaqueColor(geometry.Box.Appearance.Accent));
-        graphics.FillPath(accent, accentPath);
         using var titleFont = CreateFont(
             geometry.Box.Appearance.TitleFontFamily,
             (float)geometry.Box.Appearance.TitleFontSize,
@@ -576,21 +587,40 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Trimming = StringTrimming.EllipsisCharacter,
             FormatFlags = StringFormatFlags.NoWrap
         };
-        var titleRightPadding = GetTitleRightPadding(geometry.Box);
         if (_editingBox?.Id != geometry.Box.Id)
         {
+            var titleBounds = CalculateTitleTextBounds(
+                geometry.Header,
+                geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center);
             graphics.DrawString(geometry.Box.Title, titleFont, titleBrush,
-                new RectangleF(geometry.Header.X + 20, geometry.Header.Y, geometry.Header.Width - titleRightPadding, geometry.Header.Height), titleFormat);
+                titleBounds,
+                titleFormat);
         }
-        DrawAutoExpandButton(
-            graphics,
-            geometry.AutoExpand,
-            geometry.Box.ExpandOnHover,
-            _hoveredAutoExpandBoxId == geometry.Box.Id,
-            ParseOpaqueColor(geometry.Box.Appearance.Accent),
-            textColor,
-            isDarkSurface);
-        DrawMenuIcon(graphics, geometry.Menu, textColor);
+        if (ShouldDrawHeaderActionsOnCurrentLayer(
+                _isCompositedByIconSurface,
+                _headerActionOverlayUnavailable,
+                includeCompositedHeaderActions) &&
+            ShouldShowHeaderActions(geometry.Box.Id, _hoveredBoxId, _searchingBoxId))
+        {
+            var headerAccent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+            DrawSearchButton(
+                graphics,
+                geometry.Search,
+                _searchingBoxId == geometry.Box.Id,
+                _hoveredSearchBoxId == geometry.Box.Id,
+                headerAccent,
+                textColor,
+                isDarkSurface);
+            DrawAutoExpandButton(
+                graphics,
+                geometry.AutoExpand,
+                geometry.Box.ExpandOnHover,
+                _hoveredAutoExpandBoxId == geometry.Box.Id,
+                headerAccent,
+                textColor,
+                isDarkSurface);
+            DrawMenuIcon(graphics, geometry.Menu, textColor);
+        }
         DrawBoxTabs(
             graphics,
             geometry,
@@ -1274,6 +1304,59 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         graphics.ResetTransform();
     }
 
+    private void DrawHeaderActionOverlay(Graphics graphics, RectangleF overlayBounds)
+    {
+        var targetBoxId = _searchingBoxId ?? _hoveredBoxId;
+        var geometry = targetBoxId is { } boxId
+            ? _boxes.LastOrDefault(box => box.Box.Id == boxId)
+            : null;
+        if (geometry is null)
+        {
+            return;
+        }
+
+        // This overlay covers just the header controls. Keeping it on the
+        // quality path avoids rough vector edges without affecting desktop
+        // drag rendering.
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        graphics.TextContrast = 4;
+        graphics.Transform = new Matrix(
+            (float)_scale,
+            0,
+            0,
+            (float)_scale,
+            -(float)(overlayBounds.X * _scale),
+            -(float)(overlayBounds.Y * _scale));
+        graphics.SetClip(geometry.Header, CombineMode.Intersect);
+
+        var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
+        var textColor = ResolveAutoTextColor(baseColor);
+        var isDarkSurface = UsesLightText(baseColor);
+        var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+        DrawSearchButton(
+            graphics,
+            geometry.Search,
+            _searchingBoxId == geometry.Box.Id,
+            _hoveredSearchBoxId == geometry.Box.Id,
+            accent,
+            textColor,
+            isDarkSurface);
+        DrawAutoExpandButton(
+            graphics,
+            geometry.AutoExpand,
+            geometry.Box.ExpandOnHover,
+            _hoveredAutoExpandBoxId == geometry.Box.Id,
+            accent,
+            textColor,
+            isDarkSurface);
+        DrawMenuIcon(graphics, geometry.Menu, textColor);
+        graphics.ResetTransform();
+    }
+
     private RectangleF GetItemHoverVisualBounds(
         Graphics graphics,
         ItemGeometry item,
@@ -1310,6 +1393,38 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             LucideRuntimeIcon.Menu,
             bounds,
             color,
+            15f);
+    }
+
+    private static void DrawSearchButton(
+        Graphics graphics,
+        RectangleF bounds,
+        bool active,
+        bool hovered,
+        Color accent,
+        Color textColor,
+        bool isDark)
+    {
+        if (active || hovered)
+        {
+            var fillColor = active
+                ? Color.FromArgb(isDark ? 76 : 48, accent)
+                : Color.FromArgb(isDark ? 36 : 24, textColor);
+            using var fill = new SolidBrush(fillColor);
+            using var path = RoundedRectangle(RectangleF.Inflate(bounds, -2, -2), 4);
+            graphics.FillPath(fill, path);
+            if (active)
+            {
+                using var border = new Pen(Color.FromArgb(isDark ? 150 : 120, accent), 1);
+                graphics.DrawPath(border, path);
+            }
+        }
+
+        LucideRuntimeIcons.Draw(
+            graphics,
+            LucideRuntimeIcon.Search,
+            bounds,
+            active ? accent : textColor,
             15f);
     }
 

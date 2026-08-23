@@ -22,10 +22,7 @@
                         <Border Style="{StaticResource SettingRowStyle}">
                             <Grid ColumnSpacing="16">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="自动检查" FontWeight="SemiBold" />
-                                    <TextBlock Text="CrabDesk 启动后检查 GitHub 上的最新版本" Style="{StaticResource SecondaryBodyStyle}" />
-                                </StackPanel>
+                                <TextBlock Text="启动时自动检查更新" FontWeight="SemiBold" VerticalAlignment="Center" />
                                 <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding CheckUpdatesOnStartup, Mode=TwoWay}"
                                               VerticalAlignment="Center" AutomationProperties.Name="启动时检查更新" />
                             </Grid>

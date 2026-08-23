@@ -97,6 +97,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         _startBounds = box.Box.Bounds;
+        if (box.Search.Contains(point))
+        {
+            ToggleBoxSearch(box.Box);
+            return;
+        }
         if (box.AutoExpand.Contains(point))
         {
             ToggleBoxDisplayMode(box.Box);
@@ -441,7 +446,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void ReconcileHoverAtCursor()
     {
         _hoverReconcilePending = false;
-        if (_runtime.IsDesktopIconPointerInteractionActive ||
+        if (ShouldSuspendHoverState(_openBoxMenuBoxId) ||
+            _runtime.IsDesktopIconPointerInteractionActive ||
             _movingBox is not null || _resizingBox is not null || IsDisposed)
         {
             return;
@@ -453,11 +459,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var clientPoint = PointToClient(Forms.Cursor.Position);
         if (ClientRectangle.Contains(clientPoint))
         {
+            var previousHoveredBoxId = _hoveredBoxId;
             UpdateHoverState(ToDip(clientPoint));
+            if (ShouldRestoreHeaderActionOverlay(
+                    previousHoveredBoxId == _hoveredBoxId,
+                    _hoveredBoxId is not null || _searchingBoxId is not null,
+                    _headerActionOverlay.Visible))
+            {
+                RequestHeaderActionVisualUpdate();
+            }
             return;
         }
 
         Cursor = Forms.Cursors.Default;
+        var headerActionsChanged = SetHoveredBox(null);
         ClearAutoExpandHover();
         if (_hoveredItemKey is not null)
         {
@@ -468,6 +483,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _hoveredItemKey = null;
             HideItemHoverOverlay();
             InvalidateItem(previousHoveredItem);
+        }
+        if (headerActionsChanged)
+        {
+            RequestHeaderActionVisualUpdate();
         }
     }
 
@@ -481,21 +500,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void UpdatePointerCursor(PointF point)
     {
+        var searchBoxId = _boxes.LastOrDefault(box => box.Search.Contains(point))?.Box.Id;
         var autoExpandBoxId = _boxes.LastOrDefault(box => box.AutoExpand.Contains(point))?.Box.Id;
-        if (_hoveredAutoExpandBoxId != autoExpandBoxId)
+        if (_hoveredSearchBoxId != searchBoxId || _hoveredAutoExpandBoxId != autoExpandBoxId)
         {
-            var previous = _hoveredAutoExpandBoxId;
+            _hoveredSearchBoxId = searchBoxId;
             _hoveredAutoExpandBoxId = autoExpandBoxId;
             _headerToolTip.SetToolTip(this, null);
-            InvalidateHeaderButton(previous, box => box.AutoExpand);
-            InvalidateHeaderButton(autoExpandBoxId, box => box.AutoExpand);
-            if (autoExpandBoxId is not null)
+            if (searchBoxId is not null)
+            {
+                _headerToolTip.SetToolTip(this, "搜索盒子内容");
+            }
+            else if (autoExpandBoxId is not null)
             {
                 var enabled = _boxes.FirstOrDefault(box => box.Box.Id == autoExpandBoxId)?.Box.ExpandOnHover == true;
                 _headerToolTip.SetToolTip(
                     this,
                     enabled ? "切换为固定展开" : "切换为悬停自动展开");
             }
+            RequestHeaderActionVisualUpdate();
         }
         var resizeEdges = ResizeEdges.None;
         if (_runtime.State.Settings.Appearance.ShowResizeGrip &&
@@ -504,6 +527,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             resizeEdges = GetResizeEdges(resizeBox, point);
         }
         var isHeaderButton = _boxes.LastOrDefault(box =>
+            box.Search.Contains(point) ||
             box.AutoExpand.Contains(point) ||
             box.Menu.Contains(point)) is not null;
         var isBoxTab = _boxes.LastOrDefault(box =>
@@ -523,6 +547,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         try
         {
+            _hoverTimer.Stop();
+            // A context menu is an extension of its box interaction. Freeze
+            // hover expansion while the root menu or one of its submenus is
+            // active; Closed queues one reconciliation against the real
+            // pointer position so ordinary collapse timing resumes cleanly.
+            if (ShouldSuspendHoverState(_openBoxMenuBoxId))
+            {
+                return;
+            }
             // A desktop marquee owns the pointer capture. Do not let the
             // 25 ms box-hover poll mutate box geometry while that gesture is
             // in progress. An OLE file drag is different: its DragOver route
@@ -535,6 +568,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 return;
             }
             if (_movingBox is not null || _resizingBox is not null)
+            {
+                return;
+            }
+            if (_searchingBoxId is not null && _searchWindow.Visible)
             {
                 return;
             }
@@ -606,7 +643,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ClearHoverState()
     {
+        _hoverTimer.Stop();
         HideItemHoverOverlay();
+        HideHeaderActionOverlay();
         var previousHoveredItem = _hoveredItemKey is null
             ? null
             : _items.LastOrDefault(candidate => string.Equals(
@@ -615,6 +654,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 StringComparison.OrdinalIgnoreCase));
         var expandedBoxIds = _hoverExpandedBoxes.ToArray();
         _hoveredItemKey = null;
+        var headerActionsChanged = SetHoveredBox(null);
         ClearAutoExpandHover();
         var expandedBoxId = _hoverExpansion.Reset();
         if (expandedBoxId is { } id)
@@ -632,14 +672,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             RequestLayerRender();
             return;
         }
+        if (headerActionsChanged)
+        {
+            RequestHeaderActionVisualUpdate();
+        }
         InvalidateItem(previousHoveredItem);
     }
 
     private void UpdateHoverState(PointF point, bool updateItemHover = true)
     {
         EnsureGeometry();
-        var hoveredBoxId = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point))?.Box.Id;
-        var focusChanged = FocusBoxOnHover(hoveredBoxId);
+        var hoveredBoxId = _boxes.LastOrDefault(candidate =>
+            IsPointerInsideVisualBox(candidate.Bounds, point))?.Box.Id;
+        var headerActionsChanged = SetHoveredBox(hoveredBoxId);
+        var focusDirtyBounds = FocusBoxOnHover(hoveredBoxId);
         var hoverChanged = false;
         ItemGeometry? previousHoveredItem = null;
         ItemGeometry? hoveredItem = null;
@@ -667,15 +713,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var collapsedHeaderBoxId = _boxes.LastOrDefault(box =>
             box.Box.ExpandOnHover &&
             box.Header.Contains(point) &&
+            !box.Search.Contains(point) &&
             !box.AutoExpand.Contains(point) &&
             !box.Menu.Contains(point))?.Box.Id;
         var pointerInsideExpandedBox = _hoverExpansion.ExpandedBoxId is { } expandedBoxId &&
             _boxes.LastOrDefault(box => box.Box.Id == expandedBoxId)?.Bounds.Contains(point) == true;
         var autoExpandEnabled = _hoverExpansion.ExpandedBoxId is not null ||
             collapsedHeaderBoxId is not null;
+        var now = DateTimeOffset.UtcNow;
         var transition = autoExpandEnabled &&
             _movingBox is null && _resizingBox is null
-            ? _hoverExpansion.Update(collapsedHeaderBoxId, pointerInsideExpandedBox, DateTimeOffset.UtcNow)
+            ? _hoverExpansion.Update(collapsedHeaderBoxId, pointerInsideExpandedBox, now)
             : new HoverExpansionTransition(null, _hoverExpansion.Reset());
         if (transition.CollapsedBoxId is { } collapsedBoxId)
         {
@@ -695,9 +743,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         else
         {
-            if (focusChanged)
+            if (focusDirtyBounds is { } dirtyBounds)
             {
-                RequestVisualLayerRender();
+                RequestFocusVisualUpdate(dirtyBounds);
+            }
+            if (headerActionsChanged)
+            {
+                RequestHeaderActionVisualUpdate();
             }
             if (hoverChanged)
             {
@@ -707,21 +759,138 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 RequestItemHoverVisualUpdate();
             }
         }
+        if (!structureChanged)
+        {
+            QueueHeightAnimationCachePrewarm(collapsedHeaderBoxId);
+        }
+        ScheduleHoverDeadline(now);
     }
 
-    private bool FocusBoxOnHover(Guid? boxId)
+    private void ScheduleHoverDeadline(DateTimeOffset now)
+    {
+        _hoverTimer.Stop();
+        if (_hoverExpansion.NextTransitionAt is not { } due)
+        {
+            return;
+        }
+
+        _hoverTimer.Interval = Math.Clamp(
+            (int)Math.Ceiling((due - now).TotalMilliseconds),
+            1,
+            1000);
+        _hoverTimer.Start();
+    }
+
+    private void QueueHeightAnimationCachePrewarm(Guid? boxId)
+    {
+        if (boxId is not { } candidateBoxId ||
+            _pendingHeightAnimationCachePrewarmBoxId == candidateBoxId ||
+            _heightAnimationVisualCaches.ContainsKey(candidateBoxId))
+        {
+            return;
+        }
+
+        _pendingHeightAnimationCachePrewarmBoxId = candidateBoxId;
+        try
+        {
+            BeginInvoke((Action)(() => PrewarmHeightAnimationCache(candidateBoxId)));
+        }
+        catch (InvalidOperationException)
+        {
+            _pendingHeightAnimationCachePrewarmBoxId = null;
+        }
+    }
+
+    private void PrewarmHeightAnimationCache(Guid boxId)
+    {
+        if (_pendingHeightAnimationCachePrewarmBoxId == boxId)
+        {
+            _pendingHeightAnimationCachePrewarmBoxId = null;
+        }
+        if (_resourcesDisposed || IsDisposed)
+        {
+            return;
+        }
+
+        EnsureGeometry();
+        var geometry = _boxes.LastOrDefault(box => box.Box.Id == boxId);
+        if (geometry is null)
+        {
+            return;
+        }
+        var pointer = ToDip(PointToClient(Forms.Cursor.Position));
+        var pointerStillOnHeader = geometry.Header.Contains(pointer) &&
+            !geometry.Search.Contains(pointer) &&
+            !geometry.AutoExpand.Contains(pointer) &&
+            !geometry.Menu.Contains(pointer);
+        if (!pointerStillOnHeader ||
+            !ShouldPrewarmHeightAnimationCache(
+                _isCompositedByIconSurface,
+                _runtime.State.Settings.Appearance.AnimationEnabled,
+                geometry.Box.ExpandOnHover,
+                IsEffectivelyCollapsed(geometry.Box),
+                _heightAnimationVisualCaches.ContainsKey(boxId)))
+        {
+            return;
+        }
+
+        if (_prewarmedHeightAnimationCacheBoxId is { } previousBoxId &&
+            previousBoxId != boxId &&
+            !_heightAnimations.ContainsKey(previousBoxId))
+        {
+            ReleaseHeightAnimationVisualCache(previousBoxId);
+        }
+        EnsureHeightAnimationVisualCache(geometry.Box);
+        if (_heightAnimationVisualCaches.ContainsKey(boxId))
+        {
+            _prewarmedHeightAnimationCacheBoxId = boxId;
+        }
+    }
+
+    private RectangleF? FocusBoxOnHover(Guid? boxId)
     {
         if (boxId is not { } focusedBoxId || _focusedBoxId == focusedBoxId)
+        {
+            return null;
+        }
+
+        var previousBoxId = _focusedBoxId;
+        var previousBounds = previousBoxId is { } previousId
+            ? _boxes.FirstOrDefault(box => box.Box.Id == previousId)?.Bounds
+            : null;
+        _focusedBoxId = focusedBoxId;
+        var focusedGeometryIndex = _boxes.FindIndex(box => box.Box.Id == focusedBoxId);
+        if (focusedGeometryIndex >= 0)
+        {
+            var focusedGeometry = _boxes[focusedGeometryIndex];
+            _boxes.RemoveAt(focusedGeometryIndex);
+            _boxes.Add(focusedGeometry);
+        }
+        var currentBounds = _boxes.First(box => box.Box.Id == focusedBoxId).Bounds;
+        DiagnosticLog.Verbose(
+            $"Box hover focus monitor={_monitor.Id} {previousBoxId?.ToString("N") ?? "<none>"} -> {focusedBoxId:N}");
+        return CalculateFocusDirtyBounds(previousBounds, currentBounds);
+    }
+
+    private void RequestFocusVisualUpdate(RectangleF dirtyBounds)
+    {
+        if (_isCompositedByIconSurface && _iconLayerPartialRenderRequest is not null)
+        {
+            _iconLayerPartialRenderRequest(dirtyBounds);
+            return;
+        }
+
+        RequestVisualLayerRender();
+    }
+
+    private bool SetHoveredBox(Guid? boxId)
+    {
+        if (_hoveredBoxId == boxId)
         {
             return false;
         }
 
-        var previousBoxId = _focusedBoxId;
-        _focusedBoxId = focusedBoxId;
-        _geometryDirty = true;
-        RebuildGeometry();
-        DiagnosticLog.Info(
-            $"Box hover focus monitor={_monitor.Id} {previousBoxId?.ToString("N") ?? "<none>"} -> {focusedBoxId:N}");
+        _hoveredBoxId = boxId;
         return true;
     }
 
@@ -755,7 +924,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
     {
-        DiagnosticLog.Info(
+        DiagnosticLog.Verbose(
             $"Surface mouse up monitor={_monitor.Id} button={eventArgs.Button} moving={_movingBox is not null} resizing={_resizingBox is not null} selecting={_selectionBox is not null}");
         if (eventArgs.Button == Forms.MouseButtons.Left)
         {
@@ -905,17 +1074,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         UpdateWindowRegion();
-        if (!_isCompositedByIconSurface)
-        {
-            FlushTransformTrail();
-        }
+        FlushTransformTrail();
         if (movingBox is not null)
         {
-            _runtime.BoxChanged(movingBox, true);
+            _runtime.BoxChanged(movingBox, ShouldRebuildWorkspaceAfterBoxTransform());
         }
         else if (resizingBox is not null)
         {
-            _runtime.BoxChanged(resizingBox, true);
+            _runtime.BoxChanged(resizingBox, ShouldRebuildWorkspaceAfterBoxTransform());
         }
     }
 
@@ -1110,7 +1276,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _transformDirtyBounds = null;
             return;
         }
+        var dirtyBounds = _transformDirtyBounds.Value;
         _transformDirtyBounds = null;
+        if (ShouldUsePartialTransformCommit(
+                _isCompositedByIconSurface,
+                _iconLayerPartialRenderRequest is not null))
+        {
+            _iconLayerPartialRenderRequest!(new RectangleF(
+                (float)dirtyBounds.X,
+                (float)dirtyBounds.Y,
+                (float)dirtyBounds.Width,
+                (float)dirtyBounds.Height));
+            return;
+        }
         PresentLayer();
     }
 
@@ -1138,6 +1316,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         if (box is not null &&
             box.Header.Contains(point) &&
+            !box.Search.Contains(point) &&
             !box.Menu.Contains(point) &&
             !box.AutoExpand.Contains(point))
         {
@@ -1158,7 +1337,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         var scrollKey = GetItemViewKey(box);
-        var itemCount = GetCachedItemsForBox(box.Box.Id).Count;
+        var itemCount = GetVisibleItemsForBox(box).Count;
         var extent = DesktopItemLayoutEngine.GetScrollExtent(
             box.Box.ViewMode,
             new LayoutRect(box.Body.X, box.Body.Y, box.Body.Width, box.Body.Height),
@@ -1178,7 +1357,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // Continue from the offset that is currently on screen, so rapid
         // wheel input glides through every notch instead of skipping to the
         // latest target.
-        var current = _scrollAnimationKey == scrollKey && _scrollAnimationTimer.Enabled
+        var current = _scrollAnimationKey == scrollKey && IsScrollAnimationActive
             ? GetAnimatedScrollOffset()
             : _scrollOffsets.GetValueOrDefault(scrollKey);
         // A standard notch is 120 units. Map the configured wheel lines onto
@@ -1249,21 +1428,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _scrollAnimationFrom = from;
         _scrollAnimationTo = to;
         _scrollAnimationStartedUtc = DateTime.UtcNow;
-        _scrollAnimationTimer.Stop();
-        _scrollAnimationTimer.Start();
+        _animationFrameClock.RequestFrames();
         if (startsNewDynamicPass)
         {
             _dynamicVisualVersion++;
         }
-        ApplyScrollOffset(key, from);
+        ApplyScrollOffset(key, from, requestRender: false);
     }
 
-    private void OnScrollAnimationTick(object? sender, EventArgs eventArgs)
+    private bool AdvanceScrollAnimation(bool requestRender)
     {
         if (_scrollAnimationKey is not { } key)
         {
-            _scrollAnimationTimer.Stop();
-            return;
+            return false;
         }
 
         var progress = Math.Min(
@@ -1277,16 +1454,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             offset = _scrollAnimationTo;
         }
-        ApplyScrollOffset(key, offset, requestRender: !completed);
+        ApplyScrollOffset(key, offset, requestRender: requestRender && !completed);
         if (completed)
         {
             _scrollAnimationKey = null;
-            _scrollAnimationTimer.Stop();
             _dynamicVisualVersion++;
             _scrollHoverResumeTimer.Stop();
             _scrollHoverResumeTimer.Start();
-            RequestVisualLayerRender();
         }
+        return completed;
     }
 
     private void OnScrollHoverResumeTimerTick(object? sender, EventArgs eventArgs)

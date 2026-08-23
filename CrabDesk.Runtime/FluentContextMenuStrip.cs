@@ -96,6 +96,8 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     private ToolStripDropDownCloseReason _pendingCloseReason;
 
     internal int MinimumMenuWidth { get; init; } = 112;
+    internal bool OpacityAnimationAllowed { get; init; } = true;
+    internal float? PreferredDpiScale { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
 
     protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
@@ -119,6 +121,30 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     internal static int NormalizeExtendedWindowStyle(int extendedStyle) =>
         (extendedStyle | WsExToolWindow | WsExNoActivate) & ~WsExAppWindow;
 
+    internal static bool ShouldAnimateOpacity(
+        bool allowedByOwner,
+        bool appAnimationsEnabled,
+        bool systemMenuAnimationEnabled,
+        bool systemMenuFadeEnabled) =>
+        allowedByOwner &&
+        appAnimationsEnabled &&
+        systemMenuAnimationEnabled &&
+        systemMenuFadeEnabled;
+
+    internal static float ResolveMetricsDpiScale(
+        bool handleCreated,
+        int deviceDpi,
+        float? preferredDpiScale)
+    {
+        if (preferredDpiScale is > 0)
+        {
+            return Math.Max(0.75f, preferredDpiScale.Value);
+        }
+        return handleCreated && deviceDpi > 0
+            ? Math.Max(0.75f, deviceDpi / 96f)
+            : 1f;
+    }
+
     internal static Padding CalculateOuterPadding(int deviceDpi)
     {
         var dpiScale = Math.Max(0.75f, deviceDpi / 96f);
@@ -130,7 +156,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     protected override void OnOpening(CancelEventArgs eventArgs)
     {
         StopOpacityAnimation();
-        Opacity = AnimationsEnabled ? 0 : 1;
+        Opacity = OpacityAnimationAllowed && AnimationsEnabled ? 0 : 1;
         base.OnOpening(eventArgs);
         AttachToTopLevelOwner();
         if (eventArgs.Cancel)
@@ -150,9 +176,10 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         base.OnOpened(eventArgs);
         AttachToTopLevelOwner();
         StretchItemsToClientWidth();
+        FluentMenuRenderer.ApplyRoundedCorners(this);
         StartOutsideClickMonitor();
         Invalidate(true);
-        if (AnimationsEnabled)
+        if (OpacityAnimationAllowed && AnimationsEnabled)
         {
             StartOpacityAnimation(1, 90, false);
         }
@@ -164,7 +191,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
 
     protected override void OnClosing(ToolStripDropDownClosingEventArgs eventArgs)
     {
-        if (!_allowImmediateClose && AnimationsEnabled && Visible && !IsDisposed)
+        if (!_allowImmediateClose && OpacityAnimationAllowed && AnimationsEnabled && Visible && !IsDisposed)
         {
             eventArgs.Cancel = true;
             _pendingCloseReason = eventArgs.CloseReason;

@@ -19,7 +19,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private Forms.ContextMenuStrip BuildBoxMenu(DesktopBox box)
     {
-        var menu = CreateContextMenu();
+        var menu = CreateContextMenu(box.Id);
         if (box.IsMappedFolder)
         {
             menu.Items.Add(CreateLucideMenuItem(
@@ -61,7 +61,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             AddManualTabMenu(menu, box);
         }
-        var accentMenu = new FluentToolStripMenuItem("颜色条颜色");
+        var accentMenu = new FluentToolStripMenuItem("强调色");
         LucideRuntimeIcons.SetMenuIcon(accentMenu, LucideRuntimeIcon.Palette);
         var stackMenu = new FluentToolStripMenuItem("层级");
         LucideRuntimeIcons.SetMenuIcon(stackMenu, LucideRuntimeIcon.Layers);
@@ -659,23 +659,37 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             height);
     }
 
-    private Forms.ContextMenuStrip CreateContextMenu()
+    private Forms.ContextMenuStrip CreateContextMenu(Guid boxId)
     {
-        var menu = new FluentContextMenuStrip();
+        var menu = new FluentContextMenuStrip
+        {
+            // Desktop box menus are transient interaction surfaces. Showing
+            // them immediately avoids adding a guaranteed 90 ms delay to an
+            // already synchronous menu construction and layout path.
+            OpacityAnimationAllowed = false,
+            // Opening fires before the drop-down handle exists, so DeviceDpi
+            // still reports the fallback DPI at this point. The surface's
+            // monitor scale is already authoritative.
+            PreferredDpiScale = (float)_monitor.DpiScale
+        };
         menu.Opening += (_, _) => _runtime.ApplyContextMenuTheme(menu);
-        menu.Opened += (_, _) => _runtime.ApplyContextMenuTheme(menu);
+        menu.Opened += (_, _) => _openBoxMenuBoxId = boxId;
         // ContextMenuStrip is still referenced by ToolStripManager while the
         // Closed event is running. Disposing it synchronously here leaves a
         // disposed active drop-down behind and crashes on the next mouse press.
         menu.Closed += (_, _) =>
         {
+            if (_openBoxMenuBoxId == boxId)
+            {
+                _openBoxMenuBoxId = null;
+                QueueHoverReconcile();
+            }
             if (IsDisposed || !IsHandleCreated)
             {
                 return;
             }
             BeginInvoke((Action)(() => menu.Dispose()));
         };
-        _runtime.ApplyContextMenuTheme(menu);
         return menu;
     }
 

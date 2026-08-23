@@ -76,6 +76,69 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         RequestVisualLayerRender();
     }
 
+    private void RequestHeaderActionVisualUpdate()
+    {
+        if (_isCompositedByIconSurface && !_headerActionOverlayUnavailable)
+        {
+            if (PresentHeaderActionOverlay())
+            {
+                return;
+            }
+        }
+
+        RequestVisualLayerRender();
+    }
+
+    private bool PresentHeaderActionOverlay()
+    {
+        if (_resourcesDisposed ||
+            !_isCompositedByIconSurface ||
+            !ShouldPresentHeaderActionOverlay(HasDynamicVisual, IsPartialAnimationOnly) ||
+            (_searchingBoxId is null && _hoveredBoxId is null))
+        {
+            HideHeaderActionOverlay();
+            return true;
+        }
+
+        EnsureGeometry();
+        var targetBoxId = _searchingBoxId ?? _hoveredBoxId;
+        var geometry = _boxes.LastOrDefault(box => box.Box.Id == targetBoxId);
+        if (geometry is null)
+        {
+            HideHeaderActionOverlay();
+            return true;
+        }
+
+        var surfaceBounds = new RectangleF(
+            0,
+            0,
+            (float)(ClientSize.Width / Math.Max(_scale, 0.01d)),
+            (float)(ClientSize.Height / Math.Max(_scale, 0.01d)));
+        var actionBounds = RectangleF.Union(geometry.Search, geometry.Menu);
+        actionBounds = RectangleF.Intersect(surfaceBounds, RectangleF.Inflate(actionBounds, 4, 4));
+        if (actionBounds.Width <= 0 || actionBounds.Height <= 0)
+        {
+            HideHeaderActionOverlay();
+            return true;
+        }
+
+        if (!_headerActionOverlay.Present(
+                actionBounds,
+                _scale,
+                DrawHeaderActionOverlay,
+                out var diagnostic))
+        {
+            HideHeaderActionOverlay();
+            _headerActionOverlayUnavailable = true;
+            DiagnosticLog.Error(
+                $"Desktop box header action overlay presentation failed monitor={_monitor.Id}: {diagnostic}",
+                new InvalidOperationException(diagnostic));
+            return false;
+        }
+
+        return true;
+    }
+
     private bool PresentItemHoverOverlay()
     {
         if (_resourcesDisposed ||
@@ -156,6 +219,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _lastItemHoverOverlayBounds = null;
     }
 
+    private void HideHeaderActionOverlay() =>
+        _headerActionOverlay.HideOverlay();
+
     private void RequestDragRender()
     {
         if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
@@ -164,6 +230,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         HideItemHoverOverlay();
+        var transferHeaderActionsToDynamicFrame =
+            _isCompositedByIconSurface && IsTransformActive;
+        if (!transferHeaderActionsToDynamicFrame)
+        {
+            HideHeaderActionOverlay();
+        }
 
         if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)
         {
@@ -171,6 +243,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // coalesces frames. A second 16 ms timer here adds a full extra
             // frame of input latency to every box movement.
             _iconLayerRenderRequest();
+            if (transferHeaderActionsToDynamicFrame)
+            {
+                // The first transform frame is synchronous, so keep the old
+                // header overlay visible until the moving box already owns
+                // the same actions. This avoids an empty compositor frame at
+                // drag start; later frames carry the actions in the box cache.
+                HideHeaderActionOverlay();
+            }
             return;
         }
 

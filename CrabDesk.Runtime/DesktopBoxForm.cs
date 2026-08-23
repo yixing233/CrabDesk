@@ -28,8 +28,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private const int WsExLayered = 0x00080000;
     private const int HoverExpansionDelayMilliseconds = 120;
     private const int HoverCollapseDelayMilliseconds = 180;
-    private const int HoverPollingIntervalMilliseconds = 25;
-    private const int ScrollAnimationIntervalMilliseconds = 8;
     private const double ScrollAnimationDurationMilliseconds = 190;
     private const double ScrollEaseExponent = 2.2;
     private const double ScrollWheelStepFraction = 0.75;
@@ -61,6 +59,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         MappedFolderItemCategory.Archive,
         MappedFolderItemCategory.Other
     ];
+
+    internal static IReadOnlyList<Guid> OrderFocusedGeometry(
+        IEnumerable<Guid> orderedBoxIds,
+        Guid focusedBoxId) =>
+        orderedBoxIds
+            .Where(boxId => boxId != focusedBoxId)
+            .Append(focusedBoxId)
+            .ToArray();
+
     private readonly CrabDeskRuntime _runtime;
     private readonly MonitorLayout _monitor;
     private readonly double _scale;
@@ -81,6 +88,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly Dictionary<Guid, IReadOnlyList<DesktopItemRef>> _boxItems = [];
     private readonly Dictionary<Guid, BoxHeightAnimation> _heightAnimations = [];
     private readonly Dictionary<Guid, BoxHeightVisualCache> _heightAnimationVisualCaches = [];
+    private Guid? _pendingHeightAnimationCachePrewarmBoxId;
+    private Guid? _prewarmedHeightAnimationCacheBoxId;
     private readonly List<BoxGeometry> _boxes = [];
     private readonly List<ItemGeometry> _items = [];
     private readonly List<ItemGeometry> _marqueeSelectionItems = [];
@@ -88,16 +97,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly Dictionary<(Guid BoxId, string ItemKey), RectangleF> _expandedItemHitBounds = [];
     private bool _geometryDirty = true;
     private IReadOnlyList<LayoutRect> _lastWindowRegionRectangles = [];
-    private readonly Forms.Timer _animationTimer;
+    private readonly DesktopAnimationFrameClock _animationFrameClock;
     private readonly Forms.Timer _hoverTimer;
     private readonly Forms.Timer _dragRenderTimer;
-    private readonly Forms.Timer _scrollAnimationTimer;
     private readonly Forms.Timer _scrollHoverResumeTimer;
     private ItemViewKey? _scrollAnimationKey;
     private double _scrollAnimationFrom;
     private double _scrollAnimationTo;
     private DateTime _scrollAnimationStartedUtc;
     private readonly DesktopHoverOverlay _itemHoverOverlay;
+    private readonly DesktopHoverOverlay _headerActionOverlay;
     private DesktopRenameEditor? _renameEditor;
     private Guid? _renamingBoxId;
     private string? _renamingItemKey;
@@ -107,6 +116,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool _confirmationInProgress;
     private bool _staticRenderDiagnosticWritten;
     private Bitmap? _hitMaskBitmap;
+    private bool _hitMaskPresented;
     private Bitmap? _movingBoxVisualCache;
     private Guid? _movingBoxVisualCacheBoxId;
     private RectangleF _movingBoxVisualCacheBounds;
@@ -143,8 +153,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private string? _hoveredItemKey;
     private RectangleF? _lastItemHoverOverlayBounds;
     private bool _itemHoverOverlayUnavailable;
+    private bool _headerActionOverlayUnavailable;
     private Guid? _focusedBoxId;
+    private Guid? _hoveredBoxId;
+    private Guid? _hoveredSearchBoxId;
     private Guid? _hoveredAutoExpandBoxId;
+    private Guid? _openBoxMenuBoxId;
     private LayoutRect? _transformDirtyBounds;
     private string? _lastRegionDiagnostic;
     private bool _lastPresentSucceeded;
@@ -153,6 +167,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool _presentingLayer;
     private bool _isCompositedByIconSurface;
     private Action? _iconLayerRenderRequest;
+    private Action<RectangleF>? _iconLayerPartialRenderRequest;
     private Action<PointF, IReadOnlyList<string>?, IReadOnlyList<string>?>? _iconDragStateForward;
     private int _iconCacheVersion;
     private int _dynamicVisualVersion;
@@ -182,19 +197,18 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Forms.ControlStyles.OptimizedDoubleBuffer,
             true);
 
-        _animationTimer = new Forms.Timer { Interval = 15 };
-        _animationTimer.Tick += OnAnimationTick;
-        _hoverTimer = new Forms.Timer { Interval = HoverPollingIntervalMilliseconds };
+        _animationFrameClock = new DesktopAnimationFrameClock();
+        _animationFrameClock.Frame += OnAnimationFrame;
+        _hoverTimer = new Forms.Timer { Interval = 1 };
         _hoverTimer.Tick += OnHoverTimer;
-        _hoverTimer.Start();
-        _scrollAnimationTimer = new Forms.Timer { Interval = ScrollAnimationIntervalMilliseconds };
-        _scrollAnimationTimer.Tick += OnScrollAnimationTick;
         _scrollHoverResumeTimer = new Forms.Timer { Interval = ScrollHoverResumeDelayMilliseconds };
         _scrollHoverResumeTimer.Tick += OnScrollHoverResumeTimerTick;
         _dragRenderTimer = new Forms.Timer { Interval = DragRenderCoalesceMilliseconds };
         _dragRenderTimer.Tick += OnDragRenderTimerTick;
         _itemHoverOverlay = new DesktopHoverOverlay();
         Controls.Add(_itemHoverOverlay);
+        _headerActionOverlay = new DesktopHoverOverlay();
+        Controls.Add(_headerActionOverlay);
         _headerToolTip = new Forms.ToolTip
         {
             InitialDelay = 450,
@@ -231,6 +245,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _titleEditor.TextChanged += OnTitleEditorTextChanged;
         _titleEditorWindow.Deactivate += OnTitleEditorWindowDeactivate;
         _titleEditorWindow.Controls.Add(_titleEditorHost);
+        InitializeBoxSearch();
 
         MouseDown += OnMouseDown;
         MouseMove += OnMouseMove;
@@ -351,6 +366,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     internal bool RefreshWorkspace()
     {
         HideItemHoverOverlay();
+        HideHeaderActionOverlay();
         ClearHeightAnimationVisualCaches();
         RebuildBoxItemCache();
         _geometryDirty = true;
@@ -373,7 +389,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return false;
         }
-        return PresentLayer();
+        var presented = PresentLayer();
+        if (presented)
+        {
+            // Refresh intentionally hides transient child layers while box
+            // geometry is rebuilt. Reconcile the physical cursor afterwards
+            // even when the logical hovered box id did not change.
+            QueueHoverReconcile();
+        }
+        return presented;
     }
 
     internal bool UpdateInteractionRegion()
@@ -382,6 +406,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return false;
         }
+
+        // A composited box already has its transparent hit-mask window in
+        // place. Re-presenting it after a geometry-only update asks the icon
+        // surface for a full frame, which made every desktop icon visibly
+        // refresh at the end of a box drag. The transform trail has already
+        // queued the precise visual dirty region for this case.
+        if (!ShouldPresentAfterRegionUpdate(
+                _isCompositedByIconSurface,
+                _hitMaskPresented))
+        {
+            return _lastPresentSucceeded;
+        }
+
         return PresentLayer();
     }
 
@@ -444,7 +481,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     internal bool IsTransformActive => _movingBox is not null || _resizingBox is not null;
 
     private bool IsScrollAnimationActive =>
-        _scrollAnimationKey is not null && _scrollAnimationTimer.Enabled;
+        _scrollAnimationKey is not null && _animationFrameClock.Enabled;
 
     internal bool HasDynamicVisual =>
         IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null ||
@@ -468,10 +505,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool otherDynamicVisualActive) =>
         (heightAnimationActive || scrollAnimationActive) && !otherDynamicVisualActive;
 
+    internal static bool ShouldPresentHitMask(bool bitmapPresented, bool presenterLost) =>
+        !bitmapPresented || presenterLost;
+
+    internal static int CalculateAnimationPresentCount(bool heightAnimationActive, bool scrollAnimationActive) =>
+        heightAnimationActive || scrollAnimationActive ? 1 : 0;
+
     internal static bool ShouldCompositeBoxVisualsInParent(
         bool hasDynamicVisual,
         bool heightAnimationOnly) =>
         hasDynamicVisual && !heightAnimationOnly;
+
+    internal static bool ShouldUsePartialTransformCommit(
+        bool isCompositedByIconSurface,
+        bool hasPartialRenderer) =>
+        isCompositedByIconSurface && hasPartialRenderer;
+
+    internal static bool ShouldRebuildWorkspaceAfterBoxTransform() => false;
+
+    internal static bool ShouldPresentAfterRegionUpdate(
+        bool isCompositedByIconSurface,
+        bool hitMaskPresented) =>
+        !isCompositedByIconSurface || !hitMaskPresented;
 
     internal static bool ShouldRebuildHeightAnimationGeometry(
         bool compositedByIconSurface,
@@ -492,6 +547,91 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool scrollAnimationActive,
         bool hoverResumePending) =>
         !scrollAnimationActive && !hoverResumePending;
+
+    internal static bool ShouldShowHeaderActions(
+        Guid boxId,
+        Guid? hoveredBoxId,
+        Guid? searchingBoxId) =>
+        hoveredBoxId == boxId || searchingBoxId == boxId;
+
+    internal static bool ShouldRestoreHeaderActionOverlay(
+        bool hoverTargetUnchanged,
+        bool hasActiveHeaderActions,
+        bool overlayVisible) =>
+        hoverTargetUnchanged && hasActiveHeaderActions && !overlayVisible;
+
+    internal static bool ShouldSuspendHoverState(Guid? openBoxMenuBoxId) =>
+        openBoxMenuBoxId is not null;
+
+    internal static bool IsPointerInsideVisualBox(
+        RectangleF visualBounds,
+        PointF pointer) =>
+        visualBounds.Contains(pointer);
+
+    internal static bool ShouldDrawHeaderActionsInBaseLayer(
+        bool compositedByIconSurface,
+        bool overlayUnavailable) =>
+        ShouldDrawHeaderActionsOnCurrentLayer(
+            compositedByIconSurface,
+            overlayUnavailable,
+            dynamicTransform: false);
+
+    internal static bool ShouldDrawHeaderActionsOnCurrentLayer(
+        bool compositedByIconSurface,
+        bool overlayUnavailable,
+        bool dynamicTransform) =>
+        !compositedByIconSurface || overlayUnavailable || dynamicTransform;
+
+    internal static bool ShouldPresentHeaderActionOverlay(
+        bool hasDynamicVisual,
+        bool partialAnimationOnly) =>
+        !hasDynamicVisual || partialAnimationOnly;
+
+    internal static bool ShouldPrewarmHeightAnimationCache(
+        bool compositedByIconSurface,
+        bool animationEnabled,
+        bool expandOnHover,
+        bool effectivelyCollapsed,
+        bool cacheExists) =>
+        compositedByIconSurface &&
+        animationEnabled &&
+        expandOnHover &&
+        effectivelyCollapsed &&
+        !cacheExists;
+
+    internal static (
+        RectangleF Search,
+        RectangleF AutoExpand,
+        RectangleF Menu) CalculateHeaderActionBounds(RectangleF header)
+    {
+        const float buttonWidth = 26;
+        const float buttonHeight = 28;
+        var top = header.Y + (header.Height - buttonHeight) / 2;
+        return (
+            new RectangleF(header.X + 18, top, buttonWidth, buttonHeight),
+            new RectangleF(header.Right - 74, top, buttonWidth, buttonHeight),
+            new RectangleF(header.Right - 44, top, buttonWidth, buttonHeight));
+    }
+
+    internal static RectangleF CalculateTitleTextBounds(RectangleF header, bool centered)
+    {
+        const float centeredSideInset = 80;
+        const float leftAlignedInset = 52;
+        const float rightInset = 80;
+        var leftInset = centered ? centeredSideInset : leftAlignedInset;
+        return new RectangleF(
+            header.X + leftInset,
+            header.Y,
+            Math.Max(0, header.Width - leftInset - rightInset),
+            header.Height);
+    }
+
+    internal static RectangleF CalculateFocusDirtyBounds(
+        RectangleF? previousBounds,
+        RectangleF currentBounds) =>
+        previousBounds is { } previous
+            ? RectangleF.Union(previous, currentBounds)
+            : currentBounds;
 
     internal static RectangleF CalculateMovingBoxVisualCacheBounds(
         RectangleF boxBounds,
@@ -590,6 +730,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal void SetIconLayerRenderRequest(Action renderRequest) =>
         _iconLayerRenderRequest = renderRequest;
+
+    internal void SetIconLayerPartialRenderRequest(Action<RectangleF> renderRequest) =>
+        _iconLayerPartialRenderRequest = renderRequest;
 
     // The icon surface draws every drag ghost. While the OLE drag route is
     // owned by this (visually transparent) box window, forward the pointer
@@ -705,7 +848,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                         graphics,
                         transformGeometry,
                         clipBounds,
-                        includeItemHoverFeedback: false);
+                        includeItemHoverFeedback: false,
+                        includeCompositedHeaderActions: true);
                 }
             }
         }
@@ -793,35 +937,24 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             if (_isCompositedByIconSurface)
             {
                 EnsureHitMaskBitmap();
-                using (var graphics = Graphics.FromImage(_hitMaskBitmap!))
+                if (ShouldPresentHitMask(_hitMaskPresented, !_lastPresentSucceeded))
                 {
-                    graphics.Clear(Color.Transparent);
-                    graphics.ScaleTransform((float)_scale, (float)_scale);
-                    // Per-pixel alpha zero is click-through for a layered
-                    // child. Keep a one-alpha hit mask only inside the native
-                    // box region; it is visually imperceptible but preserves
-                    // the existing box mouse and drag handlers.
-                    using var hitMask = new SolidBrush(Color.FromArgb(1, Color.Black));
-                    // Hit masking only needs the current model bounds. Avoid a
-                    // full geometry rebuild on every coalesced drag frame.
-                    foreach (var box in DesktopBoxes)
+                    using (var graphics = Graphics.FromImage(_hitMaskBitmap!))
                     {
-                        var hitHeight = (float)GetInteractionBoxHeight(box);
-                        graphics.FillRectangle(
-                            hitMask,
-                            (float)box.Bounds.X,
-                            (float)box.Bounds.Y,
-                            (float)box.Bounds.Width,
-                            hitHeight);
+                        // The native rounded window region defines the precise
+                        // interactive shape. A resident one-alpha surface keeps
+                        // every future region click-capable without uploading a
+                        // monitor-sized hit mask after each hover transition.
+                        graphics.Clear(Color.FromArgb(1, Color.Black));
                     }
-                    graphics.ResetTransform();
-                }
 
-                _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
-                    Handle,
-                    _hitMaskBitmap!,
-                    PointToScreen(Point.Empty),
-                    out _lastPresentDiagnostic);
+                    _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
+                        Handle,
+                        _hitMaskBitmap!,
+                        PointToScreen(Point.Empty),
+                        out _lastPresentDiagnostic);
+                    _hitMaskPresented = _lastPresentSucceeded;
+                }
                 if (_lastPresentSucceeded)
                 {
                     _iconLayerRenderRequest?.Invoke();
@@ -910,6 +1043,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _hitMaskBitmap = DesktopLayerBitmapFactory.Create(
                 ClientSize.Width,
                 ClientSize.Height);
+            _hitMaskPresented = false;
         }
     }
 
@@ -937,17 +1071,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             _resourcesDisposed = true;
             _iconLoadCancellation.Cancel();
-            _animationTimer.Stop();
-            _animationTimer.Dispose();
+            _animationFrameClock.Dispose();
             _hoverTimer.Stop();
             _hoverTimer.Dispose();
-            _scrollAnimationTimer.Stop();
-            _scrollAnimationTimer.Dispose();
             _scrollHoverResumeTimer.Stop();
             _scrollHoverResumeTimer.Dispose();
             CancelPendingDragRender();
             _dragRenderTimer.Dispose();
             _itemHoverOverlay.Dispose();
+            _headerActionOverlay.Dispose();
             _renameEditor?.Dispose();
             _renameEditor = null;
             _renamingBoxId = null;
@@ -956,6 +1088,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ClearHeightAnimationVisualCaches();
             _hitMaskBitmap?.Dispose();
             _hitMaskBitmap = null;
+            _hitMaskPresented = false;
             LayeredWindowPresenter.Release(Handle);
             ClearIconCache();
             _iconLoadCancellation.Dispose();
@@ -965,6 +1098,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _titleEditorFont = null;
             _editingBox = null;
             _titleEditorWindow.Dispose();
+            DisposeBoxSearch();
             _headerToolTip.Dispose();
             Region?.Dispose();
         }
@@ -1314,7 +1448,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         _regionFailureHandled = true;
-        _animationTimer.Stop();
+        _animationFrameClock.StopWhenIdle(hasActiveAnimation: false);
         _hoverTimer.Stop();
         CancelPendingDragRender();
         try
@@ -1452,6 +1586,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         IReadOnlyList<ManualBoxTab> ManualTabs,
         Guid? ActiveManualTabId,
         RectangleF Body,
+        RectangleF Search,
         RectangleF AutoExpand,
         RectangleF Menu,
         RectangleF Resize);

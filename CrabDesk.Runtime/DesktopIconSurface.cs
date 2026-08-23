@@ -54,6 +54,9 @@ internal sealed class DesktopIconSurface : Forms.Form
     // The shell provider owns and may evict its cached bitmaps. Keep copies
     // here because this full-surface renderer can reuse an icon across frames.
     private readonly Dictionary<(string ParsingName, int PixelSize), Bitmap> _desktopIconCache = [];
+    private readonly HashSet<(string ParsingName, int PixelSize)> _pendingDesktopIconLoads = [];
+    private readonly CancellationTokenSource _desktopIconLoadCancellation = new();
+    private int _desktopIconCacheVersion;
     private readonly HashSet<string> _boxDropItemKeys = new(StringComparer.OrdinalIgnoreCase);
     private DesktopItemRef? _pressedItem;
     private PointF _pressPoint;
@@ -122,6 +125,8 @@ internal sealed class DesktopIconSurface : Forms.Form
     private readonly DesktopHoverRenderState _hoverRenderState = new();
     private bool _geometryDirty = true;
     private bool _dragRenderPending;
+    private bool _boxVisualRenderPending;
+    private RectangleF? _pendingBoxVisualBounds;
     private bool _hoverReconcilePending;
     private bool _presentingLayer;
     private bool _presentRequested;
@@ -234,6 +239,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (disposing)
         {
             CancelPendingDragRender();
+            _desktopIconLoadCancellation.Cancel();
             _hoverReconcileTimer.Stop();
             _hoverReconcileTimer.Dispose();
             ClearDesktopIconCache();
@@ -250,6 +256,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             LayeredWindowPresenter.Release(Handle);
             _shellContextMenu?.Dispose();
             _shellContextMenu = null;
+            _desktopIconLoadCancellation.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -389,6 +396,56 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         RequestDragRender();
+    }
+
+    internal void RequestBoxVisualFrame(RectangleF dirtyBounds)
+    {
+        if (dirtyBounds.Width <= 0 || dirtyBounds.Height <= 0 ||
+            IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        if (IsDragCompositeActive)
+        {
+            RequestDragFrame();
+            return;
+        }
+
+        _pendingBoxVisualBounds = _pendingBoxVisualBounds is { } pending
+            ? RectangleF.Union(pending, dirtyBounds)
+            : dirtyBounds;
+        if (_boxVisualRenderPending)
+        {
+            return;
+        }
+
+        _boxVisualRenderPending = true;
+        try
+        {
+            BeginInvoke((Action)RenderQueuedBoxVisualFrame);
+        }
+        catch (InvalidOperationException)
+        {
+            _boxVisualRenderPending = false;
+            _pendingBoxVisualBounds = null;
+        }
+    }
+
+    private void RenderQueuedBoxVisualFrame()
+    {
+        if (!_boxVisualRenderPending || IsDisposed)
+        {
+            return;
+        }
+
+        _boxVisualRenderPending = false;
+        var dirtyBounds = _pendingBoxVisualBounds;
+        _pendingBoxVisualBounds = null;
+        if (dirtyBounds is not { } bounds || !PresentSettledBoxPartialFrame(bounds))
+        {
+            PresentLayer();
+        }
     }
 
     private void RequestDragRender()
@@ -957,6 +1014,66 @@ internal sealed class DesktopIconSurface : Forms.Form
         return _lastPresentSucceeded;
     }
 
+    private bool PresentSettledBoxPartialFrame(RectangleF dirtyBounds)
+    {
+        if (!_lastPresentSucceeded || _layerBitmap is null || _staticLayerBitmap is null ||
+            IsDragCompositeActive)
+        {
+            return false;
+        }
+
+        var dirtyPixels = CalculatePartialBoxAnimationDirtyPixels(
+            dirtyBounds,
+            _scale,
+            ClientSize);
+        if (dirtyPixels.Width <= 0 || dirtyPixels.Height <= 0)
+        {
+            return false;
+        }
+
+        var workAreaBounds = GetDesktopWorkAreaBounds();
+        var dirtyDipBounds = new RectangleF(
+            (float)(dirtyPixels.X / _scale),
+            (float)(dirtyPixels.Y / _scale),
+            (float)(dirtyPixels.Width / _scale),
+            (float)(dirtyPixels.Height / _scale));
+        using (var graphics = Graphics.FromImage(_layerBitmap))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            using (var clearBrush = new SolidBrush(Color.Transparent))
+            {
+                graphics.FillRectangle(clearBrush, dirtyPixels);
+            }
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            ConfigureLayerGraphics(graphics, workAreaBounds, fastRender: false);
+            graphics.SetClip(dirtyDipBounds, CombineMode.Intersect);
+            using var hitTestBackground = new SolidBrush(Color.FromArgb(DesktopHitTestAlpha, Color.Black));
+            graphics.FillRectangle(hitTestBackground, dirtyDipBounds);
+            DrawDesktopItems(graphics, clipBounds: dirtyDipBounds);
+            DrawBoxItemDropPreview(graphics);
+            _boxRenderer?.Invoke(graphics, dirtyDipBounds);
+            graphics.ResetTransform();
+        }
+
+        using (var baseGraphics = Graphics.FromImage(_staticLayerBitmap))
+        {
+            baseGraphics.CompositingMode = CompositingMode.SourceCopy;
+            baseGraphics.DrawImage(
+                _layerBitmap,
+                dirtyPixels,
+                dirtyPixels,
+                GraphicsUnit.Pixel);
+        }
+
+        _lastPresentSucceeded = LayeredWindowPresenter.TryPresentPartial(
+            Handle,
+            _layerBitmap,
+            PointToScreen(Point.Empty),
+            dirtyPixels,
+            out _lastPresentDiagnostic);
+        return _lastPresentSucceeded;
+    }
+
     private bool PresentPartialBoxAnimationFallbackFrame(RectangleF workAreaBounds)
     {
         EnsureLayerBitmap();
@@ -1497,7 +1614,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             $"workArea={workAreaBounds.Width:0.#}x{workAreaBounds.Height:0.#}");
         foreach (var entry in _items.Take(30))
         {
-            DiagnosticLog.Info(
+            DiagnosticLog.Verbose(
                 $"Icon geometry name={entry.Item.DisplayName} cell={entry.Cell.Column},{entry.Cell.Row} " +
                 $"hit={entry.HitBounds.X:0.#},{entry.HitBounds.Y:0.#},{entry.HitBounds.Width:0.#}x{entry.HitBounds.Height:0.#}");
         }
@@ -1649,9 +1766,18 @@ internal sealed class DesktopIconSurface : Forms.Form
         Graphics graphics,
         IReadOnlySet<string>? selectedItemKeys = null,
         bool includeSelectionRectangle = true,
-        bool includeHoverFeedback = false)
+        bool includeHoverFeedback = false,
+        RectangleF? clipBounds = null)
     {
         selectedItemKeys ??= _selection;
+        var itemsToDraw = clipBounds is { } dirtyBounds
+            ? _items
+                .Where(item => item.Bounds.IntersectsWith(dirtyBounds))
+                .OrderBy(item => IsRaisedVisual(item.Item.Key.ToString(), selectedItemKeys))
+                .ToArray()
+            : _items
+                .OrderBy(item => IsRaisedVisual(item.Item.Key.ToString(), selectedItemKeys))
+                .ToArray();
         using var font = ResolveIconLabelFont();
         using var textFormat = new StringFormat
         {
@@ -1670,7 +1796,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         // painted afterwards so an expanded two-line or full name is never
         // covered by the icon pixels of the row below.
         var labelBoundsByKey = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in _items.OrderBy(item => IsRaisedVisual(item.Item.Key.ToString(), selectedItemKeys)))
+        foreach (var entry in itemsToDraw)
         {
             var itemKey = entry.Item.Key.ToString();
             var selected = selectedItemKeys.Contains(itemKey);
@@ -1746,7 +1872,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             }
         }
 
-        foreach (var entry in _items.OrderBy(item => IsRaisedVisual(item.Item.Key.ToString(), selectedItemKeys)))
+        foreach (var entry in itemsToDraw)
         {
             var itemKey = entry.Item.Key.ToString();
             if ((_dragStarted && _dragItemKeys.Contains(itemKey)) || _boxDropItemKeys.Contains(itemKey))
@@ -1776,6 +1902,13 @@ internal sealed class DesktopIconSurface : Forms.Form
                 Math.Max(1, _selectionRectangle.Width), Math.Max(1, _selectionRectangle.Height));
         }
     }
+
+    internal static IReadOnlyList<int> SelectDirtyItemIndexes(
+        IReadOnlyList<RectangleF> visualBounds,
+        RectangleF dirtyBounds) =>
+        Enumerable.Range(0, visualBounds.Count)
+            .Where(index => visualBounds[index].IntersectsWith(dirtyBounds))
+            .ToArray();
 
     private bool IsDynamicMarqueeSelection(DesktopIconGeometry entry)
     {
@@ -1861,34 +1994,91 @@ internal sealed class DesktopIconSurface : Forms.Form
             return cached;
         }
 
-        var source = _runtime.IconProvider.GetIcon(item.ParsingName, pixelSize);
-        if (source is null)
+        if (_pendingDesktopIconLoads.Add(key))
         {
-            // Shell image retrieval can temporarily fail while Explorer
-            // rebuilds its image list, so leave misses uncached for retry.
-            return null;
+            _ = LoadDesktopIconAsync(key, _desktopIconCacheVersion);
+        }
+
+        // Shell extraction can block while Explorer refreshes its image list.
+        // Draw the stock placeholder now and replace only the affected pixels
+        // after the worker has copied the resolved image into this surface.
+        return ShellIconProvider.GetGenericFileIcon();
+    }
+
+    private async Task LoadDesktopIconAsync(
+        (string ParsingName, int PixelSize) key,
+        int cacheVersion)
+    {
+        Bitmap? bitmap = null;
+        try
+        {
+            bitmap = await Task.Run(() =>
+            {
+                var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
+                return source is null ? null : new Bitmap(source);
+            }, _desktopIconLoadCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch
+        {
+            bitmap?.Dispose();
+            bitmap = null;
+        }
+
+        if (_desktopIconLoadCancellation.IsCancellationRequested || IsDisposed || !IsHandleCreated)
+        {
+            bitmap?.Dispose();
+            return;
         }
 
         try
         {
-            cached = new Bitmap(source);
-            _desktopIconCache[key] = cached;
-            return cached;
+            BeginInvoke((Action)(() =>
+            {
+                if (cacheVersion != _desktopIconCacheVersion || IsDisposed)
+                {
+                    bitmap?.Dispose();
+                    return;
+                }
+                _pendingDesktopIconLoads.Remove(key);
+                if (bitmap is null || _desktopIconCache.ContainsKey(key))
+                {
+                    bitmap?.Dispose();
+                    return;
+                }
+
+                _desktopIconCache[key] = bitmap;
+                var dirtyBounds = _items
+                    .Where(item => string.Equals(item.Item.ParsingName, key.ParsingName, StringComparison.Ordinal))
+                    .Select(item => item.Bounds)
+                    .Aggregate((RectangleF?)null, (current, bounds) => current is null
+                        ? bounds
+                        : RectangleF.Union(current.Value, bounds));
+                if (dirtyBounds is { } dirty)
+                {
+                    RequestBoxVisualFrame(dirty);
+                }
+            }));
         }
-        catch
+        catch (InvalidOperationException)
         {
-            return null;
+            bitmap?.Dispose();
         }
     }
 
     private int ClearDesktopIconCache()
     {
+        _desktopIconCacheVersion++;
         var count = _desktopIconCache.Count;
         foreach (var bitmap in _desktopIconCache.Values)
         {
             bitmap.Dispose();
         }
         _desktopIconCache.Clear();
+        _pendingDesktopIconLoads.Clear();
         return count;
     }
 
@@ -2877,7 +3067,10 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         if (_runtime.IsDesktopAutoArrangeEnabled)
         {
-            _runtime.ResetDesktopIconLayoutForAutoArrange();
+            // The final frame below already rebuilds this surface from the
+            // new layout. A workspace refresh would first clear every icon
+            // bitmap and make the whole desktop visibly reload.
+            _runtime.ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
             return;
         }
 
@@ -2909,7 +3102,10 @@ internal sealed class DesktopIconSurface : Forms.Form
                 Row = entry.Value.Row
             },
             StringComparer.OrdinalIgnoreCase);
-        _runtime.SetDesktopIconLayout(layout);
+        // Commit persistence without a second full workspace refresh. The
+        // caller presents the settled desktop exactly once after ending the
+        // drag, while retaining the icon bitmap cache.
+        _runtime.SetDesktopIconLayout(layout, refreshWorkspace: false);
     }
 
     // Decides where the dragged icon is inserted based on where its center

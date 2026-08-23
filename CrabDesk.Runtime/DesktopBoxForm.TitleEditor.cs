@@ -62,17 +62,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             box.Appearance.IconSize,
             DesktopItemLayoutEngine.ScaleIconSpacing(_runtime.State.Settings.Appearance.IconHorizontalSpacing, box.Appearance.IconSize));
 
-    private static float GetTitleRightPadding(DesktopBox box) => 92;
-
-    private void InvalidateHeaderButton(Guid? boxId, Func<BoxGeometry, RectangleF> getBounds)
-    {
-        if (boxId is not { } id || _boxes.FirstOrDefault(box => box.Box.Id == id) is not { } geometry)
-        {
-            return;
-        }
-        InvalidateDip(getBounds(geometry));
-    }
-
     private void InvalidateBoxVisualArea(Guid? boxId)
     {
         if (boxId is not { } id || DesktopBoxes.FirstOrDefault(box => box.Id == id) is not { } box)
@@ -88,17 +77,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ClearAutoExpandHover()
     {
-        if (_hoveredAutoExpandBoxId is not { } id)
+        var autoExpandBoxId = _hoveredAutoExpandBoxId;
+        var searchBoxId = _hoveredSearchBoxId;
+        if (autoExpandBoxId is null && searchBoxId is null)
         {
             return;
         }
+        _hoveredSearchBoxId = null;
         _hoveredAutoExpandBoxId = null;
         _headerToolTip.SetToolTip(this, null);
-        InvalidateHeaderButton(id, box => box.AutoExpand);
+        RequestHeaderActionVisualUpdate();
     }
 
     private void BeginTitleEdit(DesktopBox box)
     {
+        CloseBoxSearch(clearFilter: true);
         if (_editingBox is not null)
         {
             FinishTitleEdit(true);
@@ -163,9 +156,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var left = ToPixel(geometry.Header.X + 20);
-        var rightPadding = GetTitleRightPadding(geometry.Box);
-        var availableWidth = Math.Max(ToPixel(48), ToPixel(geometry.Header.Width - rightPadding));
+        var centered = geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center;
+        var titleBounds = CalculateTitleTextBounds(geometry.Header, centered);
+        var left = ToPixel(titleBounds.X);
+        var availableWidth = Math.Max(ToPixel(48), ToPixel(titleBounds.Width));
         var minimumWidth = Math.Min(ToPixel(40), availableWidth);
         var text = string.IsNullOrEmpty(_titleEditor.Text) ? "M" : _titleEditor.Text;
         var measuredWidth = Forms.TextRenderer.MeasureText(
@@ -174,7 +168,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Size.Empty,
             Forms.TextFormatFlags.NoPadding | Forms.TextFormatFlags.SingleLine).Width + ToPixel(8);
         var editorWidth = Math.Clamp(measuredWidth, minimumWidth, availableWidth);
-        if (geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center)
+        if (centered)
         {
             left += (availableWidth - editorWidth) / 2;
         }
@@ -320,6 +314,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void SetBoxDisplayMode(DesktopBox box, bool expandOnHover)
     {
+        CloseBoxSearch(clearFilter: true);
         FinishTitleEdit(true);
         if (box.ExpandOnHover == expandOnHover && box.IsCollapsed == expandOnHover)
         {
@@ -353,15 +348,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void PrepareBoxTransform(DesktopBox box)
     {
+        CloseBoxSearch(clearFilter: true);
         ReleaseMovingBoxVisualCache();
         ReleaseHeightAnimationVisualCache(box.Id);
         _transformDirtyBounds = ToVisualBounds(box, box.Bounds);
         _heightAnimations.Remove(box.Id);
         _geometryDirty = true;
-        if (_heightAnimations.Count == 0)
-        {
-            _animationTimer.Stop();
-        }
+        _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
     }
 
     private void StartBoxHeightAnimation(DesktopBox box, double fromHeight)
@@ -375,7 +368,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ReleaseHeightAnimationVisualCache(box.Id);
             return;
         }
-        PrepareHeightAnimationVisualCache(box);
+        EnsureHeightAnimationVisualCache(box);
         _heightAnimations[box.Id] = new BoxHeightAnimation(
             fromHeight,
             targetHeight,
@@ -386,7 +379,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds),
                 TimeSpan.FromMilliseconds(MinimumBoxHeightAnimationMilliseconds)));
         _dynamicVisualVersion++;
-        _animationTimer.Start();
+        _animationFrameClock.RequestFrames();
     }
 
     private double GetVisualBoxHeight(DesktopBox box)
@@ -421,9 +414,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ? Math.Max(animation.FromHeight, animation.ToHeight)
             : GetVisualBoxHeight(box);
 
-    private void OnAnimationTick(object? sender, EventArgs eventArgs)
+    private void OnAnimationFrame(object? sender, EventArgs eventArgs)
     {
         var now = DateTimeOffset.UtcNow;
+        var hadScrollAnimation = _scrollAnimationKey is not null;
+        var scrollCompleted = AdvanceScrollAnimation(requestRender: false);
         var animatedBoxIds = _heightAnimations.Keys.ToArray();
         var completedBoxIds = _heightAnimations
             .Where(pair => now - pair.Value.StartedAt >= pair.Value.Duration)
@@ -442,10 +437,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // restored while the remaining box continues animating.
             _dynamicVisualVersion++;
         }
-        if (_heightAnimations.Count == 0)
-        {
-            _animationTimer.Stop();
-        }
+        _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
         if (ShouldRebuildHeightAnimationGeometry(
                 _isCompositedByIconSurface,
                 completedBoxIds.Length > 0))
@@ -461,9 +453,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             UpdateWindowRegion();
             RequestLayerRender();
         }
-        else if (animatedBoxIds.Length > 0)
+        else if (animatedBoxIds.Length > 0 || hadScrollAnimation)
         {
             RequestVisualLayerRender();
+        }
+        if (completedBoxIds.Length > 0 || scrollCompleted)
+        {
+            RequestHeaderActionVisualUpdate();
         }
     }
 

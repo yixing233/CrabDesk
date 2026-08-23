@@ -369,6 +369,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             foreach (var boxSurface in monitorBoxes)
             {
                 boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
+                boxSurface.SetIconLayerPartialRenderRequest(iconSurface.RequestBoxVisualFrame);
                 boxSurface.SetIconDragStateForward((point, paths, keys) =>
                     iconSurface.ForwardDragFromBox(point, paths, keys));
             }

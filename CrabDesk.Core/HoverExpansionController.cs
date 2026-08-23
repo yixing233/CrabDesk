@@ -21,6 +21,11 @@ public sealed class HoverExpansionController
 
     public Guid? ExpandedBoxId { get; private set; }
 
+    public DateTimeOffset? NextTransitionAt =>
+        _candidateSince is { } candidate ? candidate + _expandDelay :
+        _outsideSince is { } outside ? outside + _collapseDelay :
+        null;
+
     public void AdoptExpanded(Guid boxId)
     {
         ExpandedBoxId = boxId;

@@ -79,6 +79,34 @@ public static class LayeredWindowPresenter
         }
     }
 
+    internal static void CopyRectangleForTesting(
+        byte[] source,
+        int sourceStride,
+        byte[] destination,
+        int destinationStride,
+        int rowBytes,
+        int rowCount,
+        int destinationOffset)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+        if (sourceStride < rowBytes || destinationStride < rowBytes ||
+            rowBytes < 0 || rowCount < 0 || destinationOffset < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rowBytes));
+        }
+
+        for (var row = 0; row < rowCount; row++)
+        {
+            Buffer.BlockCopy(
+                source,
+                checked(row * sourceStride),
+                destination,
+                checked(destinationOffset + row * destinationStride),
+                rowBytes);
+        }
+    }
+
     /// <summary>
     /// Updates only a physical-pixel rectangle of an already presented layered
     /// surface. The persistent DIB keeps the pixels outside the dirty area, so
@@ -369,25 +397,37 @@ public static class LayeredWindowPresenter
                 var totalBytes = checked((nuint)(rowBytes * copyBounds.Height));
 
                 // Format32bppPArgb bitmaps created by the runtime are normally
-                // tightly packed. Copy the whole block in one native call;
-                // the old row-by-row loop paid for one P/Invoke transition per
-                // scanline on every drag frame.
+                // tightly packed. Copy the whole block in one native operation.
                 if (copyBounds.X == 0 && copyBounds.Y == 0 &&
                     copyBounds.Width == _width && copyBounds.Height == _height &&
                     data.Stride == rowBytes)
                 {
-                    CopyMemory(_bits, data.Scan0, totalBytes);
+                    unsafe
+                    {
+                        Buffer.MemoryCopy(
+                            data.Scan0.ToPointer(),
+                            _bits.ToPointer(),
+                            (long)totalBytes,
+                            (long)totalBytes);
+                    }
                     return true;
                 }
 
-                for (var row = 0; row < copyBounds.Height; row++)
+                unsafe
                 {
-                    var sourceRow = data.Stride >= 0
-                        ? IntPtr.Add(data.Scan0, row * sourceStride)
-                        : IntPtr.Add(data.Scan0, (copyBounds.Height - row - 1) * sourceStride);
-                    var destinationOffset = checked(
-                        ((copyBounds.Top + row) * _width + copyBounds.Left) * 4);
-                    CopyMemory(IntPtr.Add(_bits, destinationOffset), sourceRow, (nuint)rowBytes);
+                    for (var row = 0; row < copyBounds.Height; row++)
+                    {
+                        var sourceRow = data.Stride >= 0
+                            ? (byte*)data.Scan0 + row * sourceStride
+                            : (byte*)data.Scan0 + (copyBounds.Height - row - 1) * sourceStride;
+                        var destinationOffset = checked(
+                            ((copyBounds.Top + row) * _width + copyBounds.Left) * 4);
+                        Buffer.MemoryCopy(
+                            sourceRow,
+                            (byte*)_bits + destinationOffset,
+                            rowBytes,
+                            rowBytes);
+                    }
                 }
                 return true;
             }
@@ -607,6 +647,4 @@ public static class LayeredWindowPresenter
     [DllImport("gdi32.dll", SetLastError = true)]
     private static extern IntPtr SelectObject(IntPtr deviceContext, IntPtr graphicsObject);
 
-    [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
-    private static extern void CopyMemory(IntPtr destination, IntPtr source, UIntPtr length);
 }

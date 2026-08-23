@@ -62,11 +62,8 @@
                         </Grid>
                         <Grid Style="{StaticResource SettingRowGridStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="显示隐藏文件与 Office 临时文件" VerticalAlignment="Center" />
-                                <TextBlock Text="显示 ~$ 锁定文件及带隐藏/系统属性的文件" Style="{StaticResource SecondaryBodyStyle}" />
-                            </StackPanel>
-                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ShowHiddenFiles, Mode=TwoWay}" AutomationProperties.Name="显示隐藏文件与 Office 临时文件" />
+                            <TextBlock Text="显示隐藏、系统与 Office 临时文件" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding ShowHiddenFiles, Mode=TwoWay}" AutomationProperties.Name="显示隐藏、系统与 Office 临时文件" />
                         </Grid>
                         <Grid Style="{StaticResource SettingRowGridStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -88,10 +85,7 @@
                     <StackPanel>
                         <Grid Style="{StaticResource SettingRowGridStyle}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="主题" FontWeight="SemiBold" />
-                                <TextBlock Text="选择设置界面的明暗模式" Style="{StaticResource SecondaryBodyStyle}" />
-                            </StackPanel>
+                            <TextBlock Text="主题" FontWeight="SemiBold" VerticalAlignment="Center" />
                             <ComboBox Grid.Column="1"
                                       Width="{StaticResource SettingsControlWidth}"
                                       ItemsSource="{Binding ThemeModes}"
