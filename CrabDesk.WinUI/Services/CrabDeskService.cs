@@ -27,6 +27,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public string ConfigDirectory => _runtime.ConfigDirectory;
     public UpdateCheckResult LastUpdateCheck => _runtime.LastUpdateCheck;
     public bool CanUndoOrganization => _runtime.CanUndoOrganization;
+    public bool IsAiOrganizationRunning => _runtime.IsAiOrganizationRunning;
     public string BackupDirectory => _runtime.BackupDirectory;
     public IReadOnlyList<DesktopBox> Boxes => _runtime.State.Boxes;
     public HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action) => _runtime.GetHotkeyStatus(action);
@@ -92,8 +93,16 @@ public sealed class CrabDeskService : ICrabDeskService
         _runtime.GetAiModelsAsync(cancellationToken);
     public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
         _runtime.TestAiModelConnectivityAsync(cancellationToken);
-    public Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default) =>
-        _runtime.ApplyAiClassificationAsync(cancellationToken);
+    public Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null) =>
+        _runtime.PreviewAiClassificationAsync(progress, cancellationToken, modelOutput);
+    public Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
+        AiClassificationPreview preview,
+        CancellationToken cancellationToken = default) =>
+        _runtime.ApplyAiClassificationPreviewAsync(preview, cancellationToken);
+    public void CancelAiOrganization() => _runtime.CancelAiOrganization();
     public IReadOnlyList<OrganizationDecision> PreviewOrganizationRules() => _runtime.PreviewOrganizationRules();
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true) => _runtime.ApplyOrganizationRules(notify);
     public void UndoLastOrganization() => _runtime.UndoLastOrganization();
@@ -107,12 +116,12 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetCornerRadius(double value) => _runtime.SetCornerRadius(value);
     public void SetShowBoxBorder(bool enabled) => _runtime.SetShowBoxBorder(enabled);
     public void SetShowResizeGrip(bool enabled) => _runtime.SetShowResizeGrip(enabled);
+    public void SetShowBoxScrollBar(bool enabled) => _runtime.SetShowBoxScrollBar(enabled);
     public void SetHoverFeedback(bool enabled) => _runtime.SetHoverFeedback(enabled);
     public void SetIconSpacing(double horizontal, double vertical) => _runtime.SetIconSpacing(horizontal, vertical);
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);
     public void SetIconLabelFontFamily(string value) => _runtime.SetIconLabelFontFamily(value);
-    public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment) => _runtime.SetBoxTitleAlignment(boxId, alignment);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);
     public void SetBoxOpacity(Guid? boxId, double value) => _runtime.SetBoxOpacity(boxId, value);

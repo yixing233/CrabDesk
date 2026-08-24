@@ -24,6 +24,7 @@
                         <ComboBox Header="模型"
                                   IsEditable="True"
                                   ItemsSource="{Binding Models}"
+                                  SelectedItem="{Binding Model, Mode=OneWay}"
                                   Text="{Binding Model, Mode=TwoWay}"
                                   MaxDropDownHeight="200"
                                   PlaceholderText="选择或输入模型名称"
@@ -33,12 +34,23 @@
                                 Command="{Binding LoadModelsCommand}"
                                 VerticalAlignment="Bottom" />
                         <Button Grid.Column="2"
-                                Content="测试模型连通性"
                                 Command="{Binding TestConnectivityCommand}"
-                                VerticalAlignment="Bottom" />
+                                VerticalAlignment="Bottom"
+                                AutomationProperties.Name="测试模型连通性">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ProgressRing Width="16"
+                                              Height="16"
+                                              IsActive="{Binding IsConnectivityTestInProgress}"
+                                              Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <TextBlock Text="{Binding ConnectivityTestButtonText}" />
+                            </StackPanel>
+                        </Button>
                     </Grid>
-                    <TextBlock Text="支持常见的 GET /models 返回结构；API Key 保存在本机 CrabDesk 配置中。"
-                               Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                    <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
+                             IsClosable="False"
+                             Severity="{Binding ConnectivityTestSeverity}"
+                             Title="{Binding ConnectivityTestTitle}"
+                             Message="{Binding ConnectivityTestMessage}" />
                 </StackPanel>
             </Border>
 
@@ -66,23 +78,24 @@
             </Border>
 
             <Border Style="{StaticResource SectionCardStyle}" Padding="16">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center" Spacing="3">
-                        <TextBlock Text="开始识别桌面图标" FontWeight="SemiBold" />
-                        <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。"
-                                   Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                        <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
-                        <Button Content="AI 自动分类"
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                            <TextBlock Text="预览 AI 整理结果" FontWeight="SemiBold" />
+                            <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。确认前不会改变桌面布局。"
+                                       Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="AI 自动分类"
                                 Style="{StaticResource AccentButtonStyle}"
-                                Command="{Binding ClassifyCommand}" />
-                    </StackPanel>
-                </Grid>
+                                Command="{Binding ClassifyCommand}"
+                                VerticalAlignment="Center" />
+                    </Grid>
+                </StackPanel>
             </Border>
         </StackPanel>
     </ScrollViewer>

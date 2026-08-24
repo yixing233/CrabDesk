@@ -160,7 +160,7 @@ GlobalAppearanceSettings
 BoxAppearance
   Background, Accent, Opacity, TitleBarHeight
   IconSize, LabelFontSize, ShowItemLabels
-  TitleAlignment, TitleColor, TitleFontSize, TitleFontBold
+  TitleColor, TitleFontSize, TitleFontBold
 
 BackupSettings
   Enabled, RetentionDays, BackupDirectory

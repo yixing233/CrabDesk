@@ -13,7 +13,6 @@ public sealed class PersistenceTests : IDisposable
         var state = JsonLayoutStore.CreateDefaultState("display-1");
         state.Boxes.Add(new DesktopBox { MonitorId = "display-1" });
         state.Boxes[0].Title = "工作";
-        state.Boxes[0].Appearance.TitleAlignment = BoxTitleAlignment.Center;
         state.Boxes[0].Appearance.TitleColor = "#FF21A179";
         state.Boxes[0].Appearance.TitleFontFamily = "Microsoft YaHei UI";
         state.Boxes[0].Appearance.TitleFontSize = 15;
@@ -42,6 +41,7 @@ public sealed class PersistenceTests : IDisposable
         state.Settings.DesktopBehavior.ExpandBoxOnHover = true;
         state.Settings.DesktopBehavior.RefreshAfterRename = false;
         state.Settings.Appearance.HoverFeedback = false;
+        state.Settings.Appearance.ShowBoxScrollBar = false;
         state.Settings.Appearance.AnimationEnabled = false;
         state.Settings.Updates.CheckOnStartup = false;
         state.Settings.Updates.Channel = UpdateChannel.Preview;
@@ -60,7 +60,6 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await store.LoadAsync();
 
         Assert.Equal("工作", loaded.Boxes[0].Title);
-        Assert.Equal(BoxTitleAlignment.Center, loaded.Boxes[0].Appearance.TitleAlignment);
         Assert.Equal("#FF21A179", loaded.Boxes[0].Appearance.TitleColor);
         Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
         Assert.Equal(15, loaded.Boxes[0].Appearance.TitleFontSize);
@@ -88,6 +87,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(loaded.Settings.DesktopBehavior.ExpandBoxOnHover);
         Assert.False(loaded.Settings.DesktopBehavior.RefreshAfterRename);
         Assert.False(loaded.Settings.Appearance.HoverFeedback);
+        Assert.False(loaded.Settings.Appearance.ShowBoxScrollBar);
         Assert.False(loaded.Settings.Appearance.AnimationEnabled);
         Assert.False(loaded.Settings.Updates.CheckOnStartup);
         Assert.Equal(UpdateChannel.Preview, loaded.Settings.Updates.Channel);

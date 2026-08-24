@@ -14,6 +14,7 @@ public interface ICrabDeskService
     string ConfigDirectory { get; }
     UpdateCheckResult LastUpdateCheck { get; }
     bool CanUndoOrganization { get; }
+    bool IsAiOrganizationRunning { get; }
     string BackupDirectory { get; }
     IReadOnlyList<DesktopBox> Boxes { get; }
     HotkeyRegistrationStatus GetHotkeyStatus(HotkeyAction action);
@@ -69,7 +70,14 @@ public interface ICrabDeskService
         bool reassignExistingItems);
     Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default);
     Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default);
-    Task<AiClassificationApplyResult> ApplyAiClassificationAsync(CancellationToken cancellationToken = default);
+    Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null);
+    Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
+        AiClassificationPreview preview,
+        CancellationToken cancellationToken = default);
+    void CancelAiOrganization();
     IReadOnlyList<OrganizationDecision> PreviewOrganizationRules();
     OrganizationApplyResult ApplyOrganizationRules(bool notify = true);
     void UndoLastOrganization();
@@ -83,12 +91,12 @@ public interface ICrabDeskService
     void SetCornerRadius(double value);
     void SetShowBoxBorder(bool enabled);
     void SetShowResizeGrip(bool enabled);
+    void SetShowBoxScrollBar(bool enabled);
     void SetHoverFeedback(bool enabled);
     void SetIconSpacing(double horizontal, double vertical);
     void SetSelectionColor(string value);
     void SetIconLabelFontSize(double value);
     void SetIconLabelFontFamily(string value);
-    void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);
     void SetBoxOpacity(Guid? boxId, double value);

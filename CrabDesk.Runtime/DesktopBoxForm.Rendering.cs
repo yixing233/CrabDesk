@@ -580,18 +580,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         using var titleBrush = new SolidBrush(ResolveTitleColor(geometry.Box.Appearance.TitleColor, baseColor));
         using var titleFormat = new StringFormat
         {
-            Alignment = geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center
-                ? StringAlignment.Center
-                : StringAlignment.Near,
+            Alignment = StringAlignment.Center,
             LineAlignment = StringAlignment.Center,
             Trimming = StringTrimming.EllipsisCharacter,
             FormatFlags = StringFormatFlags.NoWrap
         };
         if (_editingBox?.Id != geometry.Box.Id)
         {
-            var titleBounds = CalculateTitleTextBounds(
-                geometry.Header,
-                geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center);
+            var titleBounds = CalculateTitleTextBounds(geometry.Header, centered: true);
             graphics.DrawString(geometry.Box.Title, titleFont, titleBrush,
                 titleBounds,
                 titleFormat);
@@ -708,6 +704,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 _selectionRectangle.Height);
         }
         graphics.Restore(state);
+
+        DrawVerticalScrollBar(
+            graphics,
+            geometry,
+            ParseOpaqueColor(geometry.Box.Appearance.Accent),
+            textColor);
 
         if (includeDropPreview)
         {

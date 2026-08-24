@@ -223,21 +223,25 @@ public partial class App : Application
     private async Task RunAiOrganizationAsync(CrabDeskRuntime runtime)
     {
         var notifications = GetService<IInfoBarService>();
+        var dialogs = GetService<IDialogService>();
         try
         {
-            var result = await runtime.ApplyAiClassificationAsync();
-            notifications.Show(
-                result.Requested == 0
-                    ? "没有需要 AI 整理的桌面图标"
-                    : $"AI 整理完成：{result.Applied}/{result.Requested} 项",
-                Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
-                TimeSpan.FromSeconds(6));
+            ActivateWindow();
+            await Task.Yield();
+            var result = await dialogs.RunAiOrganizationAsync(new AiOrganizationDialogRequest(
+                (progress, modelOutput, token) => runtime.PreviewAiClassificationAsync(progress, token, modelOutput),
+                (preview, token) => runtime.ApplyAiClassificationPreviewAsync(preview, token),
+                runtime.CancelAiOrganization));
+            if (result.Outcome == AiOrganizationDialogOutcome.Failed)
+            {
+                runtime.RequestShowSettings("ai");
+            }
         }
         catch (Exception exception)
         {
             AppDiagnostic.Error("Desktop context-menu AI organization failed", exception);
             notifications.Show(
-                $"AI 整理失败：{exception.Message}",
+                AiOperationMessages.ToUserMessage(exception),
                 Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error,
                 TimeSpan.FromSeconds(8));
             runtime.RequestShowSettings("ai");

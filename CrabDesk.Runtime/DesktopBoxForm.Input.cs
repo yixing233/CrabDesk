@@ -29,6 +29,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         RebuildGeometry();
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        if (eventArgs.Button == Forms.MouseButtons.Left &&
+            box is not null &&
+            TryBeginScrollBarDrag(box, point))
+        {
+            return;
+        }
         var item = GetItemAtPoint(box, point);
         if (item is not null)
         {
@@ -165,6 +171,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnMouseMove(object? sender, Forms.MouseEventArgs eventArgs)
     {
         var point = ToDip(eventArgs.Location);
+        if (_scrollBarDrag is not null)
+        {
+            UpdateScrollBarDrag(point);
+            return;
+        }
         if (_movingBox is not null)
         {
             UpdateMovingBox(_movingBox, point);
@@ -533,13 +544,18 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var isBoxTab = _boxes.LastOrDefault(box =>
             GetMappedFolderTabAtPoint(box, point) is not null ||
             GetManualBoxTabAtPoint(box, point) is not null) is not null;
+        var scrollBox = _boxes.LastOrDefault(box => box.Body.Contains(point));
+        var isScrollBar = scrollBox is not null &&
+                          GetScrollBarLayout(scrollBox)?.Track.Contains(point.X, point.Y) == true;
         Cursor = resizeEdges switch
         {
             ResizeEdges.Left or ResizeEdges.Right => Forms.Cursors.SizeWE,
             ResizeEdges.Top or ResizeEdges.Bottom => Forms.Cursors.SizeNS,
             ResizeEdges.TopLeft or ResizeEdges.BottomRight => Forms.Cursors.SizeNWSE,
             ResizeEdges.TopRight or ResizeEdges.BottomLeft => Forms.Cursors.SizeNESW,
-            _ => isHeaderButton || isBoxTab ? Forms.Cursors.Hand : Forms.Cursors.Default
+            _ => isScrollBar
+                ? Forms.Cursors.SizeNS
+                : isHeaderButton || isBoxTab ? Forms.Cursors.Hand : Forms.Cursors.Default
         };
     }
 
@@ -930,6 +946,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         DiagnosticLog.Verbose(
             $"Surface mouse up monitor={_monitor.Id} button={eventArgs.Button} moving={_movingBox is not null} resizing={_resizingBox is not null} selecting={_selectionBox is not null}");
+        if (eventArgs.Button == Forms.MouseButtons.Left && _scrollBarDrag is not null)
+        {
+            FinishScrollBarDrag();
+            return;
+        }
         if (eventArgs.Button == Forms.MouseButtons.Left)
         {
             CommitPendingSlowDoubleClickRename();
@@ -1017,6 +1038,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         base.OnMouseCaptureChanged(eventArgs);
         if (Capture)
         {
+            return;
+        }
+        if (_scrollBarDrag is not null)
+        {
+            _scrollBarDrag = null;
+            QueueHoverReconcile();
             return;
         }
         if (_selectionBox is not null)
