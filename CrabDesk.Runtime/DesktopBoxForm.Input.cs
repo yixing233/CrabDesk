@@ -711,13 +711,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         var structureChanged = false;
         var collapsedHeaderBoxId = _boxes.LastOrDefault(box =>
-            box.Box.ExpandOnHover &&
-            box.Header.Contains(point) &&
-            !box.Search.Contains(point) &&
-            !box.AutoExpand.Contains(point) &&
-            !box.Menu.Contains(point))?.Box.Id;
+            IsCollapsedHeaderHoverTarget(
+                box.Box.Id,
+                hoveredBoxId,
+                box.Box.ExpandOnHover,
+                box.IsCollapsed,
+                box.Header.Contains(point),
+                box.Search.Contains(point) ||
+                box.AutoExpand.Contains(point) ||
+                box.Menu.Contains(point)))?.Box.Id;
         var pointerInsideExpandedBox = _hoverExpansion.ExpandedBoxId is { } expandedBoxId &&
-            _boxes.LastOrDefault(box => box.Box.Id == expandedBoxId)?.Bounds.Contains(point) == true;
+            hoveredBoxId == expandedBoxId;
         var autoExpandEnabled = _hoverExpansion.ExpandedBoxId is not null ||
             collapsedHeaderBoxId is not null;
         var now = DateTimeOffset.UtcNow;

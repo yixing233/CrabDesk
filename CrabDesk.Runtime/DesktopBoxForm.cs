@@ -568,6 +568,24 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         PointF pointer) =>
         visualBounds.Contains(pointer);
 
+    internal static bool ShouldCloseBoxSearchForPointer(
+        bool searchVisible,
+        bool pointerInsideActiveBox) =>
+        searchVisible && !pointerInsideActiveBox;
+
+    internal static bool IsCollapsedHeaderHoverTarget(
+        Guid candidateBoxId,
+        Guid? topmostVisualBoxId,
+        bool expandsOnHover,
+        bool isCollapsed,
+        bool pointerInHeader,
+        bool pointerOverHeaderAction) =>
+        candidateBoxId == topmostVisualBoxId &&
+        expandsOnHover &&
+        isCollapsed &&
+        pointerInHeader &&
+        !pointerOverHeaderAction;
+
     internal static bool ShouldDrawHeaderActionsInBaseLayer(
         bool compositedByIconSurface,
         bool overlayUnavailable) =>

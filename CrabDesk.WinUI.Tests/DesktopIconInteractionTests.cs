@@ -91,6 +91,47 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, false)]
+    public void BoxSearchClosesOnlyForClicksOutsideItsActiveBox(
+        bool searchVisible,
+        bool pointerInsideActiveBox,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldCloseBoxSearchForPointer(
+                searchVisible,
+                pointerInsideActiveBox));
+    }
+
+    [Theory]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, true, false, false)]
+    public void HoverExpansionOnlyTargetsTheTopmostVisibleCollapsedHeader(
+        bool isTopmostVisualBox,
+        bool isCollapsed,
+        bool pointerOverHeaderAction,
+        bool expected)
+    {
+        var candidateBoxId = Guid.NewGuid();
+        var topmostVisualBoxId = isTopmostVisualBox ? candidateBoxId : Guid.NewGuid();
+
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.IsCollapsedHeaderHoverTarget(
+                candidateBoxId,
+                topmostVisualBoxId,
+                expandsOnHover: true,
+                isCollapsed,
+                pointerInHeader: true,
+                pointerOverHeaderAction));
+    }
+
+    [Theory]
     [InlineData(true, false, true)]
     [InlineData(false, true, true)]
     [InlineData(false, false, false)]

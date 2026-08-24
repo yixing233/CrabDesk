@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using CrabDesk.Core;
 using Forms = System.Windows.Forms;
 using FormsIntegration = System.Windows.Forms.Integration;
@@ -21,6 +22,14 @@ internal sealed partial class DesktopBoxForm
     private Guid? _searchingBoxId;
     private string _searchQuery = string.Empty;
     private bool _updatingSearchInput;
+    private IntPtr _searchOutsideClickHook;
+    private SearchMouseHookProcedure? _searchOutsideClickHookProcedure;
+
+    private const int SearchMouseLowLevelHook = 14;
+    private const int SearchWmLeftButtonDown = 0x0201;
+    private const int SearchWmRightButtonDown = 0x0204;
+    private const int SearchWmMiddleButtonDown = 0x0207;
+    private const int SearchWmXButtonDown = 0x020B;
 
     private void InitializeBoxSearch()
     {
@@ -62,6 +71,7 @@ internal sealed partial class DesktopBoxForm
 
     private void DisposeBoxSearch()
     {
+        StopBoxSearchOutsideClickMonitor();
         _updatingSearchInput = true;
         _searchingBoxId = null;
         _searchQuery = string.Empty;
@@ -112,6 +122,7 @@ internal sealed partial class DesktopBoxForm
         _searchWindow.Activate();
         _searchInputHost.Focus();
         _searchInput.Focus();
+        StartBoxSearchOutsideClickMonitor();
         RequestVisualLayerRender();
         RequestHeaderActionVisualUpdate();
     }
@@ -125,6 +136,7 @@ internal sealed partial class DesktopBoxForm
 
         var previousBoxId = _searchingBoxId;
         _searchingBoxId = null;
+        StopBoxSearchOutsideClickMonitor();
         _searchWindow.Hide();
         if (clearFilter)
         {
@@ -215,6 +227,7 @@ internal sealed partial class DesktopBoxForm
 
         if (DesktopBoxes.All(box => box.Id != boxId))
         {
+            StopBoxSearchOutsideClickMonitor();
             _searchingBoxId = null;
             _searchQuery = string.Empty;
             _updatingSearchInput = true;
@@ -283,6 +296,115 @@ internal sealed partial class DesktopBoxForm
             _searchWindow.CreateControl();
         }
     }
+
+    private void StartBoxSearchOutsideClickMonitor()
+    {
+        StopBoxSearchOutsideClickMonitor();
+        _searchOutsideClickHookProcedure = OnBoxSearchGlobalMouseMessage;
+        _searchOutsideClickHook = SetWindowsHookEx(
+            SearchMouseLowLevelHook,
+            _searchOutsideClickHookProcedure,
+            GetModuleHandle(null),
+            0);
+    }
+
+    private void StopBoxSearchOutsideClickMonitor()
+    {
+        if (_searchOutsideClickHook != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_searchOutsideClickHook);
+            _searchOutsideClickHook = IntPtr.Zero;
+        }
+        _searchOutsideClickHookProcedure = null;
+    }
+
+    private IntPtr OnBoxSearchGlobalMouseMessage(int code, IntPtr message, IntPtr data)
+    {
+        var hook = _searchOutsideClickHook;
+        if (code >= 0 &&
+            IsSearchMouseButtonDown(message.ToInt32()) &&
+            _searchWindow.Visible &&
+            _searchingBoxId is not null)
+        {
+            try
+            {
+                var mouse = Marshal.PtrToStructure<SearchLowLevelMouseInput>(data);
+                var pointerInsideActiveBox = IsScreenPointInsideActiveSearchBox(mouse.Point);
+                if (ShouldCloseBoxSearchForPointer(_searchWindow.Visible, pointerInsideActiveBox))
+                {
+                    CloseBoxSearch(clearFilter: true);
+                }
+            }
+            catch (Exception exception)
+            {
+                DiagnosticLog.Error("Box search outside-click monitor failed", exception);
+            }
+        }
+
+        return CallNextHookEx(hook, code, message, data);
+    }
+
+    private bool IsScreenPointInsideActiveSearchBox(Point screenPoint)
+    {
+        if (_searchingBoxId is not { } boxId)
+        {
+            return false;
+        }
+
+        var clientPoint = PointToClient(screenPoint);
+        if (!ClientRectangle.Contains(clientPoint))
+        {
+            return false;
+        }
+
+        EnsureGeometry();
+        var pointer = ToDip(clientPoint);
+        return _boxes.FirstOrDefault(box => box.Box.Id == boxId)?.Bounds.Contains(pointer) == true;
+    }
+
+    private static bool IsSearchMouseButtonDown(int message) =>
+        message is SearchWmLeftButtonDown or
+            SearchWmRightButtonDown or
+            SearchWmMiddleButtonDown or
+            SearchWmXButtonDown;
+
+    private delegate IntPtr SearchMouseHookProcedure(int code, IntPtr message, IntPtr data);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct SearchNativePoint
+    {
+        internal readonly int X;
+        internal readonly int Y;
+
+        public static implicit operator Point(SearchNativePoint point) => new(point.X, point.Y);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct SearchLowLevelMouseInput
+    {
+        internal readonly SearchNativePoint Point;
+        internal readonly uint MouseData;
+        internal readonly uint Flags;
+        internal readonly uint Time;
+        internal readonly UIntPtr ExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(
+        int hookId,
+        SearchMouseHookProcedure procedure,
+        IntPtr module,
+        uint threadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? moduleName);
 
     private static WpfMedia.SolidColorBrush CreateSearchBrush(Color color)
     {
