@@ -128,9 +128,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _titleEditor.Background = CreateOpaqueWpfBrush(GetOpaqueTitleEditorBackColor(boxBackground));
         _titleEditor.Foreground = CreateOpaqueWpfBrush(ResolveTitleColor(box.Appearance.TitleColor, boxBackground));
         _titleEditor.Text = box.Title;
-        _titleEditor.TextAlignment = box.Appearance.TitleAlignment == BoxTitleAlignment.Center
-            ? Wpf.TextAlignment.Center
-            : Wpf.TextAlignment.Left;
+        _titleEditor.TextAlignment = Wpf.TextAlignment.Center;
         ShowTitleEditor(geometry);
         Invalidate();
     }
@@ -156,8 +154,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var centered = geometry.Box.Appearance.TitleAlignment == BoxTitleAlignment.Center;
-        var titleBounds = CalculateTitleTextBounds(geometry.Header, centered);
+        var titleBounds = CalculateTitleTextBounds(geometry.Header, centered: true);
         var left = ToPixel(titleBounds.X);
         var availableWidth = Math.Max(ToPixel(48), ToPixel(titleBounds.Width));
         var minimumWidth = Math.Min(ToPixel(40), availableWidth);
@@ -168,10 +165,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Size.Empty,
             Forms.TextFormatFlags.NoPadding | Forms.TextFormatFlags.SingleLine).Width + ToPixel(8);
         var editorWidth = Math.Clamp(measuredWidth, minimumWidth, availableWidth);
-        if (centered)
-        {
-            left += (availableWidth - editorWidth) / 2;
-        }
+        left += (availableWidth - editorWidth) / 2;
 
         var editorHeight = Math.Min(
             Math.Max(20, ToPixel(geometry.Header.Height) - 10),

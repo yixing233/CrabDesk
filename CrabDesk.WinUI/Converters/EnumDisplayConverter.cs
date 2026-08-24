@@ -26,9 +26,6 @@ public sealed class EnumDisplayConverter : IValueConverter
         BackdropKind.Acrylic => "亚克力",
 
 
-        BoxTitleAlignment.Left => "左对齐",
-        BoxTitleAlignment.Center => "居中",
-
         BoxViewMode.Grid => "图标",
         BoxViewMode.List => "列表",
 

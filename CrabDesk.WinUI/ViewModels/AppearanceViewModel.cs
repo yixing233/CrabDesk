@@ -22,7 +22,6 @@ public partial class AppearanceViewModel : ObservableObject
         Refresh();
     }
 
-    public IReadOnlyList<BoxTitleAlignment> TitleAlignments { get; } = Enum.GetValues<BoxTitleAlignment>();
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();
     public IReadOnlyList<string> FontFamilies { get; }
@@ -40,7 +39,6 @@ public partial class AppearanceViewModel : ObservableObject
     public double VerticalSpacing { get => _service.State.Settings.Appearance.IconVerticalSpacing; set => _service.SetIconSpacing(HorizontalSpacing, value); }
     public string SelectionColor { get => _service.State.Settings.Appearance.SelectionColor; set { if (IsColor(value)) _service.SetSelectionColor(value); } }
     public double TitleBarHeight { get => CurrentBox.Appearance.TitleBarHeight; set => _service.SetBoxTitleBarHeight(null, value); }
-    public BoxTitleAlignment TitleAlignment { get => CurrentBox.Appearance.TitleAlignment; set => _service.SetBoxTitleAlignment(null, value); }
     public string TitleColor { get => CurrentBox.Appearance.TitleColor; set { if (string.Equals(value, "Auto", StringComparison.OrdinalIgnoreCase) || IsColor(value)) _service.SetBoxTitleColor(null, value); } }
     public string TitleFontFamily { get => CurrentBox.Appearance.TitleFontFamily; set { if (!string.IsNullOrWhiteSpace(value) && value != TitleFontFamily) _service.SetBoxTitleFontFamily(null, value); } }
     public string ManualTitleColor

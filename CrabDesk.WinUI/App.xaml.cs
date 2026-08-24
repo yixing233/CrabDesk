@@ -226,40 +226,16 @@ public partial class App : Application
         var dialogs = GetService<IDialogService>();
         try
         {
-            var preview = await runtime.PreviewAiClassificationAsync();
-            if (preview.Requested == 0)
+            ActivateWindow();
+            await Task.Yield();
+            var result = await dialogs.RunAiOrganizationAsync(new AiOrganizationDialogRequest(
+                (progress, modelOutput, token) => runtime.PreviewAiClassificationAsync(progress, token, modelOutput),
+                (preview, token) => runtime.ApplyAiClassificationPreviewAsync(preview, token),
+                runtime.CancelAiOrganization));
+            if (result.Outcome == AiOrganizationDialogOutcome.Failed)
             {
-                notifications.Show(
-                    "没有需要 AI 整理的桌面图标",
-                    Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
-                    TimeSpan.FromSeconds(6));
-                return;
+                runtime.RequestShowSettings("ai");
             }
-            if (preview.Assignments.Count == 0)
-            {
-                notifications.Show(
-                    "AI 未返回可应用的分类结果",
-                    Microsoft.UI.Xaml.Controls.InfoBarSeverity.Warning,
-                    TimeSpan.FromSeconds(6));
-                return;
-            }
-            var confirmed = await dialogs.ConfirmAsync(
-                "确认 AI 整理",
-                $"将整理 {preview.Assignments.Count}/{preview.Requested} 个图标，" +
-                (preview.NewBoxLabels.Count > 0
-                    ? $"并新建 {preview.NewBoxLabels.Count} 个盒子。"
-                    : "不会新建盒子。") +
-                "文件不会移动或删除。",
-                "应用整理");
-            if (!confirmed)
-            {
-                return;
-            }
-            var result = await runtime.ApplyAiClassificationPreviewAsync(preview);
-            notifications.Show(
-                $"AI 整理完成：{result.Applied}/{result.Requested} 项",
-                Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
-                TimeSpan.FromSeconds(6));
         }
         catch (Exception exception)
         {

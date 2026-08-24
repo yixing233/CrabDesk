@@ -95,8 +95,9 @@ public sealed class CrabDeskService : ICrabDeskService
         _runtime.TestAiModelConnectivityAsync(cancellationToken);
     public Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
-        CancellationToken cancellationToken = default) =>
-        _runtime.PreviewAiClassificationAsync(progress, cancellationToken);
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null) =>
+        _runtime.PreviewAiClassificationAsync(progress, cancellationToken, modelOutput);
     public Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default) =>
@@ -121,7 +122,6 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);
     public void SetIconLabelFontFamily(string value) => _runtime.SetIconLabelFontFamily(value);
-    public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment) => _runtime.SetBoxTitleAlignment(boxId, alignment);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);
     public void SetBoxOpacity(Guid? boxId, double value) => _runtime.SetBoxOpacity(boxId, value);

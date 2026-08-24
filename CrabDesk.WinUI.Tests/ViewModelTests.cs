@@ -2,6 +2,7 @@ using CrabDesk.Core;
 using CrabDesk.WinUI.Converters;
 using CrabDesk.WinUI.Services;
 using CrabDesk.WinUI.ViewModels;
+using Microsoft.UI.Xaml.Controls;
 using Moq;
 using Windows.UI;
 using Xunit;
@@ -134,8 +135,6 @@ public sealed class ViewModelTests
             BackdropKind.Mica,
             BackdropKind.MicaAlt,
             BackdropKind.Acrylic,
-            BoxTitleAlignment.Left,
-            BoxTitleAlignment.Center,
             BoxViewMode.Grid,
             BoxViewMode.List,
             BoxSortMode.Manual,
@@ -312,6 +311,143 @@ public sealed class ViewModelTests
 
         Assert.Contains("复制诊断失败", viewModel.MaintenanceStatus);
         Assert.Equal(Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error, viewModel.MaintenanceInfoSeverity);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelShowsInlineConnectivityProgressAndSuccessResult()
+    {
+        var service = CreateService(CreateState());
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        service.Setup(item => item.TestAiModelConnectivityAsync(It.IsAny<CancellationToken>()))
+            .Returns(completion.Task);
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        var task = viewModel.TestConnectivityCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.IsConnectivityTestInProgress);
+        Assert.True(viewModel.HasConnectivityTestResult);
+        Assert.Equal(InfoBarSeverity.Informational, viewModel.ConnectivityTestSeverity);
+        Assert.Equal("正在测试模型连接", viewModel.ConnectivityTestTitle);
+        Assert.Equal("正在测试…", viewModel.ConnectivityTestButtonText);
+
+        completion.SetResult();
+        await task;
+
+        Assert.False(viewModel.IsConnectivityTestInProgress);
+        Assert.True(viewModel.HasConnectivityTestResult);
+        Assert.Equal(InfoBarSeverity.Success, viewModel.ConnectivityTestSeverity);
+        Assert.Equal("模型连接正常", viewModel.ConnectivityTestTitle);
+        Assert.Contains("可以开始 AI 分类", viewModel.ConnectivityTestMessage);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelShowsSafeInlineConnectivityFailure()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.TestAiModelConnectivityAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new AiClassificationRequestException("服务端返回的敏感错误"));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        await viewModel.TestConnectivityCommand.ExecuteAsync(null);
+
+        Assert.False(viewModel.IsConnectivityTestInProgress);
+        Assert.True(viewModel.HasConnectivityTestResult);
+        Assert.Equal(InfoBarSeverity.Error, viewModel.ConnectivityTestSeverity);
+        Assert.Equal("模型连接失败", viewModel.ConnectivityTestTitle);
+        Assert.Equal(AiClassificationRequestException.SafeMessage, viewModel.ConnectivityTestMessage);
+        Assert.DoesNotContain("敏感错误", viewModel.ConnectivityTestMessage);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelClearsConnectivityResultWhenConnectionSettingsChange()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.TestAiModelConnectivityAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        await viewModel.TestConnectivityCommand.ExecuteAsync(null);
+        viewModel.Model = "另一模型";
+
+        Assert.False(viewModel.HasConnectivityTestResult);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelRunsOrganizationInsideDialogSession()
+    {
+        var service = CreateService(CreateState());
+        var preview = new AiClassificationPreview(1, 1, [], []);
+        var applyResult = new AiClassificationApplyResult(1, 1, 1, 0, 0, []);
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>()))
+            .ReturnsAsync(preview);
+        service.Setup(item => item.ApplyAiClassificationPreviewAsync(
+                preview,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(applyResult);
+        var dialogs = new Mock<IDialogService>();
+        AiOrganizationDialogRequest? request = null;
+        dialogs.Setup(item => item.RunAiOrganizationAsync(It.IsAny<AiOrganizationDialogRequest>()))
+            .Callback<AiOrganizationDialogRequest>(value => request = value)
+            .ReturnsAsync(new AiOrganizationDialogResult(
+                AiOrganizationDialogOutcome.Cancelled,
+                "已取消应用 AI 整理结果。"));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            dialogs.Object);
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+
+        Assert.NotNull(request);
+        Assert.Equal("已取消应用 AI 整理结果。", viewModel.Status);
+
+        await request.PreviewAsync(
+            new Progress<AiClassificationProgress>(),
+            new Progress<string>(),
+            CancellationToken.None);
+        await request.ApplyAsync(preview, CancellationToken.None);
+        request.Cancel();
+
+        service.Verify(item => item.PreviewAiClassificationAsync(
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>()), Times.Once);
+        service.Verify(item => item.ApplyAiClassificationPreviewAsync(
+            preview,
+            It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(item => item.CancelAiOrganization(), Times.Once);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelReportsDialogApplyResult()
+    {
+        var service = CreateService(CreateState());
+        var dialogs = new Mock<IDialogService>();
+        dialogs.Setup(item => item.RunAiOrganizationAsync(It.IsAny<AiOrganizationDialogRequest>()))
+            .ReturnsAsync(new AiOrganizationDialogResult(
+                AiOrganizationDialogOutcome.Applied,
+                "已分类 3/3 项",
+                new AiClassificationApplyResult(3, 3, 3, 0, 0, [])));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            dialogs.Object);
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+
+        Assert.Equal("已分类 3/3 项", viewModel.Status);
     }
 
     private static Mock<ICrabDeskService> CreateService(CrabDeskState state)

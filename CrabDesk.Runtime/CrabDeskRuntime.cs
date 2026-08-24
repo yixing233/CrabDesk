@@ -2016,15 +2016,6 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
-    public void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment)
-    {
-        foreach (var box in GetAppearanceTargets(boxId))
-        {
-            box.Appearance.TitleAlignment = alignment;
-        }
-        NotifyWorkspaceChanged(true);
-    }
-
     public void SetBoxBackground(Guid? boxId, string value)
     {
         foreach (var box in GetAppearanceTargets(boxId))
@@ -2260,7 +2251,8 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public async Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null) =>
         await RunAiOrganizationAsync(async operationToken =>
         {
             var settings = State.Settings.AiClassification;
@@ -2309,11 +2301,29 @@ public sealed class CrabDeskRuntime : IDisposable
                     totalBatches,
                     true,
                     "正在请求 AI 分类"));
+                IProgress<AiClassificationTransportProgress>? transportProgress = progress is null
+                    ? null
+                    : new Progress<AiClassificationTransportProgress>(transport =>
+                    {
+                        if (!transport.IsCompatibilityFallback)
+                        {
+                            return;
+                        }
+                        progress.Report(new AiClassificationProgress(
+                            completedItems,
+                            candidates.Length,
+                            completedBatches,
+                            totalBatches,
+                            true,
+                            "接口不支持当前输出能力，正在切换兼容模式"));
+                    });
                 var result = await _aiClassificationService.ClassifyAsync(
                     settings,
                     batch,
                     labels,
-                    operationToken).ConfigureAwait(false);
+                    operationToken,
+                    modelOutput,
+                    transportProgress).ConfigureAwait(false);
                 classifications.AddRange(result);
                 completedItems += batch.Length;
                 completedBatches++;
@@ -3020,7 +3030,6 @@ public sealed class CrabDeskRuntime : IDisposable
             LabelFontSize = source.LabelFontSize,
             ShowItemLabels = source.ShowItemLabels,
             TitleBarHeight = source.TitleBarHeight,
-            TitleAlignment = source.TitleAlignment,
             TitleColor = source.TitleColor,
             TitleFontFamily = source.TitleFontFamily,
             TitleFontSize = source.TitleFontSize,

@@ -24,6 +24,7 @@
                         <ComboBox Header="模型"
                                   IsEditable="True"
                                   ItemsSource="{Binding Models}"
+                                  SelectedItem="{Binding Model, Mode=OneWay}"
                                   Text="{Binding Model, Mode=TwoWay}"
                                   MaxDropDownHeight="200"
                                   PlaceholderText="选择或输入模型名称"
@@ -33,12 +34,23 @@
                                 Command="{Binding LoadModelsCommand}"
                                 VerticalAlignment="Bottom" />
                         <Button Grid.Column="2"
-                                Content="测试模型连通性"
                                 Command="{Binding TestConnectivityCommand}"
-                                VerticalAlignment="Bottom" />
+                                VerticalAlignment="Bottom"
+                                AutomationProperties.Name="测试模型连通性">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ProgressRing Width="16"
+                                              Height="16"
+                                              IsActive="{Binding IsConnectivityTestInProgress}"
+                                              Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <TextBlock Text="{Binding ConnectivityTestButtonText}" />
+                            </StackPanel>
+                        </Button>
                     </Grid>
-                    <TextBlock Text="仅支持 HTTPS；API Key 使用当前 Windows 用户加密保存。分类接口需支持 JSON Schema 结构化输出。"
-                               Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                    <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
+                             IsClosable="False"
+                             Severity="{Binding ConnectivityTestSeverity}"
+                             Title="{Binding ConnectivityTestTitle}"
+                             Message="{Binding ConnectivityTestMessage}" />
                 </StackPanel>
             </Border>
 
@@ -77,32 +89,11 @@
                             <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。确认前不会改变桌面布局。"
                                        Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
-                            <Button Content="AI 自动分类"
-                                    Style="{StaticResource AccentButtonStyle}"
-                                    Command="{Binding ClassifyCommand}" />
-                            <Button Content="取消"
-                                    Command="{Binding CancelClassificationCommand}" />
-                        </StackPanel>
-                    </Grid>
-
-                    <Grid ColumnSpacing="10"
-                          Visibility="{Binding IsClassificationInProgress, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <ProgressRing Width="20" Height="20" IsActive="True" VerticalAlignment="Center" />
-                        <StackPanel Grid.Column="1" Spacing="6">
-                            <ProgressBar Minimum="0"
-                                         Maximum="{Binding ProgressTotal}"
-                                         Value="{Binding ProgressCompleted}"
-                                         IsIndeterminate="{Binding IsProgressIndeterminate}" />
-                            <TextBlock Text="{Binding ProgressText}"
-                                       Style="{StaticResource SecondaryBodyStyle}"
-                                       TextWrapping="Wrap" />
-                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Content="AI 自动分类"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Command="{Binding ClassifyCommand}"
+                                VerticalAlignment="Center" />
                     </Grid>
                 </StackPanel>
             </Border>

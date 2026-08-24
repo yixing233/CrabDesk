@@ -11,6 +11,7 @@ public interface IDialogService
     Task<bool> ConfirmAsync(string title, string message, string primaryText);
     Task ShowMessageAsync(string title, string message);
     Task<string?> PromptAsync(string title, string label, string initialValue = "");
+    Task<AiOrganizationDialogResult> RunAiOrganizationAsync(AiOrganizationDialogRequest request);
     Task<OrganizationRule?> EditOrganizationRuleAsync(
         OrganizationRule? rule,
         IReadOnlyList<DesktopBox> boxes);
@@ -57,6 +58,16 @@ public sealed class DialogService : IDialogService
         return await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(input.Text)
             ? input.Text.Trim()
             : null;
+    }
+
+    public Task<AiOrganizationDialogResult> RunAiOrganizationAsync(AiOrganizationDialogRequest request)
+    {
+        if (_xamlRoot is null)
+        {
+            throw new InvalidOperationException("The dialog XamlRoot has not been registered.");
+        }
+
+        return AiOrganizationProgressDialog.ShowAsync(_xamlRoot, request);
     }
 
     public async Task<OrganizationRule?> EditOrganizationRuleAsync(

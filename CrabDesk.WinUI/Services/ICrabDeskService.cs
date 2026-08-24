@@ -72,7 +72,8 @@ public interface ICrabDeskService
     Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default);
     Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null);
     Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default);
@@ -96,7 +97,6 @@ public interface ICrabDeskService
     void SetSelectionColor(string value);
     void SetIconLabelFontSize(double value);
     void SetIconLabelFontFamily(string value);
-    void SetBoxTitleAlignment(Guid? boxId, BoxTitleAlignment alignment);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);
     void SetBoxOpacity(Guid? boxId, double value);

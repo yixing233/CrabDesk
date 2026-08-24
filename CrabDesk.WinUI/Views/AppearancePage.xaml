@@ -123,14 +123,11 @@
                 <Grid Padding="0,12,0,0" ColumnSpacing="12" RowSpacing="8" HorizontalAlignment="Stretch">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <controls:FontPickerControl Header="盒子名称字体"
+                    <controls:FontPickerControl Grid.ColumnSpan="2"
+                                                Header="盒子名称字体"
                                                 FontFamilies="{Binding FontFamilies}"
                                                 SelectedFont="{Binding TitleFontFamily, Mode=TwoWay}"
                                                 AutomationProperties.Name="盒子名称字体" />
-                    <ComboBox Grid.Column="1" Header="标题对齐"
-                              ItemsSource="{Binding TitleAlignments}"
-                              ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
-                              SelectedItem="{Binding TitleAlignment, Mode=TwoWay}" />
                     <StackPanel Grid.Row="1">
                         <Grid>
                             <TextBlock Text="高度" />
