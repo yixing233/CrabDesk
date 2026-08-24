@@ -1,0 +1,87 @@
+<Window
+    x:Class="CrabDesk.WinUI.Windows.BackupPreviewWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CrabDesk.WinUI.Controls"
+    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+
+    <Grid x:Name="RootGrid" Background="#D9000000" SizeChanged="RootGrid_OnSizeChanged" KeyDown="RootGrid_OnKeyDown">
+        <Border Background="Transparent" Tapped="Backdrop_OnTapped" />
+
+        <ScrollViewer x:Name="ImageViewer"
+                      Background="Transparent"
+                      HorizontalScrollMode="Disabled"
+                      VerticalScrollMode="Disabled"
+                      HorizontalScrollBarVisibility="Hidden"
+                      VerticalScrollBarVisibility="Hidden"
+                      ZoomMode="Enabled"
+                      MinZoomFactor="1"
+                      MaxZoomFactor="8"
+                      PointerPressed="ImageViewer_OnPointerPressed"
+                      PointerMoved="ImageViewer_OnPointerMoved"
+                      PointerReleased="ImageViewer_OnPointerReleased"
+                      PointerCanceled="ImageViewer_OnPointerReleased"
+                      PointerWheelChanged="ImageViewer_OnPointerWheelChanged"
+                      DoubleTapped="ImageViewer_OnDoubleTapped"
+                      ViewChanged="ImageViewer_OnViewChanged">
+            <Grid x:Name="ImageStage" Background="Transparent">
+                <Image x:Name="PreviewImage" Stretch="Uniform" />
+                <controls:DesktopSnapshotView x:Name="LayoutPreview" Visibility="Collapsed" />
+            </Grid>
+        </ScrollViewer>
+
+        <Border x:Name="WindowDragRegion"
+                Height="72"
+                Margin="16,8,72,0"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                PointerPressed="WindowDragRegion_OnPointerPressed"
+                PointerMoved="WindowDragRegion_OnPointerMoved"
+                PointerReleased="WindowDragRegion_OnPointerReleased"
+                PointerCanceled="WindowDragRegion_OnPointerReleased" />
+
+        <Border HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,48"
+                Padding="8"
+                Background="#E6212121"
+                CornerRadius="24">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button Click="ZoomOut_OnClick" ToolTipService.ToolTip="缩小"
+                        Background="Transparent" BorderBrush="Transparent" Foreground="White">
+                    <lucide:LucideIcon Icon="ZoomOut" FontSize="18" Foreground="White" />
+                </Button>
+                <TextBlock x:Name="ZoomText" Width="48" Text="100%" Foreground="White"
+                           TextAlignment="Center" VerticalAlignment="Center" />
+                <Button Click="ZoomIn_OnClick" ToolTipService.ToolTip="放大"
+                        Background="Transparent" BorderBrush="Transparent" Foreground="White">
+                    <lucide:LucideIcon Icon="ZoomIn" FontSize="18" Foreground="White" />
+                </Button>
+                <Border Width="1" Height="20" Background="#66FFFFFF" Margin="4,0" />
+                <Button Click="Reset_OnClick" ToolTipService.ToolTip="适应窗口"
+                        Background="Transparent" BorderBrush="Transparent" Foreground="White">
+                    <lucide:LucideIcon Icon="Maximize2" FontSize="18" Foreground="White" />
+                </Button>
+                <Button Click="Close_OnClick" ToolTipService.ToolTip="关闭预览"
+                        Width="36" Height="36" MinWidth="36" MinHeight="36" Padding="0"
+                        Background="Transparent" BorderBrush="Transparent" Foreground="White">
+                    <lucide:LucideIcon Icon="X" FontSize="18" Width="20" Height="20"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Margin="28,24" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2" IsHitTestVisible="False">
+            <TextBlock Text="备份预览" FontSize="16" FontWeight="SemiBold" Foreground="White" />
+            <TextBlock x:Name="DetailsText" Foreground="#BFFFFFFF" FontSize="12" />
+        </StackPanel>
+
+        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,16,16,0"
+                Click="Close_OnClick" ToolTipService.ToolTip="关闭预览"
+                Background="#52000000" BorderBrush="Transparent" Foreground="White"
+                CornerRadius="20" Width="40" Height="40" MinWidth="40" MinHeight="40" Padding="0">
+            <lucide:LucideIcon Icon="X" FontSize="20" Width="24" Height="24"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" />
+        </Button>
+    </Grid>
+</Window>

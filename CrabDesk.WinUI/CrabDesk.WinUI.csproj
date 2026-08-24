@@ -41,6 +41,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CrabDesk.WinUI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk-256.png" CopyToOutputDirectory="PreserveNewest" />

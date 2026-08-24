@@ -2,14 +2,16 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using CrabDesk.Core;
 using CrabDesk.WinUI.Converters;
+using CrabDesk.WinUI.Windows;
 
 namespace CrabDesk.WinUI.Services;
 
 public interface IDialogService
 {
-    void RegisterXamlRoot(XamlRoot root);
+    void RegisterXamlRoot(XamlRoot root, IntPtr ownerHandle);
     Task<bool> ConfirmAsync(string title, string message, string primaryText);
     Task ShowMessageAsync(string title, string message);
+    Task ShowBackupPreviewAsync(LayoutBackupInfo backup);
     Task<string?> PromptAsync(string title, string label, string initialValue = "");
     Task<OrganizationRule?> EditOrganizationRuleAsync(
         OrganizationRule? rule,
@@ -21,8 +23,13 @@ public sealed class DialogService : IDialogService
     private sealed record DialogOption<T>(string Label, T Value);
 
     private XamlRoot? _xamlRoot;
+    private IntPtr _ownerHandle;
 
-    public void RegisterXamlRoot(XamlRoot root) => _xamlRoot = root;
+    public void RegisterXamlRoot(XamlRoot root, IntPtr ownerHandle)
+    {
+        _xamlRoot = root;
+        _ownerHandle = ownerHandle;
+    }
 
     public async Task<bool> ConfirmAsync(string title, string message, string primaryText)
     {
@@ -38,6 +45,13 @@ public sealed class DialogService : IDialogService
         var dialog = CreateDialog(title, message);
         dialog.CloseButtonText = "关闭";
         await dialog.ShowAsync();
+    }
+
+    public async Task ShowBackupPreviewAsync(LayoutBackupInfo backup)
+    {
+        ArgumentNullException.ThrowIfNull(backup);
+        var isDark = _xamlRoot?.Content is FrameworkElement { ActualTheme: ElementTheme.Dark };
+        await BackupPreviewWindow.ShowAsync(_ownerHandle, backup, isDark);
     }
 
     public async Task<string?> PromptAsync(string title, string label, string initialValue = "")

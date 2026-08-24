@@ -10,7 +10,7 @@
             Padding="5">
         <Grid>
             <Image x:Name="SnapshotWallpaper"
-                   Stretch="UniformToFill"
+                   Stretch="Uniform"
                    Opacity="0.34" />
             <Canvas x:Name="SnapshotCanvas" SizeChanged="SnapshotCanvas_OnSizeChanged" />
             <Border Height="3"

@@ -113,6 +113,15 @@ public partial class BackupViewModel : ObservableObject
     }
 
     [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task PreviewAsync()
+    {
+        if (SelectedBackup is not null)
+        {
+            await _dialogs.ShowBackupPreviewAsync(SelectedBackup);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(HasSelection))]
     private async Task RestoreAsync()
     {
         if (SelectedBackup is null || !await _dialogs.ConfirmAsync("恢复布局", "当前布局会被所选备份替换。", "恢复")) return;
@@ -140,6 +149,7 @@ public partial class BackupViewModel : ObservableObject
 
     partial void OnSelectedBackupChanged(LayoutBackupInfo? value)
     {
+        PreviewCommand.NotifyCanExecuteChanged();
         RestoreCommand.NotifyCanExecuteChanged();
         DeleteCommand.NotifyCanExecuteChanged();
     }

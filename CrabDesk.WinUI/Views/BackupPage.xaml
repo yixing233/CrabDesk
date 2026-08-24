@@ -84,6 +84,7 @@
                 <AppBarButton Label="导出布局" Command="{Binding ExportCommand}" ToolTipService.ToolTip="导出布局"><AppBarButton.Icon><lucide:LucideIcon Icon="Upload" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="导入布局" Command="{Binding ImportCommand}" ToolTipService.ToolTip="导入布局"><AppBarButton.Icon><lucide:LucideIcon Icon="Download" /></AppBarButton.Icon></AppBarButton>
                 <AppBarSeparator />
+                <AppBarButton Label="预览" Command="{Binding PreviewCommand}" ToolTipService.ToolTip="预览所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="Eye" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="恢复" Command="{Binding RestoreCommand}" ToolTipService.ToolTip="恢复所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="RotateCcw" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="删除" Command="{Binding DeleteCommand}" ToolTipService.ToolTip="删除所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="Trash2" /></AppBarButton.Icon></AppBarButton>
                 <CommandBar.SecondaryCommands>
@@ -99,53 +100,47 @@
                       AutomationProperties.Name="布局备份列表">
                 <ListView.ItemTemplate>
                     <DataTemplate>
-                        <Grid Padding="10" MinHeight="112" ColumnSpacing="16">
+                        <Grid Padding="16,12" MinHeight="124" ColumnSpacing="20"
+                              DoubleTapped="BackupItem_OnDoubleTapped">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="168" />
+                                <ColumnDefinition Width="176" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <controls:DesktopSnapshotView Width="168"
-                                                          Height="94"
+                            <controls:DesktopSnapshotView Width="176"
+                                                          Height="100"
                                                           Snapshot="{Binding Snapshot}"
                                                           DesktopPreviewPath="{Binding DesktopPreviewPath}"
                                                           AutomationProperties.Name="备份桌面快照" />
 
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="5">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="7">
                                 <TextBlock Text="{Binding CreatedAtText}"
                                            FontFamily="Segoe UI Variable Text"
-                                           FontSize="14"
+                                           FontSize="18"
                                            FontWeight="SemiBold" />
                                 <TextBlock Text="{Binding FileName}"
                                            Style="{StaticResource SecondaryBodyStyle}"
                                            TextWrapping="NoWrap"
                                            TextTrimming="CharacterEllipsis"
                                            ToolTipService.ToolTip="{Binding Path}" />
-                                <StackPanel Orientation="Horizontal" Spacing="5">
-                                    <TextBlock Text="{Binding BoxCount}" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="个盒子" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="{Binding RuleCount}" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="条规则" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="{Binding MonitorCount}" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="块屏幕" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="·" Style="{StaticResource SecondaryBodyStyle}" />
-                                    <TextBlock Text="{Binding PreviewSummaryText}" Style="{StaticResource SecondaryBodyStyle}" />
+                                <StackPanel Orientation="Horizontal" Spacing="16">
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <lucide:LucideIcon Icon="Box" FontSize="13" Foreground="{ThemeResource SecondaryTextBrush}" />
+                                        <TextBlock Text="{Binding BoxCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                        <TextBlock Text="个盒子" Style="{StaticResource SecondaryBodyStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <lucide:LucideIcon Icon="ListTree" FontSize="13" Foreground="{ThemeResource SecondaryTextBrush}" />
+                                        <TextBlock Text="{Binding RuleCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                        <TextBlock Text="条规则" Style="{StaticResource SecondaryBodyStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <lucide:LucideIcon Icon="Monitor" FontSize="13" Foreground="{ThemeResource SecondaryTextBrush}" />
+                                        <TextBlock Text="{Binding MonitorCount}" Style="{StaticResource SecondaryBodyStyle}" />
+                                        <TextBlock Text="块屏幕" Style="{StaticResource SecondaryBodyStyle}" />
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
-
-                            <Border Grid.Column="2"
-                                    Padding="8,3"
-                                    Background="{ThemeResource NavigationSurfaceBrush}"
-                                    CornerRadius="10"
-                                    VerticalAlignment="Center">
-                                <StackPanel Orientation="Horizontal" Spacing="1">
-                                    <TextBlock Text="v" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                    <TextBlock Text="{Binding SchemaVersion}" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                </StackPanel>
-                            </Border>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

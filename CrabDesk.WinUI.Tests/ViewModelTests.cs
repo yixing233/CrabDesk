@@ -94,6 +94,32 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public async Task BackupViewModelOpensPreviewForSelectedBackup()
+    {
+        var state = CreateState();
+        var service = CreateService(state);
+        var backup = new LayoutBackupInfo(
+            "C:\\Backups\\CrabDesk-20260824-1845.crabdesk.json",
+            DateTimeOffset.Parse("2026-08-24T18:45:00+08:00"),
+            state.SchemaVersion,
+            1,
+            0,
+            1,
+            new LayoutBackupSnapshot(new LayoutRect(0, 0, 1920, 1080), []));
+        service.Setup(item => item.GetBackupsAsync())
+            .ReturnsAsync([backup]);
+        var dialogs = new Mock<IDialogService>();
+        var viewModel = new BackupViewModel(
+            service.Object,
+            Mock.Of<IFilePickerService>(),
+            dialogs.Object);
+
+        await viewModel.PreviewCommand.ExecuteAsync(null);
+
+        dialogs.Verify(item => item.ShowBackupPreviewAsync(backup), Times.Once);
+    }
+
+    [Fact]
     public void AppearanceViewModelPreservesBoxSizeWhenChangingColor()
     {
         var state = CreateState();

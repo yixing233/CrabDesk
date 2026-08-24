@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using WinRT.Interop;
 using Windows.Graphics;
 using Windows.UI.ViewManagement;
 
@@ -148,7 +149,7 @@ public sealed partial class MainWindow : Window
     private void OnRootLoaded(object sender, RoutedEventArgs eventArgs)
     {
         _themeService.RegisterRoot(RootGrid);
-        _dialogService.RegisterXamlRoot(RootGrid.XamlRoot);
+        _dialogService.RegisterXamlRoot(RootGrid.XamlRoot, WindowNative.GetWindowHandle(this));
         _filePickerService.RegisterWindow(this);
         var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1;
         UpdateNavigationMode(AppWindow.Size.Width / scale);
