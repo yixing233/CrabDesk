@@ -34,6 +34,7 @@ public partial class AppearanceViewModel : ObservableObject
     public double CornerRadius { get => _service.State.Settings.Appearance.CornerRadius; set => _service.SetCornerRadius(value); }
     public bool ShowBorder { get => _service.State.Settings.Appearance.ShowBorder; set => _service.SetShowBoxBorder(value); }
     public bool ShowResizeGrip { get => _service.State.Settings.Appearance.ShowResizeGrip; set => _service.SetShowResizeGrip(value); }
+    public bool ShowBoxScrollBar { get => _service.State.Settings.Appearance.ShowBoxScrollBar; set => _service.SetShowBoxScrollBar(value); }
     public bool HoverFeedback { get => _service.State.Settings.Appearance.HoverFeedback; set => _service.SetHoverFeedback(value); }
     public double HorizontalSpacing { get => _service.State.Settings.Appearance.IconHorizontalSpacing; set => _service.SetIconSpacing(value, VerticalSpacing); }
     public double VerticalSpacing { get => _service.State.Settings.Appearance.IconVerticalSpacing; set => _service.SetIconSpacing(HorizontalSpacing, value); }

@@ -7,6 +7,17 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class FluentContextMenuStripTests
 {
     [Fact]
+    public void BoxMenuMetricsUsePreferredMonitorDpiBeforeHandleCreation()
+    {
+        using var menu = new FluentContextMenuStrip
+        {
+            PreferredDpiScale = 1.5f
+        };
+
+        Assert.Equal(1.5f, CrabDeskRuntime.GetMenuDpiScale(menu));
+    }
+
+    [Fact]
     public void RootMetricsDoNotConfigureClosedSubmenus()
     {
         using var root = new FluentContextMenuStrip();

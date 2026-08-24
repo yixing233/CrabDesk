@@ -115,6 +115,7 @@
                     <ToggleSwitch Grid.Row="2" Header="显示边框" IsOn="{Binding ShowBorder, Mode=TwoWay}" />
                     <ToggleSwitch Grid.Row="2" Grid.Column="1" Header="允许调整盒子大小" IsOn="{Binding ShowResizeGrip, Mode=TwoWay}" />
                     <ToggleSwitch Grid.Row="3" Header="悬停高亮" IsOn="{Binding HoverFeedback, Mode=TwoWay}" />
+                    <ToggleSwitch Grid.Row="3" Grid.Column="1" Header="显示盒子滚动条" IsOn="{Binding ShowBoxScrollBar, Mode=TwoWay}" />
                 </Grid>
             </Expander>
 

@@ -293,6 +293,20 @@ public sealed record LayoutResetResult(LayoutBackupInfo Backup, int DisabledRule
 
 public sealed record AiClassificationAssignment(string ItemKey, string ItemName, string Label);
 
+public sealed record AiClassificationPreview(
+    long WorkspaceRevision,
+    int Requested,
+    IReadOnlyList<AiClassificationAssignment> Assignments,
+    IReadOnlyList<string> NewBoxLabels);
+
+public sealed record AiClassificationProgress(
+    int CompletedItems,
+    int TotalItems,
+    int CompletedBatches,
+    int TotalBatches,
+    bool IsIndeterminate,
+    string Message);
+
 public sealed record AiClassificationApplyResult(
     int Requested,
     int Classified,
@@ -300,6 +314,12 @@ public sealed record AiClassificationApplyResult(
     int CreatedBoxes,
     int Unmatched,
     IReadOnlyList<AiClassificationAssignment> Assignments);
+
+public sealed class AiClassificationRequestException(string technicalMessage, Exception? innerException = null)
+    : Exception(technicalMessage, innerException)
+{
+    public const string SafeMessage = "AI 服务请求失败，请检查接口配置后重试。";
+}
 
 public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move)
 {
@@ -488,6 +508,7 @@ public sealed class GlobalAppearanceSettings
     public double CornerRadius { get; set; } = 8;
     public bool ShowBorder { get; set; } = true;
     public bool ShowResizeGrip { get; set; } = true;
+    public bool ShowBoxScrollBar { get; set; } = true;
     public double IconHorizontalSpacing { get; set; } = 76;
     public double IconVerticalSpacing { get; set; } = 80;
     public string SelectionColor { get; set; } = "#FF4A5BB1";

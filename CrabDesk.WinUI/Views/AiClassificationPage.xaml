@@ -37,7 +37,7 @@
                                 Command="{Binding TestConnectivityCommand}"
                                 VerticalAlignment="Bottom" />
                     </Grid>
-                    <TextBlock Text="支持常见的 GET /models 返回结构；API Key 保存在本机 CrabDesk 配置中。"
+                    <TextBlock Text="仅支持 HTTPS；API Key 使用当前 Windows 用户加密保存。分类接口需支持 JSON Schema 结构化输出。"
                                Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -66,23 +66,45 @@
             </Border>
 
             <Border Style="{StaticResource SectionCardStyle}" Padding="16">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center" Spacing="3">
-                        <TextBlock Text="开始识别桌面图标" FontWeight="SemiBold" />
-                        <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。"
-                                   Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                        <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
-                        <Button Content="AI 自动分类"
-                                Style="{StaticResource AccentButtonStyle}"
-                                Command="{Binding ClassifyCommand}" />
-                    </StackPanel>
-                </Grid>
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="3">
+                            <TextBlock Text="预览 AI 整理结果" FontWeight="SemiBold" />
+                            <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。确认前不会改变桌面布局。"
+                                       Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <ProgressRing Width="22" Height="22" IsActive="{Binding IsBusy}" />
+                            <Button Content="AI 自动分类"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Command="{Binding ClassifyCommand}" />
+                            <Button Content="取消"
+                                    Command="{Binding CancelClassificationCommand}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid ColumnSpacing="10"
+                          Visibility="{Binding IsClassificationInProgress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ProgressRing Width="20" Height="20" IsActive="True" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <ProgressBar Minimum="0"
+                                         Maximum="{Binding ProgressTotal}"
+                                         Value="{Binding ProgressCompleted}"
+                                         IsIndeterminate="{Binding IsProgressIndeterminate}" />
+                            <TextBlock Text="{Binding ProgressText}"
+                                       Style="{StaticResource SecondaryBodyStyle}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
             </Border>
         </StackPanel>
     </ScrollViewer>

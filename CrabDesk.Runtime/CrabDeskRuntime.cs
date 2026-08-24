@@ -50,6 +50,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private readonly SemaphoreSlim _mappedRefreshLock = new(1, 1);
     private readonly SemaphoreSlim _updateLock = new(1, 1);
+    private readonly AiOrganizationOperationGate _aiOrganizationGate = new();
     private readonly CancellationTokenSource _updateCancellation = new();
     private readonly Dictionary<Guid, MappedFolderSnapshot> _mappedFolderSnapshots = [];
     private readonly Dictionary<string, FileAttributes> _originalFileAttributes = new(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +58,8 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
+    private HashSet<Guid> _lastOrganizationCreatedBoxes = [];
+    private long _workspaceRevision;
     private DesktopSurfaceManager? _surfaceManager;
     private System.Windows.Forms.NotifyIcon? _trayIcon;
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
@@ -118,6 +121,7 @@ public sealed class CrabDeskRuntime : IDisposable
         _itemProvider.ItemsChanged += (sender, args) => _beginInvoke(() => OnDesktopItemsChanged(sender, args));
         _mappedFolderProvider.ItemsChanged += (_, _) => _beginInvoke(async () => await RefreshMappedFoldersAsync());
         _hotkeyService.Pressed += OnGlobalHotkeyPressed;
+        _aiOrganizationGate.Changed += (_, _) => Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public event EventHandler? Changed;
@@ -135,6 +139,7 @@ public sealed class CrabDeskRuntime : IDisposable
     public bool IsDownloadingUpdate { get; private set; }
     public bool DesktopConnected => _desktopHost.IsAvailable && !IsPaused;
     public bool CanUndoOrganization => _lastOrganizationAssignments is not null;
+    public bool IsAiOrganizationRunning => _aiOrganizationGate.IsRunning;
     public IFileOperationService FileOperations => _fileOperations;
     public ShellIconProvider IconProvider => _iconProvider;
     public string CurrentVersion => UpdateConfiguration.CurrentVersion;
@@ -1946,6 +1951,12 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
+    public void SetShowBoxScrollBar(bool enabled)
+    {
+        State.Settings.Appearance.ShowBoxScrollBar = enabled;
+        NotifyWorkspaceChanged(true);
+    }
+
     public void SetHoverFeedback(bool enabled)
     {
         State.Settings.Appearance.HoverFeedback = enabled;
@@ -2137,6 +2148,7 @@ public sealed class CrabDeskRuntime : IDisposable
         var primary = Monitors.FirstOrDefault(monitor => monitor.IsPrimary) ?? Monitors.FirstOrDefault();
         var disabledRules = LayoutCoordinator.ResetLayout(State, primary?.Id ?? "primary");
         _lastOrganizationAssignments = null;
+        _lastOrganizationCreatedBoxes.Clear();
         _mappedFolderSnapshots.Clear();
         ConfigureMappedFolderWatchers();
         NormalizeMonitorIds();
@@ -2246,68 +2258,183 @@ public sealed class CrabDeskRuntime : IDisposable
     public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
         _aiClassificationService.TestModelConnectivityAsync(State.Settings.AiClassification, cancellationToken);
 
+    public async Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default) =>
+        await RunAiOrganizationAsync(async operationToken =>
+        {
+            var settings = State.Settings.AiClassification;
+            var labels = ParseAiCategoryLabels(settings.CategoryLabels);
+            if (labels.Count == 0)
+            {
+                throw new InvalidOperationException("请至少提供一个分类标签。");
+            }
+
+            var candidates = Items
+                .Where(item => item.Kind != DesktopItemKind.Shell)
+                .Where(item => settings.ReassignExistingItems || !State.Assignments.ContainsKey(item.Key.ToString()))
+                .Select(item => new AiClassificationInput(item.Key.ToString(), item.DisplayName))
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                progress?.Report(new AiClassificationProgress(
+                    0,
+                    0,
+                    0,
+                    0,
+                    false,
+                    "没有需要分类的桌面图标"));
+                return new AiClassificationPreview(_workspaceRevision, 0, [], []);
+            }
+
+            var classifications = new List<AiClassificationAssignment>();
+            var totalBatches = (candidates.Length + AiClassificationService.MaxItemsPerRequest - 1) /
+                AiClassificationService.MaxItemsPerRequest;
+            var completedItems = 0;
+            var completedBatches = 0;
+            progress?.Report(new AiClassificationProgress(
+                completedItems,
+                candidates.Length,
+                completedBatches,
+                totalBatches,
+                true,
+                "正在准备分类项目"));
+            foreach (var batch in candidates.Chunk(AiClassificationService.MaxItemsPerRequest))
+            {
+                operationToken.ThrowIfCancellationRequested();
+                progress?.Report(new AiClassificationProgress(
+                    completedItems,
+                    candidates.Length,
+                    completedBatches,
+                    totalBatches,
+                    true,
+                    "正在请求 AI 分类"));
+                var result = await _aiClassificationService.ClassifyAsync(
+                    settings,
+                    batch,
+                    labels,
+                    operationToken).ConfigureAwait(false);
+                classifications.AddRange(result);
+                completedItems += batch.Length;
+                completedBatches++;
+                progress?.Report(new AiClassificationProgress(
+                    completedItems,
+                    candidates.Length,
+                    completedBatches,
+                    totalBatches,
+                    false,
+                    "已完成一批分类"));
+            }
+
+            progress?.Report(new AiClassificationProgress(
+                candidates.Length,
+                candidates.Length,
+                totalBatches,
+                totalBatches,
+                true,
+                "正在生成整理预览"));
+
+            var existingBoxTitles = State.Boxes
+                .Where(box => !box.IsMappedFolder)
+                .Select(box => box.Title.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var newBoxLabels = classifications
+                .Select(classification => classification.Label)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(label => !existingBoxTitles.Contains(label))
+                .ToArray();
+            return new AiClassificationPreview(
+                _workspaceRevision,
+                candidates.Length,
+                classifications,
+                newBoxLabels);
+        }, cancellationToken).ConfigureAwait(false);
+
+    public async Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
+        AiClassificationPreview preview,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(preview);
+        return await RunAiOrganizationAsync(operationToken =>
+        {
+            if (preview.WorkspaceRevision != _workspaceRevision)
+            {
+                throw new InvalidOperationException("桌面状态已变化，请重新预览 AI 整理结果。");
+            }
+            operationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(ApplyAiClassificationPreviewCore(preview, operationToken));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    [Obsolete("Use PreviewAiClassificationAsync followed by ApplyAiClassificationPreviewAsync so the user can confirm the result.")]
     public async Task<AiClassificationApplyResult> ApplyAiClassificationAsync(
         CancellationToken cancellationToken = default)
     {
-        var settings = State.Settings.AiClassification;
-        var labels = ParseAiCategoryLabels(settings.CategoryLabels);
-        if (labels.Count == 0)
+        var preview = await PreviewAiClassificationAsync(
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        return await ApplyAiClassificationPreviewAsync(preview, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void CancelAiOrganization()
+    {
+        _aiOrganizationGate.Cancel();
+    }
+
+    private AiClassificationApplyResult ApplyAiClassificationPreviewCore(
+        AiClassificationPreview preview,
+        CancellationToken cancellationToken)
+    {
+        if (preview.Assignments.Count == 0)
         {
-            throw new InvalidOperationException("请至少提供一个分类标签。");
+            return new AiClassificationApplyResult(preview.Requested, 0, 0, 0, preview.Requested, []);
         }
-        var candidates = Items
-            .Where(item => settings.ReassignExistingItems || !State.Assignments.ContainsKey(item.Key.ToString()))
-            .Select(item => new AiClassificationInput(item.Key.ToString(), item.DisplayName))
+
+        var itemsByKey = Items.ToDictionary(item => item.Key.ToString(), StringComparer.OrdinalIgnoreCase);
+        var assignmentsToApply = preview.Assignments
+            .Where(classification => itemsByKey.ContainsKey(classification.ItemKey))
             .ToArray();
-        if (candidates.Length == 0)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (assignmentsToApply.Length == 0)
         {
-            return new AiClassificationApplyResult(0, 0, 0, 0, 0, []);
+            return new AiClassificationApplyResult(
+                preview.Requested,
+                preview.Assignments.Count,
+                0,
+                0,
+                preview.Requested - preview.Assignments.Count,
+                preview.Assignments);
         }
 
-        var classifications = await _aiClassificationService.ClassifyAsync(
-            settings,
-            candidates,
-            labels,
-            cancellationToken);
-        if (classifications.Count == 0)
-        {
-            return new AiClassificationApplyResult(candidates.Length, 0, 0, 0, candidates.Length, []);
-        }
-
+        // Applying a confirmed preview is deliberately atomic: cancellation is
+        // observed before state mutation, not between individual assignments.
         _lastOrganizationAssignments = new Dictionary<string, Guid>(
             State.Assignments,
             StringComparer.OrdinalIgnoreCase);
+        _lastOrganizationCreatedBoxes = [];
         var boxesByTitle = State.Boxes
             .Where(box => !box.IsMappedFolder)
             .GroupBy(box => box.Title.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-        var createdBoxes = 0;
         var applied = 0;
-        foreach (var classification in classifications)
+        foreach (var classification in assignmentsToApply)
         {
             if (!boxesByTitle.TryGetValue(classification.Label, out var box))
             {
                 box = CreateBoxCore(classification.Label);
                 boxesByTitle[classification.Label] = box;
-                createdBoxes++;
-            }
-            var item = Items.FirstOrDefault(candidate => string.Equals(
-                candidate.Key.ToString(),
-                classification.ItemKey,
-                StringComparison.OrdinalIgnoreCase));
-            if (item is null)
-            {
-                continue;
+                _lastOrganizationCreatedBoxes.Add(box.Id);
             }
             State.Assignments[classification.ItemKey] = box.Id;
             MoveItemOrderKey(classification.ItemKey, box.Id);
             applied++;
         }
-        if (applied > 0 || createdBoxes > 0)
+        if (applied > 0 || _lastOrganizationCreatedBoxes.Count > 0)
         {
             if (IsPaused)
             {
-                SetPaused(false);
+                _workspaceRevision++;
+                Changed?.Invoke(this, EventArgs.Empty);
+                ScheduleSave();
             }
             else
             {
@@ -2315,13 +2442,18 @@ public sealed class CrabDeskRuntime : IDisposable
             }
         }
         return new AiClassificationApplyResult(
-            candidates.Length,
-            classifications.Count,
+            preview.Requested,
+            preview.Assignments.Count,
             applied,
-            createdBoxes,
-            candidates.Length - classifications.Count,
-            classifications);
+            _lastOrganizationCreatedBoxes.Count,
+            preview.Requested - preview.Assignments.Count,
+            preview.Assignments);
     }
+
+    private async Task<T> RunAiOrganizationAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken) =>
+        await _aiOrganizationGate.ExecuteAsync(operation, cancellationToken).ConfigureAwait(false);
 
     private static IReadOnlyList<string> ParseAiCategoryLabels(string value) => value
         .Split(['\r', '\n', ',', '，', ';', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -2344,6 +2476,7 @@ public sealed class CrabDeskRuntime : IDisposable
             _lastOrganizationAssignments = new Dictionary<string, Guid>(
                 State.Assignments,
                 StringComparer.OrdinalIgnoreCase);
+            _lastOrganizationCreatedBoxes.Clear();
         }
         var assigned = 0;
         var unassigned = 0;
@@ -2425,6 +2558,8 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
         _lastOrganizationAssignments = null;
+        var createdBoxIds = _lastOrganizationCreatedBoxes;
+        _lastOrganizationCreatedBoxes = [];
 
         foreach (var key in State.Assignments.Keys.Where(key => !previous.ContainsKey(key)).ToArray())
         {
@@ -2447,6 +2582,13 @@ public sealed class CrabDeskRuntime : IDisposable
             }
             State.Assignments[key] = target;
             MoveItemOrderKey(key, target);
+        }
+        foreach (var box in State.Boxes.Where(box => createdBoxIds.Contains(box.Id)).ToArray())
+        {
+            if (!State.Assignments.Values.Contains(box.Id))
+            {
+                State.Boxes.Remove(box);
+            }
         }
         NotifyWorkspaceChanged(true);
     }
@@ -2688,6 +2830,7 @@ public sealed class CrabDeskRuntime : IDisposable
         _desktopZoomTimer.Stop();
         _desktopViewRefreshTimer.Stop();
         _desktopMenuRefreshTimer.Stop();
+        CancelAiOrganization();
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged;
         Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         try
@@ -2728,6 +2871,7 @@ public sealed class CrabDeskRuntime : IDisposable
         _trayMenu?.Dispose();
         _applicationIcon?.Dispose();
         _menuFont.Dispose();
+        _aiOrganizationGate.Dispose();
         _aiClassificationService.Dispose();
         _iconProvider.ClearCache();
         SaveNowAsync().GetAwaiter().GetResult();
@@ -3116,6 +3260,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void NotifyWorkspaceChanged(bool rebuild)
     {
+        _workspaceRevision++;
         try
         {
             if (rebuild)
@@ -3809,7 +3954,9 @@ public sealed class CrabDeskRuntime : IDisposable
     private async Task ApplyLoadedStateAsync(CrabDeskState state)
     {
         RestoreAssignedItemVisibility(true);
-        var localAiApiKey = State.Settings.AiClassification.ApiKey;
+        var localAiSettings = AiClassificationImportPolicy.PreserveLocalProfile(
+            State.Settings.AiClassification,
+            state.Settings.AiClassification);
         try
         {
             _surfaceManager?.Dispose();
@@ -3820,9 +3967,11 @@ public sealed class CrabDeskRuntime : IDisposable
             EnsureDesktopInput("state reload");
         }
         State = state;
-        State.Settings.AiClassification.ApiKey = localAiApiKey;
+        State.Settings.AiClassification = localAiSettings;
         SynchronizeBoxStyles();
         _lastOrganizationAssignments = null;
+        _lastOrganizationCreatedBoxes.Clear();
+        _workspaceRevision++;
         LastUpdateCheck = new UpdateCheckResult(
             UpdateCheckStatus.NotChecked,
             CurrentVersion,
@@ -4104,17 +4253,23 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private static float GetMenuDpiScale(System.Windows.Forms.ContextMenuStrip menu)
+    internal static float GetMenuDpiScale(System.Windows.Forms.ContextMenuStrip menu)
     {
+        var preferredDpiScale = menu is FluentContextMenuStrip fluentMenu
+            ? fluentMenu.PreferredDpiScale
+            : null;
         try
         {
-            return menu.IsHandleCreated && menu.DeviceDpi > 0
-                ? menu.DeviceDpi / 96f
-                : 1f;
+            return FluentContextMenuStrip.ResolveMetricsDpiScale(
+                menu.IsHandleCreated,
+                menu.DeviceDpi,
+                preferredDpiScale);
         }
         catch
         {
-            return 1f;
+            return preferredDpiScale is > 0
+                ? Math.Max(0.75f, preferredDpiScale.Value)
+                : 1f;
         }
     }
 

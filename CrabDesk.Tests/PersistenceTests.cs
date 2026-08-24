@@ -42,6 +42,7 @@ public sealed class PersistenceTests : IDisposable
         state.Settings.DesktopBehavior.ExpandBoxOnHover = true;
         state.Settings.DesktopBehavior.RefreshAfterRename = false;
         state.Settings.Appearance.HoverFeedback = false;
+        state.Settings.Appearance.ShowBoxScrollBar = false;
         state.Settings.Appearance.AnimationEnabled = false;
         state.Settings.Updates.CheckOnStartup = false;
         state.Settings.Updates.Channel = UpdateChannel.Preview;
@@ -88,6 +89,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(loaded.Settings.DesktopBehavior.ExpandBoxOnHover);
         Assert.False(loaded.Settings.DesktopBehavior.RefreshAfterRename);
         Assert.False(loaded.Settings.Appearance.HoverFeedback);
+        Assert.False(loaded.Settings.Appearance.ShowBoxScrollBar);
         Assert.False(loaded.Settings.Appearance.AnimationEnabled);
         Assert.False(loaded.Settings.Updates.CheckOnStartup);
         Assert.Equal(UpdateChannel.Preview, loaded.Settings.Updates.Channel);

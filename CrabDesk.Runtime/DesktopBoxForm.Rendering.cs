@@ -709,6 +709,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         graphics.Restore(state);
 
+        DrawVerticalScrollBar(
+            graphics,
+            geometry,
+            ParseOpaqueColor(geometry.Box.Appearance.Accent),
+            textColor);
+
         if (includeDropPreview)
         {
             DrawDropTargetFeedback(graphics, geometry, clipBounds);

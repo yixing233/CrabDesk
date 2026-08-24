@@ -1,0 +1,17 @@
+using CrabDesk.Core;
+
+namespace CrabDesk.WinUI.Services;
+
+internal static class AiOperationMessages
+{
+    internal static string ToUserMessage(Exception exception) => exception switch
+    {
+        OperationCanceledException => "AI 整理已取消。",
+        AiClassificationRequestException => AiClassificationRequestException.SafeMessage,
+        InvalidOperationException { Message: "AI 整理正在运行，请等待当前操作完成。" } =>
+            "AI 整理正在运行，请等待当前操作完成。",
+        InvalidOperationException { Message: "桌面状态已变化，请重新预览 AI 整理结果。" } =>
+            "桌面状态已变化，请重新预览 AI 整理结果。",
+        _ => "AI 操作失败，请检查配置后重试。"
+    };
+}

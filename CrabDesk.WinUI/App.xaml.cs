@@ -223,13 +223,41 @@ public partial class App : Application
     private async Task RunAiOrganizationAsync(CrabDeskRuntime runtime)
     {
         var notifications = GetService<IInfoBarService>();
+        var dialogs = GetService<IDialogService>();
         try
         {
-            var result = await runtime.ApplyAiClassificationAsync();
+            var preview = await runtime.PreviewAiClassificationAsync();
+            if (preview.Requested == 0)
+            {
+                notifications.Show(
+                    "没有需要 AI 整理的桌面图标",
+                    Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
+                    TimeSpan.FromSeconds(6));
+                return;
+            }
+            if (preview.Assignments.Count == 0)
+            {
+                notifications.Show(
+                    "AI 未返回可应用的分类结果",
+                    Microsoft.UI.Xaml.Controls.InfoBarSeverity.Warning,
+                    TimeSpan.FromSeconds(6));
+                return;
+            }
+            var confirmed = await dialogs.ConfirmAsync(
+                "确认 AI 整理",
+                $"将整理 {preview.Assignments.Count}/{preview.Requested} 个图标，" +
+                (preview.NewBoxLabels.Count > 0
+                    ? $"并新建 {preview.NewBoxLabels.Count} 个盒子。"
+                    : "不会新建盒子。") +
+                "文件不会移动或删除。",
+                "应用整理");
+            if (!confirmed)
+            {
+                return;
+            }
+            var result = await runtime.ApplyAiClassificationPreviewAsync(preview);
             notifications.Show(
-                result.Requested == 0
-                    ? "没有需要 AI 整理的桌面图标"
-                    : $"AI 整理完成：{result.Applied}/{result.Requested} 项",
+                $"AI 整理完成：{result.Applied}/{result.Requested} 项",
                 Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success,
                 TimeSpan.FromSeconds(6));
         }
@@ -237,7 +265,7 @@ public partial class App : Application
         {
             AppDiagnostic.Error("Desktop context-menu AI organization failed", exception);
             notifications.Show(
-                $"AI 整理失败：{exception.Message}",
+                AiOperationMessages.ToUserMessage(exception),
                 Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error,
                 TimeSpan.FromSeconds(8));
             runtime.RequestShowSettings("ai");
