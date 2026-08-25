@@ -13,7 +13,6 @@ public interface IDialogService
     Task ShowMessageAsync(string title, string message);
     Task ShowBackupPreviewAsync(LayoutBackupInfo backup);
     Task<string?> PromptAsync(string title, string label, string initialValue = "");
-    Task<AiOrganizationDialogResult> RunAiOrganizationAsync(AiOrganizationDialogRequest request);
     Task<OrganizationRule?> EditOrganizationRuleAsync(
         OrganizationRule? rule,
         IReadOnlyList<DesktopBox> boxes);
@@ -72,16 +71,6 @@ public sealed class DialogService : IDialogService
         return await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(input.Text)
             ? input.Text.Trim()
             : null;
-    }
-
-    public Task<AiOrganizationDialogResult> RunAiOrganizationAsync(AiOrganizationDialogRequest request)
-    {
-        if (_xamlRoot is null)
-        {
-            throw new InvalidOperationException("The dialog XamlRoot has not been registered.");
-        }
-
-        return AiOrganizationProgressDialog.ShowAsync(_xamlRoot, request);
     }
 
     public async Task<OrganizationRule?> EditOrganizationRuleAsync(

@@ -68,12 +68,24 @@ public interface ICrabDeskService
         string categoryLabels,
         string customPrompt,
         bool reassignExistingItems);
+    void ConfigureAiWebSearch(bool enabled, string apiKey);
     Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default);
     Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default);
+    AiClassificationWorkspace GetAiClassificationWorkspace();
     Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        IProgress<string>? modelOutput = null);
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null);
+    Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        long expectedWorkspaceRevision,
+        IReadOnlyCollection<string> selectedItemKeys,
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null);
     Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default);

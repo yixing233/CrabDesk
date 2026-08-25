@@ -47,6 +47,7 @@
   <ItemGroup>
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\CrabDesk.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk-256.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\CrabDesk.Runtime\Assets\lucide.ttf"
              Link="Assets\lucide.ttf"

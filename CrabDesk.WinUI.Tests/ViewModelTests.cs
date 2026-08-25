@@ -408,73 +408,176 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public async Task AiClassificationViewModelRunsOrganizationInsideDialogSession()
+    public void AiClassificationViewModelLoadsAndRemovesCategoryTags()
     {
-        var service = CreateService(CreateState());
-        var preview = new AiClassificationPreview(1, 1, [], []);
-        var applyResult = new AiClassificationApplyResult(1, 1, 1, 0, 0, []);
-        service.Setup(item => item.PreviewAiClassificationAsync(
-                It.IsAny<IProgress<AiClassificationProgress>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<IProgress<string>>()))
-            .ReturnsAsync(preview);
-        service.Setup(item => item.ApplyAiClassificationPreviewAsync(
-                preview,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(applyResult);
-        var dialogs = new Mock<IDialogService>();
-        AiOrganizationDialogRequest? request = null;
-        dialogs.Setup(item => item.RunAiOrganizationAsync(It.IsAny<AiOrganizationDialogRequest>()))
-            .Callback<AiOrganizationDialogRequest>(value => request = value)
-            .ReturnsAsync(new AiOrganizationDialogResult(
-                AiOrganizationDialogOutcome.Cancelled,
-                "已取消应用 AI 整理结果。"));
+        var state = CreateState();
+        state.Settings.AiClassification.CategoryLabels = "工作\n游戏\n工作";
         var viewModel = new AiClassificationViewModel(
-            service.Object,
+            CreateService(state).Object,
             Mock.Of<IInfoBarService>(),
-            dialogs.Object);
+            Mock.Of<IDialogService>());
 
-        await viewModel.ClassifyCommand.ExecuteAsync(null);
+        Assert.Equal(["工作", "游戏"], viewModel.CategoryTags);
 
-        Assert.NotNull(request);
-        Assert.Equal("已取消应用 AI 整理结果。", viewModel.Status);
+        viewModel.RemoveCategoryTagCommand.Execute("工作");
 
-        await request.PreviewAsync(
-            new Progress<AiClassificationProgress>(),
-            new Progress<string>(),
-            CancellationToken.None);
-        await request.ApplyAsync(preview, CancellationToken.None);
-        request.Cancel();
-
-        service.Verify(item => item.PreviewAiClassificationAsync(
-                It.IsAny<IProgress<AiClassificationProgress>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<IProgress<string>>()), Times.Once);
-        service.Verify(item => item.ApplyAiClassificationPreviewAsync(
-            preview,
-            It.IsAny<CancellationToken>()), Times.Once);
-        service.Verify(item => item.CancelAiOrganization(), Times.Once);
+        Assert.Equal(["游戏"], viewModel.CategoryTags);
     }
 
     [Fact]
-    public async Task AiClassificationViewModelReportsDialogApplyResult()
+    public async Task AiClassificationViewModelAddsWhitespaceSeparatedCategoryTags()
     {
         var service = CreateService(CreateState());
         var dialogs = new Mock<IDialogService>();
-        dialogs.Setup(item => item.RunAiOrganizationAsync(It.IsAny<AiOrganizationDialogRequest>()))
-            .ReturnsAsync(new AiOrganizationDialogResult(
-                AiOrganizationDialogOutcome.Applied,
-                "已分类 3/3 项",
-                new AiClassificationApplyResult(3, 3, 3, 0, 0, [])));
+        dialogs.Setup(item => item.PromptAsync(
+                "添加分类标签",
+                It.IsAny<string>(),
+                ""))
+            .ReturnsAsync("工作  游戏\n开发工具 工作");
         var viewModel = new AiClassificationViewModel(
             service.Object,
             Mock.Of<IInfoBarService>(),
             dialogs.Object);
 
+        await viewModel.AddCategoryTagsCommand.ExecuteAsync(null);
+
+        Assert.Equal(["工作", "游戏", "开发工具"], viewModel.CategoryTags);
+        service.Verify(item => item.ConfigureAiClassification(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            "工作\n游戏\n开发工具",
+            It.IsAny<string>(),
+            It.IsAny<bool>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public void AiClassificationViewModelSavesWebSearchSettingsSeparately()
+    {
+        var service = CreateService(CreateState());
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        viewModel.WebSearchEnabled = true;
+        viewModel.WebSearchApiKey = "tvly-test";
+
+        service.Verify(item => item.ConfigureAiWebSearch(true, "tvly-test"), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelRunsPreviewForOnlySelectedWorkspaceItems()
+    {
+        var state = CreateState();
+        state.Settings.AiClassification.CategoryLabels = "工作\n学习";
+        var service = CreateService(state);
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [
+                new AiClassificationWorkspaceItem("one", "One", DesktopItemKind.File, "C:\\One.txt"),
+                new AiClassificationWorkspaceItem("two", "Two", DesktopItemKind.File, "C:\\Two.txt")
+            ]));
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                7,
+                It.Is<IReadOnlyCollection<string>>(keys => HasOnlyKey(keys, "one")),
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>(),
+                It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+            .ReturnsAsync(new AiClassificationPreview(7, 1, [], []) { RequestedItemKeys = ["one"] });
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+        viewModel.WorkspaceItems[1].IsSelected = false;
+
+        Assert.Equal(0, viewModel.SelectedInspectorTabIndex);
+
         await viewModel.ClassifyCommand.ExecuteAsync(null);
 
-        Assert.Equal("已分类 3/3 项", viewModel.Status);
+        Assert.Equal(1, viewModel.SelectedInspectorTabIndex);
+
+        service.Verify(item => item.PreviewAiClassificationAsync(
+            7,
+            It.Is<IReadOnlyCollection<string>>(keys => HasOnlyKey(keys, "one")),
+            It.IsAny<IProgress<AiClassificationProgress>>(),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<IProgress<string>>(),
+            It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+            It.IsAny<IProgress<AiClassificationUsageProgress>>()), Times.Once);
     }
+
+    [Fact]
+    public void AiClassificationViewModelTogglesWorkspaceSelectionFromIcon()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [new AiClassificationWorkspaceItem("one", "One", DesktopItemKind.File, "C:\\One.txt")]));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+        var workspaceItem = Assert.Single(viewModel.WorkspaceItems);
+
+        viewModel.ToggleWorkspaceItemSelectionCommand.Execute(workspaceItem);
+
+        Assert.False(workspaceItem.IsSelected);
+        Assert.Equal(0, viewModel.SelectedItemCount);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelAppliesManualLabelOnlyToAnUncertainItem()
+    {
+        var state = CreateState();
+        state.Settings.AiClassification.CategoryLabels = "工作\n学习";
+        var service = CreateService(state);
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [
+                new AiClassificationWorkspaceItem("one", "One", DesktopItemKind.File, "C:\\One.txt"),
+                new AiClassificationWorkspaceItem("two", "Two", DesktopItemKind.File, "C:\\Two.txt")
+            ]));
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                7,
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>(),
+                It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+            .ReturnsAsync(new AiClassificationPreview(
+                7,
+                2,
+                [new AiClassificationAssignment("one", "One", "工作")],
+                []) { RequestedItemKeys = ["one", "two"] });
+        service.Setup(item => item.ApplyAiClassificationPreviewAsync(
+                It.IsAny<AiClassificationPreview>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AiClassificationApplyResult(2, 2, 2, 0, 0, []));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+        viewModel.WorkspaceItems.Single(item => item.ItemKey == "two").ManualLabel = "学习";
+        await viewModel.ApplyCommand.ExecuteAsync(null);
+
+        service.Verify(item => item.ApplyAiClassificationPreviewAsync(
+            It.Is<AiClassificationPreview>(preview =>
+                preview.Assignments.Count == 2 &&
+                preview.Assignments[0].ItemKey == "one" &&
+                preview.Assignments[0].Label == "工作" &&
+                preview.Assignments[1].ItemKey == "two" &&
+                preview.Assignments[1].Label == "学习"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static bool HasOnlyKey(IReadOnlyCollection<string> keys, string expected) =>
+        keys.Count == 1 && keys.Contains(expected, StringComparer.Ordinal);
 
     private static Mock<ICrabDeskService> CreateService(CrabDeskState state)
     {

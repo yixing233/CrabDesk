@@ -8,11 +8,16 @@ public sealed partial class AiClassificationPage : Page
 {
     private AiClassificationViewModel ViewModel => (AiClassificationViewModel)DataContext;
 
-    public AiClassificationPage()
+    public AiClassificationPage() : this(App.GetService<AiClassificationViewModel>())
+    {
+    }
+
+    internal AiClassificationPage(AiClassificationViewModel viewModel)
     {
         InitializeComponent();
-        DataContext = App.GetService<AiClassificationViewModel>();
-        ApiKeyBox.Password = ViewModel.ApiKey;
+        DataContext = viewModel;
+        ApiKeyBox.Password = viewModel.ApiKey;
+        WebSearchApiKeyBox.Password = viewModel.WebSearchApiKey;
     }
 
     private void ApiKeyBox_OnPasswordChanged(object sender, RoutedEventArgs eventArgs)
@@ -20,6 +25,14 @@ public sealed partial class AiClassificationPage : Page
         if (DataContext is AiClassificationViewModel viewModel && sender is PasswordBox passwordBox)
         {
             viewModel.ApiKey = passwordBox.Password;
+        }
+    }
+
+    private void WebSearchApiKeyBox_OnPasswordChanged(object sender, RoutedEventArgs eventArgs)
+    {
+        if (DataContext is AiClassificationViewModel viewModel && sender is PasswordBox passwordBox)
+        {
+            viewModel.WebSearchApiKey = passwordBox.Password;
         }
     }
 }

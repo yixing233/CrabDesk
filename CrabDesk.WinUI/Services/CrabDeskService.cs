@@ -89,15 +89,37 @@ public sealed class CrabDeskService : ICrabDeskService
             categoryLabels,
             customPrompt,
             reassignExistingItems);
+    public void ConfigureAiWebSearch(bool enabled, string apiKey) =>
+        _runtime.ConfigureAiWebSearch(enabled, apiKey);
     public Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default) =>
         _runtime.GetAiModelsAsync(cancellationToken);
     public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
         _runtime.TestAiModelConnectivityAsync(cancellationToken);
+    public AiClassificationWorkspace GetAiClassificationWorkspace() =>
+        _runtime.GetAiClassificationWorkspace();
     public Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        IProgress<string>? modelOutput = null) =>
-        _runtime.PreviewAiClassificationAsync(progress, cancellationToken, modelOutput);
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
+        _runtime.PreviewAiClassificationAsync(progress, cancellationToken, modelOutput, modelStream, usageProgress);
+    public Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        long expectedWorkspaceRevision,
+        IReadOnlyCollection<string> selectedItemKeys,
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
+        _runtime.PreviewAiClassificationAsync(
+            expectedWorkspaceRevision,
+            selectedItemKeys,
+            progress,
+            cancellationToken,
+            modelOutput,
+            modelStream,
+            usageProgress);
     public Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default) =>

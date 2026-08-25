@@ -40,6 +40,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private IDesktopInputMonitor? _desktopInputMonitor;
     private readonly IOrganizationRuleEngine _organizationRuleEngine = new OrganizationRuleEngine();
     private readonly AiClassificationService _aiClassificationService = new();
+    private readonly TavilySearchService _tavilySearchService = new();
     private readonly IUpdateService _updateService = new GitHubUpdateService();
     private readonly ShellIconProvider _iconProvider = new();
     private readonly RuntimeTimer _hostTimer;
@@ -237,6 +238,7 @@ public sealed class CrabDeskRuntime : IDisposable
         State = await _layoutStore.LoadAsync();
         _itemProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
         State.Settings.AiClassification.ApiKey = AiApiKeyStore.Load(GetAiApiKeyPath());
+        State.Settings.AiClassification.WebSearchApiKey = AiApiKeyStore.Load(GetAiWebSearchApiKeyPath());
         MigrateGlobalHoverExpansionSetting();
         SynchronizeBoxStyles();
         DiagnosticLog.Info($"State loaded schema={State.SchemaVersion} takeover={State.Settings.TakeOverDesktop} boxes={State.Boxes.Count}");
@@ -2243,18 +2245,67 @@ public sealed class CrabDeskRuntime : IDisposable
         ScheduleSave();
     }
 
+    public void ConfigureAiWebSearch(bool enabled, string apiKey)
+    {
+        var settings = State.Settings.AiClassification;
+        settings.WebSearchEnabled = enabled;
+        settings.WebSearchApiKey = apiKey ?? string.Empty;
+        try
+        {
+            AiApiKeyStore.Save(GetAiWebSearchApiKeyPath(), settings.WebSearchApiKey);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to save encrypted AI web search API key", exception);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
     public Task<IReadOnlyList<string>> GetAiModelsAsync(CancellationToken cancellationToken = default) =>
         _aiClassificationService.GetModelsAsync(State.Settings.AiClassification, cancellationToken);
 
     public Task TestAiModelConnectivityAsync(CancellationToken cancellationToken = default) =>
         _aiClassificationService.TestModelConnectivityAsync(State.Settings.AiClassification, cancellationToken);
 
+    public AiClassificationWorkspace GetAiClassificationWorkspace() => new(
+        _workspaceRevision,
+        GetAiClassificationWorkspaceItems());
+
     public async Task<AiClassificationPreview> PreviewAiClassificationAsync(
         IProgress<AiClassificationProgress>? progress = null,
         CancellationToken cancellationToken = default,
-        IProgress<string>? modelOutput = null) =>
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null)
+    {
+        var workspace = GetAiClassificationWorkspace();
+        return await PreviewAiClassificationAsync(
+                workspace.WorkspaceRevision,
+                workspace.Items.Select(item => item.ItemKey).ToArray(),
+                progress,
+                cancellationToken,
+                modelOutput,
+                modelStream,
+                usageProgress)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<AiClassificationPreview> PreviewAiClassificationAsync(
+        long expectedWorkspaceRevision,
+        IReadOnlyCollection<string> selectedItemKeys,
+        IProgress<AiClassificationProgress>? progress = null,
+        CancellationToken cancellationToken = default,
+        IProgress<string>? modelOutput = null,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
+        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
         await RunAiOrganizationAsync(async operationToken =>
         {
+            if (expectedWorkspaceRevision != _workspaceRevision)
+            {
+                throw new InvalidOperationException("桌面状态已变化，请刷新项目后重新生成 AI 预览。");
+            }
+
             var settings = State.Settings.AiClassification;
             var labels = ParseAiCategoryLabels(settings.CategoryLabels);
             if (labels.Count == 0)
@@ -2262,11 +2313,26 @@ public sealed class CrabDeskRuntime : IDisposable
                 throw new InvalidOperationException("请至少提供一个分类标签。");
             }
 
-            var candidates = Items
-                .Where(item => item.Kind != DesktopItemKind.Shell)
-                .Where(item => settings.ReassignExistingItems || !State.Assignments.ContainsKey(item.Key.ToString()))
-                .Select(item => new AiClassificationInput(item.Key.ToString(), item.DisplayName))
+            var workspace = GetAiClassificationWorkspace();
+            var knownKeys = workspace.Items
+                .Select(item => item.ItemKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var requestedKeys = selectedItemKeys
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!requestedKeys.IsSubsetOf(knownKeys))
+            {
+                throw new InvalidOperationException("桌面项目已变化，请刷新项目后重新生成 AI 预览。");
+            }
+
+            var selectedItems = AiClassificationWorkbench.Select(workspace, requestedKeys);
+            var candidates = selectedItems
+                .Select(item => new AiClassificationInput(item.ItemKey, item.DisplayName))
                 .ToArray();
+            var usageAccumulator = new AiClassificationUsageAccumulator(usageProgress);
+            DiagnosticLog.Info(
+                $"AI classification preview started endpoint={GetAiDiagnosticEndpoint(settings.BaseUrl)} " +
+                $"model={settings.Model.Trim()} candidates={candidates.Length} labels={labels.Count}");
             if (candidates.Length == 0)
             {
                 progress?.Report(new AiClassificationProgress(
@@ -2276,7 +2342,10 @@ public sealed class CrabDeskRuntime : IDisposable
                     0,
                     false,
                     "没有需要分类的桌面图标"));
-                return new AiClassificationPreview(_workspaceRevision, 0, [], []);
+                return new AiClassificationPreview(_workspaceRevision, 0, [], [])
+                {
+                    RequestedItemKeys = []
+                };
             }
 
             var classifications = new List<AiClassificationAssignment>();
@@ -2284,6 +2353,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 AiClassificationService.MaxItemsPerRequest;
             var completedItems = 0;
             var completedBatches = 0;
+            var remainingWebSearchItems = TavilySearchService.MaxItemsPerRun;
             progress?.Report(new AiClassificationProgress(
                 completedItems,
                 candidates.Length,
@@ -2305,6 +2375,9 @@ public sealed class CrabDeskRuntime : IDisposable
                     ? null
                     : new Progress<AiClassificationTransportProgress>(transport =>
                     {
+                        DiagnosticLog.Info(
+                            $"AI classification transport attempt={transport.Attempt}/{transport.TotalAttempts} " +
+                            $"fallback={transport.IsCompatibilityFallback} streaming={transport.IsStreaming}");
                         if (!transport.IsCompatibilityFallback)
                         {
                             return;
@@ -2317,13 +2390,109 @@ public sealed class CrabDeskRuntime : IDisposable
                             true,
                             "接口不支持当前输出能力，正在切换兼容模式"));
                     });
-                var result = await _aiClassificationService.ClassifyAsync(
-                    settings,
-                    batch,
-                    labels,
+                var reasoningChunks = 0;
+                var reasoningCharacters = 0;
+                var contentChunks = 0;
+                var contentCharacters = 0;
+                var batchNumber = completedBatches + 1;
+                var streamProgress = new DirectProgress<AiClassificationModelStreamUpdate>(update =>
+                {
+                    var (chunkCount, characterCount) = update.Kind switch
+                    {
+                        AiClassificationModelStreamKind.Reasoning =>
+                            (reasoningChunks = checked(reasoningChunks + 1),
+                                reasoningCharacters = checked(reasoningCharacters + update.Text.Length)),
+                        _ =>
+                            (contentChunks = checked(contentChunks + 1),
+                                contentCharacters = checked(contentCharacters + update.Text.Length))
+                    };
+                    if (chunkCount == 1 || chunkCount % 128 == 0)
+                    {
+                        DiagnosticLog.Info(
+                            $"AI classification stream batch={batchNumber}/{totalBatches} " +
+                            $"kind={update.Kind} chunks={chunkCount} characters={characterCount}");
+                    }
+                    modelStream?.Report(update);
+                });
+                IReadOnlyList<AiClassificationAssignment> result;
+                try
+                {
+                    result = await _aiClassificationService.ClassifyAsync(
+                        settings,
+                        batch,
+                        labels,
                     operationToken,
                     modelOutput,
-                    transportProgress).ConfigureAwait(false);
+                    transportProgress,
+                    streamProgress,
+                    usageAccumulator).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    DiagnosticLog.Error(
+                        $"AI classification request failed endpoint={GetAiDiagnosticEndpoint(settings.BaseUrl)} " +
+                        $"model={settings.Model.Trim()} batch={completedBatches + 1}/{totalBatches}",
+                        exception);
+                    throw;
+                }
+
+                var webSearchCandidates = settings.WebSearchEnabled &&
+                    !string.IsNullOrWhiteSpace(settings.WebSearchApiKey)
+                    ? AiClassificationFallbackPlanner.SelectForWebSearch(
+                        batch,
+                        result,
+                        remainingWebSearchItems)
+                    : [];
+                if (webSearchCandidates.Count > 0)
+                {
+                    remainingWebSearchItems -= webSearchCandidates.Count;
+                    progress?.Report(new AiClassificationProgress(
+                        completedItems,
+                        candidates.Length,
+                        completedBatches,
+                        totalBatches,
+                        true,
+                        "正在联网辅助识别待确认项目"));
+                    try
+                    {
+                        var evidenceItems = await _tavilySearchService.SearchAsync(
+                                settings.WebSearchApiKey,
+                                webSearchCandidates,
+                                operationToken)
+                            .ConfigureAwait(false);
+                        if (evidenceItems.Count > 0)
+                        {
+                            var supplementalAssignments = await _aiClassificationService.ClassifyAsync(
+                                    settings,
+                                    evidenceItems,
+                                    labels,
+                                    operationToken,
+                                    modelOutput,
+                                    transportProgress,
+                                    streamProgress,
+                                    usageAccumulator)
+                                .ConfigureAwait(false);
+                            result = result
+                                .Concat(supplementalAssignments)
+                                .GroupBy(assignment => assignment.ItemKey, StringComparer.Ordinal)
+                                .Select(group => group.First())
+                                .ToArray();
+                        }
+                    }
+                    catch (AiWebSearchRequestException exception)
+                    {
+                        DiagnosticLog.Error(
+                            $"AI web search failed provider=Tavily candidates={webSearchCandidates.Count}",
+                            exception);
+                        progress?.Report(new AiClassificationProgress(
+                            completedItems,
+                            candidates.Length,
+                            completedBatches,
+                            totalBatches,
+                            true,
+                            AiWebSearchRequestException.SafeMessage));
+                    }
+                }
                 classifications.AddRange(result);
                 completedItems += batch.Length;
                 completedBatches++;
@@ -2357,7 +2526,10 @@ public sealed class CrabDeskRuntime : IDisposable
                 _workspaceRevision,
                 candidates.Length,
                 classifications,
-                newBoxLabels);
+                newBoxLabels)
+            {
+                RequestedItemKeys = candidates.Select(candidate => candidate.ItemKey).ToArray()
+            };
         }, cancellationToken).ConfigureAwait(false);
 
     public async Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
@@ -2371,6 +2543,7 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 throw new InvalidOperationException("桌面状态已变化，请重新预览 AI 整理结果。");
             }
+            ValidateAiClassificationPreviewScope(preview);
             operationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ApplyAiClassificationPreviewCore(preview, operationToken));
         }, cancellationToken).ConfigureAwait(false);
@@ -2472,6 +2645,54 @@ public sealed class CrabDeskRuntime : IDisposable
         .ToArray();
 
     private string GetAiApiKeyPath() => Path.Combine(ConfigDirectory, "ai-api-key.dat");
+
+    private string GetAiWebSearchApiKeyPath() => Path.Combine(ConfigDirectory, "ai-web-search-key.dat");
+
+    private static string GetAiDiagnosticEndpoint(string? baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl?.Trim(), UriKind.Absolute, out var uri))
+        {
+            return "<invalid>";
+        }
+
+        return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+    }
+
+    private IReadOnlyList<AiClassificationWorkspaceItem> GetAiClassificationWorkspaceItems() => Items
+        .Where(item => item.Kind != DesktopItemKind.Shell)
+        .Where(item => !State.Assignments.ContainsKey(item.Key.ToString()))
+        .Select(item => new AiClassificationWorkspaceItem(
+            item.Key.ToString(),
+            item.DisplayName,
+            item.Kind,
+            item.ParsingName))
+        .ToArray();
+
+    private void ValidateAiClassificationPreviewScope(AiClassificationPreview preview)
+    {
+        var requestedKeys = preview.RequestedItemKeys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (requestedKeys.Count != preview.Requested)
+        {
+            throw new InvalidOperationException("AI 预览范围无效，请重新生成预览。");
+        }
+
+        var eligibleKeys = GetAiClassificationWorkspaceItems()
+            .Select(item => item.ItemKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var labels = ParseAiCategoryLabels(State.Settings.AiClassification.CategoryLabels)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var assignment in preview.Assignments)
+        {
+            if (!requestedKeys.Contains(assignment.ItemKey) ||
+                !eligibleKeys.Contains(assignment.ItemKey) ||
+                !labels.Contains(assignment.Label))
+            {
+                throw new InvalidOperationException("AI 预览包含无效分类，请重新生成预览。");
+            }
+        }
+    }
 
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true)
     {
@@ -2883,6 +3104,7 @@ public sealed class CrabDeskRuntime : IDisposable
         _menuFont.Dispose();
         _aiOrganizationGate.Dispose();
         _aiClassificationService.Dispose();
+        _tavilySearchService.Dispose();
         _iconProvider.ClearCache();
         SaveNowAsync().GetAwaiter().GetResult();
         _saveLock.Dispose();
@@ -4592,5 +4814,47 @@ public sealed class CrabDeskRuntime : IDisposable
     }
 
     private static string FormatHandle(IntPtr handle) => $"0x{handle.ToInt64():X}";
+
+    private sealed class AiClassificationUsageAccumulator(
+        IProgress<AiClassificationUsageProgress>? progress) : IProgress<AiClassificationRequestUsage>
+    {
+        private bool _hasInputTokens = true;
+        private bool _hasOutputTokens = true;
+        private bool _hasTotalTokens = true;
+        private int _inputTokens;
+        private int _outputTokens;
+        private int _totalTokens;
+        private TimeSpan? _firstTokenLatency;
+        private int _completedRequests;
+
+        public void Report(AiClassificationRequestUsage value)
+        {
+            _completedRequests++;
+            _firstTokenLatency ??= value.FirstTokenLatency;
+            Add(value.InputTokens, ref _hasInputTokens, ref _inputTokens);
+            Add(value.OutputTokens, ref _hasOutputTokens, ref _outputTokens);
+            Add(value.TotalTokens, ref _hasTotalTokens, ref _totalTokens);
+            progress?.Report(new AiClassificationUsageProgress(
+                _firstTokenLatency,
+                _hasInputTokens ? _inputTokens : null,
+                _hasOutputTokens ? _outputTokens : null,
+                _hasTotalTokens ? _totalTokens : null,
+                _completedRequests));
+        }
+
+        private static void Add(int? value, ref bool hasValuesForAllRequests, ref int total)
+        {
+            hasValuesForAllRequests &= value.HasValue;
+            if (value is { } count)
+            {
+                total = checked(total + count);
+            }
+        }
+    }
+
+    private sealed class DirectProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 
 }

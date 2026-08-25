@@ -115,6 +115,7 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.Updates.RepositoryName = state.Settings.Updates.RepositoryName?.Trim() ?? string.Empty;
         state.Settings.AiClassification.BaseUrl = state.Settings.AiClassification.BaseUrl?.Trim() ?? string.Empty;
         state.Settings.AiClassification.ApiKey ??= string.Empty;
+        state.Settings.AiClassification.WebSearchApiKey ??= string.Empty;
         state.Settings.AiClassification.Model = state.Settings.AiClassification.Model?.Trim() ?? string.Empty;
         state.Settings.AiClassification.CategoryLabels ??= string.Empty;
         state.Settings.AiClassification.CustomPrompt ??= string.Empty;

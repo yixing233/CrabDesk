@@ -271,7 +271,7 @@ public sealed partial class MainWindow : Window
         {
             "hotkeys" => typeof(HotkeysPage),
             "backup" => typeof(BackupPage),
-            "smart-organization" or "organization" or "ai" => typeof(SmartOrganizationPage),
+            "smart-organization" or "organization" => typeof(OrganizationPage),
             "appearance" or "boxes" => typeof(DesktopBoxesPage),
             "about" => typeof(AboutPage),
             _ => typeof(GeneralPage)

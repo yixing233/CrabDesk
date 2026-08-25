@@ -7,6 +7,7 @@ using CrabDesk.WinUI.Windows;
 using CrabDesk.WinUI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 
 namespace CrabDesk.WinUI;
@@ -24,6 +25,7 @@ public partial class App : Application
     private EventWaitHandle? _settingsEvent;
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
+    private AiOrganizationWindow? _aiOrganizationWindow;
 
     public App()
     {
@@ -154,13 +156,13 @@ public partial class App : Application
         StartCommandListeners(runtime, _window.DispatcherQueue);
 
         if (organize) runtime.SmartOrganize();
-        if (aiOrganize) _ = RunAiOrganizationAsync(runtime);
+        if (aiOrganize) OpenAiOrganizationWorkbench();
         if (createBox) runtime.AddBox();
         if (undoOrganization) runtime.UndoLastOrganization();
 
         var background = commandLine.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
-        if (showSettings || (!background && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
+        if (showSettings || (!background && !aiOrganize && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
         {
             if (showSettings)
             {
@@ -179,6 +181,8 @@ public partial class App : Application
 
     internal void Shutdown()
     {
+        _aiOrganizationWindow?.Close();
+        _aiOrganizationWindow = null;
         GetService<CrabDeskRuntime>().Dispose();
         DisposeInstanceResources();
         Exit();
@@ -195,6 +199,9 @@ public partial class App : Application
         services.AddSingleton<IThemeService, ThemeService>();
         services.AddSingleton<IBackdropService, BackdropService>();
         services.AddSingleton<IDialogService, DialogService>();
+        services.AddSingleton(serviceProvider => new DesktopItemIconSourceFactory(
+            dispatcher,
+            serviceProvider.GetRequiredService<CrabDeskRuntime>().IconProvider));
         services.AddSingleton<IClipboardService, ClipboardService>();
         services.AddSingleton<IFilePickerService, FilePickerService>();
         services.AddSingleton<IFontCatalogService, SystemFontCatalogService>();
@@ -214,38 +221,30 @@ public partial class App : Application
         StartListener(_activateEvent!, dispatcher, ActivateWindow);
         StartListener(_exitEvent!, dispatcher, Shutdown);
         StartListener(_organizeEvent!, dispatcher, () => runtime.SmartOrganize());
-        StartListener(_aiOrganizeEvent!, dispatcher, () => _ = RunAiOrganizationAsync(runtime));
+        StartListener(_aiOrganizeEvent!, dispatcher, OpenAiOrganizationWorkbench);
         StartListener(_createBoxEvent!, dispatcher, () => runtime.AddBox());
         StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
         StartListener(_undoOrganizationEvent!, dispatcher, runtime.UndoLastOrganization);
     }
 
-    private async Task RunAiOrganizationAsync(CrabDeskRuntime runtime)
+    internal void OpenAiOrganizationWorkbench()
     {
-        var notifications = GetService<IInfoBarService>();
-        var dialogs = GetService<IDialogService>();
-        try
+        if (_aiOrganizationWindow is null)
         {
-            ActivateWindow();
-            await Task.Yield();
-            var result = await dialogs.RunAiOrganizationAsync(new AiOrganizationDialogRequest(
-                (progress, modelOutput, token) => runtime.PreviewAiClassificationAsync(progress, token, modelOutput),
-                (preview, token) => runtime.ApplyAiClassificationPreviewAsync(preview, token),
-                runtime.CancelAiOrganization));
-            if (result.Outcome == AiOrganizationDialogOutcome.Failed)
+            _aiOrganizationWindow = new AiOrganizationWindow();
+            _aiOrganizationWindow.Closed += (_, _) => _aiOrganizationWindow = null;
+        }
+
+        if (_aiOrganizationWindow.AppWindow.Presenter is OverlappedPresenter
             {
-                runtime.RequestShowSettings("ai");
-            }
-        }
-        catch (Exception exception)
+                State: OverlappedPresenterState.Minimized
+            } presenter)
         {
-            AppDiagnostic.Error("Desktop context-menu AI organization failed", exception);
-            notifications.Show(
-                AiOperationMessages.ToUserMessage(exception),
-                Microsoft.UI.Xaml.Controls.InfoBarSeverity.Error,
-                TimeSpan.FromSeconds(8));
-            runtime.RequestShowSettings("ai");
+            presenter.Restore();
         }
+
+        _aiOrganizationWindow.AppWindow.Show();
+        _aiOrganizationWindow.Activate();
     }
 
     private static void StartListener(EventWaitHandle handle, DispatcherQueue dispatcher, Action action)

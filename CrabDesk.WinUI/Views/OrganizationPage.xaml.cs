@@ -16,6 +16,9 @@ public sealed partial class OrganizationPage : Page
         DataContext = App.GetService<OrganizationViewModel>();
     }
 
+    private void OpenAiOrganization_OnClick(object sender, RoutedEventArgs eventArgs) =>
+        App.CurrentApp.OpenAiOrganizationWorkbench();
+
     private void RuleEnabled_OnToggled(object sender, RoutedEventArgs eventArgs)
     {
         if (sender is ToggleSwitch { DataContext: OrganizationRuleListItem item } toggle)

@@ -290,7 +290,29 @@ public sealed record AiClassificationPreview(
     long WorkspaceRevision,
     int Requested,
     IReadOnlyList<AiClassificationAssignment> Assignments,
-    IReadOnlyList<string> NewBoxLabels);
+    IReadOnlyList<string> NewBoxLabels)
+{
+    /// <summary>
+    /// Immutable scope of desktop items the user selected when the preview was created.
+    /// Runtime validates every assignment against this list before applying it.
+    /// </summary>
+    public IReadOnlyList<string> RequestedItemKeys { get; init; } = [];
+}
+
+/// <summary>
+/// Revision-bound, privacy-local representation of desktop items that may be
+/// selected in the AI organization workbench. ParsingName is used only to
+/// resolve the local shell icon and is never included in AI requests.
+/// </summary>
+public sealed record AiClassificationWorkspace(
+    long WorkspaceRevision,
+    IReadOnlyList<AiClassificationWorkspaceItem> Items);
+
+public sealed record AiClassificationWorkspaceItem(
+    string ItemKey,
+    string DisplayName,
+    DesktopItemKind Kind,
+    string ParsingName);
 
 public sealed record AiClassificationProgress(
     int CompletedItems,
@@ -305,6 +327,38 @@ public sealed record AiClassificationTransportProgress(
     int TotalAttempts,
     bool IsCompatibilityFallback,
     bool IsStreaming);
+
+/// <summary>
+/// Provider-reported telemetry for one successful classification request.
+/// Token counts are nullable because streamed OpenAI-compatible responses do
+/// not always include a usage object.
+/// </summary>
+public sealed record AiClassificationRequestUsage(
+    TimeSpan Duration,
+    TimeSpan? FirstTokenLatency,
+    int? InputTokens,
+    int? OutputTokens,
+    int? TotalTokens);
+
+/// <summary>
+/// Cumulative telemetry for the current AI organization operation.
+/// </summary>
+public sealed record AiClassificationUsageProgress(
+    TimeSpan? FirstTokenLatency,
+    int? InputTokens,
+    int? OutputTokens,
+    int? TotalTokens,
+    int CompletedRequests);
+
+public enum AiClassificationModelStreamKind
+{
+    Reasoning,
+    Content
+}
+
+public sealed record AiClassificationModelStreamUpdate(
+    AiClassificationModelStreamKind Kind,
+    string Text);
 
 public sealed record AiClassificationApplyResult(
     int Requested,
@@ -330,6 +384,19 @@ public sealed class AiClassificationRequestException : Exception
     }
 
     public int? StatusCode { get; }
+}
+
+public sealed class AiWebSearchRequestException : Exception
+{
+    public const string SafeMessage = "联网辅助识别失败，待确认项目未被自动分类。";
+
+    public AiWebSearchRequestException(string technicalMessage, Exception? innerException = null)
+        : base(SafeMessage, innerException)
+    {
+        TechnicalMessage = technicalMessage;
+    }
+
+    public string TechnicalMessage { get; }
 }
 
 public sealed record FileClipboardContent(IReadOnlyList<string> Paths, bool Move)
@@ -397,6 +464,9 @@ public sealed class AiClassificationSettings
     public string BaseUrl { get; set; } = string.Empty;
     [JsonIgnore]
     public string ApiKey { get; set; } = string.Empty;
+    public bool WebSearchEnabled { get; set; }
+    [JsonIgnore]
+    public string WebSearchApiKey { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public string CategoryLabels { get; set; } = string.Empty;
     public string CustomPrompt { get; set; } =

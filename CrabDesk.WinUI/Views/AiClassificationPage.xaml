@@ -1,102 +1,488 @@
 <Page
     x:Class="CrabDesk.WinUI.Views.AiClassificationPage"
+    x:Name="RootPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Disabled"
-                  HorizontalContentAlignment="Stretch">
-        <StackPanel Padding="{StaticResource PagePadding}" Spacing="12">
-            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
-                <StackPanel Spacing="12">
-                    <TextBox Header="接口地址"
-                             PlaceholderText="https://api.example.com/v1"
-                             Text="{Binding BaseUrl, Mode=TwoWay}" />
-                    <PasswordBox x:Name="ApiKeyBox"
-                                 Header="API Key"
-                                 PlaceholderText="本地模型可留空"
-                                 PasswordChanged="ApiKeyBox_OnPasswordChanged" />
-                    <Grid ColumnSpacing="10">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+    <Grid Padding="{StaticResource PagePadding}">
+        <Grid ColumnSpacing="12" MinWidth="860">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="420" />
+            </Grid.ColumnDefinitions>
+
+            <Border Style="{StaticResource SectionCardStyle}" Padding="12">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ComboBox Header="模型"
-                                  IsEditable="True"
-                                  ItemsSource="{Binding Models}"
-                                  SelectedItem="{Binding Model, Mode=OneWay}"
-                                  Text="{Binding Model, Mode=TwoWay}"
-                                  MaxDropDownHeight="200"
-                                  PlaceholderText="选择或输入模型名称"
-                                  HorizontalAlignment="Stretch" />
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="桌面图标" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SelectedItemSummary}"
+                                       Style="{StaticResource SecondaryBodyStyle}" />
+                        </StackPanel>
                         <Button Grid.Column="1"
-                                Content="获取模型列表"
-                                Command="{Binding LoadModelsCommand}"
-                                VerticalAlignment="Bottom" />
+                                Command="{Binding RefreshWorkspaceCommand}"
+                                ToolTipService.ToolTip="刷新桌面图标"
+                                AutomationProperties.Name="刷新桌面图标">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <lucide:LucideIcon Icon="RefreshCw" FontSize="15" />
+                                <TextBlock Text="刷新" />
+                            </StackPanel>
+                        </Button>
                         <Button Grid.Column="2"
-                                Command="{Binding TestConnectivityCommand}"
-                                VerticalAlignment="Bottom"
-                                AutomationProperties.Name="测试模型连通性">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <ProgressRing Width="16"
-                                              Height="16"
-                                              IsActive="{Binding IsConnectivityTestInProgress}"
-                                              Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <TextBlock Text="{Binding ConnectivityTestButtonText}" />
+                                Command="{Binding SelectAllCommand}"
+                                ToolTipService.ToolTip="选择全部桌面图标">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <lucide:LucideIcon Icon="CheckCheck" FontSize="15" />
+                                <TextBlock Text="全选" />
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="3"
+                                Command="{Binding ClearSelectionCommand}"
+                                ToolTipService.ToolTip="清除全部选择">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <lucide:LucideIcon Icon="SquareDashed" FontSize="15" />
+                                <TextBlock Text="清除" />
                             </StackPanel>
                         </Button>
                     </Grid>
-                    <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
-                             IsClosable="False"
-                             Severity="{Binding ConnectivityTestSeverity}"
-                             Title="{Binding ConnectivityTestTitle}"
-                             Message="{Binding ConnectivityTestMessage}" />
-                </StackPanel>
-            </Border>
 
-            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
-                <StackPanel Spacing="12">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="分类规则" FontWeight="SemiBold" />
-                        <TextBlock Text="标签会对应同名盒子；没有对应盒子时会自动创建。"
-                                   Style="{StaticResource SecondaryBodyStyle}" />
-                    </StackPanel>
-                    <TextBox Header="分类标签"
-                             PlaceholderText="工作&#x0a;开发工具&#x0a;游戏&#x0a;影音&#x0a;系统工具"
-                             Text="{Binding CategoryLabels, Mode=TwoWay}"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             MinHeight="112" />
-                    <TextBox Header="自定义提示词"
-                             Text="{Binding CustomPrompt, Mode=TwoWay}"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             MinHeight="112" />
-                    <CheckBox Content="重新分类已经放入盒子的图标"
-                              IsChecked="{Binding ReassignExistingItems, Mode=TwoWay}" />
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
-                <StackPanel Spacing="12">
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="3">
-                            <TextBlock Text="预览 AI 整理结果" FontWeight="SemiBold" />
-                            <TextBlock Text="只向模型发送图标名称和临时编号，不上传图标图片或文件内容。确认前不会改变桌面布局。"
-                                       Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                    <Grid Grid.Row="1">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      HorizontalContentAlignment="Stretch">
+                            <ItemsRepeater ItemsSource="{Binding WorkspaceItems}"
+                                           HorizontalAlignment="Stretch"
+                                           Margin="0,0,4,0">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="132"
+                                                       MinItemHeight="136"
+                                                       MinColumnSpacing="10"
+                                                       MinRowSpacing="10"
+                                                       ItemsStretch="None"
+                                                       ItemsJustification="Start"
+                                                       Orientation="Horizontal" />
+                                </ItemsRepeater.Layout>
+                                <ItemsRepeater.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Width="132"
+                                                MinHeight="136"
+                                                Padding="10"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="8"
+                                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                                HorizontalAlignment="Stretch"
+                                                VerticalAlignment="Stretch">
+                                            <Grid RowSpacing="6">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="58" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                          Width="32"
+                                                          Height="32"
+                                                          MinWidth="32"
+                                                          MinHeight="32"
+                                                          Padding="0"
+                                                          HorizontalAlignment="Left"
+                                                          VerticalAlignment="Top"
+                                                          Canvas.ZIndex="1"
+                                                          AutomationProperties.Name="选择桌面图标" />
+                                                <Button Width="64"
+                                                        Height="58"
+                                                        MinWidth="64"
+                                                        MinHeight="58"
+                                                        Padding="2"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        BorderThickness="0"
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Command="{Binding DataContext.ToggleWorkspaceItemSelectionCommand, ElementName=RootPage}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTipService.ToolTip="切换选择"
+                                                        AutomationProperties.Name="切换桌面图标选择">
+                                                    <Grid Width="54" Height="54">
+                                                        <lucide:LucideIcon Icon="File"
+                                                                           FontSize="32"
+                                                                           HorizontalAlignment="Center"
+                                                                           VerticalAlignment="Center"
+                                                                           Visibility="{Binding HasIcon, Converter={StaticResource BooleanNegationToVisibilityConverter}}" />
+                                                        <Image Source="{Binding Icon}"
+                                                               Width="48"
+                                                               Height="48"
+                                                               Stretch="Uniform"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    </Grid>
+                                                </Button>
+                                                <TextBlock Grid.Row="1"
+                                                           Text="{Binding DisplayName}"
+                                                           TextAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextWrapping="Wrap"
+                                                           MaxLines="2"
+                                                           MinHeight="36"
+                                                           FontSize="14"
+                                                           VerticalAlignment="Top" />
+                                                <StackPanel Grid.Row="2" Spacing="4">
+                                                    <Border Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
+                                                            CornerRadius="10"
+                                                            Padding="7,3"
+                                                            Visibility="{Binding HasAiLabel, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                        <TextBlock Text="{Binding AiLabel}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   HorizontalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel Spacing="4"
+                                                                Visibility="{Binding IsUncertain, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                        <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                                                                CornerRadius="10"
+                                                                Padding="7,3">
+                                                            <TextBlock Text="待确认"
+                                                                       HorizontalAlignment="Center"
+                                                                       FontWeight="SemiBold" />
+                                                        </Border>
+                                                        <ComboBox ItemsSource="{Binding DataContext.CategoryTags, ElementName=RootPage}"
+                                                                  SelectedItem="{Binding ManualLabel, Mode=TwoWay}"
+                                                                  IsEnabled="{Binding IsSelected}"
+                                                                  PlaceholderText="选择标签"
+                                                                  FontSize="12" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsRepeater.ItemTemplate>
+                            </ItemsRepeater>
+                        </ScrollViewer>
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Spacing="8"
+                                    IsHitTestVisible="False"
+                                    Visibility="{Binding IsWorkspaceEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <lucide:LucideIcon Icon="Inbox" FontSize="32" HorizontalAlignment="Center" />
+                            <TextBlock Text="当前没有位于桌面的可整理图标" />
                         </StackPanel>
-                        <Button Grid.Column="1"
-                                Content="AI 自动分类"
-                                Style="{StaticResource AccentButtonStyle}"
-                                Command="{Binding ClassifyCommand}"
-                                VerticalAlignment="Center" />
                     </Grid>
-                </StackPanel>
+                </Grid>
             </Border>
-        </StackPanel>
-    </ScrollViewer>
+
+            <TabView Grid.Column="1"
+                     SelectedIndex="{Binding SelectedInspectorTabIndex, Mode=TwoWay}"
+                     IsAddTabButtonVisible="False"
+                     TabWidthMode="SizeToContent"
+                     HorizontalContentAlignment="Stretch"
+                     VerticalContentAlignment="Stretch">
+                <TabViewItem Header="流程" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalContentAlignment="Stretch">
+                        <Border Style="{StaticResource SectionCardStyle}"
+                                Padding="14"
+                                Margin="0,8,4,0">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="整理流程" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Status}"
+                                           Style="{StaticResource SecondaryBodyStyle}"
+                                           MinHeight="34" />
+                                <ProgressBar IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                             Maximum="100"
+                                             Value="{Binding ProgressValue}"
+                                             Visibility="{Binding HasProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Button Command="{Binding ClassifyCommand}"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <lucide:LucideIcon Icon="Sparkles" FontSize="16" />
+                                        <TextBlock Text="开始 AI 分类" />
+                                    </StackPanel>
+                                </Button>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Command="{Binding ApplyCommand}"
+                                            IsEnabled="{Binding CanApplyPreview}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <lucide:LucideIcon Icon="Check" FontSize="15" />
+                                            <TextBlock Text="确认应用" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Grid.Column="1"
+                                            Command="{Binding CancelCommand}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <lucide:LucideIcon Icon="Square" FontSize="15" />
+                                            <TextBlock Text="终止" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabViewItem>
+
+                <TabViewItem Header="AI 活动" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalContentAlignment="Stretch">
+                        <Border Style="{StaticResource SectionCardStyle}"
+                                Padding="14"
+                                Margin="0,8,4,0">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{Binding Status}"
+                                           Style="{StaticResource SecondaryBodyStyle}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="12"
+                                        Padding="14">
+                                    <StackPanel Spacing="12">
+                                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                            <Border Width="30"
+                                                    Height="30"
+                                                    CornerRadius="15"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                                <lucide:LucideIcon Icon="Sparkles"
+                                                                  FontSize="16"
+                                                                  Foreground="White"
+                                                                  HorizontalAlignment="Center"
+                                                                  VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Spacing="1">
+                                                <TextBlock Text="CrabDesk AI" FontWeight="SemiBold" />
+                                                <TextBlock Text="桌面分类助手" Style="{StaticResource SecondaryBodyStyle}" />
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="总耗时" Style="{StaticResource SecondaryBodyStyle}" />
+                                                <TextBlock Text="{Binding TotalDurationText}" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Spacing="2">
+                                                <TextBlock Text="首字耗时" Style="{StaticResource SecondaryBodyStyle}" />
+                                                <TextBlock Text="{Binding FirstTokenLatencyText}" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Spacing="2">
+                                                <TextBlock Text="输入 Token" Style="{StaticResource SecondaryBodyStyle}" />
+                                                <TextBlock Text="{Binding InputTokenText}" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="3" Spacing="2">
+                                                <TextBlock Text="输出 Token" Style="{StaticResource SecondaryBodyStyle}" />
+                                                <TextBlock Text="{Binding OutputTokenText}" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4" Spacing="2">
+                                                <TextBlock Text="总 Token" Style="{StaticResource SecondaryBodyStyle}" />
+                                                <TextBlock Text="{Binding TotalTokenText}" FontWeight="SemiBold" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Expander IsExpanded="{Binding IsThinkingExpanded, Mode=TwoWay}">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                                    <lucide:LucideIcon Icon="Brain" FontSize="15" />
+                                                    <TextBlock Text="{Binding ThinkingHeaderText}" />
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <Border Margin="0,8,0,0"
+                                                    Padding="10"
+                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                    CornerRadius="8">
+                                                <TextBox Text="{Binding ReasoningOutput}"
+                                                         IsReadOnly="True"
+                                                         AcceptsReturn="True"
+                                                         TextWrapping="NoWrap"
+                                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                         FontFamily="Consolas"
+                                                         MinHeight="88"
+                                                         MaxHeight="220" />
+                                            </Border>
+                                        </Expander>
+
+                                        <StackPanel Spacing="6">
+                                            <TextBlock Text="分类结果" FontWeight="SemiBold" />
+                                            <TextBox Text="{Binding StructuredOutput}"
+                                                     IsReadOnly="True"
+                                                     AcceptsReturn="True"
+                                                     TextWrapping="NoWrap"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                     FontFamily="Consolas"
+                                                     MinHeight="136"
+                                                     MaxHeight="360" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabViewItem>
+
+                <TabViewItem Header="分类设置" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalContentAlignment="Stretch">
+                        <Border Style="{StaticResource SectionCardStyle}"
+                                Padding="14"
+                                Margin="0,8,4,0">
+                            <StackPanel Spacing="10">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="分类标签" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1"
+                                            Command="{Binding AddCategoryTagsCommand}"
+                                            ToolTipService.ToolTip="添加分类标签"
+                                            AutomationProperties.Name="添加分类标签">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <lucide:LucideIcon Icon="Plus" FontSize="15" />
+                                            <TextBlock Text="添加" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                                <ItemsRepeater ItemsSource="{Binding CategoryTags}"
+                                               HorizontalAlignment="Stretch">
+                                    <ItemsRepeater.Layout>
+                                        <lucide:TagWrapLayout />
+                                    </ItemsRepeater.Layout>
+                                    <ItemsRepeater.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Height="32"
+                                                    Padding="10,0,4,0"
+                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                    BorderBrush="{ThemeResource ControlStrokeColorSecondaryBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="16">
+                                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                                    <TextBlock Text="{Binding}"
+                                                               FontSize="13"
+                                                               VerticalAlignment="Center" />
+                                                    <Button Width="24"
+                                                            Height="24"
+                                                            MinWidth="24"
+                                                            MinHeight="24"
+                                                            Padding="0"
+                                                            Background="Transparent"
+                                                            BorderBrush="Transparent"
+                                                            BorderThickness="0"
+                                                            CornerRadius="12"
+                                                            Command="{Binding DataContext.RemoveCategoryTagCommand, ElementName=RootPage}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTipService.ToolTip="移除此标签"
+                                                            AutomationProperties.Name="移除分类标签">
+                                                        <lucide:LucideIcon Icon="X" FontSize="13" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsRepeater.ItemTemplate>
+                                </ItemsRepeater>
+                                <TextBox Header="自定义提示词"
+                                         Text="{Binding CustomPrompt, Mode=TwoWay}"
+                                         AcceptsReturn="True"
+                                         TextWrapping="Wrap"
+                                         MinHeight="120" />
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabViewItem>
+
+                <TabViewItem Header="模型设置" IsClosable="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  HorizontalContentAlignment="Stretch">
+                        <Border Style="{StaticResource SectionCardStyle}"
+                                Padding="14"
+                                Margin="0,8,4,0">
+                            <StackPanel Spacing="10">
+                                <TextBox Header="接口地址"
+                                         PlaceholderText="https://api.example.com/v1"
+                                         Text="{Binding BaseUrl, Mode=TwoWay}" />
+                                <PasswordBox x:Name="ApiKeyBox"
+                                             Header="API Key"
+                                             PlaceholderText="本地模型可留空"
+                                             PasswordChanged="ApiKeyBox_OnPasswordChanged" />
+                                <ComboBox Header="模型"
+                                          IsEditable="True"
+                                          ItemsSource="{Binding Models}"
+                                          SelectedItem="{Binding Model, Mode=OneWay}"
+                                          Text="{Binding Model, Mode=TwoWay}"
+                                          MaxDropDownHeight="200"
+                                          PlaceholderText="选择或输入模型名称" />
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="获取模型"
+                                            Command="{Binding LoadModelsCommand}"
+                                            HorizontalAlignment="Stretch" />
+                                    <Button Grid.Column="1"
+                                            Command="{Binding TestConnectivityCommand}"
+                                            HorizontalAlignment="Stretch">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <ProgressRing Width="14"
+                                                          Height="14"
+                                                          IsActive="{Binding IsConnectivityTestInProgress}"
+                                                          Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <TextBlock Text="{Binding ConnectivityTestButtonText}" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                                <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
+                                         IsClosable="False"
+                                         Severity="{Binding ConnectivityTestSeverity}"
+                                         Title="{Binding ConnectivityTestTitle}"
+                                         Message="{Binding ConnectivityTestMessage}" />
+                                <ToggleSwitch Header="联网辅助识别（Tavily）"
+                                              IsOn="{Binding WebSearchEnabled, Mode=TwoWay}" />
+                                <PasswordBox x:Name="WebSearchApiKeyBox"
+                                             Header="Tavily API Key"
+                                             PlaceholderText="tvly-…"
+                                             IsEnabled="{Binding WebSearchEnabled}"
+                                             PasswordChanged="WebSearchApiKeyBox_OnPasswordChanged" />
+                                <InfoBar IsOpen="{Binding WebSearchEnabled}"
+                                         IsClosable="False"
+                                         Severity="Informational"
+                                         Title="联网识别范围"
+                                         Message="仅发送最多 8 个待确认图标的名称，不发送路径、图片或文件内容。" />
+                            </StackPanel>
+                        </Border>
+                    </ScrollViewer>
+                </TabViewItem>
+            </TabView>
+        </Grid>
+
+    </Grid>
 </Page>

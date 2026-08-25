@@ -1,0 +1,15 @@
+<Window
+    x:Class="CrabDesk.WinUI.Windows.AiOrganizationWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid x:Name="RootGrid">
+        <ContentControl x:Name="WorkbenchHost" />
+        <InfoBar x:Name="NotificationBar"
+                 Width="420"
+                 Margin="0,16,24,0"
+                 HorizontalAlignment="Right"
+                 VerticalAlignment="Top"
+                 IsOpen="False"
+                 IsClosable="True" />
+    </Grid>
+</Window>

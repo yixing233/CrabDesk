@@ -16,6 +16,8 @@ public static class AiClassificationImportPolicy
         {
             BaseUrl = localProfile.BaseUrl,
             ApiKey = localProfile.ApiKey,
+            WebSearchEnabled = localProfile.WebSearchEnabled,
+            WebSearchApiKey = localProfile.WebSearchApiKey,
             Model = localProfile.Model,
             CategoryLabels = localProfile.CategoryLabels,
             CustomPrompt = localProfile.CustomPrompt,

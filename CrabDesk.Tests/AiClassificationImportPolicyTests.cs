@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CrabDesk.Core;
 
 namespace CrabDesk.Tests;
@@ -31,5 +32,38 @@ public sealed class AiClassificationImportPolicyTests
         Assert.Equal("trusted-model", restored.Model);
         Assert.Equal("工作", restored.CategoryLabels);
         Assert.Equal("本地规则", restored.CustomPrompt);
+    }
+
+    [Fact]
+    public void ImportedProfileCannotReplaceLocalWebSearchTrust()
+    {
+        var local = new AiClassificationSettings
+        {
+            WebSearchEnabled = true,
+            WebSearchApiKey = "local-key"
+        };
+        var imported = new AiClassificationSettings
+        {
+            WebSearchEnabled = false,
+            WebSearchApiKey = "imported-key"
+        };
+
+        var restored = AiClassificationImportPolicy.PreserveLocalProfile(local, imported);
+
+        Assert.True(restored.WebSearchEnabled);
+        Assert.Equal("local-key", restored.WebSearchApiKey);
+    }
+
+    [Fact]
+    public void WebSearchApiKeyIsNeverSerializedIntoLayoutData()
+    {
+        var serialized = JsonSerializer.Serialize(new AiClassificationSettings
+        {
+            WebSearchEnabled = true,
+            WebSearchApiKey = "tvly-secret"
+        });
+
+        Assert.DoesNotContain("tvly-secret", serialized);
+        Assert.DoesNotContain("WebSearchApiKey", serialized);
     }
 }

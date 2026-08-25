@@ -30,6 +30,28 @@
                 </StackPanel>
             </Border>
 
+            <Border Style="{StaticResource SectionCardStyle}" Padding="16">
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="AI 整理" FontWeight="SemiBold" />
+                        <TextBlock Text="选择桌面图标并生成分类建议。"
+                                   Style="{StaticResource SecondaryBodyStyle}" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Click="OpenAiOrganization_OnClick"
+                            Style="{StaticResource AccentButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <lucide:LucideIcon Icon="Sparkles" FontSize="16" />
+                            <TextBlock Text="打开 AI 整理" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
             <CommandBar DefaultLabelPosition="Collapsed" Background="Transparent">
                 <AppBarButton Label="新建规则" Command="{Binding AddRuleCommand}" ToolTipService.ToolTip="新建规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Plus" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="编辑规则" Command="{Binding EditRuleCommand}" ToolTipService.ToolTip="编辑规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Pencil" /></AppBarButton.Icon></AppBarButton>
