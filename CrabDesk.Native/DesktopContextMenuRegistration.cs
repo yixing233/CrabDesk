@@ -2,6 +2,7 @@ using CrabDesk.Core;
 using Microsoft.Win32;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.IO;
 using System.Runtime.InteropServices;
 
@@ -11,12 +12,14 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 {
     private const string DefaultKeyPath = @"Software\Classes\DesktopBackground\Shell\CrabDesk";
     private const int MenuIconSize = 32;
+    private static readonly Color MenuIconColor = Color.FromArgb(50, 55, 65);
     private static readonly Color AccentBlue = Color.FromArgb(74, 91, 177);
     private static readonly Color AccentBlueLight = Color.FromArgb(120, 74, 91, 177);
     private const string DefaultSubmenuClassName = "CrabDesk.DesktopContextMenu.Commands";
     private const string DefaultSubmenuKeyPath = @"Software\Classes\CrabDesk.DesktopContextMenu.Commands";
     private const string DefaultLegacyOrganizeKeyPath =
         @"Software\Classes\DesktopBackground\Shell\CrabDesk.Organize";
+
     private readonly RegistryKey _root;
     private readonly string _keyPath;
     private readonly string _submenuClassName;
@@ -63,7 +66,7 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         key.SetValue(null, "CrabDesk", RegistryValueKind.String);
         key.SetValue("MUIVerb", "CrabDesk", RegistryValueKind.String);
         key.SetValue("Icon", $"\"{normalizedExecutable}\",0", RegistryValueKind.String);
-        key.SetValue("Position", "Bottom", RegistryValueKind.String);
+        key.SetValue("Position", "Top", RegistryValueKind.String);
         key.SetValue("ExtendedSubCommandsKey", _submenuClassName, RegistryValueKind.String);
         // Keep the root item executable as well as exposing the cascading
         // commands.  Explorer does not invoke a root that only contains
@@ -108,6 +111,28 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
             normalizedExecutable,
             "--ai-organize",
             GetMenuIconPath(iconDirectory, "ai-organize.ico", DrawAiOrganizeIcon));
+        WriteCommand(
+            submenu,
+            "05Reconnect",
+            "\u91CD\u65B0\u8FDE\u63A5\u684C\u9762",
+            normalizedExecutable,
+            "--reconnect",
+            GetMenuIconPath(iconDirectory, "reconnect.ico", DrawReconnectIcon));
+        WriteCommand(
+            submenu,
+            "06Exit",
+            "\u9000\u51FA CrabDesk",
+            normalizedExecutable,
+            "--exit",
+            GetMenuIconPath(iconDirectory, "exit.ico", DrawExitIcon));
+
+        try
+        {
+            SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
+        }
+        catch
+        {
+        }
     }
 
     private static void WriteCommand(
@@ -136,6 +161,14 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         _root.DeleteSubKeyTree(_keyPath, false);
         _root.DeleteSubKeyTree(_submenuKeyPath, false);
         _root.DeleteSubKeyTree(_legacyOrganizeKeyPath, false);
+
+        try
+        {
+            SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
+        }
+        catch
+        {
+        }
     }
 
     // ---- Dedicated menu icons ----------------------------------------
@@ -150,7 +183,7 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         var directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CrabDesk",
-            "icons");
+            "icons_v2");
         Directory.CreateDirectory(directory);
         return directory;
     }
@@ -158,15 +191,12 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
     private static string GetMenuIconPath(
         string directory,
         string fileName,
-        Action<Graphics, RectangleF> draw)
+        Action<Graphics, int> draw)
     {
         var path = Path.Combine(directory, fileName);
         try
         {
-            if (!File.Exists(path))
-            {
-                WriteMenuIcon(path, draw);
-            }
+            WriteMultiSizeIcon(path, draw);
         }
         catch
         {
@@ -176,26 +206,281 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         return path;
     }
 
-    private static void WriteMenuIcon(string path, Action<Graphics, RectangleF> draw)
+    private static PrivateFontCollection? s_fontCollection;
+    private static FontFamily? s_lucideFontFamily;
+    private static readonly object s_fontLock = new();
+
+    private static void WriteMultiSizeIcon(string path, Action<Graphics, int> draw)
     {
-        using var bitmap = new Bitmap(MenuIconSize, MenuIconSize);
-        using (var graphics = Graphics.FromImage(bitmap))
+        var sizes = new[] { 16, 24, 32, 48 };
+        var bitmaps = new Bitmap[sizes.Length];
+
+        for (var i = 0; i < sizes.Length; i++)
         {
+            var size = sizes[i];
+            var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(bmp);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             graphics.Clear(Color.Transparent);
-            draw(graphics, new RectangleF(3, 3, MenuIconSize - 6, MenuIconSize - 6));
+            draw(graphics, size);
+            bitmaps[i] = bmp;
         }
-        var hIcon = bitmap.GetHicon();
+
         try
         {
-            using var icon = Icon.FromHandle(hIcon);
-            using var stream = File.Create(path);
-            icon.Save(stream);
+            using var fs = File.Create(path);
+            using var bw = new BinaryWriter(fs);
+
+            // ICONDIR
+            bw.Write((short)0); // Reserved
+            bw.Write((short)1); // Type 1 = Icon
+            bw.Write((short)sizes.Length); // Image count
+
+            var offset = 6 + (16 * sizes.Length);
+            var imageBuffers = new byte[sizes.Length][];
+
+            for (var i = 0; i < sizes.Length; i++)
+            {
+                var size = sizes[i];
+                var bmp = bitmaps[i];
+
+                using var ms = new MemoryStream();
+                using var imgBw = new BinaryWriter(ms);
+
+                var maskRowWidth = ((size + 31) / 32) * 4;
+                var maskSize = maskRowWidth * size;
+                var imageSize = size * size * 4;
+
+                // BITMAPINFOHEADER
+                imgBw.Write((int)40); // biSize
+                imgBw.Write((int)size); // biWidth
+                imgBw.Write((int)(size * 2)); // biHeight (doubled for mask)
+                imgBw.Write((short)1); // biPlanes
+                imgBw.Write((short)32); // biBitCount
+                imgBw.Write((int)0); // biCompression (BI_RGB)
+                imgBw.Write((int)(imageSize + maskSize)); // biSizeImage
+                imgBw.Write((int)0); // biXPelsPerMeter
+                imgBw.Write((int)0); // biYPelsPerMeter
+                imgBw.Write((int)0); // biClrUsed
+                imgBw.Write((int)0); // biClrImportant
+
+                // Bottom-up BGRA
+                for (var y = size - 1; y >= 0; y--)
+                {
+                    for (var x = 0; x < size; x++)
+                    {
+                        var pixel = bmp.GetPixel(x, y);
+                        imgBw.Write((byte)pixel.B);
+                        imgBw.Write((byte)pixel.G);
+                        imgBw.Write((byte)pixel.R);
+                        imgBw.Write((byte)pixel.A);
+                    }
+                }
+
+                // AND mask
+                imgBw.Write(new byte[maskSize]);
+                imgBw.Flush();
+
+                var buffer = ms.ToArray();
+                imageBuffers[i] = buffer;
+
+                // Directory entry
+                bw.Write((byte)(size >= 256 ? 0 : size));
+                bw.Write((byte)(size >= 256 ? 0 : size));
+                bw.Write((byte)0); // Colors
+                bw.Write((byte)0); // Reserved
+                bw.Write((short)1); // Planes
+                bw.Write((short)32); // BitCount
+                bw.Write((int)buffer.Length); // Bytes in image
+                bw.Write((int)offset); // Offset
+
+                offset += buffer.Length;
+            }
+
+            for (var i = 0; i < sizes.Length; i++)
+            {
+                bw.Write(imageBuffers[i]);
+            }
+
+            bw.Flush();
         }
         finally
         {
-            DestroyIcon(hIcon);
+            foreach (var bmp in bitmaps)
+            {
+                bmp.Dispose();
+            }
         }
+    }
+
+    private static FontFamily? GetLucideFontFamily()
+    {
+        lock (s_fontLock)
+        {
+            if (s_lucideFontFamily != null)
+            {
+                return s_lucideFontFamily;
+            }
+
+            try
+            {
+                var assemblyDir = Path.GetDirectoryName(typeof(DesktopContextMenuRegistration).Assembly.Location) ?? string.Empty;
+                var baseDir = AppContext.BaseDirectory;
+                var candidatePaths = new[]
+                {
+                    Path.Combine(baseDir, "Assets", "lucide.ttf"),
+                    Path.Combine(baseDir, "lucide.ttf"),
+                    Path.Combine(assemblyDir, "Assets", "lucide.ttf"),
+                    Path.Combine(assemblyDir, "lucide.ttf"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "lucide.ttf"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lucide.ttf"),
+                    Path.Combine(baseDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "lucide.ttf"),
+                    Path.Combine(assemblyDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "lucide.ttf")
+                };
+
+                foreach (var rawPath in candidatePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(rawPath))
+                    {
+                        continue;
+                    }
+                    var fontPath = Path.GetFullPath(rawPath);
+                    if (File.Exists(fontPath))
+                    {
+                        var collection = new PrivateFontCollection();
+                        collection.AddFontFile(fontPath);
+                        if (collection.Families.Length > 0)
+                        {
+                            s_fontCollection = collection;
+                            s_lucideFontFamily = collection.Families[0];
+                            return s_lucideFontFamily;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+    }
+
+    private static void DrawLucideGlyph(
+        Graphics graphics,
+        int size,
+        string glyph,
+        Color color)
+    {
+        var family = GetLucideFontFamily();
+        if (family is null)
+        {
+            return;
+        }
+
+        var fontSize = (float)Math.Round(size * 0.68f);
+        using var font = new Font(family, fontSize, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(color);
+        using var format = new StringFormat(StringFormat.GenericTypographic)
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+            FormatFlags = StringFormatFlags.NoClip
+        };
+        graphics.DrawString(glyph, font, brush, new RectangleF(0, 0, size, size), format);
+    }
+
+    private static void DrawCreateBoxIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE173", MenuIconColor); // SquarePlus
+        }
+        else
+        {
+            DrawCreateBoxIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawSettingsIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE154", MenuIconColor); // Settings
+        }
+        else
+        {
+            DrawSettingsIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawOrganizeIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE460", MenuIconColor); // ListFilter
+        }
+        else
+        {
+            DrawOrganizeIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawAiOrganizeIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE412", MenuIconColor); // Sparkles
+        }
+        else
+        {
+            DrawAiOrganizeIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawReconnectIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE145", MenuIconColor); // RefreshCw
+        }
+        else
+        {
+            DrawReconnectIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawExitIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            DrawLucideGlyph(graphics, size, "\uE10E", MenuIconColor); // LogOut
+        }
+        else
+        {
+            DrawExitIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawReconnectIconFallback(Graphics graphics, RectangleF bounds)
+    {
+        using var pen = new Pen(AccentBlue, 2);
+        graphics.DrawArc(pen, bounds.X + 4, bounds.Y + 4, bounds.Width - 8, bounds.Height - 8, 30, 300);
+    }
+
+    private static void DrawExitIconFallback(Graphics graphics, RectangleF bounds)
+    {
+        using var pen = new Pen(AccentBlue, 2);
+        graphics.DrawRectangle(pen, bounds.X + 4, bounds.Y + 4, bounds.Width - 8, bounds.Height - 8);
     }
 
     private static GraphicsPath RoundedPath(RectangleF bounds, float radius)
@@ -210,9 +495,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         return path;
     }
 
-    private static void DrawCreateBoxIcon(Graphics graphics, RectangleF bounds)
+    private static void DrawCreateBoxIconFallback(Graphics graphics, RectangleF bounds)
     {
-        // Two stacked rounded panels: the front box in the accent color.
         var back = new RectangleF(
             bounds.X + 4,
             bounds.Y + 4,
@@ -231,9 +515,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         graphics.FillPath(frontBrush, frontPath);
     }
 
-    private static void DrawSettingsIcon(Graphics graphics, RectangleF bounds)
+    private static void DrawSettingsIconFallback(Graphics graphics, RectangleF bounds)
     {
-        // A simplified gear: eight teeth around a solid center disc.
         var center = new PointF(
             bounds.X + bounds.Width / 2,
             bounds.Y + bounds.Height / 2);
@@ -260,9 +543,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
             bodyRadius * 2);
     }
 
-    private static void DrawOrganizeIcon(Graphics graphics, RectangleF bounds)
+    private static void DrawOrganizeIconFallback(Graphics graphics, RectangleF bounds)
     {
-        // Three stacked lines with a right-pointing arrow: sorting rules.
         using var brush = new SolidBrush(AccentBlue);
         var lineWidth = bounds.Width * 0.34f;
         var lineHeight = bounds.Height * 0.10f;
@@ -282,9 +564,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
             ]);
     }
 
-    private static void DrawAiOrganizeIcon(Graphics graphics, RectangleF bounds)
+    private static void DrawAiOrganizeIconFallback(Graphics graphics, RectangleF bounds)
     {
-        // A four-point sparkle: AI organization.
         var center = new PointF(
             bounds.X + bounds.Width / 2,
             bounds.Y + bounds.Height / 2);
@@ -307,4 +588,7 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr handle);
+
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 }

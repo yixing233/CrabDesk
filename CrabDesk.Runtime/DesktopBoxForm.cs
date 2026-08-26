@@ -26,14 +26,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private const int WmMouseWheel = 0x020A;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
-    private const int HoverExpansionDelayMilliseconds = 120;
-    private const int HoverCollapseDelayMilliseconds = 180;
+    private const int HoverExpansionDelayMilliseconds = 70;
+    private const int HoverCollapseDelayMilliseconds = 120;
     private const double ScrollAnimationDurationMilliseconds = 190;
     private const double ScrollEaseExponent = 2.2;
     private const double ScrollWheelStepFraction = 0.75;
     private const int ScrollHoverResumeDelayMilliseconds = 120;
-    private const int BoxHeightAnimationMilliseconds = 220;
-    private const int MinimumBoxHeightAnimationMilliseconds = 80;
+    private const int BoxHeightAnimationMilliseconds = 150;
+    private const int MinimumBoxHeightAnimationMilliseconds = 60;
     private const int DragRenderCoalesceMilliseconds = 16;
     private const float MappedFolderTabBarHeight = (float)DesktopItemLayoutEngine.TabBarHeight;
     private const int CompactGridLabelLineCount = 2;
@@ -75,7 +75,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
     private readonly Dictionary<IconBitmapKey, IconLoadRetry> _iconLoadRetries = [];
     private readonly CancellationTokenSource _iconLoadCancellation = new();
-    private readonly SemaphoreSlim _iconLoadGate = new(2, 2);
+    private readonly SemaphoreSlim _iconLoadGate = new(4, 4);
+    private bool _boxIconPreloadPending;
+    private readonly HashSet<IconBitmapKey> _boxIconPreloadKeys = [];
+    private DateTimeOffset? _boxIconPreloadStartedAt;
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _hoverExpandedBoxes = [];
     private readonly HoverExpansionController _hoverExpansion = new(
@@ -88,6 +91,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly Dictionary<Guid, IReadOnlyList<DesktopItemRef>> _boxItems = [];
     private readonly Dictionary<Guid, BoxHeightAnimation> _heightAnimations = [];
     private readonly Dictionary<Guid, BoxHeightVisualCache> _heightAnimationVisualCaches = [];
+    private readonly HashSet<Guid> _heightAnimationCacheRequestBoxIds = [];
+    private RectangleF? _pendingHeightAnimationFrameDirtyBounds;
     private Guid? _pendingHeightAnimationCachePrewarmBoxId;
     private Guid? _prewarmedHeightAnimationCacheBoxId;
     private readonly List<BoxGeometry> _boxes = [];
@@ -149,7 +154,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool _dragCancelled;
     private bool _showVirtualDesktopDropCursor;
     private DropPreviewState? _dropPreview;
-    private string? _lastDesktopDropTargetKey;
     private string? _hoveredItemKey;
     private RectangleF? _lastItemHoverOverlayBounds;
     private bool _itemHoverOverlayUnavailable;
@@ -396,8 +400,51 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // geometry is rebuilt. Reconcile the physical cursor afterwards
             // even when the logical hovered box id did not change.
             QueueHoverReconcile();
+            QueueBoxIconPreload();
         }
         return presented;
+    }
+
+    internal bool RefreshAssignedItems(Guid boxId)
+    {
+        var box = _runtime.State.Boxes.FirstOrDefault(candidate =>
+            candidate.Id == boxId &&
+            string.Equals(candidate.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase));
+        if (box is null)
+        {
+            return false;
+        }
+
+        EnsureGeometry();
+        var dirtyBounds = _boxes.FirstOrDefault(candidate => candidate.Box.Id == boxId)?.Bounds ??
+            new RectangleF(
+                (float)box.Bounds.X,
+                (float)box.Bounds.Y,
+                (float)box.Bounds.Width,
+                (float)(IsEffectivelyCollapsed(box)
+                    ? box.Appearance.TitleBarHeight
+                    : box.Bounds.Height));
+
+        HideItemHoverOverlay();
+        _boxItems[boxId] = _runtime.GetItemsForBox(boxId);
+        _geometryDirty = true;
+        var visibleKeys = _boxItems.Values
+            .SelectMany(items => items)
+            .Select(item => item.Key.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _selection.RemoveWhere(key => !visibleKeys.Contains(key));
+        PruneIconCache();
+
+        dirtyBounds.Inflate(2, 2);
+        if (_isCompositedByIconSurface && _iconLayerPartialRenderRequest is not null)
+        {
+            _iconLayerPartialRenderRequest(dirtyBounds);
+        }
+        else
+        {
+            PresentLayer();
+        }
+        return true;
     }
 
     internal bool UpdateInteractionRegion()
@@ -499,11 +546,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         IsScrollAnimationActive,
         IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null);
 
+    internal bool UsesPartialHeightAnimationComposition =>
+        CanUsePartialHeightAnimationComposition(
+            _heightAnimations.Count > 0,
+            IsTransformActive,
+            _selectionBox is not null,
+            IsScrollAnimationActive);
+
     internal static bool IsPartialBoxAnimationOnly(
         bool heightAnimationActive,
         bool scrollAnimationActive,
         bool otherDynamicVisualActive) =>
         (heightAnimationActive || scrollAnimationActive) && !otherDynamicVisualActive;
+
+    internal static bool CanUsePartialHeightAnimationComposition(
+        bool heightAnimationActive,
+        bool transformActive,
+        bool selectionActive,
+        bool scrollAnimationActive) =>
+        heightAnimationActive &&
+        !transformActive &&
+        !selectionActive &&
+        !scrollAnimationActive;
 
     internal static bool ShouldPresentHitMask(bool bitmapPresented, bool presenterLost) =>
         !bitmapPresented || presenterLost;
@@ -533,6 +597,63 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool animationCompleted) =>
         !compositedByIconSurface || animationCompleted;
 
+    internal static RectangleF CalculateHeightAnimationFrameDirtyBounds(
+        RectangleF boxBounds,
+        float previousHeight,
+        float currentHeight,
+        float cornerRadius)
+    {
+        if (boxBounds.Width <= 0 || boxBounds.Height <= 0)
+        {
+            return RectangleF.Empty;
+        }
+
+        previousHeight = Math.Clamp(previousHeight, 0, boxBounds.Height);
+        currentHeight = Math.Clamp(currentHeight, 0, boxBounds.Height);
+        var smallerHeight = Math.Min(previousHeight, currentHeight);
+        var largerHeight = Math.Max(previousHeight, currentHeight);
+        var roundedEdgeAllowance = Math.Clamp(cornerRadius, 0, smallerHeight / 2);
+        return RectangleF.FromLTRB(
+            boxBounds.Left,
+            Math.Max(boxBounds.Top, boxBounds.Top + smallerHeight - roundedEdgeAllowance),
+            boxBounds.Right,
+            Math.Min(boxBounds.Bottom, boxBounds.Top + largerHeight));
+    }
+
+    internal static bool ShouldCommitCompletedHeightAnimationPartially(
+        bool compositedByIconSurface,
+        bool hasCompletedAnimation,
+        bool animationStillActive,
+        bool otherDynamicVisualActive,
+        bool hasPartialRenderer) =>
+        compositedByIconSurface &&
+        hasCompletedAnimation &&
+        !animationStillActive &&
+        !otherDynamicVisualActive &&
+        hasPartialRenderer;
+
+    internal static bool ShouldCreateHeightAnimationVisualCache(
+        int requiredIconCount,
+        int loadedIconCount) =>
+        loadedIconCount >= requiredIconCount;
+
+    internal static bool ShouldPresentLoadedBoxIcon(
+        bool effectivelyCollapsed,
+        bool heightAnimationActive) =>
+        !effectivelyCollapsed && !heightAnimationActive;
+
+    internal static bool ShouldRetainHeightAnimationVisualCache(bool effectivelyCollapsed) =>
+        !effectivelyCollapsed;
+
+    internal static TimeSpan CalculateBoxHeightAnimationDuration(
+        double remainingDistance,
+        double fullDistance) =>
+        AnimationMath.ScaleDurationByDistance(
+            remainingDistance,
+            fullDistance,
+            TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds),
+            TimeSpan.FromMilliseconds(MinimumBoxHeightAnimationMilliseconds));
+
     internal bool IsMarqueeSelectionActive => _selectionBox is not null;
 
     internal int DynamicVisualVersion => _dynamicVisualVersion;
@@ -560,8 +681,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool overlayVisible) =>
         hoverTargetUnchanged && hasActiveHeaderActions && !overlayVisible;
 
-    internal static bool ShouldSuspendHoverState(Guid? openBoxMenuBoxId) =>
-        openBoxMenuBoxId is not null;
+    internal static bool ShouldSuspendHoverState(
+        Guid? openBoxMenuBoxId,
+        bool inlineRenameActive) =>
+        openBoxMenuBoxId is not null || inlineRenameActive;
 
     internal static bool IsPointerInsideVisualBox(
         RectangleF visualBounds,
@@ -671,7 +794,33 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         previewBoxId != transformBoxId &&
         !animatedBoxIds.Contains(previewBoxId);
 
-    internal RectangleF? GetDynamicVisualBounds()
+    internal static bool HasDesktopDropTargetVisualChanged(
+        Guid? previousBoxId,
+        bool? previousAcceptsDrop,
+        int? previousManualTabIndex,
+        Guid currentBoxId,
+        bool currentAcceptsDrop,
+        int? currentManualTabIndex) =>
+        previousBoxId != currentBoxId ||
+        previousAcceptsDrop != currentAcceptsDrop ||
+        previousManualTabIndex != currentManualTabIndex;
+
+    internal static bool ShouldRenderOleDropPreview(
+        bool floatingCard,
+        bool targetVisualChanged,
+        bool folderTargetChanged,
+        bool pointerChanged) =>
+        targetVisualChanged ||
+        folderTargetChanged ||
+        (floatingCard && pointerChanged);
+
+    internal RectangleF? GetDynamicVisualBounds() =>
+        GetDynamicVisualBounds(useAnimationDirtyBounds: false);
+
+    internal RectangleF? GetDynamicVisualDirtyBounds() =>
+        GetDynamicVisualBounds(useAnimationDirtyBounds: true);
+
+    private RectangleF? GetDynamicVisualBounds(bool useAnimationDirtyBounds)
     {
         if (IsDisposed || _resourcesDisposed || !HasDynamicVisual)
         {
@@ -680,6 +829,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         EnsureGeometry();
         RectangleF? bounds = null;
+        var heightAnimationFrameDirtyBounds = useAnimationDirtyBounds &&
+            UsesPartialHeightAnimationComposition
+            ? _pendingHeightAnimationFrameDirtyBounds
+            : null;
+        if (heightAnimationFrameDirtyBounds is not null)
+        {
+            // Animation requests are coalesced on the icon surface. The union
+            // accumulated since the previous presentation is consumed here so
+            // no skipped timer tick can leave stale pixels behind.
+            _pendingHeightAnimationFrameDirtyBounds = null;
+        }
         var transformBox = _movingBox ?? _resizingBox;
         if (transformBox is not null)
         {
@@ -727,19 +887,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        foreach (var animatedBoxId in _heightAnimations.Keys)
+        if (heightAnimationFrameDirtyBounds is { } frameDirtyBounds)
         {
-            var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == animatedBoxId);
-            if (box is not null)
+            bounds = bounds is { } existing
+                ? RectangleF.Union(existing, frameDirtyBounds)
+                : frameDirtyBounds;
+        }
+        else
+        {
+            foreach (var animatedBoxId in _heightAnimations.Keys)
             {
-                var animationBounds = new RectangleF(
-                    (float)box.Bounds.X,
-                    (float)box.Bounds.Y,
-                    (float)box.Bounds.Width,
-                    (float)box.Bounds.Height);
-                bounds = bounds is { } existing
-                    ? RectangleF.Union(existing, animationBounds)
-                    : animationBounds;
+                var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == animatedBoxId);
+                if (box is not null)
+                {
+                    var animationBounds = new RectangleF(
+                        (float)box.Bounds.X,
+                        (float)box.Bounds.Y,
+                        (float)box.Bounds.Width,
+                        (float)box.Bounds.Height);
+                    bounds = bounds is { } existing
+                        ? RectangleF.Union(existing, animationBounds)
+                        : animationBounds;
+                }
             }
         }
 
@@ -1136,6 +1305,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         _iconCache.Clear();
         Invalidate();
+        QueueBoxIconPreload();
         return count;
     }
 
@@ -1152,6 +1322,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     internal bool HasSelection => _selection.Count > 0;
 
     internal bool IsTitleEditing => _editingBox is not null || _titleEditorWindow.Visible;
+
+    internal bool HasActiveInlineRename =>
+        _renamingBoxId is not null &&
+        _renamingItemKey is not null &&
+        _renameEditor?.IsActive == true;
+
+    internal bool CommitActiveInlineRename() =>
+        _renameEditor?.CommitExternally() == true;
+
+    internal void ReconcileHoverAfterDesktopPointerInteraction() =>
+        QueueHoverReconcile();
 
     internal IReadOnlyList<DesktopItemRef> GetSelectedFileSystemItems(bool includeReadOnly = false)
     {
@@ -1339,20 +1520,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         pointerOverBox = true;
         var manualTabIndex = GetManualBoxTabIndex(box, point);
         var acceptsDrop = !box.Box.IsMappedFolder && box.Box.MappedFolder?.IsReadOnly != true;
-        // The preview is a cell-level insertion marker, so it only needs a
-        // repaint when the pointer crosses into or out of an item. Throttling
-        // keeps a hovered desktop drag from repainting the whole monitor
-        // layer on every mouse move.
-        var targetKey = _items.LastOrDefault(candidate =>
-                candidate.Box.Id == box.Box.Id &&
-                candidate.Bounds.Contains(point) &&
-                !itemKeys.Contains(candidate.Item.Key.ToString(), StringComparer.OrdinalIgnoreCase))
-            ?.Item.Key.ToString();
-        var renderNeeded = !string.Equals(
-            _lastDesktopDropTargetKey,
-            targetKey,
-            StringComparison.OrdinalIgnoreCase);
-        _lastDesktopDropTargetKey = targetKey;
+        // The visible feedback is the target outline and optional manual-tab
+        // highlight. Repaint only when that visible target state changes.
+        var renderNeeded = HasDesktopDropTargetVisualChanged(
+            _dropPreview?.BoxId,
+            _dropPreview?.AcceptsDrop,
+            _dropPreview?.TargetManualTabIndex,
+            box.Box.Id,
+            acceptsDrop,
+            manualTabIndex);
         SetDropPreview(
             new DropPreviewState(
                 box.Box.Id,
@@ -1360,7 +1536,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 itemKeys.ToArray(),
                 itemKeys.Count,
                 acceptsDrop,
-                DropPreviewKind.DesktopAssign,
                 manualTabIndex,
                 FloatingCard: false),
             renderNeeded);
@@ -1635,20 +1810,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         string Label,
         int Count);
 
-    private enum DropPreviewKind
-    {
-        Assign,
-        DesktopAssign,
-        Reorder
-    }
-
     private sealed record DropPreviewState(
         Guid BoxId,
         PointF Pointer,
         IReadOnlyList<string> ItemKeys,
         int ItemCount,
         bool AcceptsDrop,
-        DropPreviewKind Kind,
         int? TargetManualTabIndex,
         bool FloatingCard);
 

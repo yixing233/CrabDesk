@@ -576,6 +576,93 @@ public sealed class ViewModelTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task AiClassificationViewModelGroupsPreviewResultsIntoCards()
+    {
+        var state = CreateState();
+        state.Settings.AiClassification.CategoryLabels = "工作\n学习";
+        var service = CreateService(state);
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [
+                new AiClassificationWorkspaceItem("one", "One", DesktopItemKind.File, "C:\\One.txt"),
+                new AiClassificationWorkspaceItem("two", "Two", DesktopItemKind.File, "C:\\Two.txt"),
+                new AiClassificationWorkspaceItem("three", "Three", DesktopItemKind.File, "C:\\Three.txt")
+            ]));
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                7,
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>(),
+                It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+            .ReturnsAsync(new AiClassificationPreview(
+                7,
+                3,
+                [
+                    new AiClassificationAssignment("one", "One", "工作"),
+                    new AiClassificationAssignment("two", "Two", "工作")
+                ],
+                []) { RequestedItemKeys = ["one", "two", "three"] });
+
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.HasResultGroups);
+        Assert.Equal(2, viewModel.ResultGroups.Count);
+
+        var workGroup = Assert.Single(viewModel.ResultGroups.Where(g => g.CategoryName == "工作"));
+        Assert.False(workGroup.IsUncertainGroup);
+        Assert.Equal(2, workGroup.ItemCount);
+
+        var uncertainGroup = Assert.Single(viewModel.ResultGroups.Where(g => g.IsUncertainGroup));
+        Assert.Equal("待确认项目", uncertainGroup.CategoryName);
+        Assert.Equal(1, uncertainGroup.ItemCount);
+        Assert.Equal("three", uncertainGroup.Items[0].ItemKey);
+    }
+
+    [Fact]
+    public void AiClassificationViewModelSwitchesCardAndJsonViewModes()
+    {
+        var viewModel = new AiClassificationViewModel(
+            CreateService(CreateState()).Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        Assert.False(viewModel.IsJsonViewMode);
+
+        viewModel.ShowJsonViewCommand.Execute(null);
+        Assert.True(viewModel.IsJsonViewMode);
+
+        viewModel.ShowCardViewCommand.Execute(null);
+        Assert.False(viewModel.IsJsonViewMode);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelCopiesReasoningAndStructuredOutputToClipboard()
+    {
+        var clipboard = new Mock<IClipboardService>();
+        var notifications = new Mock<IInfoBarService>();
+        var viewModel = new AiClassificationViewModel(
+            CreateService(CreateState()).Object,
+            notifications.Object,
+            Mock.Of<IDialogService>(),
+            clipboard: clipboard.Object);
+
+        await viewModel.CopyReasoningCommand.ExecuteAsync(null);
+        clipboard.Verify(c => c.SetTextAsync("尚未开始 AI 分类。"), Times.Once);
+        notifications.Verify(n => n.Show("思考过程已复制到剪贴板", InfoBarSeverity.Success, It.IsAny<TimeSpan?>()), Times.Once);
+
+        await viewModel.CopyStructuredOutputCommand.ExecuteAsync(null);
+        clipboard.Verify(c => c.SetTextAsync("尚未生成分类结果。"), Times.Once);
+        notifications.Verify(n => n.Show("分类结果已复制到剪贴板", InfoBarSeverity.Success, It.IsAny<TimeSpan?>()), Times.Once);
+    }
+
     private static bool HasOnlyKey(IReadOnlyCollection<string> keys, string expected) =>
         keys.Count == 1 && keys.Contains(expected, StringComparer.Ordinal);
 

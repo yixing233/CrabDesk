@@ -170,9 +170,17 @@ internal static class LucideRuntimeIcons
             }
 
             var fontPath = GetFontPath();
-            _wpfFontFamily = File.Exists(fontPath)
-                ? new WpfMedia.FontFamily(new Uri(fontPath, UriKind.Absolute), "#lucide")
-                : new WpfMedia.FontFamily("lucide");
+            if (File.Exists(fontPath))
+            {
+                var fontDirectory = Path.GetDirectoryName(fontPath)! + Path.DirectorySeparatorChar;
+                _wpfFontFamily = new WpfMedia.FontFamily(
+                    new Uri(fontDirectory, UriKind.Absolute),
+                    $"./{Path.GetFileName(fontPath)}#lucide");
+            }
+            else
+            {
+                _wpfFontFamily = new WpfMedia.FontFamily("lucide");
+            }
             return _wpfFontFamily;
         }
     }

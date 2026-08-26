@@ -15,6 +15,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
     private bool _desktopIconViewHidden;
     private bool _desktopIconsVisible = true;
     private bool _deleteInProgress;
+    private bool _boxHoverReconcilePending;
 
     internal int SurfaceCount => _surfaces.Count;
 
@@ -182,6 +183,52 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    internal bool RefreshDesktopItemAssignment(Guid boxId)
+    {
+        foreach (var surface in _surfaces)
+        {
+            if (surface.RefreshAssignedItems(boxId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal bool RefreshDesktopItemRelease(
+        IReadOnlyCollection<Guid> sourceBoxIds,
+        IReadOnlyCollection<string> releasedItemKeys)
+    {
+        var refreshedAllSourceBoxes = true;
+        foreach (var boxId in sourceBoxIds)
+        {
+            if (_surfaces.Any(surface => surface.RefreshAssignedItems(boxId)))
+            {
+                continue;
+            }
+
+            refreshedAllSourceBoxes = false;
+        }
+
+        var refreshedDesktop = _iconSurfaces.Any(surface =>
+            surface.RefreshReleasedItems(releasedItemKeys));
+        return refreshedAllSourceBoxes && refreshedDesktop;
+    }
+
+    internal bool RefreshDesktopItemsRemoved(IReadOnlyCollection<string> removedItemKeys)
+    {
+        var refreshed = false;
+        foreach (var surface in _iconSurfaces)
+        {
+            refreshed |= surface.RefreshRemovedItems(removedItemKeys);
+        }
+        return refreshed;
+    }
+
+    internal bool RefreshDesktopItemsAdded(IReadOnlyCollection<string> addedItemKeys) =>
+        _iconSurfaces.Any(surface => surface.RefreshReleasedItems(addedItemKeys));
+
     internal void SetDesktopIconsVisible(bool visible)
     {
         if (_desktopIconsVisible == visible)
@@ -342,6 +389,21 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 }
                 return bounds;
             });
+            iconSurface.SetBoxDynamicDirtyBounds(() =>
+            {
+                RectangleF? bounds = null;
+                foreach (var boxSurface in monitorBoxes)
+                {
+                    if (boxSurface.GetDynamicVisualDirtyBounds() is not { } candidate)
+                    {
+                        continue;
+                    }
+                    bounds = bounds is { } existing
+                        ? RectangleF.Union(existing, candidate)
+                        : candidate;
+                }
+                return bounds;
+            });
             iconSurface.SetBoxDynamicVersion(() =>
             {
                 var version = 17;
@@ -364,7 +426,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     .Where(surface => surface.HasDynamicVisual)
                     .ToArray();
                 return dynamicBoxes.Length > 0 &&
-                    dynamicBoxes.All(surface => surface.IsPartialAnimationOnly);
+                    dynamicBoxes.All(surface => surface.UsesPartialHeightAnimationComposition);
             });
             foreach (var boxSurface in monitorBoxes)
             {
@@ -465,10 +527,99 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    internal bool CommitActiveInlineRename()
+    {
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            if (iconSurface.CommitActiveInlineRename())
+            {
+                DiagnosticLog.Verbose("Committed active desktop inline rename from a surface click.");
+                return true;
+            }
+        }
+
+        foreach (var surface in _surfaces)
+        {
+            if (surface.CommitActiveInlineRename())
+            {
+                _boxHoverReconcilePending = true;
+                DiagnosticLog.Verbose("Committed active box inline rename from a surface click.");
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool ShouldFlushPendingBoxHoverReconcile(
+        bool reconcilePending,
+        bool pointerInteractionActive) =>
+        reconcilePending && !pointerInteractionActive;
+
+    internal void CompleteDesktopPointerInteraction()
+    {
+        if (!ShouldFlushPendingBoxHoverReconcile(
+                _boxHoverReconcilePending,
+                IsDesktopIconPointerInteractionActive))
+        {
+            return;
+        }
+
+        _boxHoverReconcilePending = false;
+        foreach (var surface in _surfaces)
+        {
+            surface.ReconcileHoverAfterDesktopPointerInteraction();
+        }
+        DiagnosticLog.Verbose(
+            "Requeued box hover reconciliation after desktop pointer interaction completed.");
+    }
+
+    internal void PrepareSelection(
+        DesktopIconSurface source,
+        bool preserveExisting)
+    {
+        DiagnosticLog.Verbose(
+            $"Global selection gesture source=desktop preserveExisting={preserveExisting}");
+        if (preserveExisting)
+        {
+            return;
+        }
+
+        foreach (var iconSurface in _iconSurfaces.Where(surface => surface != source))
+        {
+            iconSurface.ClearSelection();
+        }
+        foreach (var surface in _surfaces)
+        {
+            surface.ClearSelection();
+        }
+    }
+
+    internal void PrepareSelection(
+        DesktopBoxForm source,
+        bool preserveExisting)
+    {
+        DiagnosticLog.Verbose(
+            $"Global selection gesture source=box preserveExisting={preserveExisting}");
+        if (preserveExisting)
+        {
+            return;
+        }
+
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            iconSurface.ClearSelection();
+        }
+        foreach (var surface in _surfaces.Where(surface => surface != source))
+        {
+            surface.ClearSelection();
+        }
+    }
+
     internal bool CanDeleteSelectedItems =>
         !_deleteInProgress &&
         !_surfaces.Any(surface => surface.IsTitleEditing) &&
-        GetSelectedFileSystemItems().Count > 0;
+        GetDeleteSelection().SelectedCount > 0;
 
     internal bool CanRenameSelectedItem =>
         !_deleteInProgress &&
@@ -575,38 +726,103 @@ internal sealed class DesktopSurfaceManager : IDisposable
             return;
         }
 
-        var selectedItems = GetSelectedFileSystemItems();
-        if (selectedItems.Count == 0)
+        var selection = GetDeleteSelection();
+        if (selection.SelectedCount == 0)
         {
             return;
         }
 
         _deleteInProgress = true;
-        ClearSelection();
+        var deleteAttempted = false;
         try
         {
-            await _runtime.FileOperations.DeleteAsync(selectedItems);
+            if (selection.DeletableItems.Count == 0)
+            {
+                ShowDeleteMessage(
+                    "无法删除所选项目",
+                    "所选项目属于只读映射目录或系统桌面项目。",
+                    DesktopDialogKind.Warning);
+                return;
+            }
+
+            if (!await ConfirmDeleteAsync(selection))
+            {
+                return;
+            }
+
+            deleteAttempted = true;
+            await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);
         }
         catch (Exception exception)
         {
             DiagnosticLog.Error("Failed to delete selected desktop items.", exception);
+            ShowDeleteMessage("删除失败", exception.Message, DesktopDialogKind.Error);
         }
         finally
         {
-            try
+            if (deleteAttempted)
             {
-                await _runtime.RefreshItemsAsync(false);
+                try
+                {
+                    await _runtime.RefreshItemsAsync(false);
+                }
+                catch (Exception exception)
+                {
+                    DiagnosticLog.Error("Failed to refresh desktop items after deletion.", exception);
+                }
             }
-            catch (Exception exception)
-            {
-                DiagnosticLog.Error("Failed to refresh desktop items after deletion.", exception);
-            }
-            finally
-            {
-                _deleteInProgress = false;
-            }
+            _deleteInProgress = false;
+            _runtime.ActivateDesktopKeyboardInput();
         }
     }
+
+    private async Task<bool> ConfirmDeleteAsync(DesktopDeleteSelection selection)
+    {
+        System.Windows.Forms.Form? owner = (System.Windows.Forms.Form?)_surfaces.FirstOrDefault() ??
+            _iconSurfaces.FirstOrDefault();
+        if (owner is null)
+        {
+            return false;
+        }
+
+        var confirmation = DesktopSelectionPolicy.BuildDeleteConfirmation(selection);
+        var handler = _runtime.DesktopConfirmationHandler;
+        if (handler is null)
+        {
+            return DesktopConfirmationDialog.Show(
+                owner,
+                _runtime.IsDarkTheme,
+                confirmation.Title,
+                confirmation.Message,
+                confirmation.PrimaryText);
+        }
+
+        return await handler(new DesktopConfirmationRequest(
+            owner.Handle,
+            confirmation.Title,
+            confirmation.Message,
+            confirmation.PrimaryText));
+    }
+
+    private void ShowDeleteMessage(string title, string message, DesktopDialogKind kind)
+    {
+        System.Windows.Forms.Form? owner = (System.Windows.Forms.Form?)_surfaces.FirstOrDefault() ??
+            _iconSurfaces.FirstOrDefault();
+        if (owner is not null)
+        {
+            DesktopConfirmationDialog.ShowMessage(
+                owner,
+                _runtime.IsDarkTheme,
+                title,
+                message,
+                kind);
+        }
+    }
+
+    private DesktopDeleteSelection GetDeleteSelection() =>
+        DesktopSelectionPolicy.BuildDeleteSelection(
+            GetSelectedItems(),
+            GetSelectedFileSystemItems());
 
     private IReadOnlyList<DesktopItemRef> GetSelectedFileSystemItems(bool includeReadOnly = false) => _iconSurfaces
         .SelectMany(surface => surface.GetSelectedFileSystemItems())

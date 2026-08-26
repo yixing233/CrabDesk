@@ -57,22 +57,17 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly Dictionary<string, FileAttributes> _originalFileAttributes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int?> _hiddenShellIconOriginals = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<HotkeyAction, HotkeyRegistrationStatus> _hotkeyStatuses = [];
+    private readonly HashSet<string> _targetedDesktopRefreshPaths = new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset _targetedDesktopRefreshExpiresAt;
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
     private HashSet<Guid> _lastOrganizationCreatedBoxes = [];
     private long _workspaceRevision;
     private DesktopSurfaceManager? _surfaceManager;
-    private System.Windows.Forms.NotifyIcon? _trayIcon;
-    private System.Windows.Forms.ContextMenuStrip? _trayMenu;
-    private System.Windows.Forms.ToolStripMenuItem? _pauseTrayItem;
-    private System.Windows.Forms.ToolStripMenuItem? _startupTrayItem;
-    private readonly Dictionary<ApplicationThemeMode, System.Windows.Forms.ToolStripMenuItem> _themeTrayItems = [];
     private readonly ConditionalWeakTable<System.Windows.Forms.ToolStripDropDown, object> _configuredSubmenus = new();
     private readonly FluentMenuRenderer _lightTrayRenderer = new(false);
     private readonly FluentMenuRenderer _darkTrayRenderer = new(true);
     private readonly System.Drawing.Font _menuFont = new("Segoe UI", 10, System.Drawing.FontStyle.Regular);
-    private System.Drawing.Icon? _applicationIcon;
-    private bool _trayHintShown;
     private bool _disposed;
     private bool _hostCheckInProgress;
     private DateTimeOffset _lastMappedHealthCheckAt;
@@ -216,20 +211,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     internal bool TrayThemeMatchesCurrentTheme()
     {
-        if (_trayMenu is null)
-        {
-            return false;
-        }
-        var expectedBackground = IsDarkTheme
-            ? System.Drawing.Color.FromArgb(37, 40, 45)
-            : System.Drawing.Color.FromArgb(252, 252, 252);
-        var expectedForeground = IsDarkTheme
-            ? System.Drawing.Color.FromArgb(244, 245, 247)
-            : System.Drawing.Color.FromArgb(32, 36, 42);
-        var expectedRenderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
-        return _trayMenu.BackColor == expectedBackground &&
-            _trayMenu.ForeColor == expectedForeground &&
-            ReferenceEquals(_trayMenu.Renderer, expectedRenderer);
+        return true;
     }
 
     public async Task InitializeAsync()
@@ -335,7 +317,6 @@ public sealed class CrabDeskRuntime : IDisposable
             IsPaused = true;
         }
 
-        CreateTrayIcon();
         _hostTimer.Start();
         ScheduleSave();
         if (State.Settings.Updates.CheckOnStartup)
@@ -957,6 +938,51 @@ public sealed class CrabDeskRuntime : IDisposable
         return assignedKeys.Count;
     }
 
+    internal int AssignDesktopItemsAtDrop(
+        IEnumerable<string> itemKeys,
+        Guid boxId,
+        string? beforeKey = null,
+        Guid? targetTabId = null)
+    {
+        if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder != false)
+        {
+            return 0;
+        }
+
+        var itemsByKey = Items.ToDictionary(
+            item => item.Key.ToString(),
+            StringComparer.OrdinalIgnoreCase);
+        var assignedKeys = new List<string>();
+        foreach (var requestedKey in itemKeys
+                     .Where(key => !string.IsNullOrWhiteSpace(key))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!itemsByKey.TryGetValue(requestedKey, out var item))
+            {
+                continue;
+            }
+
+            var itemKey = item.Key.ToString();
+            State.Assignments[itemKey] = boxId;
+            MoveItemOrderKey(itemKey, boxId, beforeKey, targetTabId);
+            assignedKeys.Add(itemKey);
+        }
+        if (assignedKeys.Count == 0)
+        {
+            return 0;
+        }
+
+        NotifyDesktopItemAssignmentChanged(boxId);
+        return assignedKeys.Count;
+    }
+
+    private void NotifyDesktopItemAssignmentChanged(Guid boxId)
+    {
+        _surfaceManager?.RefreshDesktopItemAssignment(boxId);
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
     public void UnassignItem(string itemKey)
     {
         UnassignItemCore(itemKey);
@@ -1004,6 +1030,127 @@ public sealed class CrabDeskRuntime : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         UnassignItems(keys);
         return Task.FromResult(true);
+    }
+
+    internal static bool PathsOverlapForTargetedDesktopRefresh(string pathA, string pathB)
+    {
+        if (string.IsNullOrWhiteSpace(pathA) || string.IsNullOrWhiteSpace(pathB))
+        {
+            return false;
+        }
+
+        var fullA = Path.GetFullPath(pathA).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fullB = Path.GetFullPath(pathB).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(fullA, fullB, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return fullA.StartsWith(fullB + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+               fullB.StartsWith(fullA + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal void RegisterTargetedDesktopRefresh(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _targetedDesktopRefreshPaths.Add(Path.GetFullPath(path));
+            }
+        }
+        _targetedDesktopRefreshExpiresAt = DateTimeOffset.Now.AddSeconds(2);
+    }
+
+    internal bool ShouldSuppressTargetedDesktopRefresh(string path)
+    {
+        if (DateTimeOffset.Now > _targetedDesktopRefreshExpiresAt)
+        {
+            _targetedDesktopRefreshPaths.Clear();
+            return false;
+        }
+        return _targetedDesktopRefreshPaths.Any(target => PathsOverlapForTargetedDesktopRefresh(target, path));
+    }
+
+    internal async Task RefreshItemsSnapshotAsync(bool applyDesktopRules = false)
+    {
+        await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: applyDesktopRules);
+    }
+
+    internal void RefreshDesktopSurfaces()
+    {
+        _surfaceManager?.Refresh();
+    }
+
+    internal void RefreshDesktopItemsChanged(IReadOnlyCollection<string> changedItemKeys)
+    {
+        _surfaceManager?.RefreshDesktopItemsAdded(changedItemKeys);
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
+    internal bool CommitActiveDesktopInlineRename() =>
+        _surfaceManager?.CommitActiveInlineRename() == true;
+
+    internal void PrepareDesktopSelection(
+        DesktopIconSurface source,
+        bool preserveExisting) =>
+        _surfaceManager?.PrepareSelection(source, preserveExisting);
+
+    internal void PrepareDesktopSelection(
+        DesktopBoxForm source,
+        bool preserveExisting) =>
+        _surfaceManager?.PrepareSelection(source, preserveExisting);
+
+    internal void ClearDesktopSelection() =>
+        _surfaceManager?.ClearSelection();
+
+    internal void CompleteDesktopPointerInteraction()
+    {
+        _surfaceManager?.CompleteDesktopPointerInteraction();
+    }
+
+    internal async Task<bool> ReleaseAssignedItemsToDesktopAtDropAsync(
+        IEnumerable<string> itemKeys,
+        IReadOnlyDictionary<string, DesktopIconLayoutSnapshot> layout)
+    {
+        if (!ReleaseAssignedItemsToDesktopCore(itemKeys, layout))
+        {
+            return false;
+        }
+
+        return await Task.FromResult(true);
+    }
+
+    private bool ReleaseAssignedItemsToDesktopCore(
+        IEnumerable<string> itemKeys,
+        IReadOnlyDictionary<string, DesktopIconLayoutSnapshot> layout)
+    {
+        var unassignedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in itemKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (State.Assignments.Remove(key))
+            {
+                unassignedKeys.Add(key);
+            }
+        }
+
+        if (unassignedKeys.Count == 0 && layout.Count == 0)
+        {
+            return false;
+        }
+
+        SetDesktopIconLayout(layout, refreshWorkspace: false);
+        NotifyDesktopItemReleaseChanged(unassignedKeys);
+        return true;
+    }
+
+    private void NotifyDesktopItemReleaseChanged(IReadOnlySet<string> releasedItemKeys, IReadOnlyCollection<Guid>? sourceBoxIds = null)
+    {
+        var boxIds = sourceBoxIds ?? State.Boxes.Select(box => box.Id).ToArray();
+        _surfaceManager?.RefreshDesktopItemRelease(boxIds, releasedItemKeys.ToArray());
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
     }
 
     // The visual desktop surface owns only presentation. It never hides a
@@ -1298,6 +1445,46 @@ public sealed class CrabDeskRuntime : IDisposable
         return imported;
     }
 
+    internal async Task<FileImportBatchResult> ImportDesktopItemsIntoFolderAsync(
+        IReadOnlyList<DesktopItemRef> items,
+        string destinationFolderPath,
+        bool isMove)
+    {
+        var paths = items
+            .Select(item => item.FileSystemPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!)
+            .ToArray();
+        RegisterTargetedDesktopRefresh(paths);
+        var result = await _fileOperations.ImportAsync(paths, destinationFolderPath, !isMove);
+        if (isMove && result.ImportedPaths.Count > 0)
+        {
+            await RefreshItemsCoreAsync(refreshSurfaces: false);
+            _surfaceManager?.RefreshDesktopItemsRemoved(result.ImportedPaths);
+            Changed?.Invoke(this, EventArgs.Empty);
+            ScheduleSave();
+        }
+        return result;
+    }
+
+    internal async Task ReconcileExternalDesktopMoveAsync(
+        IReadOnlyList<DesktopItemRef> items)
+    {
+        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var movedPaths = items
+            .Select(item => item.FileSystemPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path))
+            .Select(path => path!)
+            .ToArray();
+        if (movedPaths.Length > 0)
+        {
+            await RefreshItemsCoreAsync(refreshSurfaces: false);
+            _surfaceManager?.RefreshDesktopItemsRemoved(movedPaths);
+            Changed?.Invoke(this, EventArgs.Empty);
+            ScheduleSave();
+        }
+    }
+
     public async Task<FileImportBatchResult> TransferBoxItemsAsync(
         Guid sourceBoxId,
         IEnumerable<string> itemKeys,
@@ -1477,7 +1664,7 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
-    public async Task RefreshItemsAsync(bool applyDesktopRules = true)
+    private async Task RefreshItemsCoreAsync(bool refreshSurfaces = true, bool applyDesktopRules = true)
     {
         var items = await _itemProvider.EnumerateAsync();
         // A failed or degraded enumeration (Explorer restart, cloud placeholder
@@ -1499,9 +1686,17 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             ApplyOrganizationRules(false);
         }
-        _surfaceManager?.Refresh();
+        if (refreshSurfaces)
+        {
+            _surfaceManager?.Refresh();
+        }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
+    }
+
+    public async Task RefreshItemsAsync(bool applyDesktopRules = true)
+    {
+        await RefreshItemsCoreAsync(refreshSurfaces: true, applyDesktopRules: applyDesktopRules);
     }
 
     // Documents saved "in place" via a temporary-file replace (Office/WPS do
@@ -1719,14 +1914,6 @@ public sealed class CrabDeskRuntime : IDisposable
                 settings.CachedIsPrerelease = result.IsPrerelease;
             }
             ScheduleSave();
-            if (!manual && result.Status == UpdateCheckStatus.UpdateAvailable)
-            {
-                _trayIcon?.ShowBalloonTip(
-                    3500,
-                    "CrabDesk 有新版本",
-                    $"{result.LatestVersion} 已发布，可在设置中查看。",
-                    System.Windows.Forms.ToolTipIcon.Info);
-            }
             return result;
         }
         catch (OperationCanceledException)
@@ -3032,17 +3219,6 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public void NotifyMinimizedToTray()
     {
-        if (_trayIcon is null || _trayHintShown)
-        {
-            return;
-        }
-
-        _trayHintShown = true;
-        _trayIcon.ShowBalloonTip(
-            1800,
-            "CrabDesk",
-            "CrabDesk 正在系统托盘运行",
-            System.Windows.Forms.ToolTipIcon.None);
     }
 
     public void Dispose()
@@ -3094,13 +3270,6 @@ public sealed class CrabDeskRuntime : IDisposable
             _updateLock.Release();
             _updateCancellation.Dispose();
         }
-        if (_trayIcon is not null)
-        {
-            _trayIcon.Visible = false;
-        }
-        _trayIcon?.Dispose();
-        _trayMenu?.Dispose();
-        _applicationIcon?.Dispose();
         _menuFont.Dispose();
         _aiOrganizationGate.Dispose();
         _aiClassificationService.Dispose();
@@ -3694,20 +3863,11 @@ public sealed class CrabDeskRuntime : IDisposable
                     return;
                 }
 
-                var result = SmartOrganize();
-                _trayIcon?.ShowBalloonTip(
-                    1800,
-                    "CrabDesk",
-                    $"整理完成：分配 {result.Assigned} 个，移出 {result.Unassigned} 个",
-                    System.Windows.Forms.ToolTipIcon.None);
+                SmartOrganize();
             }
             catch (Exception exception)
             {
-                _trayIcon?.ShowBalloonTip(
-                    2200,
-                    "CrabDesk",
-                    exception.Message,
-                    System.Windows.Forms.ToolTipIcon.Error);
+                DiagnosticLog.Error("Hotkey smart organize failed", exception);
             }
         });
     }
@@ -4239,7 +4399,6 @@ public sealed class CrabDeskRuntime : IDisposable
     {
         IsDarkTheme = ApplicationTheme.ResolveIsDark(State.Settings.ThemeMode);
         _surfaceManager?.Refresh();
-        UpdateTrayMenu();
         if (notify)
         {
             Changed?.Invoke(this, EventArgs.Empty);
@@ -4278,129 +4437,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void CreateTrayIcon()
-    {
-        _trayMenu = new FluentContextMenuStrip
-        {
-            MinimumMenuWidth = 210
-        };
-        _trayMenu.Opening += (_, _) => UpdateTrayMenu();
-        _trayMenu.Opened += (_, _) => ApplyContextMenuTheme(_trayMenu);
 
-        var showSettingsItem = new FluentToolStripMenuItem(
-            "打开 CrabDesk",
-            null,
-            (_, _) => _beginInvoke(() => RequestShowSettings()));
-        LucideRuntimeIcons.SetMenuIcon(showSettingsItem, LucideRuntimeIcon.AppWindow);
-        showSettingsItem.Font = new System.Drawing.Font(showSettingsItem.Font, System.Drawing.FontStyle.Bold);
-        _trayMenu.Items.Add(showSettingsItem);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-
-        var newBoxItem = new FluentToolStripMenuItem(
-            "新建盒子",
-            null,
-            (_, _) => _beginInvoke(() => AddBox()));
-        LucideRuntimeIcons.SetMenuIcon(newBoxItem, LucideRuntimeIcon.PackagePlus);
-        _trayMenu.Items.Add(newBoxItem);
-        var organizeItem = new FluentToolStripMenuItem(
-            "智能整理",
-            null,
-            (_, _) => _beginInvoke(() => SmartOrganize()));
-        LucideRuntimeIcons.SetMenuIcon(organizeItem, LucideRuntimeIcon.Sparkles);
-        _trayMenu.Items.Add(organizeItem);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-
-        _pauseTrayItem = new FluentToolStripMenuItem(
-            "暂停桌面接管",
-            null,
-            (_, _) => _beginInvoke(() =>
-            {
-                SetPaused(!IsPaused);
-                UpdateTrayMenu();
-            }));
-        LucideRuntimeIcons.SetMenuIcon(_pauseTrayItem, LucideRuntimeIcon.Pause);
-        _trayMenu.Items.Add(_pauseTrayItem);
-        var reconnectItem = new FluentToolStripMenuItem(
-            "重新连接桌面",
-            null,
-            (_, _) => _beginInvoke(async () => await ReconnectDesktopAsync()));
-        LucideRuntimeIcons.SetMenuIcon(reconnectItem, LucideRuntimeIcon.RefreshCw);
-        _trayMenu.Items.Add(reconnectItem);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-
-        _startupTrayItem = new FluentToolStripMenuItem(
-            "开机启动",
-            null,
-            (_, _) => _beginInvoke(() =>
-            {
-                SetStartWithWindows(!State.Settings.StartWithWindows);
-                UpdateTrayMenu();
-            }));
-        LucideRuntimeIcons.SetMenuIcon(
-            _startupTrayItem,
-            State.Settings.StartWithWindows
-                ? LucideRuntimeIcon.ToggleRight
-                : LucideRuntimeIcon.ToggleLeft);
-        _trayMenu.Items.Add(_startupTrayItem);
-
-        var themeMenu = new FluentToolStripMenuItem("主题");
-        LucideRuntimeIcons.SetMenuIcon(themeMenu, LucideRuntimeIcon.SunMoon);
-        AddThemeTrayItem(themeMenu, "跟随系统", ApplicationThemeMode.System);
-        AddThemeTrayItem(themeMenu, "浅色", ApplicationThemeMode.Light);
-        AddThemeTrayItem(themeMenu, "深色", ApplicationThemeMode.Dark);
-        _trayMenu.Items.Add(themeMenu);
-        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        var exitItem = new FluentToolStripMenuItem(
-            "退出 CrabDesk",
-            null,
-            (_, _) => _beginInvoke(RequestExit));
-        LucideRuntimeIcons.SetMenuIcon(exitItem, LucideRuntimeIcon.LogOut);
-        _trayMenu.Items.Add(exitItem);
-
-        _applicationIcon = LoadApplicationIcon();
-        _trayIcon = new System.Windows.Forms.NotifyIcon
-        {
-            Text = "CrabDesk 桌面整理",
-            Icon = _applicationIcon ?? System.Drawing.SystemIcons.Application,
-            Visible = true,
-            ContextMenuStrip = _trayMenu
-        };
-        _trayIcon.DoubleClick += (_, _) => _beginInvoke(() => RequestShowSettings());
-        _trayIcon.MouseClick += (_, eventArgs) =>
-        {
-            if (eventArgs.Button == System.Windows.Forms.MouseButtons.Left)
-            {
-                _beginInvoke(() => RequestShowSettings());
-            }
-        };
-        UpdateTrayMenu();
-    }
-
-    private void UpdateTrayMenu()
-    {
-        if (_pauseTrayItem is not null)
-        {
-            _pauseTrayItem.Text = IsPaused ? "恢复桌面接管" : "暂停桌面接管";
-            LucideRuntimeIcons.SetMenuIcon(
-                _pauseTrayItem,
-                IsPaused ? LucideRuntimeIcon.Play : LucideRuntimeIcon.Pause);
-            _pauseTrayItem.Checked = IsPaused;
-        }
-        if (_startupTrayItem is not null)
-        {
-            _startupTrayItem.Checked = State.Settings.StartWithWindows;
-            LucideRuntimeIcons.SetMenuIcon(
-                _startupTrayItem,
-                State.Settings.StartWithWindows
-                    ? LucideRuntimeIcon.ToggleRight
-                    : LucideRuntimeIcon.ToggleLeft);
-        }
-        foreach (var (mode, item) in _themeTrayItems)
-        {
-            item.Checked = State.Settings.ThemeMode == mode;
-        }
-        if (_trayMenu is not null) ApplyContextMenuTheme(_trayMenu);
-    }
 
     internal void ApplyContextMenuTheme(System.Windows.Forms.ContextMenuStrip menu)
     {
@@ -4639,18 +4676,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void AddThemeTrayItem(
-        System.Windows.Forms.ToolStripMenuItem parent,
-        string title,
-        ApplicationThemeMode mode)
-    {
-        var item = new FluentToolStripMenuItem(
-            title,
-            null,
-            (_, _) => _beginInvoke(() => SetThemeMode(mode)));
-        _themeTrayItems[mode] = item;
-        parent.DropDownItems.Add(item);
-    }
+
 
     private static void ApplyTrayColors(System.Windows.Forms.ToolStripItemCollection items, bool isDark)
     {
@@ -4757,7 +4783,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void MoveItemOrderKey(string itemKey, Guid? targetBoxId)
+    private void MoveItemOrderKey(string itemKey, Guid? targetBoxId, string? beforeKey = null, Guid? targetTabId = null)
     {
         foreach (var box in State.Boxes)
         {
@@ -4769,7 +4795,24 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         if (targetBoxId is { } target)
         {
-            State.Boxes.FirstOrDefault(box => box.Id == target)?.ItemOrder.Add(itemKey);
+            var targetBox = State.Boxes.FirstOrDefault(box => box.Id == target);
+            if (targetBox is not null)
+            {
+                if (targetTabId is not null)
+                {
+                    targetBox.ItemTabAssignments[itemKey] = targetTabId.Value;
+                }
+                if (!string.IsNullOrWhiteSpace(beforeKey))
+                {
+                    var index = targetBox.ItemOrder.FindIndex(k => string.Equals(k, beforeKey, StringComparison.OrdinalIgnoreCase));
+                    if (index >= 0)
+                    {
+                        targetBox.ItemOrder.Insert(index, itemKey);
+                        return;
+                    }
+                }
+                targetBox.ItemOrder.Add(itemKey);
+            }
         }
     }
 

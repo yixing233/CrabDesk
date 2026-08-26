@@ -37,10 +37,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .FirstOrDefault();
         if (nearest is not null)
         {
-            if (_pendingIconLoads.Add(key))
-            {
-                _ = LoadIconBitmapAsync(key, _iconCacheVersion);
-            }
+            QueueIconBitmapLoad(key);
             return nearest;
         }
         if (_iconLoadRetries.TryGetValue(key, out var retry) &&
@@ -48,11 +45,85 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return null;
         }
-        if (_pendingIconLoads.Add(key))
-        {
-            _ = LoadIconBitmapAsync(key, _iconCacheVersion);
-        }
+        QueueIconBitmapLoad(key);
         return null;
+    }
+
+    private void QueueIconBitmapLoad(IconBitmapKey key)
+    {
+        if (_iconCache.ContainsKey(key) ||
+            (_iconLoadRetries.TryGetValue(key, out var retry) &&
+             DateTimeOffset.UtcNow < retry.RetryAfter) ||
+            !_pendingIconLoads.Add(key))
+        {
+            return;
+        }
+
+        _ = LoadIconBitmapAsync(key, _iconCacheVersion);
+    }
+
+    private void QueueBoxIconPreload()
+    {
+        if (_boxIconPreloadPending || _resourcesDisposed || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        _boxIconPreloadPending = true;
+        try
+        {
+            BeginInvoke((Action)PreloadBoxIcons);
+        }
+        catch (InvalidOperationException)
+        {
+            _boxIconPreloadPending = false;
+        }
+    }
+
+    private void PreloadBoxIcons()
+    {
+        _boxIconPreloadPending = false;
+        if (_resourcesDisposed || IsDisposed)
+        {
+            return;
+        }
+
+        var requiredKeys = DesktopBoxes
+            .SelectMany(GetRequiredBoxIconBitmapKeys)
+            .Distinct()
+            .ToArray();
+        _boxIconPreloadKeys.Clear();
+        _boxIconPreloadKeys.UnionWith(requiredKeys.Where(key => !_iconCache.ContainsKey(key)));
+        _boxIconPreloadStartedAt = _boxIconPreloadKeys.Count > 0
+            ? DateTimeOffset.UtcNow
+            : null;
+        DiagnosticLog.Info(
+            $"Box icon preload monitor={_monitor.Id} required={requiredKeys.Length} " +
+            $"missing={_boxIconPreloadKeys.Count}");
+        foreach (var key in requiredKeys)
+        {
+            QueueIconBitmapLoad(key);
+        }
+    }
+
+    private IconBitmapKey[] GetRequiredBoxIconBitmapKeys(DesktopBox box)
+    {
+        var expandedGeometry = CreateBoxGeometry(
+            box,
+            (float)box.Bounds.Height,
+            isCollapsed: false);
+        return GetRenderedItemsForBox(expandedGeometry, expandedGeometry.Bounds)
+            .Select(item => CreateIconBitmapKey(item.Item, (float)box.Appearance.IconSize))
+            .Distinct()
+            .ToArray();
+    }
+
+    private bool AreRequiredBoxIconsLoaded(DesktopBox box)
+    {
+        var requiredKeys = GetRequiredBoxIconBitmapKeys(box);
+        var loadedIconCount = requiredKeys.Count(key =>
+            _iconCache.TryGetValue(key, out var bitmap) && bitmap is not null);
+        return ShouldCreateHeightAnimationVisualCache(requiredKeys.Length, loadedIconCount);
     }
 
     private async Task LoadIconBitmapAsync(IconBitmapKey key, int cacheVersion)
@@ -119,6 +190,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 }
                 _iconLoadRetries.Remove(key);
                 _iconCache[key] = bitmap;
+                if (_boxIconPreloadKeys.Remove(key) && _boxIconPreloadKeys.Count == 0)
+                {
+                    var elapsed = _boxIconPreloadStartedAt is { } startedAt
+                        ? (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds
+                        : 0;
+                    _boxIconPreloadStartedAt = null;
+                    DiagnosticLog.Info(
+                        $"Box icon preload ready monitor={_monitor.Id} elapsedMs={elapsed:0}");
+                }
+                TryCompleteHeightAnimationCacheRequest(key);
                 InvalidateIcon(key);
             }));
         }
@@ -214,12 +295,56 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void InvalidateIcon(IconBitmapKey key)
     {
-        // This is a full-surface layered window, so a completed icon load
-        // always needs the same complete presentation regardless of how many
-        // items use the bitmap.  Do not enumerate _items here: presenting a
-        // layer rebuilds that list synchronously, which used to invalidate a
-        // Where() enumerator between its first and second matching item.
+        var dirtyBounds = DesktopBoxes
+            .Where(box =>
+                ShouldPresentLoadedBoxIcon(
+                    IsEffectivelyCollapsed(box),
+                    _heightAnimations.ContainsKey(box.Id)) &&
+                GetRequiredBoxIconBitmapKeys(box).Contains(key))
+            .Select(box => new RectangleF(
+                (float)box.Bounds.X,
+                (float)box.Bounds.Y,
+                (float)box.Bounds.Width,
+                (float)box.Bounds.Height))
+            .Aggregate((RectangleF?)null, (current, candidate) => current is { } existing
+                ? RectangleF.Union(existing, candidate)
+                : candidate);
+        if (dirtyBounds is null)
+        {
+            return;
+        }
+
+        if (_isCompositedByIconSurface && _iconLayerPartialRenderRequest is not null)
+        {
+            _iconLayerPartialRenderRequest(dirtyBounds.Value);
+            return;
+        }
+
         RequestVisualLayerRender();
+    }
+
+    private void TryCompleteHeightAnimationCacheRequest(IconBitmapKey loadedKey)
+    {
+        foreach (var boxId in _heightAnimationCacheRequestBoxIds.ToArray())
+        {
+            var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == boxId);
+            if (box is null)
+            {
+                _heightAnimationCacheRequestBoxIds.Remove(boxId);
+                continue;
+            }
+            if (!GetRequiredBoxIconBitmapKeys(box).Contains(loadedKey) ||
+                !AreRequiredBoxIconsLoaded(box))
+            {
+                continue;
+            }
+
+            PrepareHeightAnimationVisualCache(box);
+            if (_heightAnimationVisualCaches.ContainsKey(boxId))
+            {
+                _prewarmedHeightAnimationCacheBoxId = boxId;
+            }
+        }
     }
 
 }

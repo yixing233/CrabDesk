@@ -367,11 +367,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             fromHeight,
             targetHeight,
             DateTimeOffset.UtcNow,
-            AnimationMath.ScaleDurationByDistance(
+            CalculateBoxHeightAnimationDuration(
                 Math.Abs(targetHeight - fromHeight),
-                Math.Abs(box.Bounds.Height - box.Appearance.TitleBarHeight),
-                TimeSpan.FromMilliseconds(BoxHeightAnimationMilliseconds),
-                TimeSpan.FromMilliseconds(MinimumBoxHeightAnimationMilliseconds)));
+                Math.Abs(box.Bounds.Height - box.Appearance.TitleBarHeight)));
         _dynamicVisualVersion++;
         _animationFrameClock.RequestFrames();
     }
@@ -418,18 +416,47 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .Where(pair => now - pair.Value.StartedAt >= pair.Value.Duration)
             .Select(pair => pair.Key)
             .ToArray();
+        var completedAnimationBounds = completedBoxIds
+            .Select(id => DesktopBoxes.FirstOrDefault(box => box.Id == id))
+            .Where(box => box is not null)
+            .Select(box => new RectangleF(
+                (float)box!.Bounds.X,
+                (float)box.Bounds.Y,
+                (float)box.Bounds.Width,
+                (float)box.Bounds.Height))
+            .Aggregate((RectangleF?)null, (current, candidate) => current is { } existing
+                ? RectangleF.Union(existing, candidate)
+                : candidate);
         foreach (var id in completedBoxIds)
         {
             _heightAnimations.Remove(id);
-            ReleaseHeightAnimationVisualCache(id);
+            var box = DesktopBoxes.FirstOrDefault(candidate => candidate.Id == id);
+            if (box is null ||
+                !ShouldRetainHeightAnimationVisualCache(IsEffectivelyCollapsed(box)))
+            {
+                ReleaseHeightAnimationVisualCache(id);
+            }
         }
-        if (completedBoxIds.Length > 0)
+        var otherDynamicVisualActive =
+            IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null;
+        var animationStillActive = _heightAnimations.Count > 0 || IsScrollAnimationActive;
+        var commitCompletionPartially = ShouldCommitCompletedHeightAnimationPartially(
+            _isCompositedByIconSurface,
+            completedBoxIds.Length > 0,
+            animationStillActive,
+            otherDynamicVisualActive,
+            _iconLayerPartialRenderRequest is not null);
+        if (completedBoxIds.Length > 0 && !commitCompletionPartially)
         {
             // The shared icon layer caches a settled base that excludes every
             // animated box. When one of multiple overlapping height animations
             // finishes, rebuild that base so the completed box is immediately
             // restored while the remaining box continues animating.
             _dynamicVisualVersion++;
+        }
+        if (completedBoxIds.Length > 0 && !animationStillActive)
+        {
+            _pendingHeightAnimationFrameDirtyBounds = null;
         }
         _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
         if (ShouldRebuildHeightAnimationGeometry(
@@ -442,10 +469,22 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             UpdateHeightAnimationGeometry(animatedBoxIds);
         }
-        if (!_isCompositedByIconSurface || completedBoxIds.Length > 0)
+        if (!_isCompositedByIconSurface)
         {
             UpdateWindowRegion();
             RequestLayerRender();
+        }
+        else if (completedBoxIds.Length > 0)
+        {
+            UpdateWindowRegion();
+            if (commitCompletionPartially && completedAnimationBounds is { } dirtyBounds)
+            {
+                _iconLayerPartialRenderRequest!(dirtyBounds);
+            }
+            else
+            {
+                RequestLayerRender();
+            }
         }
         else if (animatedBoxIds.Length > 0 || hadScrollAnimation)
         {

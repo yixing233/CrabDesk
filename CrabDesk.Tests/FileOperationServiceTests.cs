@@ -25,6 +25,21 @@ public sealed class FileOperationServiceTests : IDisposable
         Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], decoded.Paths);
     }
 
+    [Fact]
+    public async Task DeleteWithNoFileSystemItemsCompletesWithoutError()
+    {
+        var shellItem = new DesktopItemRef
+        {
+            Key = new DesktopItemKey("shell", "ThisPC"),
+            DisplayName = "此电脑",
+            ParsingName = "::{ThisPC}",
+            FileSystemPath = null,
+            Kind = DesktopItemKind.Shell
+        };
+
+        await new FileOperationService().DeleteAsync([shellItem]);
+    }
+
     [Theory]
     [InlineData(true, false, false, false, false, BoxTransferEffect.VirtualMove)]
     [InlineData(true, false, false, true, false, BoxTransferEffect.VirtualMove)]

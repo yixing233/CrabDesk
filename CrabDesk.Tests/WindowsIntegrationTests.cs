@@ -64,7 +64,10 @@ public sealed class WindowsIntegrationTests
             using var settingsCommand = submenuKey?.OpenSubKey(@"shell\02Settings\command");
             using var organizeCommand = submenuKey?.OpenSubKey(@"shell\03RuleOrganize\command");
             using var aiOrganizeCommand = submenuKey?.OpenSubKey(@"shell\04AiOrganize\command");
+            using var reconnectCommand = submenuKey?.OpenSubKey(@"shell\05Reconnect\command");
+            using var exitCommand = submenuKey?.OpenSubKey(@"shell\06Exit\command");
             Assert.Equal("CrabDesk", key?.GetValue(null));
+            Assert.Equal("Top", key?.GetValue("Position"));
             Assert.Null(key?.GetValue("SubCommands"));
             Assert.Equal(submenuClassName, key?.GetValue("ExtendedSubCommandsKey"));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", rootCommand?.GetValue(null));
@@ -72,6 +75,8 @@ public sealed class WindowsIntegrationTests
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", settingsCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --organize", organizeCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --ai-organize", aiOrganizeCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --reconnect", reconnectCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --exit", exitCommand?.GetValue(null));
 
             registration.SetEnabled(false, executable);
             Assert.False(registration.IsEnabled);

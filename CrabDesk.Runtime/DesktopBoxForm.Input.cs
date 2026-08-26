@@ -21,7 +21,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         // A click on the box surface while an inline rename is open commits
         // the edit (this window never activates, so Deactivate does not fire).
-        _renameEditor?.CommitExternally();
+        _runtime.CommitActiveDesktopInlineRename();
         if (_editingBox is not null)
         {
             FinishTitleEdit(true);
@@ -48,7 +48,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             if (item is not null)
             {
                 var itemKey = item.Item.Key.ToString();
-                if (!_selection.Contains(itemKey))
+                var contextTargetSelected = _selection.Contains(itemKey);
+                _runtime.PrepareDesktopSelection(
+                    this,
+                    DesktopSelectionPolicy.PreserveExistingSelection(
+                        DesktopSelectionGesture.ContextItem,
+                        additive: false,
+                        contextTargetSelected));
+                if (!contextTargetSelected)
                 {
                     _selection.Clear();
                     _selection.Add(itemKey);
@@ -75,7 +82,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (item is not null)
         {
             var key = item.Item.Key.ToString();
-            if ((Forms.Control.ModifierKeys & Forms.Keys.Control) != 0 && _selection.Contains(key))
+            var controlPressed = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+            var targetAlreadySelected = _selection.Contains(key);
+            _runtime.PrepareDesktopSelection(
+                this,
+                DesktopSelectionPolicy.PreserveExistingSelection(
+                    DesktopSelectionGesture.PrimaryItem,
+                    controlPressed,
+                    targetAlreadySelected));
+            if (controlPressed && targetAlreadySelected)
             {
                 _selection.Remove(key);
                 _pressedItem = null;
@@ -87,7 +102,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // Keep an existing multi-selection when pressing one of its items
             // so dragging starts from the whole selection. Only a plain press
             // on an unselected item resets the selection.
-            if ((Forms.Control.ModifierKeys & Forms.Keys.Control) == 0 && !_selection.Contains(key))
+            if (!controlPressed && !targetAlreadySelected)
             {
                 _selection.Clear();
             }
@@ -135,6 +150,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         else if (box.Body.Contains(point))
         {
+            var additive = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+            _runtime.PrepareDesktopSelection(
+                this,
+                DesktopSelectionPolicy.PreserveExistingSelection(
+                    DesktopSelectionGesture.Marquee,
+                    additive,
+                    targetAlreadySelected: false));
             _selectionBox = box.Box;
             _selectionGeometry = box;
             _selectionStart = point;
@@ -142,7 +164,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _selectionBase.Clear();
             _marqueeSelectionItems.Clear();
             _marqueeSelectionKeys.Clear();
-            if ((Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
+            if (additive)
             {
                 _selectionBase.UnionWith(_selection);
             }
@@ -362,6 +384,18 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ResetBoxItemDragState()
     {
+        RectangleF? settledBoxBounds = null;
+        if (_dragStarted && _pressedBoxId is { } sourceBoxId &&
+            _runtime.State.Boxes.FirstOrDefault(box => box.Id == sourceBoxId) is { } sourceBox)
+        {
+            settledBoxBounds = new RectangleF(
+                (float)sourceBox.Bounds.X,
+                (float)sourceBox.Bounds.Y,
+                (float)sourceBox.Bounds.Width,
+                (float)GetVisualBoxHeight(sourceBox));
+            settledBoxBounds = RectangleF.Inflate(settledBoxBounds.Value, 2, 2);
+        }
+
         CancelPendingDragRender();
         if (_dragStarted)
         {
@@ -373,6 +407,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _pressedItem = null;
         _pressedBoxId = null;
         Invalidate();
+        if (settledBoxBounds is { } dirtyBounds &&
+            _isCompositedByIconSurface &&
+            _iconLayerPartialRenderRequest is not null)
+        {
+            _iconLayerPartialRenderRequest(dirtyBounds);
+        }
     }
 
     // The runtime owns the release transaction: visibility, Explorer
@@ -427,7 +467,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseLeave(object? sender, EventArgs eventArgs)
     {
-        if (_runtime.IsDesktopIconPointerInteractionActive ||
+        if (HasActiveInlineRename)
+        {
+            DiagnosticLog.Verbose("Box hover leave retained while inline rename is active.");
+            return;
+        }
+        if (ShouldSuspendHoverState(_openBoxMenuBoxId, inlineRenameActive: false) ||
+            _runtime.IsDesktopIconPointerInteractionActive ||
             _movingBox is not null || _resizingBox is not null)
         {
             return;
@@ -457,7 +503,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void ReconcileHoverAtCursor()
     {
         _hoverReconcilePending = false;
-        if (ShouldSuspendHoverState(_openBoxMenuBoxId) ||
+        if (HasActiveInlineRename)
+        {
+            DiagnosticLog.Verbose("Box hover reconciliation deferred while inline rename is active.");
+            return;
+        }
+        if (ShouldSuspendHoverState(_openBoxMenuBoxId, inlineRenameActive: false) ||
             _runtime.IsDesktopIconPointerInteractionActive ||
             _movingBox is not null || _resizingBox is not null || IsDisposed)
         {
@@ -568,7 +619,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // hover expansion while the root menu or one of its submenus is
             // active; Closed queues one reconciliation against the real
             // pointer position so ordinary collapse timing resumes cleanly.
-            if (ShouldSuspendHoverState(_openBoxMenuBoxId))
+            if (HasActiveInlineRename)
+            {
+                DiagnosticLog.Verbose("Box hover timer retained expansion while inline rename is active.");
+                return;
+            }
+            if (ShouldSuspendHoverState(_openBoxMenuBoxId, inlineRenameActive: false))
             {
                 return;
             }
@@ -1113,6 +1169,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         else if (resizingBox is not null)
         {
             _runtime.BoxChanged(resizingBox, ShouldRebuildWorkspaceAfterBoxTransform());
+        }
+        if (movingBox is not null || resizingBox is not null)
+        {
+            // The transform cache owns the header actions while the box is
+            // moving. Once the settled box is committed, restore the small
+            // hover overlay even when the logical hover target did not change.
+            QueueHoverReconcile();
         }
     }
 

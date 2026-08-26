@@ -519,13 +519,6 @@ public sealed partial class MainWindow : Window
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         args.Cancel = true;
-        if (_runtime.State.Settings.DesktopBehavior.LaunchToTray)
-        {
-            sender.Hide();
-        }
-        else
-        {
-            App.CurrentApp.Shutdown();
-        }
+        sender.Hide();
     }
 }

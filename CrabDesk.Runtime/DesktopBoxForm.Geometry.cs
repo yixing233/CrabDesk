@@ -104,6 +104,22 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
             var geometry = _boxes[index];
             var height = (float)GetVisualBoxHeight(geometry.Box);
+            var frameDirtyBounds = CalculateHeightAnimationFrameDirtyBounds(
+                new RectangleF(
+                    geometry.Bounds.X,
+                    geometry.Bounds.Y,
+                    geometry.Bounds.Width,
+                    (float)geometry.Box.Bounds.Height),
+                geometry.Bounds.Height,
+                height,
+                (float)_runtime.State.Settings.Appearance.CornerRadius);
+            if (!frameDirtyBounds.IsEmpty)
+            {
+                _pendingHeightAnimationFrameDirtyBounds =
+                    _pendingHeightAnimationFrameDirtyBounds is { } pending
+                        ? RectangleF.Union(pending, frameDirtyBounds)
+                        : frameDirtyBounds;
+            }
             var bounds = new RectangleF(
                 geometry.Bounds.X,
                 geometry.Bounds.Y,
@@ -511,20 +527,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         BoxGeometry geometry,
         PointF pointer) =>
         ResolveInsertBeforeKey(geometry, pointer);
-
-    private IReadOnlyList<DesktopItemRef> GetProjectedDesktopAssignmentItems(
-        BoxGeometry geometry,
-        DropPreviewState preview)
-    {
-        var incomingKeys = preview.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var projectedItems = _runtime.GetItemsForBoxAfterAssigning(
-            geometry.Box.Id,
-            preview.ItemKeys);
-        var beforeKey = ResolveInsertBeforeKey(geometry, preview.Pointer, incomingKeys);
-        return beforeKey is null
-            ? projectedItems
-            : InsertProjectedItemsBefore(projectedItems, incomingKeys, beforeKey);
-    }
 
 }
 

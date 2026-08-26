@@ -130,12 +130,15 @@ internal sealed class DesktopRenameEditor : Forms.Form
     /// Commits the pending edit because the pointer clicked a desktop surface
     /// (which never activates, so the normal Deactivate path is not hit).
     /// </summary>
-    internal void CommitExternally()
+    internal bool CommitExternally()
     {
-        if (IsActive)
+        if (!IsActive)
         {
-            Complete(commit: true);
+            return false;
         }
+
+        Complete(commit: true);
+        return true;
     }
 
     private void SelectStem(string text, bool selectNameStem)

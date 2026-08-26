@@ -23,6 +23,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private readonly IInfoBarService _notifications;
     private readonly IDialogService _dialogs;
     private readonly DesktopItemIconSourceFactory? _iconSourceFactory;
+    private readonly IClipboardService _clipboard;
     private readonly DispatcherQueue? _dispatcherQueue;
     private readonly AiClassificationStreamAccumulator _streamAccumulator = new(
         MaximumVisibleReasoningLength,
@@ -55,6 +56,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private string _reasoningOutput = "尚未开始 AI 分类。";
     private string _structuredOutput = "尚未生成分类结果。";
     private bool _isThinkingExpanded;
+    private bool _isJsonViewMode;
     private TimeSpan _totalDuration;
     private TimeSpan? _firstTokenLatency;
     private int? _inputTokens;
@@ -68,12 +70,14 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         ICrabDeskService service,
         IInfoBarService notifications,
         IDialogService dialogs,
-        DesktopItemIconSourceFactory? iconSourceFactory = null)
+        DesktopItemIconSourceFactory? iconSourceFactory = null,
+        IClipboardService? clipboard = null)
     {
         _service = service;
         _notifications = notifications;
         _dialogs = dialogs;
         _iconSourceFactory = iconSourceFactory;
+        _clipboard = clipboard ?? new ClipboardService();
         _dispatcherQueue = GetCurrentDispatcherQueueOrNull();
         if (_dispatcherQueue is not null)
         {
@@ -107,6 +111,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> Models { get; } = [];
     public ObservableCollection<string> CategoryTags { get; } = [];
     public ObservableCollection<AiWorkbenchItemViewModel> WorkspaceItems { get; } = [];
+    public ObservableCollection<AiClassificationGroupViewModel> ResultGroups { get; } = [];
     public ObservableCollection<string> ActivityLog { get; } = [];
 
     public bool IsBusy
@@ -179,6 +184,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _hasPreview, value))
             {
                 OnPropertyChanged(nameof(CanApplyPreview));
+                UpdateResultGroups();
                 RefreshAiCommandState();
             }
         }
@@ -198,6 +204,16 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public string InputTokenText => FormatTokens(_inputTokens);
     public string OutputTokenText => FormatTokens(_outputTokens);
     public string TotalTokenText => FormatTokens(_totalTokens);
+    public bool HasResultGroups => ResultGroups.Count > 0;
+    public string ResultSummaryText => !HasPreview
+        ? "尚未生成分类结果"
+        : $"已识别 {EffectiveAssignmentCount}/{SelectedItemCount} 项" + (WorkspaceItems.Count(item => item.IsSelected && item.IsUncertain) is var uncertain && uncertain > 0 ? $"（{uncertain} 项待确认）" : string.Empty);
+
+    public bool IsJsonViewMode
+    {
+        get => _isJsonViewMode;
+        set => SetProperty(ref _isJsonViewMode, value);
+    }
 
     public bool IsConnectivityTestInProgress
     {
@@ -331,6 +347,50 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             {
                 SaveWebSearchSettings();
             }
+        }
+    }
+
+    [RelayCommand]
+    private void ShowCardView() => IsJsonViewMode = false;
+
+    [RelayCommand]
+    private void ShowJsonView() => IsJsonViewMode = true;
+
+    [RelayCommand]
+    private async Task CopyReasoningAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ReasoningOutput))
+        {
+            return;
+        }
+
+        try
+        {
+            await _clipboard.SetTextAsync(ReasoningOutput);
+            _notifications.Show("思考过程已复制到剪贴板", InfoBarSeverity.Success, TimeSpan.FromSeconds(3));
+        }
+        catch (Exception exception)
+        {
+            AppDiagnostic.Error("Failed to copy reasoning", exception);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyStructuredOutputAsync()
+    {
+        if (string.IsNullOrWhiteSpace(StructuredOutput))
+        {
+            return;
+        }
+
+        try
+        {
+            await _clipboard.SetTextAsync(StructuredOutput);
+            _notifications.Show("分类结果已复制到剪贴板", InfoBarSeverity.Success, TimeSpan.FromSeconds(3));
+        }
+        catch (Exception exception)
+        {
+            AppDiagnostic.Error("Failed to copy structured output", exception);
         }
     }
 
@@ -639,6 +699,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private void ApplyPreviewToWorkspace(AiClassificationPreview preview)
     {
+        HasPreview = true;
         var assignments = preview.Assignments
             .GroupBy(assignment => assignment.ItemKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -968,7 +1029,57 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(EffectiveAssignmentCount));
         OnPropertyChanged(nameof(IsWorkspaceEmpty));
         OnPropertyChanged(nameof(CanApplyPreview));
+        UpdateResultGroups();
         RefreshAiCommandState();
+    }
+
+    private void UpdateResultGroups()
+    {
+        ResultGroups.Clear();
+        if (!HasPreview)
+        {
+            OnPropertyChanged(nameof(HasResultGroups));
+            OnPropertyChanged(nameof(ResultSummaryText));
+            return;
+        }
+
+        var selectedItems = WorkspaceItems.Where(item => item.IsSelected).ToList();
+        var classifiedGroups = selectedItems
+            .Where(item => !string.IsNullOrWhiteSpace(item.EffectiveLabel))
+            .GroupBy(item => item.EffectiveLabel!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in classifiedGroups)
+        {
+            var groupVm = new AiClassificationGroupViewModel
+            {
+                CategoryName = group.Key,
+                IsUncertainGroup = false
+            };
+            foreach (var item in group)
+            {
+                groupVm.Items.Add(item);
+            }
+            ResultGroups.Add(groupVm);
+        }
+
+        var uncertainItems = selectedItems.Where(item => item.IsUncertain).ToList();
+        if (uncertainItems.Count > 0)
+        {
+            var uncertainGroup = new AiClassificationGroupViewModel
+            {
+                CategoryName = "待确认项目",
+                IsUncertainGroup = true
+            };
+            foreach (var item in uncertainItems)
+            {
+                uncertainGroup.Items.Add(item);
+            }
+            ResultGroups.Add(uncertainGroup);
+        }
+
+        OnPropertyChanged(nameof(HasResultGroups));
+        OnPropertyChanged(nameof(ResultSummaryText));
     }
 
     private void SetConnectivityTestResult(InfoBarSeverity severity, string title, string message)

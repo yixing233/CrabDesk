@@ -139,11 +139,22 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void PrepareHeightAnimationVisualCache(DesktopBox box)
     {
-        ReleaseHeightAnimationVisualCache(box.Id);
         if (!_isCompositedByIconSurface || IsDisposed || _resourcesDisposed)
         {
             return;
         }
+        if (!AreRequiredBoxIconsLoaded(box))
+        {
+            _heightAnimationCacheRequestBoxIds.Add(box.Id);
+            foreach (var key in GetRequiredBoxIconBitmapKeys(box))
+            {
+                QueueIconBitmapLoad(key);
+            }
+            return;
+        }
+
+        _heightAnimationCacheRequestBoxIds.Remove(box.Id);
+        ReleaseHeightAnimationVisualCache(box.Id);
 
         var geometry = CreateBoxGeometry(box, (float)box.Bounds.Height, isCollapsed: false);
         var cacheBounds = CalculateMovingBoxVisualCacheBounds(geometry.Bounds, _scale);
@@ -222,6 +233,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void ReleaseHeightAnimationVisualCache(Guid boxId)
     {
+        _heightAnimationCacheRequestBoxIds.Remove(boxId);
         if (_heightAnimationVisualCaches.Remove(boxId, out var cache))
         {
             cache.Bitmap.Dispose();
@@ -239,6 +251,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             cache.Bitmap.Dispose();
         }
         _heightAnimationVisualCaches.Clear();
+        _heightAnimationCacheRequestBoxIds.Clear();
         _pendingHeightAnimationCachePrewarmBoxId = null;
         _prewarmedHeightAnimationCacheBoxId = null;
     }
@@ -284,7 +297,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         graphics.DrawPath(tabBorder, tabPath);
     }
 
-    private void DrawDropInsertionFeedback(
+    private void DrawDropDragFeedback(
         Graphics graphics,
         BoxGeometry geometry,
         RectangleF clipBounds)
@@ -297,19 +310,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
-        if (preview.Kind == DropPreviewKind.Reorder)
-        {
-            DrawReorderDropPreview(graphics, geometry, preview, accent);
-            DrawBoxItemFloatingPreview(graphics, geometry, preview, accent);
-            return;
-        }
-
-        if (preview.Kind == DropPreviewKind.DesktopAssign)
-        {
-            DrawDesktopItemDropPreview(graphics, geometry, preview, accent);
-            return;
-        }
-
         // External file drags and desktop-icon drags already carry their own
         // mouse-following ghost, so only box-item drags (which have no shell
         // drag image) draw the shared card here.
@@ -354,199 +354,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             previewItem?.DisplayName ?? preview.ItemKeys.FirstOrDefault() ?? string.Empty,
             preview.ItemCount,
             font);
-    }
-
-    private void DrawReorderDropPreview(
-        Graphics graphics,
-        BoxGeometry geometry,
-        DropPreviewState preview,
-        Color accent)
-    {
-        var previewKeys = preview.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (previewKeys.Count == 0)
-        {
-            return;
-        }
-
-        var currentItems = GetCachedItemsForBox(geometry.Box.Id);
-        var currentKeys = currentItems.Select(item => item.Key.ToString()).ToArray();
-        var projectedKeys = LayoutCoordinator.ProjectReorderedKeys(
-            geometry.Box,
-            currentKeys,
-            previewKeys,
-            GetReorderBeforeKey(geometry, preview.Pointer));
-        var itemsByKey = currentItems.ToDictionary(
-            item => item.Key.ToString(),
-            StringComparer.OrdinalIgnoreCase);
-        var visibleKeys = GetVisibleItemsForBox(geometry)
-            .Select(item => item.Key.ToString())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var projectedItems = projectedKeys
-            .Where(key => visibleKeys.Contains(key) && itemsByKey.ContainsKey(key))
-            .Select(key => itemsByKey[key])
-            .ToArray();
-        if (projectedItems.Length == 0)
-        {
-            return;
-        }
-
-        var appearance = _runtime.State.Settings.Appearance;
-        var layout = DesktopItemLayoutEngine.CalculateVisible(
-            geometry.Box.ViewMode,
-            new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
-            projectedItems.Length,
-            geometry.Box.Appearance.IconSize,
-            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
-            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
-            _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
-        foreach (var entry in layout.Items)
-        {
-            var item = projectedItems[entry.Index];
-            if (!previewKeys.Contains(item.Key.ToString()))
-            {
-                continue;
-            }
-
-            var bounds = entry.Bounds;
-            var itemGeometry = new ItemGeometry(
-                geometry.Box,
-                item,
-                new RectangleF((float)bounds.X, (float)bounds.Y, (float)bounds.Width, (float)bounds.Height));
-            DrawDropPreviewFrame(graphics, GetItemIconBounds(itemGeometry), accent);
-        }
-    }
-
-    private void DrawDesktopItemDropPreview(
-        Graphics graphics,
-        BoxGeometry geometry,
-        DropPreviewState preview,
-        Color accent)
-    {
-        var previewItemKeys = _runtime.Items
-            .Where(item => preview.ItemKeys.Contains(item.Key.ToString(), StringComparer.OrdinalIgnoreCase))
-            .Select(item => item.Key.ToString())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (previewItemKeys.Count == 0)
-        {
-            return;
-        }
-
-        var projectedItems = _runtime.GetItemsForBoxAfterAssigning(
-            geometry.Box.Id,
-            preview.ItemKeys);
-        var beforeKey = ResolveInsertBeforeKey(geometry, preview.Pointer, previewItemKeys);
-        if (beforeKey is not null)
-        {
-            projectedItems = InsertProjectedItemsBefore(
-                projectedItems,
-                previewItemKeys,
-                beforeKey);
-        }
-        var visibleItems = GetVisibleDesktopDropPreviewItems(
-            geometry,
-            preview,
-            projectedItems,
-            previewItemKeys);
-        if (visibleItems.Count == 0)
-        {
-            return;
-        }
-
-        var appearance = _runtime.State.Settings.Appearance;
-        var layout = DesktopItemLayoutEngine.CalculateVisible(
-            geometry.Box.ViewMode,
-            new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
-            visibleItems.Count,
-            geometry.Box.Appearance.IconSize,
-            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
-            DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
-            _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
-        foreach (var entry in layout.Items)
-        {
-            var item = visibleItems[entry.Index];
-            if (!previewItemKeys.Contains(item.Key.ToString()))
-            {
-                continue;
-            }
-
-            var itemBounds = entry.Bounds;
-            var iconBounds = GetItemIconBounds(new ItemGeometry(
-                geometry.Box,
-                item,
-                new RectangleF(
-                    (float)itemBounds.X,
-                    (float)itemBounds.Y,
-                    (float)itemBounds.Width,
-                    (float)itemBounds.Height)));
-            DrawDropPreviewFrame(graphics, iconBounds, accent);
-        }
-    }
-
-    private static void DrawDropPreviewFrame(Graphics graphics, RectangleF iconBounds, Color accent)
-    {
-        var previewBounds = RectangleF.Inflate(iconBounds, 4, 4);
-        using var fill = new SolidBrush(Color.FromArgb(78, accent));
-        using var border = new Pen(Color.FromArgb(238, accent), 2f);
-        using var path = RoundedRectangle(previewBounds, 5);
-        graphics.FillPath(fill, path);
-        graphics.DrawPath(border, path);
-    }
-
-    private static IReadOnlyList<DesktopItemRef> InsertProjectedItemsBefore(
-        IReadOnlyList<DesktopItemRef> projectedItems,
-        IReadOnlySet<string> incomingKeys,
-        string targetItemKey)
-    {
-        var incoming = projectedItems
-            .Where(item => incomingKeys.Contains(item.Key.ToString()))
-            .ToArray();
-        if (incoming.Length == 0)
-        {
-            return projectedItems;
-        }
-
-        var remaining = projectedItems
-            .Where(item => !incomingKeys.Contains(item.Key.ToString()))
-            .ToList();
-        var targetIndex = remaining.FindIndex(item =>
-            string.Equals(item.Key.ToString(), targetItemKey, StringComparison.OrdinalIgnoreCase));
-        if (targetIndex < 0)
-        {
-            remaining.AddRange(incoming);
-        }
-        else
-        {
-            remaining.InsertRange(targetIndex, incoming);
-        }
-        return remaining;
-    }
-
-    private static IReadOnlyList<DesktopItemRef> GetVisibleDesktopDropPreviewItems(
-        BoxGeometry geometry,
-        DropPreviewState preview,
-        IReadOnlyList<DesktopItemRef> projectedItems,
-        IReadOnlySet<string> previewItemKeys)
-    {
-        if (geometry.ManualTabs.Count == 0 || geometry.ActiveManualTabId is not { } activeTabId)
-        {
-            return projectedItems;
-        }
-
-        var targetTabId = preview.TargetManualTabIndex is { } tabIndex &&
-                          tabIndex >= 0 && tabIndex < geometry.ManualTabs.Count
-            ? geometry.ManualTabs[tabIndex].Id
-            : null;
-        return projectedItems.Where(item =>
-        {
-            var itemKey = item.Key.ToString();
-            if (previewItemKeys.Contains(itemKey))
-            {
-                return targetTabId == activeTabId;
-            }
-
-            return geometry.Box.ItemTabAssignments.TryGetValue(itemKey, out var itemTabId) &&
-                   itemTabId == activeTabId;
-        }).ToArray();
     }
 
     private void DrawBox(
@@ -678,7 +485,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         if (includeDropPreview)
         {
-            DrawDropInsertionFeedback(graphics, geometry, clipBounds);
+            DrawDropDragFeedback(graphics, geometry, clipBounds);
         }
         if (!_runtime.AreDesktopItemsHidden && geometry.Box.IsMappedFolder &&
             visibleItems.Length == 0)
@@ -857,8 +664,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 .ToArray();
         }
 
-        var preview = includeDropPreview ? _dropPreview : null;
-        IReadOnlyList<DesktopItemRef>? projectedItems = null;
         var hiddenKeySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (_dragStarted && _pressedBoxId == geometry.Box.Id)
         {
@@ -868,50 +673,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     .Select(item => item.Key.ToString()));
         }
         IReadOnlySet<string> hiddenKeys = hiddenKeySet;
-        IReadOnlySet<string>? visibleKeyFilter = null;
-
-        if (preview is { BoxId: var previewBoxId, AcceptsDrop: true } &&
-            previewBoxId == geometry.Box.Id && preview.ItemKeys.Count > 0)
-        {
-            var previewKeys = preview.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (preview.Kind == DropPreviewKind.Reorder)
-            {
-                var currentItems = GetCachedItemsForBox(geometry.Box.Id);
-                var currentKeys = currentItems.Select(item => item.Key.ToString()).ToArray();
-                var beforeKey = GetReorderBeforeKey(geometry, preview.Pointer);
-                var projectedKeys = LayoutCoordinator.ProjectReorderedKeys(
-                    geometry.Box,
-                    currentKeys,
-                    previewKeys,
-                    beforeKey);
-                var itemsByKey = currentItems.ToDictionary(
-                    item => item.Key.ToString(),
-                    StringComparer.OrdinalIgnoreCase);
-                projectedItems = projectedKeys
-                    .Where(itemsByKey.ContainsKey)
-                    .Select(key => itemsByKey[key])
-                    .ToArray();
-                hiddenKeySet.UnionWith(previewKeys);
-                visibleKeyFilter = GetVisibleItemsForBox(geometry)
-                    .Select(item => item.Key.ToString())
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            }
-            else if (preview.Kind == DropPreviewKind.DesktopAssign)
-            {
-                projectedItems = GetProjectedDesktopAssignmentItems(geometry, preview);
-                hiddenKeySet.UnionWith(previewKeys);
-            }
-        }
-
-        var layoutItems = projectedItems is null
-            ? GetVisibleItemsForBox(geometry)
-            : visibleKeyFilter is null
-                ? GetVisibleDesktopDropPreviewItems(
-                    geometry,
-                    preview!,
-                    projectedItems,
-                    hiddenKeys)
-                : projectedItems.Where(item => visibleKeyFilter.Contains(item.Key.ToString())).ToArray();
+        var layoutItems = GetVisibleItemsForBox(geometry);
 
         var appearance = _runtime.State.Settings.Appearance;
         var layout = DesktopItemLayoutEngine.CalculateVisible(

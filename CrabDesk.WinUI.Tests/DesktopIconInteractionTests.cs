@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
+using CrabDesk.Core;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Controls;
 using Xunit;
@@ -170,16 +171,192 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public void OpenBoxMenuSuspendsHoverStateUntilItCloses(
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, true)]
+    [InlineData(true, true, true)]
+    public void MenuOrInlineRenameSuspendsHoverStateUntilInteractionCompletes(
         bool menuOpen,
+        bool inlineRenameActive,
         bool expected)
     {
         Assert.Equal(
             expected,
             DesktopBoxForm.ShouldSuspendHoverState(
-                menuOpen ? Guid.NewGuid() : null));
+                menuOpen ? Guid.NewGuid() : null,
+                inlineRenameActive));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    public void PendingBoxHoverReconcileFlushesAfterPointerInteractionCompletes(
+        bool reconcilePending,
+        bool pointerInteractionActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopSurfaceManager.ShouldFlushPendingBoxHoverReconcile(
+                reconcilePending,
+                pointerInteractionActive));
+    }
+
+    [Fact]
+    public void DesktopDropTargetVisualIgnoresPointerMovementInsideTheSameBox()
+    {
+        var boxId = Guid.NewGuid();
+
+        Assert.False(DesktopBoxForm.HasDesktopDropTargetVisualChanged(
+            boxId,
+            previousAcceptsDrop: true,
+            previousManualTabIndex: null,
+            boxId,
+            currentAcceptsDrop: true,
+            currentManualTabIndex: null));
+    }
+
+    [Theory]
+    [InlineData(false, null, true, null, true)]
+    [InlineData(true, null, true, 0, true)]
+    [InlineData(true, 0, true, 1, true)]
+    [InlineData(true, 0, false, 0, true)]
+    public void DesktopDropTargetVisualUpdatesOnlyForVisibleTargetState(
+        bool hasPreviousTarget,
+        int? previousManualTabIndex,
+        bool currentAcceptsDrop,
+        int? currentManualTabIndex,
+        bool expected)
+    {
+        var currentBoxId = Guid.NewGuid();
+
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.HasDesktopDropTargetVisualChanged(
+                hasPreviousTarget ? currentBoxId : null,
+                previousAcceptsDrop: true,
+                previousManualTabIndex,
+                currentBoxId,
+                currentAcceptsDrop,
+                currentManualTabIndex));
+    }
+
+    [Theory]
+    [InlineData(false, false, false, true, false)]
+    [InlineData(false, true, false, true, true)]
+    [InlineData(false, false, true, false, true)]
+    [InlineData(true, false, false, true, true)]
+    public void OleDropPreviewRendersOnlyWhenItsVisibleFeedbackChanges(
+        bool floatingCard,
+        bool targetVisualChanged,
+        bool folderTargetChanged,
+        bool pointerChanged,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldRenderOleDropPreview(
+                floatingCard,
+                targetVisualChanged,
+                folderTargetChanged,
+                pointerChanged));
+    }
+
+    [Theory]
+    [InlineData(false, true, false, false, true, true, 7, 7, false)]
+    [InlineData(true, false, false, false, true, true, 7, 7, false)]
+    [InlineData(true, true, true, false, true, true, 7, 7, false)]
+    [InlineData(true, true, false, true, true, true, 7, 7, false)]
+    [InlineData(true, true, false, false, false, true, 7, 7, false)]
+    [InlineData(true, true, false, false, true, false, 7, 7, false)]
+    [InlineData(true, true, false, false, true, true, 6, 7, false)]
+    [InlineData(true, true, false, false, true, true, 7, 7, true)]
+    public void UnchangedParentBoxFrameIsReusedDuringPointerGhostDrag(
+        bool visualsInParent,
+        bool pointerGhostOverlayActive,
+        bool selecting,
+        bool staticFrameChanged,
+        bool parentFrameAvailable,
+        bool lastPresentSucceeded,
+        int presentedVersion,
+        int currentVersion,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldReuseBoxParentFrame(
+                visualsInParent,
+                pointerGhostOverlayActive,
+                selecting,
+                staticFrameChanged,
+                parentFrameAvailable,
+                lastPresentSucceeded,
+                presentedVersion,
+                currentVersion));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true, false, true)]
+    [InlineData(false, true, true, true, false, false)]
+    [InlineData(true, false, true, true, false, false)]
+    [InlineData(true, true, false, true, false, false)]
+    [InlineData(true, true, true, false, false, false)]
+    [InlineData(true, true, true, true, true, false)]
+    public void BoxLocalDropFeedbackKeepsTheExistingDragBase(
+        bool dragBaseReady,
+        bool partialUpdatePending,
+        bool visualsInParent,
+        bool pointerGhostOverlayActive,
+        bool selecting,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldKeepDragBaseForPartialBoxUpdate(
+                dragBaseReady,
+                partialUpdatePending,
+                visualsInParent,
+                pointerGhostOverlayActive,
+                selecting));
+    }
+
+    [Theory]
+    [InlineData(false, 10, 20, 30, 40, false)]
+    [InlineData(true, 10, 20, 10, 20, false)]
+    [InlineData(true, 10, 20, 30, 40, true)]
+    public void ActiveDragGhostSynchronizesToAChangedPhysicalCursor(
+        bool dragActive,
+        float currentX,
+        float currentY,
+        float cursorX,
+        float cursorY,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldSynchronizeDragPointer(
+                dragActive,
+            new PointF(currentX, currentY),
+            new PointF(cursorX, cursorY)));
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public void OleInitializesVirtualBoxGhostWithoutDrivingEveryPointerFrame(
+        bool keysChanged,
+        bool pointerInitialized,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldPublishVirtualBoxGhostFromOle(
+                keysChanged,
+                pointerInitialized));
     }
 
     [Theory]
@@ -447,6 +624,122 @@ public sealed class DesktopIconInteractionTests
         Assert.True(effects.HasFlag(DragDropEffects.Move));
     }
 
+    [Fact]
+    public void DesktopFolderDropAcceptsFilesystemFilesFromTheDesktop()
+    {
+        var draggedItems = new[]
+        {
+            CreateDesktopDropItem("file-a", @"C:\Users\Test\Desktop\a.txt", DesktopItemKind.File),
+            CreateDesktopDropItem("file-b", @"C:\Users\Test\Desktop\b.txt", DesktopItemKind.File)
+        };
+        var target = CreateDesktopDropItem(
+            "folder-target",
+            @"C:\Users\Test\Desktop\Archive",
+            DesktopItemKind.Folder);
+
+        Assert.True(DesktopFolderDropPolicy.CanAccept(draggedItems, target));
+    }
+
+    [Theory]
+    [InlineData(DesktopItemKind.File, @"C:\Users\Test\Desktop\Archive")]
+    [InlineData(DesktopItemKind.Folder, null)]
+    public void DesktopFolderDropRejectsTargetsThatAreNotFilesystemFolders(
+        DesktopItemKind targetKind,
+        string? targetPath)
+    {
+        var draggedItems = new[]
+        {
+            CreateDesktopDropItem("file-a", @"C:\Users\Test\Desktop\a.txt", DesktopItemKind.File)
+        };
+        var target = CreateDesktopDropItem("target", targetPath, targetKind);
+
+        Assert.False(DesktopFolderDropPolicy.CanAccept(draggedItems, target));
+    }
+
+    [Fact]
+    public void DesktopFolderDropRejectsAFolderIncludedInTheDraggedSelection()
+    {
+        var target = CreateDesktopDropItem(
+            "folder-target",
+            @"C:\Users\Test\Desktop\Archive",
+            DesktopItemKind.Folder);
+
+        Assert.False(DesktopFolderDropPolicy.CanAccept([target], target));
+    }
+
+    [Fact]
+    public void DesktopFolderDropRejectsMovingAParentFolderIntoItsDescendant()
+    {
+        var draggedFolder = CreateDesktopDropItem(
+            "folder-source",
+            @"C:\Users\Test\Desktop\Project",
+            DesktopItemKind.Folder);
+        var nestedTarget = CreateDesktopDropItem(
+            "folder-target",
+            @"C:\Users\Test\Desktop\Project\Archive",
+            DesktopItemKind.Folder);
+
+        Assert.False(DesktopFolderDropPolicy.CanAccept([draggedFolder], nestedTarget));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, DragDropEffects.Move)]
+    [InlineData(true, false, true, DragDropEffects.Copy)]
+    [InlineData(false, true, true, DragDropEffects.Move)]
+    [InlineData(false, false, false, DragDropEffects.Copy)]
+    public void DesktopFolderDropUsesExplorerStyleEffects(
+        bool acceptsFolder,
+        bool overRecycleBin,
+        bool controlPressed,
+        DragDropEffects expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ResolveDesktopDragEffect(
+                DragDropEffects.Copy | DragDropEffects.Move,
+                acceptsFolder,
+                overRecycleBin,
+                controlPressed));
+    }
+
+    [Fact]
+    public void DesktopFolderDropRejectsAnEffectNotOfferedByTheSource()
+    {
+        Assert.Equal(
+            DragDropEffects.None,
+            DesktopIconSurface.ResolveDesktopDragEffect(
+                DragDropEffects.Copy,
+                acceptsFolder: true,
+                overRecycleBin: false,
+                controlPressed: false));
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, false)]
+    public void FolderTargetDoesNotReclassifyAnInternalBoxDragAsAFileImport(
+        bool folderTargetAvailable,
+        bool internalBoxItemDrag,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldUseFolderDropTarget(
+                folderTargetAvailable,
+                internalBoxItemDrag));
+    }
+
+    [Fact]
+    public void DesktopFolderDropHighlightUsesOnlyLocalIconBounds()
+    {
+        var iconBounds = new RectangleF(100, 50, 48, 48);
+
+        Assert.Equal(
+            new RectangleF(88, 38, 72, 72),
+            DesktopIconSurface.CalculateDesktopFolderDropHighlightBounds(iconBounds));
+    }
+
     [Theory]
     [InlineData(false, false, true)]
     [InlineData(true, true, true)]
@@ -546,7 +839,7 @@ public sealed class DesktopIconInteractionTests
     [InlineData(false, false, false)]
     [InlineData(true, false, true)]
     [InlineData(true, true, false)]
-    public void PureHeightAnimationUsesTheSmallOverlayInsteadOfTheFullParentLayer(
+    public void PureHeightAnimationSkipsFullParentRedrawOwnership(
         bool hasDynamicVisual,
         bool heightAnimationOnly,
         bool expected)
@@ -596,25 +889,164 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(true, false, false, 0, true)]
-    [InlineData(false, false, false, 0, false)]
-    [InlineData(true, true, false, 0, false)]
-    [InlineData(true, false, true, 0, false)]
-    [InlineData(true, false, false, 1, false)]
-    public void PureBoxAnimationUsesTheSingleParentLayer(
-        bool partialAnimationOnly,
+    [InlineData(300, 340)]
+    [InlineData(340, 300)]
+    public void HeightAnimationOnlyInvalidatesTheMovingBottomEdge(
+        float previousHeight,
+        float currentHeight)
+    {
+        var dirtyBounds = DesktopBoxForm.CalculateHeightAnimationFrameDirtyBounds(
+            new RectangleF(100, 50, 300, 400),
+            previousHeight,
+            currentHeight,
+            cornerRadius: 12);
+
+        Assert.Equal(new RectangleF(100, 338, 300, 52), dirtyBounds);
+    }
+
+    [Theory]
+    [InlineData(true, true, false, false, true)]
+    [InlineData(false, true, false, false, false)]
+    [InlineData(true, false, false, false, false)]
+    [InlineData(true, true, true, false, false)]
+    [InlineData(true, true, false, true, false)]
+    public void CompletedSingleHeightAnimationCommitsThroughPartialFrame(
+        bool compositedByIconSurface,
+        bool hasCompletedAnimation,
+        bool animationStillActive,
+        bool otherDynamicVisualActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldCommitCompletedHeightAnimationPartially(
+                compositedByIconSurface,
+                hasCompletedAnimation,
+                animationStillActive,
+                otherDynamicVisualActive,
+                hasPartialRenderer: true));
+    }
+
+    [Theory]
+    [InlineData(0, 0, true)]
+    [InlineData(4, 3, false)]
+    [InlineData(4, 4, true)]
+    public void HeightAnimationCacheWaitsForEveryRealIcon(
+        int requiredIconCount,
+        int loadedIconCount,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldCreateHeightAnimationVisualCache(
+                requiredIconCount,
+                loadedIconCount));
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void LoadedIconOnlyRequestsAFrameWhenItsBoxIsSettledAndVisible(
+        bool effectivelyCollapsed,
+        bool heightAnimationActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldPresentLoadedBoxIcon(
+                effectivelyCollapsed,
+                heightAnimationActive));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void ExpandedBoxRetainsAnimationCacheForItsLaterCollapse(
+        bool effectivelyCollapsed,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldRetainHeightAnimationVisualCache(effectivelyCollapsed));
+    }
+
+    [Theory]
+    [InlineData(248, 248, 150)]
+    [InlineData(124, 248, 75)]
+    [InlineData(20, 248, 60)]
+    public void BoxHeightAnimationUsesResponsiveDistanceScaledTiming(
+        double remainingDistance,
+        double fullDistance,
+        double expectedMilliseconds)
+    {
+        Assert.Equal(
+            expectedMilliseconds,
+            DesktopBoxForm.CalculateBoxHeightAnimationDuration(
+                remainingDistance,
+                fullDistance).TotalMilliseconds,
+            precision: 3);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false, true, true)]
+    [InlineData(true, false, false, false, false, true)]
+    [InlineData(true, true, true, false, true, false)]
+    [InlineData(true, true, true, false, false, true)]
+    [InlineData(true, false, true, false, false, false)]
+    [InlineData(true, true, false, true, false, false)]
+    [InlineData(false, true, false, false, false, false)]
+    public void HeightAnimationUsesOneParentLayerWithoutACompositorHandoff(
+        bool partialAnimationEligible,
+        bool boxVisualsInParent,
+        bool pointerGhostOverlayActive,
         bool selecting,
-        bool dragging,
-        int boxDropItemCount,
+        bool staticFrameChanged,
         bool expected)
     {
         Assert.Equal(
             expected,
             DesktopIconSurface.ShouldPresentPartialBoxAnimationInParent(
-                partialAnimationOnly,
+                partialAnimationEligible,
+                boxVisualsInParent,
+                pointerGhostOverlayActive,
                 selecting,
-                dragging,
-                boxDropItemCount));
+                staticFrameChanged));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void PureHeightAnimationDoesNotUseTheChildDragOverlay(
+        bool pointerGhostOverlayActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldHideDragOverlayAfterPartialBoxAnimation(
+                pointerGhostOverlayActive));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(false, false, false, false, false)]
+    [InlineData(true, true, false, false, false)]
+    [InlineData(true, false, true, false, false)]
+    [InlineData(true, false, false, true, false)]
+    public void HeightAnimationRemainsPartialWithPassiveDropFeedback(
+        bool heightAnimationActive,
+        bool transformActive,
+        bool selectionActive,
+        bool scrollAnimationActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.CanUsePartialHeightAnimationComposition(
+                heightAnimationActive,
+                transformActive,
+                selectionActive,
+                scrollAnimationActive));
     }
 
     [Theory]
@@ -642,6 +1074,125 @@ public sealed class DesktopIconInteractionTests
             expectedY,
             expectedWidth,
             expectedHeight), dirtyBounds);
+    }
+
+    [Fact]
+    public void MovingBoxFrameInvalidatesItsPreviousAndCurrentVisualBounds()
+    {
+        var previous = new RectangleF(100, 80, 260, 320);
+        var current = new RectangleF(130, 110, 260, 320);
+
+        Assert.Equal(
+            new RectangleF(100, 80, 290, 350),
+            DesktopIconSurface.CalculateDynamicBoxFrameDirtyBounds(previous, current));
+    }
+
+    [Fact]
+    public void DesktopDropDirtyBoundsOnlyContainMovedAndDraggedIcons()
+    {
+        var before = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dragged"] = new RectangleF(10, 20, 70, 84),
+            ["displaced"] = new RectangleF(110, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+        var after = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dragged"] = new RectangleF(110, 20, 70, 84),
+            ["displaced"] = new RectangleF(10, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+
+        var dirtyBounds = DesktopIconSurface.CalculateDesktopDropDirtyBounds(
+            before,
+            after,
+            ["dragged"])
+            .OrderBy(bounds => bounds.X)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                new RectangleF(10, 20, 70, 84),
+                new RectangleF(110, 20, 70, 84)
+            ],
+            dirtyBounds);
+    }
+
+    [Fact]
+    public void CancelledDesktopDropStillRestoresOnlyTheDraggedIconRegion()
+    {
+        var settledBounds = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dragged"] = new RectangleF(10, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+
+        var dirtyBounds = DesktopIconSurface.CalculateDesktopDropDirtyBounds(
+            settledBounds,
+            settledBounds,
+            ["dragged"]);
+
+        Assert.Equal([new RectangleF(10, 20, 70, 84)], dirtyBounds);
+    }
+
+    [Fact]
+    public void BoxAssignmentAddsTheTargetBoxToDesktopDropDirtyBounds()
+    {
+        var before = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["dragged"] = new RectangleF(10, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+        var after = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+        var targetBoxBounds = new RectangleF(300, 220, 240, 180);
+
+        var dirtyBounds = DesktopIconSurface.CalculateDesktopDropDirtyBounds(
+            before,
+            after,
+            ["dragged"],
+            targetBoxBounds)
+            .OrderBy(bounds => bounds.X)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                new RectangleF(10, 20, 70, 84),
+                targetBoxBounds
+            ],
+            dirtyBounds);
+    }
+
+    [Fact]
+    public void BoxReleaseDirtyBoundsIncludeTheNewAndDisplacedDesktopIcons()
+    {
+        var before = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["displaced"] = new RectangleF(10, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+        var after = new Dictionary<string, RectangleF>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["released"] = new RectangleF(10, 20, 70, 84),
+            ["displaced"] = new RectangleF(110, 20, 70, 84),
+            ["unchanged"] = new RectangleF(610, 20, 70, 84)
+        };
+
+        var dirtyBounds = DesktopIconSurface.CalculateDesktopDropDirtyBounds(
+            before,
+            after,
+            ["released"])
+            .OrderBy(bounds => bounds.X)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                new RectangleF(10, 20, 70, 84),
+                new RectangleF(110, 20, 70, 84)
+            ],
+            dirtyBounds);
     }
 
     [Theory]
@@ -701,6 +1252,18 @@ public sealed class DesktopIconInteractionTests
                 previousClickUtc.AddMilliseconds(elapsedMilliseconds),
                 systemDoubleClickTimeMilliseconds: 400));
     }
+
+    private static DesktopItemRef CreateDesktopDropItem(
+        string key,
+        string? path,
+        DesktopItemKind kind) => new()
+    {
+        Key = new DesktopItemKey("test", key),
+        DisplayName = path is null ? key : Path.GetFileName(path),
+        ParsingName = path ?? $"shell:{key}",
+        FileSystemPath = path,
+        Kind = kind
+    };
 
     private static void AssertBalancedOuterVerticalSpace(ToolStripDropDownMenu menu)
     {

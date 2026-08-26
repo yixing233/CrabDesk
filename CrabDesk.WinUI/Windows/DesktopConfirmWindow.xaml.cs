@@ -61,8 +61,8 @@ public sealed partial class DesktopConfirmWindow : Window
         bool isDark)
     {
         var window = new DesktopConfirmWindow(ownerHandle, title, message, primaryText, isDark);
-        window.Activate();
         window.ConfigureWindow();
+        window.Activate();
         return window._completion.Task;
     }
 

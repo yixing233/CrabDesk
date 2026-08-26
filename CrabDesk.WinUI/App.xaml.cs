@@ -22,6 +22,7 @@ public partial class App : Application
     private EventWaitHandle? _organizeEvent;
     private EventWaitHandle? _aiOrganizeEvent;
     private EventWaitHandle? _createBoxEvent;
+    private EventWaitHandle? _reconnectEvent;
     private EventWaitHandle? _settingsEvent;
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
@@ -52,10 +53,13 @@ public partial class App : Application
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         var commandLine = Environment.GetCommandLineArgs();
-        var exitExisting = commandLine.Any(argument => string.Equals(argument, "--exit-existing", StringComparison.OrdinalIgnoreCase));
+        var exit = commandLine.Any(argument =>
+            string.Equals(argument, "--exit", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(argument, "--exit-existing", StringComparison.OrdinalIgnoreCase));
         var organize = commandLine.Any(argument => string.Equals(argument, "--organize", StringComparison.OrdinalIgnoreCase));
         var aiOrganize = commandLine.Any(argument => string.Equals(argument, "--ai-organize", StringComparison.OrdinalIgnoreCase));
         var createBox = commandLine.Any(argument => string.Equals(argument, "--create-box", StringComparison.OrdinalIgnoreCase));
+        var reconnect = commandLine.Any(argument => string.Equals(argument, "--reconnect", StringComparison.OrdinalIgnoreCase));
         var undoOrganization = commandLine.Any(argument => string.Equals(argument, "--undo-organization", StringComparison.OrdinalIgnoreCase));
         var showSettings = commandLine.Any(argument => string.Equals(argument, "--show-settings", StringComparison.OrdinalIgnoreCase));
         var validationPage = GetArgumentValue(commandLine, "--validation-page");
@@ -69,16 +73,17 @@ public partial class App : Application
         if (!createdNew)
         {
             SignalExistingInstance(GetCommandEventName(
-                exitExisting,
+                exit,
                 organize,
                 aiOrganize,
                 createBox,
+                reconnect,
                 showSettings,
                 undoOrganization));
             Exit();
             return;
         }
-        if (exitExisting)
+        if (exit)
         {
             DisposeInstanceResources();
             Exit();
@@ -90,6 +95,7 @@ public partial class App : Application
         _organizeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Organize");
         _aiOrganizeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.AiOrganize");
         _createBoxEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.CreateBox");
+        _reconnectEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Reconnect");
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Settings");
         _undoOrganizationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.UndoOrganization");
 
@@ -223,6 +229,7 @@ public partial class App : Application
         StartListener(_organizeEvent!, dispatcher, () => runtime.SmartOrganize());
         StartListener(_aiOrganizeEvent!, dispatcher, OpenAiOrganizationWorkbench);
         StartListener(_createBoxEvent!, dispatcher, () => runtime.AddBox());
+        StartListener(_reconnectEvent!, dispatcher, () => _ = runtime.ReconnectDesktopAsync());
         StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
         StartListener(_undoOrganizationEvent!, dispatcher, runtime.UndoLastOrganization);
     }
@@ -271,17 +278,19 @@ public partial class App : Application
     }
 
     private static string GetCommandEventName(
-        bool exitExisting,
+        bool exit,
         bool organize,
         bool aiOrganize,
         bool createBox,
+        bool reconnect,
         bool showSettings,
         bool undoOrganization)
     {
-        if (exitExisting) return @"Local\CrabDesk.Exit";
+        if (exit) return @"Local\CrabDesk.Exit";
         if (organize) return @"Local\CrabDesk.Organize";
         if (aiOrganize) return @"Local\CrabDesk.AiOrganize";
         if (createBox) return @"Local\CrabDesk.CreateBox";
+        if (reconnect) return @"Local\CrabDesk.Reconnect";
         if (showSettings) return @"Local\CrabDesk.Settings";
         if (undoOrganization) return @"Local\CrabDesk.UndoOrganization";
         return @"Local\CrabDesk.Activate";
@@ -306,6 +315,7 @@ public partial class App : Application
         _organizeEvent?.Dispose();
         _aiOrganizeEvent?.Dispose();
         _createBoxEvent?.Dispose();
+        _reconnectEvent?.Dispose();
         _settingsEvent?.Dispose();
         _undoOrganizationEvent?.Dispose();
         if (_ownsSingleInstanceMutex)

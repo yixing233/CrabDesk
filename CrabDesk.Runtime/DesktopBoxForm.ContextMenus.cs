@@ -524,6 +524,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             GraphicsUnit.Point);
         _renamingBoxId = box.Id;
         _renamingItemKey = item.Key.ToString();
+        DiagnosticLog.Verbose(
+            $"Box inline rename opened box={box.Id} item={_renamingItemKey}");
         RequestVisualLayerRender();
         try
         {
@@ -543,6 +545,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _renamingBoxId = null;
             _renamingItemKey = null;
             RequestVisualLayerRender();
+            QueueHoverReconcile();
+            DiagnosticLog.Verbose("Box inline rename completed; hover reconciliation queued.");
         }
     }
 

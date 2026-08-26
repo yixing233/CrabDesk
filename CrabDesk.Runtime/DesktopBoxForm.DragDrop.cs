@@ -36,6 +36,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             : null;
     }
 
+    internal static bool ShouldUseFolderDropTarget(
+        bool folderTargetAvailable,
+        bool internalBoxItemDrag) =>
+        folderTargetAvailable && !internalBoxItemDrag;
+
+    private DesktopItemRef? GetFolderDropTargetForDrag(
+        BoxGeometry box,
+        PointF point,
+        Forms.DragEventArgs eventArgs)
+    {
+        var folderTarget = GetFolderDropTarget(box, point);
+        return ShouldUseFolderDropTarget(
+                folderTarget is not null,
+                IsInternalBoxItemDrag(eventArgs))
+            ? folderTarget
+            : null;
+    }
+
+    private static bool IsInternalBoxItemDrag(Forms.DragEventArgs eventArgs) =>
+        eventArgs.Data?.GetDataPresent(ItemKeysFormat) == true &&
+        eventArgs.Data.GetDataPresent(SourceBoxFormat);
+
     /// <summary>
     /// Imports the active drag payload into a mapped folder's subfolder. The
     /// payload may be an external FileDrop or a CrabDesk desktop-icon drag;
@@ -87,15 +109,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         string? folderTargetName,
         PointF point)
     {
-        if (string.Equals(_lastLoggedFolderDropTarget, folderTargetName, StringComparison.Ordinal) &&
-            !string.IsNullOrEmpty(folderTargetName))
+        if (string.Equals(_lastLoggedFolderDropTarget, folderTargetName, StringComparison.Ordinal))
         {
             return;
         }
         _lastLoggedFolderDropTarget = folderTargetName;
-        DiagnosticLog.Info(
+        DiagnosticLog.Verbose(
             $"FolderDropProbe source={source} box={_runtime.State.Boxes.FirstOrDefault(b => b.Id == _boxes.LastOrDefault(x => x.Bounds.Contains(point))?.Box.Id)?.IsMappedFolder} " +
             $"folderTarget={folderTargetName ?? "(none)"} point=({point.X:0},{point.Y:0}) items={_items.Count}");
+    }
+
+    private bool SetFolderDropTargetName(string? folderTargetName)
+    {
+        if (string.Equals(_folderDropTargetName, folderTargetName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        _folderDropTargetName = folderTargetName;
+        return true;
     }
 
     private int AssignDesktopItemsAtDrop(
@@ -114,53 +146,55 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var incomingKeys = incoming.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var beforeKey = ResolveInsertBeforeKey(target, point, incomingKeys);
-        var assigned = _runtime.AssignItems(incoming, target.Box.Id);
-        if (assigned > 0 && beforeKey is not null)
-        {
-            // A desktop drop is an insertion, not an append. ReorderItems also
-            // promotes a sorted box to manual mode so the chosen position is
-            // retained after the next refresh.
-            _runtime.ReorderBoxItems(target.Box.Id, incoming, beforeKey);
-        }
-
         var manualTab = GetManualBoxTabAtPoint(target, point);
-        if (assigned > 0 && manualTab is not null)
-        {
-            _runtime.MoveItemsToManualTab(target.Box.Id, incoming, manualTab.Id);
-        }
-        return assigned;
+        return _runtime.AssignDesktopItemsAtDrop(
+            incoming,
+            target.Box.Id,
+            beforeKey,
+            manualTab?.Id);
     }
 
     private void SetDropPreview(DropPreviewState? preview, bool requestRender = true)
     {
+        var previousPreview = _dropPreview;
         if (_dropPreview == preview)
         {
+            if (requestRender)
+            {
+                _dynamicVisualVersion++;
+                RequestDropPreviewVisualUpdate(previousPreview, preview);
+            }
             return;
         }
 
-        if (_dropPreview?.BoxId != preview?.BoxId)
+        if (requestRender)
         {
             _dynamicVisualVersion++;
         }
         _dropPreview = preview;
         if (requestRender)
         {
-            RequestDragRender();
+            RequestDropPreviewVisualUpdate(previousPreview, preview);
         }
     }
 
     private void ClearDropPreview()
     {
-        _folderDropTargetName = null;
-        _lastDesktopDropTargetKey = null;
+        var previousPreview = _dropPreview;
+        var folderTargetChanged = SetFolderDropTargetName(null);
         if (_dropPreview is null)
         {
+            if (folderTargetChanged)
+            {
+                _dynamicVisualVersion++;
+                RequestDropPreviewVisualUpdate(previousPreview, null);
+            }
             return;
         }
 
         _dropPreview = null;
         _dynamicVisualVersion++;
-        RequestDragRender();
+        RequestDropPreviewVisualUpdate(previousPreview, null);
     }
 
     private void InvalidateDropPreview(Guid? boxId)
@@ -175,6 +209,41 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             InvalidateDip(box.Bounds);
         }
+    }
+
+    private void RequestDropPreviewVisualUpdate(
+        DropPreviewState? previousPreview,
+        DropPreviewState? currentPreview)
+    {
+        if (_isCompositedByIconSurface &&
+            _iconLayerPartialRenderRequest is not null)
+        {
+            EnsureGeometry();
+            RectangleF? dirtyBounds = null;
+            foreach (var boxId in new[] { previousPreview?.BoxId, currentPreview?.BoxId }
+                         .Where(id => id is not null)
+                         .Select(id => id!.Value)
+                         .Distinct())
+            {
+                var geometry = _boxes.FirstOrDefault(box => box.Box.Id == boxId);
+                if (geometry is null)
+                {
+                    continue;
+                }
+                var candidate = RectangleF.Inflate(geometry.Bounds, 4, 4);
+                dirtyBounds = dirtyBounds is { } existing
+                    ? RectangleF.Union(existing, candidate)
+                    : candidate;
+            }
+
+            if (dirtyBounds is { } localBounds)
+            {
+                _iconLayerPartialRenderRequest(localBounds);
+                return;
+            }
+        }
+
+        RequestDragRender();
     }
 
     private DragImage? CreateDragImage(
@@ -282,9 +351,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnDragOver(object? sender, Forms.DragEventArgs eventArgs)
     {
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
-        // Every frame recomputes the drop-target folder highlight; branches
-        // that accept a folder item set it again before returning.
-        _folderDropTargetName = null;
         ForwardDragStateToIconSurface(eventArgs, point);
         // Box geometry is static during an OLE item drag; the shared compositor
         // already rebuilt it on the previous frame. Rebuilding per DragOver
@@ -314,7 +380,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // A mapped folder only accepts the drag when it lands on a real
             // subfolder (an internal drop there imports into that folder).
             var deskDropFolderTarget = GetFolderDropTarget(targetGeometry, point);
-            _folderDropTargetName = deskDropFolderTarget?.DisplayName;
+            var folderTargetChanged = SetFolderDropTargetName(deskDropFolderTarget?.DisplayName);
             LogFolderDropProbe("DeskIconDrag", deskDropFolderTarget?.DisplayName, point);
             var acceptsDrop = deskDropFolderTarget is not null ||
                               target.MappedFolder?.IsReadOnly != true;
@@ -324,11 +390,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 desktopDrag.ItemKeys,
                 desktopDrag.ItemKeys.Count,
                 acceptsDrop,
-                // No grid insertion projection: a box receives the drop into
-                // its body (or a highlighted mapped subfolder), it never
-                // reflows the item grid visually.
-                DropPreviewKind.Assign,
-                floatingCard: false);
+                floatingCard: false,
+                folderTargetChanged: folderTargetChanged);
             // A box body accepts the drag as a plain virtual assignment
             // (Copy). Entering a folder item under the pointer turns it into
             // a real filesystem move (Ctrl = copy), matching Explorer.
@@ -354,20 +417,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var desktopVirtualAssignment = IsDesktopVirtualAssignment(eventArgs, target);
         if (target!.MappedFolder?.IsReadOnly == true)
         {
+            var folderTargetChanged = SetFolderDropTargetName(null);
             UpdateOleDropPreview(
                 targetGeometry,
                 point,
                 GetDragItemKeys(eventArgs),
                 GetDragItemCount(eventArgs),
                 false,
-                DropPreviewKind.Assign,
-                floatingCard: false);
+                floatingCard: false,
+                folderTargetChanged: folderTargetChanged);
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
         }
         var effect = ResolveTransferEffect(eventArgs, target);
-        var mappedFolderTarget = GetFolderDropTarget(targetGeometry, point);
-        _folderDropTargetName = mappedFolderTarget?.DisplayName;
+        var mappedFolderTarget = GetFolderDropTargetForDrag(targetGeometry, point, eventArgs);
+        var mappedFolderTargetChanged = SetFolderDropTargetName(mappedFolderTarget?.DisplayName);
         LogFolderDropProbe("FileDrop", mappedFolderTarget?.DisplayName, point);
         if (mappedFolderTarget is not null && targetGeometry is not null)
         {
@@ -379,12 +443,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 GetDragItemKeys(eventArgs),
                 GetDragItemCount(eventArgs),
                 true,
-                DropPreviewKind.Assign,
-                floatingCard: false);
+                floatingCard: false,
+                folderTargetChanged: mappedFolderTargetChanged);
             eventArgs.Effect = IsControlPressed(eventArgs)
                 ? Forms.DragDropEffects.Copy
                 : Forms.DragDropEffects.Move;
-            InvalidateDropPreview(target.Id);
             return;
         }
         if (effect == BoxTransferEffect.VirtualMove && targetGeometry is not null &&
@@ -397,8 +460,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 GetDragItemKeys(eventArgs),
                 GetDragItemCount(eventArgs),
                 false,
-                DropPreviewKind.Assign,
-                floatingCard: false);
+                floatingCard: false,
+                folderTargetChanged: mappedFolderTargetChanged);
             eventArgs.Effect = Forms.DragDropEffects.None;
             return;
         }
@@ -412,21 +475,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             : IsControlPressed(eventArgs)
                 ? Forms.DragDropEffects.Copy
                 : Forms.DragDropEffects.Move;
-        // Grid insertion/Restock projections are intentionally omitted: the
-        // drop lands in the box body and ordering is still resolved from the
-        // pointer at drop time.
-        var previewKind = DropPreviewKind.Assign;
         UpdateOleDropPreview(
             targetGeometry!,
             point,
             GetDragItemKeys(eventArgs),
             GetDragItemCount(eventArgs),
             eventArgs.Effect != Forms.DragDropEffects.None,
-            previewKind,
-            // Box-item drags carry no shell drag image, so the box draws the
-            // shared ghost card itself. External file and desktop-icon drags
-            // already have a following ghost and only need slot feedback.
-            floatingCard: eventArgs.Data?.GetDataPresent(ItemKeysFormat) == true);
+            // DesktopIconSurface owns the box-item ghost in its small layered
+            // overlay. This surface only renders target/tab/folder feedback.
+            floatingCard: false,
+            folderTargetChanged: mappedFolderTargetChanged);
     }
 
     private void ForwardDragStateToIconSurface(
@@ -451,12 +509,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 return;
             }
 
-            // Box-item drags draw their own ghost card on this surface; the
-            // surface must not paint a second external card (and leave a
-            // stale one behind after the drop).
+            // Box-item drags use the icon surface's small layered ghost. Pass
+            // the stable keys so the ghost stays independent of box redraws.
             if (eventArgs.Data.GetDataPresent(ItemKeysFormat))
             {
-                forward(point, null, null);
+                forward(point, null, GetDragItemKeys(eventArgs));
                 return;
             }
 
@@ -486,19 +543,34 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         IReadOnlyList<string> itemKeys,
         int itemCount,
         bool acceptsDrop,
-        DropPreviewKind kind,
-        bool floatingCard = false)
+        bool floatingCard = false,
+        bool folderTargetChanged = false)
     {
         var manualTabIndex = GetManualBoxTabIndex(target, point);
-        SetDropPreview(new DropPreviewState(
-            target.Box.Id,
-            point,
-            itemKeys,
-            itemCount,
-            acceptsDrop,
-            kind,
-            manualTabIndex,
-            floatingCard));
+        var targetVisualChanged = HasDesktopDropTargetVisualChanged(
+                                      _dropPreview?.BoxId,
+                                      _dropPreview?.AcceptsDrop,
+                                      _dropPreview?.TargetManualTabIndex,
+                                      target.Box.Id,
+                                      acceptsDrop,
+                                      manualTabIndex) ||
+                                  _dropPreview?.FloatingCard != floatingCard;
+        var pointerChanged = _dropPreview?.Pointer != point;
+        var renderNeeded = ShouldRenderOleDropPreview(
+            floatingCard,
+            targetVisualChanged,
+            folderTargetChanged,
+            pointerChanged);
+        SetDropPreview(
+            new DropPreviewState(
+                target.Box.Id,
+                point,
+                itemKeys,
+                itemCount,
+                acceptsDrop,
+                manualTabIndex,
+                floatingCard),
+            renderNeeded);
     }
 
     private static int GetDragItemCount(Forms.DragEventArgs eventArgs)
@@ -522,26 +594,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             eventArgs.Data.GetData(ItemKeysFormat) is string[] keys)
         {
             return keys;
-        }
-
-        // Explorer's desktop drag exposes only FileDrop paths. Resolve those
-        // paths back to the stable runtime keys so DesktopAssign can project
-        // the exact destination slot before the drop is committed.
-        if (eventArgs.Data?.GetDataPresent(Forms.DataFormats.FileDrop) == true &&
-            eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is string[] paths)
-        {
-            var desktopItemsByPath = _runtime.Items
-                .Where(item => item.FileSystemPath is not null)
-                .ToDictionary(
-                    item => Path.GetFullPath(item.FileSystemPath!),
-                    item => item.Key.ToString(),
-                    StringComparer.OrdinalIgnoreCase);
-            return paths
-                .Select(path => Path.GetFullPath(path))
-                .Where(desktopItemsByPath.ContainsKey)
-                .Select(path => desktopItemsByPath[path])
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
         }
 
         return [];
@@ -586,7 +638,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             var manualTargetTab = GetManualBoxTabAtPoint(box, point);
             var mappedTargetTab = GetMappedFolderTabAtPoint(box, point);
-            var mappedFolderTarget = GetFolderDropTarget(box, point);
+            var mappedFolderTarget = GetFolderDropTargetForDrag(box, point, eventArgs);
             DiagnosticLog.Info(
                 $"FolderDrop point=({point.X:0},{point.Y:0}) boxMapped={box.Box.IsMappedFolder} " +
                 $"target={mappedFolderTarget?.DisplayName ?? "(none)"} items={_items.Count}");

@@ -238,8 +238,8 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         content.ColumnDefinitions.Add(new WpfControls.ColumnDefinition { Width = Wpf.GridLength.Auto });
         content.ColumnDefinitions.Add(new WpfControls.ColumnDefinition { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         content.RowDefinitions.Add(new WpfControls.RowDefinition { Height = Wpf.GridLength.Auto });
-        content.RowDefinitions.Add(new WpfControls.RowDefinition { Height = Wpf.GridLength.Auto });
         content.RowDefinitions.Add(new WpfControls.RowDefinition { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
+        content.RowDefinitions.Add(new WpfControls.RowDefinition { Height = Wpf.GridLength.Auto });
 
         var iconBadge = new WpfControls.Grid
         {
@@ -295,13 +295,20 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
             LineHeight = 20,
             Foreground = ToBrush(bodyColor),
             TextWrapping = Wpf.TextWrapping.Wrap,
-            VerticalAlignment = Wpf.VerticalAlignment.Top,
-            Margin = new Wpf.Thickness(0, 7, 0, 0)
+            VerticalAlignment = Wpf.VerticalAlignment.Top
         };
         WpfAutomation.SetName(body, message);
-        content.Children.Add(body);
-        WpfControls.Grid.SetColumn(body, 1);
-        WpfControls.Grid.SetRow(body, 1);
+        var bodyScroll = new WpfControls.ScrollViewer
+        {
+            Content = body,
+            HorizontalScrollBarVisibility = WpfControls.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = WpfControls.ScrollBarVisibility.Auto,
+            VerticalAlignment = Wpf.VerticalAlignment.Stretch,
+            Margin = new Wpf.Thickness(0, 7, 0, 0)
+        };
+        content.Children.Add(bodyScroll);
+        WpfControls.Grid.SetColumn(bodyScroll, 1);
+        WpfControls.Grid.SetRow(bodyScroll, 1);
 
         var actions = new WpfControls.Grid
         {
