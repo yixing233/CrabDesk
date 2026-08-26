@@ -5,9 +5,7 @@ namespace CrabDesk.Runtime;
 
 internal static class UpdateConfiguration
 {
-    private const string LegacyInstallerAssetName = "CrabDesk-Setup-x64.exe";
-    private const string WebInstallerAssetName = "CrabDesk-Setup-Web-x64.exe";
-    private const string FullInstallerAssetName = "CrabDesk-Setup-Full-x64.exe";
+    internal const string InstallerAssetName = "CrabDesk-Setup-x64.exe";
 
     internal static string CurrentVersion
     {
@@ -51,22 +49,5 @@ internal static class UpdateConfiguration
         return (
             settings.RepositoryOwner?.Trim() ?? string.Empty,
             settings.RepositoryName?.Trim() ?? string.Empty);
-    }
-
-    internal static string InstallerAssetName
-    {
-        get
-        {
-            var metadata = (Assembly.GetEntryAssembly() ?? typeof(UpdateConfiguration).Assembly)
-                .GetCustomAttributes<AssemblyMetadataAttribute>()
-                .FirstOrDefault(attribute =>
-                    attribute.Key.Equals("CrabDeskPackageKind", StringComparison.OrdinalIgnoreCase))?
-                .Value;
-            return metadata?.Equals("Web", StringComparison.OrdinalIgnoreCase) == true
-                ? WebInstallerAssetName
-                : metadata?.Equals("Full", StringComparison.OrdinalIgnoreCase) == true
-                    ? FullInstallerAssetName
-                    : LegacyInstallerAssetName;
-        }
     }
 }

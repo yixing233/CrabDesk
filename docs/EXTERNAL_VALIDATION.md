@@ -90,7 +90,8 @@ Windows 10 与 Windows 11 的结果必须写入不同子目录，避免后一台
   -CertificatePassword <password> `
   -Files @(
     "artifacts\publish\win-x64\CrabDesk.WinUI.exe",
-    "artifacts\installer\CrabDesk-Setup-x64.exe"
+    "artifacts\installer\CrabDesk-Payload-x64.exe",
+    "artifacts\release\CrabDesk-Setup-x64.exe"
   )
 ```
 
@@ -98,7 +99,8 @@ Windows 10 与 Windows 11 的结果必须写入不同子目录，避免后一台
 
 ```powershell
 Get-AuthenticodeSignature artifacts\publish\win-x64\CrabDesk.WinUI.exe
-Get-AuthenticodeSignature artifacts\installer\CrabDesk-Setup-x64.exe
+Get-AuthenticodeSignature artifacts\installer\CrabDesk-Payload-x64.exe
+Get-AuthenticodeSignature artifacts\release\CrabDesk-Setup-x64.exe
 ```
 
 三个状态都必须为 `Valid`，发布者名称与证书主体一致，并带有可信 SHA-256 时间戳。GitHub 仓库需要配置 `SIGNING_CERTIFICATE_BASE64` 和 `SIGNING_CERTIFICATE_PASSWORD` 两个 Actions Secret。
@@ -112,7 +114,6 @@ Get-AuthenticodeSignature artifacts\installer\CrabDesk-Setup-x64.exe
 4. 创建并推送带注释标签 `v1.0.0`。
 5. 确认 `release.yml` 成功生成以下资产：
    - `CrabDesk-Setup-x64.exe`
-   - `CrabDesk-Setup-Web-x64.exe`
    - `SHA256SUMS.txt`
 6. 下载 GitHub Release 资产，重新验证 SHA-256、Authenticode 签名、安装和卸载。
 7. 确认 Release 使用 `docs\releases\v1.0.0.md`，并在已配置正式仓库的客户端中检查到 `1.0.0`。

@@ -56,24 +56,13 @@ jobs:
             -GitHubOwner "${{ github.repository_owner }}" `
             -GitHubRepository "${{ github.event.repository.name }}"
 
-      - name: Publish Web bootstrapper
-        shell: pwsh
-        run: |
-          .\build\publish-bootstrapper.ps1 `
-            -Version $env:CRABDESK_VERSION `
-            -GitHubOwner "${{ github.repository_owner }}" `
-            -GitHubRepository "${{ github.event.repository.name }}"
-
       - name: Sign application binaries
         if: ${{ env.SIGNING_CERTIFICATE_BASE64 != '' }}
         shell: pwsh
         run: |
           $certificate = Join-Path $env:RUNNER_TEMP "CrabDesk-signing.pfx"
           [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
-          $files = @(
-            (Get-ChildItem artifacts\publish\win-x64 -Filter *.exe | Select-Object -ExpandProperty FullName),
-            (Resolve-Path artifacts\release\CrabDesk-Setup-Web-x64.exe).Path
-          )
+          $files = @(Get-ChildItem artifacts\publish\win-x64 -Filter *.exe | Select-Object -ExpandProperty FullName)
           .\build\sign-artifacts.ps1 `
             -CertificatePath $certificate `
             -CertificatePassword $env:SIGNING_CERTIFICATE_PASSWORD `
@@ -85,7 +74,7 @@ jobs:
           choco install innosetup --yes --no-progress
           .\build\build-installer.ps1 -Version $env:CRABDESK_VERSION
 
-      - name: Sign installer
+      - name: Sign embedded payload
         if: ${{ env.SIGNING_CERTIFICATE_BASE64 != '' }}
         shell: pwsh
         run: |
@@ -93,10 +82,22 @@ jobs:
           .\build\sign-artifacts.ps1 `
             -CertificatePath $certificate `
             -CertificatePassword $env:SIGNING_CERTIFICATE_PASSWORD `
-            -Files @(
-              "artifacts\installer\CrabDesk-Setup-x64.exe",
-              "artifacts\release\CrabDesk-Setup-Web-x64.exe"
-            )
+            -Files @("artifacts\installer\CrabDesk-Payload-x64.exe")
+
+      - name: Publish online setup
+        shell: pwsh
+        run: |
+          .\build\publish-bootstrapper.ps1 -Version $env:CRABDESK_VERSION
+
+      - name: Sign online setup
+        if: ${{ env.SIGNING_CERTIFICATE_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          $certificate = Join-Path $env:RUNNER_TEMP "CrabDesk-signing.pfx"
+          .\build\sign-artifacts.ps1 `
+            -CertificatePath $certificate `
+            -CertificatePassword $env:SIGNING_CERTIFICATE_PASSWORD `
+            -Files @("artifacts\release\CrabDesk-Setup-x64.exe")
           Remove-Item -LiteralPath $certificate -Force
 
       - name: Verify stable release signatures
@@ -106,8 +107,8 @@ jobs:
           $files = @(
             "artifacts\publish\win-x64\CrabDesk.WinUI.exe",
             "artifacts\publish\win-x64\CrabDesk.IconGuard.exe",
-            "artifacts\installer\CrabDesk-Setup-x64.exe",
-            "artifacts\release\CrabDesk-Setup-Web-x64.exe"
+            "artifacts\installer\CrabDesk-Payload-x64.exe",
+            "artifacts\release\CrabDesk-Setup-x64.exe"
           )
           $signatures = foreach ($file in $files) {
             $signature = Get-AuthenticodeSignature -LiteralPath $file
@@ -133,8 +134,7 @@ jobs:
         run: |
           New-Item -ItemType Directory artifacts\release -Force | Out-Null
           $assets = @(
-            "artifacts\installer\CrabDesk-Setup-x64.exe",
-            "artifacts\release\CrabDesk-Setup-Web-x64.exe"
+            "artifacts\release\CrabDesk-Setup-x64.exe"
           )
           $lines = foreach ($asset in $assets) {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()
@@ -149,8 +149,7 @@ jobs:
         run: |
           $arguments = @(
             "release", "create", "${{ github.ref_name }}",
-            "artifacts\installer\CrabDesk-Setup-x64.exe",
-            "artifacts\release\CrabDesk-Setup-Web-x64.exe",
+            "artifacts\release\CrabDesk-Setup-x64.exe",
             "artifacts\release\SHA256SUMS.txt",
             "--title", "CrabDesk $env:CRABDESK_VERSION",
             "--verify-tag"

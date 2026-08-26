@@ -58,18 +58,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
                         (int)(monitor.PixelBounds.Y - parentBounds.Y),
                         (int)monitor.PixelBounds.Width,
                         (int)monitor.PixelBounds.Height);
-                    if (!iconSurface.RefreshWorkspace() || !iconSurface.IsLayerReady)
-                    {
-                        throw new InvalidOperationException(
-                            $"The CrabDesk desktop icon surface could not be rendered: {iconSurface.LayerDiagnostic}");
-                    }
-                    iconSurface.Show();
-                    if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, host.DesktopListView) ||
-                        !iconSurface.IsLayerReady)
-                    {
-                        throw new InvalidOperationException(
-                            $"The CrabDesk desktop icon surface could not be shown: {iconSurface.LayerDiagnostic}");
-                    }
                     _iconSurfaces.Add(iconSurface);
                 }
                 catch
@@ -96,17 +84,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     {
                         throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified.");
                     }
-                    surface.Show();
-                    var shown = DesktopWindowTools.ShowAboveDesktop(surface.Handle, host.DesktopListView);
-                    var regionUpdated = surface.UpdateInteractionRegion();
-                    var regionValid = surface.ValidateWindowRegion();
-                    if (!shown || !regionUpdated || !surface.IsLayerReady || !regionValid)
-                    {
-                        throw new InvalidOperationException(
-                            "The CrabDesk desktop surface region was lost while showing. " +
-                            $"shown={shown} regionUpdated={regionUpdated} regionValid={regionValid} " +
-                            DesktopWindowTools.GetDesktopSurfaceDiagnostics(surface.Handle, host.DesktopListView));
-                    }
                     _surfaces.Add(surface);
                 }
                 catch
@@ -116,7 +93,19 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 }
             }
             ConfigureBoxIconLayerComposition();
-            Refresh();
+            // Keep Explorer's native desktop fully visible and interactive
+            // while the replacement windows are prepared. Render the final
+            // icon/box composite once, then show every prepared child in one
+            // short hand-off immediately before hiding Explorer's ListView.
+            foreach (var iconSurface in _iconSurfaces)
+            {
+                if (!iconSurface.RefreshWorkspace() || !iconSurface.IsLayerReady)
+                {
+                    throw new InvalidOperationException(
+                        $"The CrabDesk desktop icon surface could not be rendered: {iconSurface.LayerDiagnostic}");
+                }
+            }
+            ShowPreparedSurfaces();
             EnsureReady();
             if (!DesktopWindowTools.TryHideDesktopIconView(_desktopListView, out _desktopIconViewWasVisible))
             {
@@ -132,6 +121,37 @@ internal sealed class DesktopSurfaceManager : IDisposable
             Dispose();
             throw;
         }
+    }
+
+    private void ShowPreparedSurfaces()
+    {
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            iconSurface.Show();
+            if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _host.DesktopListView) ||
+                !iconSurface.IsLayerReady)
+            {
+                throw new InvalidOperationException(
+                    $"The CrabDesk desktop icon surface could not be shown: {iconSurface.LayerDiagnostic}");
+            }
+        }
+
+        foreach (var surface in _surfaces)
+        {
+            surface.Show();
+            var shown = DesktopWindowTools.ShowAboveDesktop(surface.Handle, _host.DesktopListView);
+            var regionUpdated = surface.UpdateInteractionRegion();
+            var regionValid = surface.ValidateWindowRegion();
+            if (!shown || !regionUpdated || !surface.IsLayerReady || !regionValid)
+            {
+                throw new InvalidOperationException(
+                    "The CrabDesk desktop surface region was lost while showing. " +
+                    $"shown={shown} regionUpdated={regionUpdated} regionValid={regionValid} " +
+                    DesktopWindowTools.GetDesktopSurfaceDiagnostics(surface.Handle, _host.DesktopListView));
+            }
+        }
+
+        EnsureBoxesAboveDesktopIcons();
     }
 
     // Refreshes every surface after a workspace change (e.g. an appearance

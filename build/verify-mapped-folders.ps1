@@ -97,7 +97,7 @@ try {
 
     $saved = Get-Content -LiteralPath (Join-Path $testRoot "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $mapped = @($saved.Boxes | Where-Object { $_.Id -eq $mappedBoxId })
-    if ($saved.SchemaVersion -ne 13 -or $mapped.Count -ne 1) {
+    if ($saved.SchemaVersion -ne 21 -or $mapped.Count -ne 1) {
         throw "Mapped folder configuration was not persisted after schema migration."
     }
     if ($mapped[0].MappedFolder.Path -ne $mappedDirectory -or $mapped[0].MappedFolder.IsReadOnly) {

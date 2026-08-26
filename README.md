@@ -74,8 +74,9 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 
 | 安装包 | 说明 |
 | --- | --- |
-| `CrabDesk-Setup-x64.exe` | 完整安装包，包含全部运行组件，离线可用 |
-| `CrabDesk-Setup-Web-x64.exe` | 轻量在线安装器（约 5 MB）：自动下载完整安装包并静默安装，无需手动点击向导 |
+| `CrabDesk-Setup-x64.exe` | 唯一正式安装包：内嵌 framework-dependent CrabDesk，检测并仅下载缺失的 Microsoft 运行组件 |
+
+Setup 自身采用 Native AOT，不依赖目标电脑预先安装 .NET；CrabDesk 应用本体作为内部 Payload 嵌入 Setup，不会作为第二个 Release 下载资源发布。
 
 每个 Release 都附带 `SHA256SUMS.txt` 校验文件，应用内更新也会在安装前自动校验。
 
@@ -116,11 +117,12 @@ dotnet run --project CrabDesk.WinUI\CrabDesk.WinUI.csproj -c Debug
 
 ## 📦 发布
 
-推送 `vX.Y.Z` 标签后，[release.yml](.github/workflows/release.yml) 会自动运行测试、构建自包含程序与 Inno Setup 安装包，并把安装包、便携版和 `SHA256SUMS.txt` 上传到 GitHub Releases。
+推送 `vX.Y.Z` 标签后，[release.yml](.github/workflows/release.yml) 会自动运行测试、构建 framework-dependent 应用负载并嵌入 Native AOT 在线安装器，最终只把 Setup 和 `SHA256SUMS.txt` 上传到 GitHub Releases。
 
 ```powershell
 .\build\publish.ps1            # 发布产物到 artifacts\publish\win-x64
-.\build\build-installer.ps1    # 构建 Inno Setup 安装包
+.\build\build-installer.ps1    # 构建 framework-dependent Payload
+.\build\publish-bootstrapper.ps1 # 构建唯一公开的在线 Setup
 ```
 
 ## 📄 许可证

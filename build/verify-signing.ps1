@@ -4,7 +4,8 @@ $ErrorActionPreference = "Stop"
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $sourceFiles = @(
     (Join-Path $root "artifacts\publish\win-x64\CrabDesk.WinUI.exe"),
-    (Join-Path $root "artifacts\installer\CrabDesk-Setup-x64.exe")
+    (Join-Path $root "artifacts\installer\CrabDesk-Payload-x64.exe"),
+    (Join-Path $root "artifacts\release\CrabDesk-Setup-x64.exe")
 )
 foreach ($file in $sourceFiles) {
     if (-not (Test-Path -LiteralPath $file)) {

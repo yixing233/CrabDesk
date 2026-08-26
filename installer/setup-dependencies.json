@@ -1,0 +1,18 @@
+{
+  "dotNetDesktopRuntime": {
+    "version": "8.0.30",
+    "url": "https://download.microsoft.com/download/9f887fdb-93b3-4b8d-8c68-c68c37d991d8/248c8e1c-3dee-4902-b593-3aee3e9f64dc/windowsdesktop-runtime-8.0.30-win-x64.exe",
+    "sha256": "8bd710afa5de396c9eb2a3b68d00279b7b9aca372a2443e9acd4f48ffdef3f2d"
+  },
+  "windowsAppRuntime": {
+    "version": "1.8.260710003",
+    "packageName": "Microsoft.WindowsAppRuntime.1.8",
+    "url": "https://download.microsoft.com/download/712421b4-6f72-47fc-acb8-2ebf030b2260/WindowsAppRuntimeInstall-x64.exe",
+    "sha256": "b8cda840267ab72797f654f801f9a064ab6d9e508cedee3df79f772f104db6d6"
+  },
+  "visualCppRuntime": {
+    "version": "14.50.35719.0",
+    "url": "https://download.visualstudio.microsoft.com/download/pr/6f02464a-5e9b-486d-a506-c99a17db9a83/8995548DFFFCDE7C49987029C764355612BA6850EE09A7B6F0FDDC85BDC5C280/VC_redist.x64.exe",
+    "sha256": "8995548dfffcde7c49987029c764355612ba6850ee09a7b6f0fddc85bdc5c280"
+  }
+}

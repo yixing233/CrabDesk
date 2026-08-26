@@ -14,16 +14,15 @@
     <CrabDeskRuntimeUsesWpf>true</CrabDeskRuntimeUsesWpf>
     <UseSystemDrawing>true</UseSystemDrawing>
     <WindowsPackageType>None</WindowsPackageType>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>20260824.01</Version>
+    <Version>20260826.02</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
     <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
     <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
-    <CrabDeskPackageKind Condition="'$(CrabDeskPackageKind)' == ''">Full</CrabDeskPackageKind>
   </PropertyGroup>
 
   <ItemGroup>
@@ -57,27 +56,7 @@
   <ItemGroup>
     <AssemblyMetadata Include="GitHubRepositoryOwner" Value="$(CrabDeskGitHubOwner)" />
     <AssemblyMetadata Include="GitHubRepositoryName" Value="$(CrabDeskGitHubRepository)" />
-    <AssemblyMetadata Include="CrabDeskPackageKind" Value="$(CrabDeskPackageKind)" />
   </ItemGroup>
-
-  <!--
-    Windows App SDK's self-contained MSIX contains optional AI, workload and
-    widget payloads even when the corresponding component packages are not
-    referenced. CrabDesk does not use those APIs, so keep them out of the
-    app-local runtime instead of shipping roughly 46 MiB of dormant binaries.
-  -->
-  <Target Name="ExcludeUnusedWindowsAppSDKPayload"
-          BeforeTargets="AddMicrosoftWindowsAppSDKPayloadFilesFromMsix">
-    <ItemGroup>
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\DirectML.dll" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\onnxruntime*.dll" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\Microsoft.Windows.AI.*" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\Microsoft.Windows.Private.Workloads.*" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\Microsoft.Windows.Workloads.*" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\Microsoft.Windows.Widgets.*" />
-      <MicrosoftWindowsAppSDKFilesExcluded Include="$(MicrosoftWindowsAppSDKMsixContent)\workloads*.json" />
-    </ItemGroup>
-  </Target>
 
   <!-- A WinUI host normally removes the unused WindowsDesktop payload. Keep it
        intact when a runtime dependency hosts a WPF control inside the desktop

@@ -9,9 +9,7 @@ namespace CrabDesk.Core;
 
 public sealed class GitHubUpdateService : IUpdateService
 {
-    private const string LegacyInstallerAssetName = "CrabDesk-Setup-x64.exe";
-    private const string WebInstallerAssetName = "CrabDesk-Setup-Web-x64.exe";
-    private const string FullInstallerAssetName = "CrabDesk-Setup-Full-x64.exe";
+    private const string InstallerAssetName = "CrabDesk-Setup-x64.exe";
     private const string Sha256AssetName = "SHA256SUMS.txt";
     private const long MaximumInstallerBytes = 512L * 1024 * 1024;
     private const int MaximumChecksumBytes = 1024 * 1024;
@@ -123,15 +121,9 @@ public sealed class GitHubUpdateService : IUpdateService
             var release = selected.Release;
             var latestVersion = selected.Parsed!;
             var assets = release.Assets ?? [];
-            var installerAssetName = NormalizeInstallerAssetName(request.InstallerAssetName);
+            var installerAssetName = InstallerAssetName;
             var installerAsset = assets.FirstOrDefault(asset =>
                 asset.Name.Equals(installerAssetName, StringComparison.OrdinalIgnoreCase));
-            if (installerAsset is null && !installerAssetName.Equals(LegacyInstallerAssetName, StringComparison.OrdinalIgnoreCase))
-            {
-                installerAssetName = LegacyInstallerAssetName;
-                installerAsset = assets.FirstOrDefault(asset =>
-                    asset.Name.Equals(installerAssetName, StringComparison.OrdinalIgnoreCase));
-            }
             var installerUrl = installerAsset?.BrowserDownloadUrl ?? string.Empty;
             var sha256Url = assets.FirstOrDefault(asset =>
                 asset.Name.Equals(Sha256AssetName, StringComparison.OrdinalIgnoreCase))?.BrowserDownloadUrl ?? string.Empty;
@@ -193,7 +185,7 @@ public sealed class GitHubUpdateService : IUpdateService
 
         var destinationRoot = Path.GetFullPath(request.DestinationDirectory);
         var versionDirectory = Path.Combine(destinationRoot, version);
-        var installerAssetName = NormalizeInstallerAssetName(request.InstallerAssetName);
+        var installerAssetName = InstallerAssetName;
         var installerPath = Path.Combine(versionDirectory, installerAssetName);
         var partialPath = installerPath + ".part";
         Directory.CreateDirectory(versionDirectory);
@@ -393,11 +385,6 @@ public sealed class GitHubUpdateService : IUpdateService
     private static SemanticVersion? ParseVersion(string value) =>
         SemanticVersion.TryParse(value, out var version) ? version : null;
 
-    private static string NormalizeInstallerAssetName(string value) =>
-        value.Equals(WebInstallerAssetName, StringComparison.OrdinalIgnoreCase) ? WebInstallerAssetName :
-        value.Equals(FullInstallerAssetName, StringComparison.OrdinalIgnoreCase) ? FullInstallerAssetName :
-        LegacyInstallerAssetName;
-
     private static UpdateCheckResult BuildCachedResult(
         UpdateCheckRequest request,
         SemanticVersion currentVersion)
@@ -423,7 +410,7 @@ public sealed class GitHubUpdateService : IUpdateService
             request.CachedSha256Url,
             request.CachedIsPrerelease,
             request.CachedETag,
-            InstallerAssetName: NormalizeInstallerAssetName(request.InstallerAssetName));
+            InstallerAssetName: InstallerAssetName);
     }
 
     private sealed class GitHubRelease

@@ -111,7 +111,7 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
-    public async Task UpdateSelectsInstallerMatchingInstalledPackageKind()
+    public async Task UpdateAlwaysSelectsSinglePublicInstaller()
     {
         using var client = new HttpClient(new StubHandler(_ => JsonResponse("""
         [
@@ -121,6 +121,7 @@ public sealed class UpdateServiceTests
             "draft": false,
             "prerelease": false,
             "assets": [
+              { "name": "CrabDesk-Setup-x64.exe", "browser_download_url": "https://download/setup.exe" },
               { "name": "CrabDesk-Setup-Web-x64.exe", "browser_download_url": "https://download/web.exe" },
               { "name": "CrabDesk-Setup-Full-x64.exe", "browser_download_url": "https://download/full.exe" },
               { "name": "SHA256SUMS.txt", "browser_download_url": "https://download/sha256.txt" }
@@ -136,8 +137,8 @@ public sealed class UpdateServiceTests
         });
 
         Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
-        Assert.Equal("https://download/web.exe", result.InstallerUrl);
-        Assert.Equal("CrabDesk-Setup-Web-x64.exe", result.InstallerAssetName);
+        Assert.Equal("https://download/setup.exe", result.InstallerUrl);
+        Assert.Equal("CrabDesk-Setup-x64.exe", result.InstallerAssetName);
     }
 
     [Fact]

@@ -1,5 +1,5 @@
 param(
-    [string]$SetupExecutable = "..\artifacts\installer\CrabDesk-Setup-x64.exe"
+    [string]$SetupExecutable = "..\artifacts\release\CrabDesk-Setup-x64.exe"
 )
 
 $ErrorActionPreference = "Stop"

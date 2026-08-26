@@ -15,6 +15,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.WinUI", "CrabDesk.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.WinUI.Tests", "CrabDesk.WinUI.Tests\CrabDesk.WinUI.Tests.csproj", "{CC722987-689F-48C3-BA5B-45190B1C2176}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Bootstrapper.Tests", "CrabDesk.Bootstrapper.Tests\CrabDesk.Bootstrapper.Tests.csproj", "{0E493BC9-2B9B-4D9A-A53D-75C4BF2D16DD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrabDesk.Bootstrapper", "CrabDesk.Bootstrapper\CrabDesk.Bootstrapper.csproj", "{2B63BFF8-A1E2-4B1D-B04B-68743A9C8C6F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +52,13 @@ Global
 		{CC722987-689F-48C3-BA5B-45190B1C2176}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CC722987-689F-48C3-BA5B-45190B1C2176}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CC722987-689F-48C3-BA5B-45190B1C2176}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E493BC9-2B9B-4D9A-A53D-75C4BF2D16DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E493BC9-2B9B-4D9A-A53D-75C4BF2D16DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E493BC9-2B9B-4D9A-A53D-75C4BF2D16DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E493BC9-2B9B-4D9A-A53D-75C4BF2D16DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B63BFF8-A1E2-4B1D-B04B-68743A9C8C6F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B63BFF8-A1E2-4B1D-B04B-68743A9C8C6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B63BFF8-A1E2-4B1D-B04B-68743A9C8C6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B63BFF8-A1E2-4B1D-B04B-68743A9C8C6F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

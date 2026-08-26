@@ -1,18 +1,17 @@
 #define MyAppName "CrabDesk"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.6.0"
+  #define MyAppVersion "20260826.02"
 #endif
 #define MyAppPublisher "CrabDesk"
 #define MyAppExeName "CrabDesk.WinUI.exe"
-#ifndef MyPackageKind
-  #define MyPackageKind "Full"
-#endif
-#if MyPackageKind == "Web"
-  #define MyOutputSuffix "-Web"
-  #define MyPublishPath "..\artifacts\publish\win-x64-web"
-#else
-  #define MyOutputSuffix ""
+#ifndef MyPublishPath
   #define MyPublishPath "..\artifacts\publish\win-x64"
+#endif
+#ifndef OutputDir
+  #define OutputDir "..\artifacts\installer"
+#endif
+#ifndef OutputBaseFilename
+  #define OutputBaseFilename "CrabDesk-Payload-x64"
 #endif
 
 [Setup]
@@ -20,17 +19,20 @@ AppId={{8AF9FCA9-D889-4ED7-B5A2-AC052B94016D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\CrabDesk
+DefaultDirName={localappdata}\Programs\CrabDesk
 DefaultGroupName=CrabDesk
 DisableProgramGroupPage=yes
-OutputDir=..\artifacts\installer
-OutputBaseFilename=CrabDesk-Setup{#MyOutputSuffix}-x64
-Compression=lzma2
+OutputDir={#OutputDir}
+OutputBaseFilename={#OutputBaseFilename}
+SetupIconFile=..\CrabDesk.WinUI\Assets\CrabDesk.ico
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
+CloseApplications=yes
+RestartApplications=no
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]

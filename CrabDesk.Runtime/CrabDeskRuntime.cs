@@ -3356,12 +3356,7 @@ public sealed class CrabDeskRuntime : IDisposable
         try
         {
             _surfaceManager.EnsureReady();
-            _surfaceManager.SetVisible(!AreDesktopItemsHidden);
-            if (!AreDesktopItemsHidden)
-            {
-                _surfaceManager.SetDesktopIconsVisible(_desktopIconsVisible);
-                _surfaceManager.Refresh();
-            }
+            _surfaceManager.SetDesktopIconsVisible(_desktopIconsVisible);
             return true;
         }
         catch (Exception exception)

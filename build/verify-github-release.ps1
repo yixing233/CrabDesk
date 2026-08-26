@@ -41,7 +41,6 @@ if (-not [string]::IsNullOrWhiteSpace($GitHubToken)) {
 }
 $requiredAssets = @(
     "CrabDesk-Setup-x64.exe",
-    "CrabDesk-Setup-Web-x64.exe",
     "SHA256SUMS.txt"
 )
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("CrabDesk.ReleaseValidation." + [Guid]::NewGuid().ToString("N"))
@@ -135,10 +134,7 @@ try {
         }
     }
 
-    $signatureTargets = @(
-        $downloaded["CrabDesk-Setup-x64.exe"],
-        $downloaded["CrabDesk-Setup-Web-x64.exe"]
-    )
+    $signatureTargets = @($downloaded["CrabDesk-Setup-x64.exe"])
     foreach ($target in $signatureTargets) {
         if (-not (Test-Path -LiteralPath $target)) {
             throw "Signed release target is missing: $target"

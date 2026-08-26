@@ -4,26 +4,25 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $output = Join-Path $root "artifacts\publish\winui-$Runtime"
-
-function Remove-PublishDirectory([string]$path) {
-    $workspace = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
-    $resolved = [IO.Path]::GetFullPath($path)
-    if (-not $resolved.StartsWith($workspace, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Publish cleanup escaped the workspace: $resolved"
-    }
-    if (Test-Path -LiteralPath $resolved) {
-        Remove-Item -LiteralPath $resolved -Recurse -Force
-    }
+$workspace = $root.TrimEnd('\') + '\'
+$resolvedOutput = [System.IO.Path]::GetFullPath($output)
+if (-not $resolvedOutput.StartsWith($workspace, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Publish cleanup escaped the workspace: $resolvedOutput"
 }
-
-Remove-PublishDirectory $output
+if (Test-Path -LiteralPath $resolvedOutput) {
+    Remove-Item -LiteralPath $resolvedOutput -Recurse -Force
+}
 
 dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
     -c $Configuration `
     -r $Runtime `
-    --self-contained true `
-    -o $output
+    --self-contained false `
+    -p:WindowsAppSDKSelfContained=false `
+    -o $resolvedOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "CrabDesk WinUI publish failed with exit code $LASTEXITCODE."
+}
 
-Write-Host "CrabDesk WinUI published to $output"
+Write-Host "Framework-dependent CrabDesk WinUI published to $resolvedOutput"

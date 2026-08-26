@@ -125,11 +125,12 @@ CrabDesk 是面向 Windows 10/11 x64 的桌面整理工具。产品以桌面盒�
 GitHub 发布流程使用 `.github/workflows/release.yml`：
 
 1. 推送格式为 `vX.Y.Z` 的标签后触发工作流。
-2. 在 Windows Runner 上执行还原、Release 测试和 `win-x64` 自包含发布。
-3. 使用 Inno Setup 生成 `CrabDesk-Setup-x64.exe`。
-4. 生成 `SHA256SUMS.txt`，并在具备签名证书时完成 Authenticode 签名。
-5. 创建 GitHub Release，上传安装包、校验文件和便携版压缩包。
-6. 工作流只使用 GitHub Actions 提供的 `GITHUB_TOKEN` 发布资源，Token 不进入客户端程序或构建产物。
+2. 在 Windows Runner 上执行还原、Release 测试和 `win-x64` framework-dependent 发布。
+3. 使用 Inno Setup 生成内部应用负载 `CrabDesk-Payload-x64.exe`，签名后嵌入最终 Setup，不单独发布。
+4. 使用 Native AOT 生成唯一公开安装器 `CrabDesk-Setup-x64.exe`；安装器读取固定依赖清单，检测并下载缺失的 .NET 8 Desktop Runtime、Windows App SDK 1.8 Runtime 和 Visual C++ x64 运行库，再校验并运行内嵌 Payload。
+5. 生成 `SHA256SUMS.txt`，并在具备签名证书时完成应用、Payload 和 Setup 的 Authenticode 签名。
+6. 创建 GitHub Release，只上传 Setup 和校验文件。
+7. 工作流只使用 GitHub Actions 提供的 `GITHUB_TOKEN` 发布资源，Token 不进入客户端程序或构建产物。
 
 稳定版标签必须配置签名证书和密码；缺少任一 Secret 时工作流直接失败，不允许降级发布未签名稳定版。创建 Release 前会再次验证应用、IconGuard 和安装包均为受信任且带时间戳的 Authenticode 签名，并确认三个产物使用同一代码签名证书。预发布版本允许在明确标记为测试版时不签名。
 

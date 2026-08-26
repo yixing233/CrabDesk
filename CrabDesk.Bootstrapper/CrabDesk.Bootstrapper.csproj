@@ -7,16 +7,58 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <StripSymbols>true</StripSymbols>
+    <ApplicationIcon>Assets\CrabDesk.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version Condition="'$(Version)' == ''">20260815.01</Version>
+    <Version Condition="'$(Version)' == ''">20260826.02</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
-    <CrabDeskGitHubOwner Condition="'$(CrabDeskGitHubOwner)' == ''">yixing233</CrabDeskGitHubOwner>
-    <CrabDeskGitHubRepository Condition="'$(CrabDeskGitHubRepository)' == ''">CrabDesk</CrabDeskGitHubRepository>
+    <DependencyHashPlaceholder Condition="'$(DependencyHashPlaceholder)' == ''">0000000000000000000000000000000000000000000000000000000000000000</DependencyHashPlaceholder>
+    <PayloadSha256 Condition="'$(PayloadSha256)' == ''">$(DependencyHashPlaceholder)</PayloadSha256>
+    <DotNetDesktopInstallerUrl Condition="'$(DotNetDesktopInstallerUrl)' == ''">https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe</DotNetDesktopInstallerUrl>
+    <DotNetDesktopInstallerSha256 Condition="'$(DotNetDesktopInstallerSha256)' == ''">$(DependencyHashPlaceholder)</DotNetDesktopInstallerSha256>
+    <DotNetDesktopMinimumVersion Condition="'$(DotNetDesktopMinimumVersion)' == ''">8.0.30</DotNetDesktopMinimumVersion>
+    <WindowsAppRuntimeInstallerUrl Condition="'$(WindowsAppRuntimeInstallerUrl)' == ''">https://aka.ms/windowsappsdk/1.8/1.8.260710003/windowsappruntimeinstall-x64.exe</WindowsAppRuntimeInstallerUrl>
+    <WindowsAppRuntimeInstallerSha256 Condition="'$(WindowsAppRuntimeInstallerSha256)' == ''">$(DependencyHashPlaceholder)</WindowsAppRuntimeInstallerSha256>
+    <VisualCppInstallerUrl Condition="'$(VisualCppInstallerUrl)' == ''">https://aka.ms/vs/18/release/14.50.35719/VC_redist.x64.exe</VisualCppInstallerUrl>
+    <VisualCppInstallerSha256 Condition="'$(VisualCppInstallerSha256)' == ''">$(DependencyHashPlaceholder)</VisualCppInstallerSha256>
+    <VisualCppMinimumVersion Condition="'$(VisualCppMinimumVersion)' == ''">14.50.35719</VisualCppMinimumVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <AssemblyMetadata Include="GitHubRepositoryOwner" Value="$(CrabDeskGitHubOwner)" />
-    <AssemblyMetadata Include="GitHubRepositoryName" Value="$(CrabDeskGitHubRepository)" />
     <AssemblyMetadata Include="ReleaseVersion" Value="$(Version)" />
+    <AssemblyMetadata Include="PayloadSha256" Value="$(PayloadSha256)" />
+    <AssemblyMetadata Include="DotNetDesktopInstallerUrl" Value="$(DotNetDesktopInstallerUrl)" />
+    <AssemblyMetadata Include="DotNetDesktopInstallerSha256" Value="$(DotNetDesktopInstallerSha256)" />
+    <AssemblyMetadata Include="DotNetDesktopMinimumVersion" Value="$(DotNetDesktopMinimumVersion)" />
+    <AssemblyMetadata Include="WindowsAppRuntimeInstallerUrl" Value="$(WindowsAppRuntimeInstallerUrl)" />
+    <AssemblyMetadata Include="WindowsAppRuntimeInstallerSha256" Value="$(WindowsAppRuntimeInstallerSha256)" />
+    <AssemblyMetadata Include="VisualCppInstallerUrl" Value="$(VisualCppInstallerUrl)" />
+    <AssemblyMetadata Include="VisualCppInstallerSha256" Value="$(VisualCppInstallerSha256)" />
+    <AssemblyMetadata Include="VisualCppMinimumVersion" Value="$(VisualCppMinimumVersion)" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+    <InternalsVisibleTo Include="CrabDesk.Bootstrapper.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\lucide.ttf" LogicalName="Assets.lucide.ttf" />
+    <EmbeddedResource Include="Assets\CrabDesk-256.png" LogicalName="Assets.CrabDesk-256.png" />
+    <EmbeddedResource Include="Assets\CrabDesk.ico" LogicalName="Assets.CrabDesk.ico" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(CrabDeskPayloadPath)' != ''">
+    <EmbeddedResource Include="$(CrabDeskPayloadPath)" LogicalName="CrabDesk.Payload.exe" />
+  </ItemGroup>
+
+  <Target Name="RequireResolvedSetupDependencies" BeforeTargets="Publish">
+    <Error Condition="'$(DotNetDesktopInstallerSha256)' == '$(DependencyHashPlaceholder)' or
+                      '$(WindowsAppRuntimeInstallerSha256)' == '$(DependencyHashPlaceholder)' or
+                      '$(VisualCppInstallerSha256)' == '$(DependencyHashPlaceholder)'"
+           Text="Publish the online setup through build\publish-bootstrapper.ps1 so pinned dependency hashes are embedded." />
+    <Error Condition="'$(PayloadSha256)' == '$(DependencyHashPlaceholder)' or
+                      '$(CrabDeskPayloadPath)' == '' or
+                      !Exists('$(CrabDeskPayloadPath)')"
+           Text="Build CrabDesk-Payload-x64.exe before publishing the online setup." />
+  </Target>
 </Project>

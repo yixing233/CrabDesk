@@ -100,7 +100,7 @@ try {
         dotnet test (Join-Path $root "CrabDesk.sln") -c Release --no-build
         if ($LASTEXITCODE -ne 0) { throw "dotnet test exited with code $LASTEXITCODE." }
     }
-    Invoke-VerificationStep "Self-contained publish" {
+    Invoke-VerificationStep "Framework-dependent publish" {
         & (Join-Path $PSScriptRoot "publish.ps1")
     }
     Invoke-VerificationStep "Backup restore UI" {
@@ -142,6 +142,10 @@ try {
     else {
         Invoke-VerificationStep "Installer build" {
             & (Join-Path $PSScriptRoot "build-installer.ps1")
+        }
+        Invoke-VerificationStep "Online setup build" {
+            & (Join-Path $PSScriptRoot "publish-bootstrapper.ps1")
+            & (Join-Path $PSScriptRoot "verify-bootstrapper.ps1")
         }
         Invoke-VerificationStep "Installer lifecycle" {
             & (Join-Path $PSScriptRoot "verify-installer.ps1")
