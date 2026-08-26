@@ -677,7 +677,8 @@ internal sealed class InstallerWindow
                     // Allow smooth animated rotation for ~300ms
                     await Task.Delay(280);
 
-                    var isInstalled = DependencyDetector.IsInstalled(item.Dependency);
+                    var isSimulated = SetupPolicy.ShouldSimulateMissing(_rawArguments, item.Dependency);
+                    var isInstalled = !isSimulated && DependencyDetector.IsInstalled(item.Dependency);
                     item.Status = isInstalled ? DependencyCheckStatus.Installed : DependencyCheckStatus.Missing;
                     item.StatusText = isInstalled ? "已就绪 ✓" : "需自动下载";
                     PostMessageW(_hwnd, WM_USER_REFRESH, IntPtr.Zero, IntPtr.Zero);
@@ -759,7 +760,7 @@ internal sealed class InstallerWindow
     private async Task ExecuteInstallationWorkflowAsync(CancellationToken token)
     {
         var missing = _dependencies
-            .Where(dep => !DependencyDetector.IsInstalled(dep))
+            .Where(dep => SetupPolicy.ShouldSimulateMissing(_rawArguments, dep) || !DependencyDetector.IsInstalled(dep))
             .ToArray();
 
         var tempRoot = Path.Combine(Path.GetTempPath(), "CrabDesk-Setup", Guid.NewGuid().ToString("N"));
