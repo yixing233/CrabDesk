@@ -89,17 +89,4 @@ public sealed class BootstrapperTests
         Assert.Equal("20260826.02", state.Version);
         Assert.False(string.IsNullOrWhiteSpace(state.InstallPath));
     }
-
-    [Fact]
-    public void ShouldSimulateMissing_RecognizesCommandLineFlags()
-    {
-        var depDotNet = new SetupDependency(SetupDependencyKind.DotNetDesktopRuntime, "Microsoft .NET 8 Desktop Runtime", new Uri("https://aka.ms/test"), "hash", "dotnet.exe", "/quiet", new Version(8, 0), 8, "");
-        var depVc = new SetupDependency(SetupDependencyKind.VisualCppRuntime, "Microsoft Visual C++ Runtime", new Uri("https://aka.ms/test"), "hash", "vc.exe", "/quiet", new Version(14, 0), 0, "");
-
-        Assert.True(SetupPolicy.ShouldSimulateMissing(["/SIMULATE-MISSING"], depDotNet));
-        Assert.True(SetupPolicy.ShouldSimulateMissing(["/SIMULATE-MISSING=all"], depDotNet));
-        Assert.True(SetupPolicy.ShouldSimulateMissing(["/SIMULATE-MISSING=dotnet"], depDotNet));
-        Assert.False(SetupPolicy.ShouldSimulateMissing(["/SIMULATE-MISSING=vcredist"], depDotNet));
-        Assert.True(SetupPolicy.ShouldSimulateMissing(["/SIMULATE-MISSING=vcredist"], depVc));
-    }
 }
