@@ -1,0 +1,111 @@
+name: Publish prerelease recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Prerelease version in YYYYMMDD.NN format
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Validate prerelease tag
+        shell: pwsh
+        run: |
+          $version = "${{ inputs.version }}"
+          if ($version -notmatch '^\d{8}\.\d{2}$') {
+            throw "Recovery publishing only supports YYYYMMDD.NN prereleases: $version"
+          }
+          $tag = "v$version"
+          git ls-remote --exit-code --tags "https://github.com/${{ github.repository }}.git" "refs/tags/$tag" | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag does not exist: $tag"
+          }
+          "CRABDESK_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CRABDESK_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish application
+        shell: pwsh
+        run: |
+          .\build\publish.ps1 `
+            -Version $env:CRABDESK_VERSION `
+            -GitHubOwner "${{ github.repository_owner }}" `
+            -GitHubRepository "${{ github.event.repository.name }}"
+
+      - name: Build embedded payload
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with code $LASTEXITCODE." }
+          .\build\build-installer.ps1 -Version $env:CRABDESK_VERSION
+
+      - name: Build and verify setup
+        shell: pwsh
+        run: |
+          .\build\publish-bootstrapper.ps1 -Version $env:CRABDESK_VERSION
+          .\build\verify-bootstrapper.ps1
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $setup = "artifacts\release\CrabDesk-Setup-x64.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup).Hash.ToLowerInvariant()
+          "$hash  CrabDesk-Setup-x64.exe" | Set-Content artifacts\release\SHA256SUMS.txt -Encoding ascii
+
+      - name: Replace draft assets and publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:CRABDESK_TAG
+          $notes = "docs\releases\v$env:CRABDESK_VERSION.md"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --repo "${{ github.repository }}" `
+              --title "CrabDesk $env:CRABDESK_VERSION" `
+              --notes-file $notes `
+              --prerelease `
+              --draft `
+              --verify-tag
+            if ($LASTEXITCODE -ne 0) { throw "Draft release creation failed with code $LASTEXITCODE." }
+          }
+
+          foreach ($asset in @("CrabDesk-Setup-x64.exe", "SHA256SUMS.txt")) {
+            gh release delete-asset $tag $asset --repo "${{ github.repository }}" --yes *> $null
+          }
+
+          gh release upload $tag `
+            "artifacts\release\CrabDesk-Setup-x64.exe" `
+            "artifacts\release\SHA256SUMS.txt" `
+            --repo "${{ github.repository }}"
+          if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed with code $LASTEXITCODE." }
+
+          gh release edit $tag `
+            --repo "${{ github.repository }}" `
+            --title "CrabDesk $env:CRABDESK_VERSION" `
+            --notes-file $notes `
+            --prerelease `
+            --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "Release publication failed with code $LASTEXITCODE." }
