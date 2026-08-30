@@ -409,16 +409,16 @@ internal static class InstallerRenderer
 
         // Header
         var headerX = (int)(36 * scale);
-        var headerY = (int)(48 * scale);
-        var iconSize = (int)(32 * scale);
+        var headerY = (int)(46 * scale);
+        var iconSize = (int)(34 * scale);
 
         LucideInstallerIcons.DrawIcon(g, LucideIcon.Package, new RectangleF(headerX, headerY, iconSize, iconSize), theme.Accent, 30 * scale);
 
-        var titleLeft = headerX + iconSize + (int)(10 * scale);
+        var titleLeft = headerX + iconSize + (int)(12 * scale);
         var installHeaderTitle = state.IsUpgrade ? "正在升级 CrabDesk..." : "正在安装 CrabDesk...";
         using (var titleBrush = new SolidBrush(theme.TextPrimary))
         {
-            g.DrawString(installHeaderTitle, theme.TitleFont, titleBrush, titleLeft, headerY - (int)(2 * scale));
+            g.DrawString(installHeaderTitle, theme.TitleFont, titleBrush, titleLeft, headerY - (int)(1 * scale));
         }
 
         var installHeaderSubtitle = state.IsUpgrade
@@ -433,45 +433,45 @@ internal static class InstallerRenderer
         var cardLeft = (int)(36 * scale);
         var cardTop = (int)(116 * scale);
         var cardWidth = winW - (int)(72 * scale);
-        var cardHeight = (int)(210 * scale);
+        var cardHeight = (int)(150 * scale);
         var cardBounds = new Rectangle(cardLeft, cardTop, cardWidth, cardHeight);
         DrawCard(g, theme, cardBounds);
 
         // Current Action with Refresh/Activity Icon
         var actionIconSize = (int)(16 * scale);
-        LucideInstallerIcons.DrawIconRotated(g, LucideIcon.RefreshCw, new RectangleF(cardLeft + (int)(22 * scale), cardTop + (int)(30 * scale), actionIconSize, actionIconSize), theme.Accent, 15 * scale, state.CheckingAnimationAngle);
+        var actionY = cardTop + (int)(26 * scale);
+        LucideInstallerIcons.DrawIconRotated(g, LucideIcon.RefreshCw, new RectangleF(cardLeft + (int)(22 * scale), actionY + (int)(1 * scale), actionIconSize, actionIconSize), theme.Accent, 15 * scale, state.CheckingAnimationAngle);
 
         using (var actionBrush = new SolidBrush(theme.TextPrimary))
         {
-            g.DrawString(state.CurrentAction, theme.ButtonFont, actionBrush, cardLeft + (int)(44 * scale), cardTop + (int)(28 * scale));
-        }
-
-        // Sub Action (Speed / Bytes)
-        if (!string.IsNullOrWhiteSpace(state.SubAction))
-        {
-            using var subActionBrush = new SolidBrush(theme.TextSecondary);
-            g.DrawString(state.SubAction, theme.SmallFont, subActionBrush, cardLeft + (int)(44 * scale), cardTop + (int)(56 * scale));
+            g.DrawString(state.CurrentAction, theme.ButtonFont, actionBrush, cardLeft + (int)(46 * scale), actionY);
         }
 
         // Progress Bar
-        var barBounds = new Rectangle(cardLeft + (int)(24 * scale), cardTop + (int)(105 * scale), cardWidth - (int)(48 * scale), (int)(10 * scale));
+        var barLeft = cardLeft + (int)(22 * scale);
+        var barWidth = cardWidth - (int)(44 * scale);
+        var barY = cardTop + (int)(100 * scale);
+        var barBounds = new Rectangle(barLeft, barY, barWidth, (int)(8 * scale));
         DrawProgressBar(g, theme, barBounds, state.ProgressPercentage);
 
-        // Percentage Text
+        // Sub Action (left) & Percentage (right) on the same baseline above progress bar
+        var infoY = barY - (int)(24 * scale);
+
+        if (!string.IsNullOrWhiteSpace(state.SubAction))
+        {
+            using var subActionBrush = new SolidBrush(theme.TextSecondary);
+            g.DrawString(state.SubAction, theme.SmallFont, subActionBrush, barLeft, infoY + (int)(2 * scale));
+        }
+
+        // Percentage Text (aligned right to progress bar)
         using (var percentBrush = new SolidBrush(theme.Accent))
         {
             var pText = $"{state.ProgressPercentage:F0}%";
             var size = g.MeasureString(pText, theme.ButtonFont);
-            g.DrawString(pText, theme.ButtonFont, percentBrush, barBounds.Right - size.Width, barBounds.Y - (int)(26 * scale));
+            g.DrawString(pText, theme.ButtonFont, percentBrush, barBounds.Right - size.Width, infoY);
         }
 
-        // Notice
-        var noticeY = cardBounds.Bottom - (int)(32 * scale);
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.Sparkles, new RectangleF(cardLeft + (int)(24 * scale), noticeY + (int)(2 * scale), (int)(14 * scale), (int)(14 * scale)), theme.TextMuted, 13 * scale);
-        using (var noticeBrush = new SolidBrush(theme.TextMuted))
-        {
-            g.DrawString("依赖组件由安装器在后台直接从微软官方下载，绝不跳转浏览器。", theme.SmallFont, noticeBrush, cardLeft + (int)(44 * scale), noticeY);
-        }
+        // Notice removed
     }
 
     private static void RenderCompletedPage(Graphics g, InstallerTheme theme, InstallerState state)

@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
 using CrabDesk.Core;
+using CrabDesk.Native;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Controls;
 using Xunit;
@@ -295,6 +296,21 @@ public sealed class DesktopIconInteractionTests
                 lastPresentSucceeded,
                 presentedVersion,
                 currentVersion));
+    }
+
+    [Fact]
+    public void ParentBoxFrameIsNotReusedWhileItsScrollAnimationIsAdvancing()
+    {
+        Assert.False(DesktopIconSurface.ShouldReuseBoxParentFrame(
+            visualsInParent: true,
+            pointerGhostOverlayActive: true,
+            selecting: false,
+            staticFrameChanged: false,
+            parentFrameAvailable: true,
+            lastPresentSucceeded: true,
+            presentedVersion: 7,
+            currentVersion: 7,
+            dynamicAnimationActive: true));
     }
 
     [Theory]
@@ -989,6 +1005,64 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
+    [InlineData(420, 0, true, 420)]
+    [InlineData(420, 300, false, 300)]
+    [InlineData(0, 0, true, 0)]
+    public void HeightAnimationDoesNotOverwriteTheSettledScrollOffset(
+        double storedOffset,
+        double calculatedOffset,
+        bool heightAnimationActive,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ResolvePersistedScrollOffset(
+                storedOffset,
+                calculatedOffset,
+                heightAnimationActive));
+    }
+
+    [Theory]
+    [InlineData(false, true, true, true, 120, true)]
+    [InlineData(true, true, true, true, 120, false)]
+    [InlineData(false, false, true, true, 120, true)]
+    [InlineData(false, true, false, true, 120, false)]
+    [InlineData(false, true, true, false, 120, false)]
+    [InlineData(false, true, true, true, 0, false)]
+    public void BoxDragWheelRoutesOnlyToTheBoxUnderThePointer(
+        bool controlPressed,
+        bool isDesktopSurface,
+        bool pointerOverBox,
+        bool boxItemDragActive,
+        int delta,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopInputMonitor.ShouldRouteBoxDragWheel(
+                controlPressed,
+                isDesktopSurface,
+                pointerOverBox,
+                boxItemDragActive,
+                delta));
+    }
+
+    [Fact]
+    public void ScrollBarViewportReachesBoxEdgeWithoutExpandingTheContentBody()
+    {
+        var boxBounds = new RectangleF(20, 40, 240, 180);
+        var bodyBounds = new RectangleF(28, 76, 224, 136);
+
+        var viewport = DesktopBoxForm.CalculateScrollBarViewport(boxBounds, bodyBounds);
+
+        Assert.Equal(bodyBounds.X, viewport.X);
+        Assert.Equal(bodyBounds.Y, viewport.Y);
+        Assert.Equal(bodyBounds.Height, viewport.Height);
+        Assert.Equal(boxBounds.Right, viewport.X + viewport.Width);
+        Assert.True(viewport.Width > bodyBounds.Width);
+    }
+
+    [Theory]
     [InlineData(true, false, false, false, true, true)]
     [InlineData(true, false, false, false, false, true)]
     [InlineData(true, true, true, false, true, false)]
@@ -1047,6 +1121,67 @@ public sealed class DesktopIconInteractionTests
                 transformActive,
                 selectionActive,
                 scrollAnimationActive));
+    }
+
+    [Theory]
+    [InlineData(false, false, false, false, false, false)]
+    [InlineData(true, false, false, false, false, true)]
+    [InlineData(false, false, false, true, false, true)]
+    [InlineData(false, true, false, true, false, false)]
+    [InlineData(false, false, true, true, false, false)]
+    [InlineData(false, false, false, true, true, false)]
+    public void PureScrollAndHeightAnimationsStayOnTheParentLayer(
+        bool heightAnimationActive,
+        bool transformActive,
+        bool selectionActive,
+        bool scrollAnimationActive,
+        bool otherDynamicVisualActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.CanUsePartialBoxAnimationComposition(
+                heightAnimationActive,
+                transformActive,
+                selectionActive,
+                scrollAnimationActive,
+                otherDynamicVisualActive));
+    }
+
+    [Theory]
+    [InlineData(true, HorizontalAlignment.Center)]
+    [InlineData(false, HorizontalAlignment.Left)]
+    public void InlineRenameAlignmentMatchesWrappedAndListLabels(
+        bool wordWrap,
+        HorizontalAlignment expected)
+    {
+        Assert.Equal(expected, DesktopRenameEditor.ResolveTextAlignment(wordWrap));
+    }
+
+    [Theory]
+    [InlineData(20, 88, 22)]
+    [InlineData(20, 18, 18)]
+    public void SingleLineRenameEditorUsesLabelHeight(
+        float lineHeight,
+        float rowHeight,
+        float expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopRenameEditor.CalculateSingleLineEditorHeight(lineHeight, rowHeight));
+    }
+
+    [Theory]
+    [InlineData(128, 20, 128)]
+    [InlineData(20, 128, 20)]
+    public void SelectedBoxLabelKeepsItsMeasuredHeightBeyondTheVisibleBody(
+        float measuredHeight,
+        float availableHeight,
+        float expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ResolveSelectedGridLabelHeight(measuredHeight, availableHeight));
     }
 
     [Theory]

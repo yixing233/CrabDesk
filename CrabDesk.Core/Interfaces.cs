@@ -51,6 +51,7 @@ public sealed class DesktopKeyboardCommandEventArgs(DesktopKeyboardCommand comma
 public interface IDesktopInputMonitor : IDisposable
 {
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
+    event EventHandler<DesktopMouseWheelEventArgs>? BoxDragMouseWheelRequested;
     event EventHandler? DesktopSurfaceClicked;
     event EventHandler? DesktopContextMenuRequested;
     event EventHandler? DesktopContextMenuCommandRequested;
@@ -64,6 +65,9 @@ public interface IDesktopInputMonitor : IDisposable
     // layer when the pointer is over the desktop, and route it to a single
     // box when the pointer is inside one of the box surfaces.
     Func<int, int, bool>? IsPointerOverBox { get; set; }
+    // The OLE box-item drag loop does not reliably dispatch ordinary WinForms
+    // MouseWheel events. The low-level hook only routes them while this is true.
+    Func<bool>? IsBoxItemDragActive { get; set; }
     // Called by the low-level keyboard hook before it consumes Delete.
     // Explorer keeps its normal behavior while CrabDesk has no custom selection.
     Func<bool>? CanDeleteDesktopItems { get; set; }
@@ -87,6 +91,13 @@ public sealed class DesktopIconZoomEventArgs(int delta) : EventArgs
         X = x;
         Y = y;
     }
+}
+
+public sealed class DesktopMouseWheelEventArgs(int delta, int x, int y) : EventArgs
+{
+    public int Delta { get; } = delta;
+    public int X { get; } = x;
+    public int Y { get; } = y;
 }
 
 public interface IUpdateService : IDisposable

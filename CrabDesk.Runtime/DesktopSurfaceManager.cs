@@ -203,14 +203,43 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
-    internal bool RefreshDesktopItemAssignment(Guid boxId)
+    internal bool RefreshDesktopItemAssignment(Guid boxId) => RefreshBoxItems(boxId);
+
+    internal bool RefreshBoxItems(Guid boxId)
+    {
+        return RefreshBoxItems([boxId]);
+    }
+
+    internal bool RefreshBoxItems(IReadOnlyCollection<Guid> boxIds)
+    {
+        if (boxIds.Count == 0)
+        {
+            return false;
+        }
+
+        var requestedIds = boxIds.ToHashSet();
+        var refreshed = false;
+        foreach (var surface in _surfaces)
+        {
+            foreach (var boxId in requestedIds)
+            {
+                refreshed |= surface.RefreshBoxItems(boxId);
+            }
+        }
+
+        return refreshed;
+    }
+
+    internal bool RefreshBoxAdded(Guid boxId)
     {
         foreach (var surface in _surfaces)
         {
-            if (surface.RefreshAssignedItems(boxId))
+            if (!surface.RefreshBoxItems(boxId))
             {
-                return true;
+                continue;
             }
+
+            return surface.UpdateInteractionRegion();
         }
 
         return false;
@@ -223,7 +252,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         var refreshedAllSourceBoxes = true;
         foreach (var boxId in sourceBoxIds)
         {
-            if (_surfaces.Any(surface => surface.RefreshAssignedItems(boxId)))
+            if (_surfaces.Any(surface => surface.RefreshBoxItems(boxId)))
             {
                 continue;
             }
@@ -446,8 +475,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     .Where(surface => surface.HasDynamicVisual)
                     .ToArray();
                 return dynamicBoxes.Length > 0 &&
-                    dynamicBoxes.All(surface => surface.UsesPartialHeightAnimationComposition);
+                    dynamicBoxes.All(surface => surface.UsesPartialBoxAnimationComposition);
             });
+            iconSurface.SetBoxDynamicAnimationActive(() =>
+                monitorBoxes.Any(surface => surface.HasDynamicAnimation));
             foreach (var boxSurface in monitorBoxes)
             {
                 boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
@@ -568,6 +599,19 @@ internal sealed class DesktopSurfaceManager : IDisposable
             }
         }
 
+        return false;
+    }
+
+    internal bool TryScrollBoxAt(int x, int y, int delta)
+    {
+        var point = new Point(x, y);
+        foreach (var surface in _surfaces)
+        {
+            if (surface.TryScrollBoxAt(point, delta))
+            {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -938,6 +982,9 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     internal bool IsDesktopIconDragActive =>
         _iconSurfaces.Any(surface => surface.IsItemDragActive);
+
+    internal bool IsBoxItemDragActive =>
+        _surfaces.Any(surface => surface.IsItemDragActive);
 
     internal void SetVirtualBoxDropTargetEnabled(bool enabled)
     {

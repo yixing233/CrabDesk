@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Drawing;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -85,6 +86,10 @@ public sealed class CrabDeskRuntime : IDisposable
     private bool _desktopMenuRefreshInProgress;
     private bool _desktopSortCommandPending;
     private DateTimeOffset? _desktopSortCommandReadyAt;
+    private readonly object _boxDragWheelGate = new();
+    private int _pendingBoxDragWheelDelta;
+    private Point _pendingBoxDragWheelPoint;
+    private bool _boxDragWheelDispatchQueued;
 
     public CrabDeskRuntime(Action<Action> beginInvoke)
     {
@@ -658,7 +663,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             return false;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxItemsChanged(boxId);
         return true;
     }
 
@@ -688,7 +693,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         else
         {
-            NotifyWorkspaceChanged(true);
+            NotifyBoxAdded(box.Id);
         }
         return box;
     }
@@ -737,7 +742,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         State.Boxes.Add(box);
         await RefreshMappedFoldersAsync(false);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxAdded(box.Id);
         return box;
     }
 
@@ -872,7 +877,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (changed > 0)
         {
-            NotifyWorkspaceChanged(true);
+            NotifyBoxItemsChanged(boxId);
         }
         return changed;
     }
@@ -978,7 +983,32 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void NotifyDesktopItemAssignmentChanged(Guid boxId)
     {
-        _surfaceManager?.RefreshDesktopItemAssignment(boxId);
+        NotifyBoxItemsChanged(boxId);
+    }
+
+    private void NotifyBoxItemsChanged(Guid boxId) =>
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBoxItems(boxId));
+
+    private void NotifyBoxesItemsChanged(IReadOnlyCollection<Guid> boxIds) =>
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBoxItems(boxIds));
+
+    private void NotifyBoxAdded(Guid boxId) =>
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBoxAdded(boxId));
+
+    private void NotifyTargetedWorkspaceChanged(Action<DesktopSurfaceManager> refresh)
+    {
+        _workspaceRevision++;
+        try
+        {
+            if (_surfaceManager is not null)
+            {
+                refresh(_surfaceManager);
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Targeted desktop surface refresh failed after a workspace change", exception);
+        }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
@@ -1028,7 +1058,25 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        UnassignItems(keys);
+        var sourceBoxIds = keys
+            .Select(key => State.Assignments.TryGetValue(key, out var boxId) ? (Guid?)boxId : null)
+            .Where(boxId => boxId is not null)
+            .Select(boxId => boxId!.Value)
+            .Distinct()
+            .ToArray();
+        var unassignedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in keys)
+        {
+            if (State.Assignments.ContainsKey(key))
+            {
+                UnassignItemCore(key);
+                unassignedKeys.Add(key);
+            }
+        }
+        if (unassignedKeys.Count > 0)
+        {
+            NotifyDesktopItemReleaseChanged(unassignedKeys, sourceBoxIds);
+        }
         return Task.FromResult(true);
     }
 
@@ -1127,8 +1175,13 @@ public sealed class CrabDeskRuntime : IDisposable
         IReadOnlyDictionary<string, DesktopIconLayoutSnapshot> layout)
     {
         var unassignedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sourceBoxIds = new HashSet<Guid>();
         foreach (var key in itemKeys.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            if (State.Assignments.TryGetValue(key, out var sourceBoxId))
+            {
+                sourceBoxIds.Add(sourceBoxId);
+            }
             if (State.Assignments.Remove(key))
             {
                 unassignedKeys.Add(key);
@@ -1141,7 +1194,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         SetDesktopIconLayout(layout, refreshWorkspace: false);
-        NotifyDesktopItemReleaseChanged(unassignedKeys);
+        NotifyDesktopItemReleaseChanged(unassignedKeys, sourceBoxIds);
         return true;
     }
 
@@ -1514,7 +1567,13 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (!target.IsMappedFolder && !source.IsMappedFolder)
         {
-            AssignItems(items.Select(item => item.Key.ToString()), targetBoxId);
+            foreach (var item in items)
+            {
+                var itemKey = item.Key.ToString();
+                State.Assignments[itemKey] = targetBoxId;
+                MoveItemOrderKey(itemKey, targetBoxId);
+            }
+            NotifyBoxesItemsChanged([sourceBoxId, targetBoxId]);
             return FileImportBatchResult.Empty;
         }
 
@@ -3257,6 +3316,7 @@ public sealed class CrabDeskRuntime : IDisposable
         if (_desktopInputMonitor is not null)
         {
             _desktopInputMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;
+            _desktopInputMonitor.BoxDragMouseWheelRequested -= OnBoxDragMouseWheelRequested;
             _desktopInputMonitor.DesktopSurfaceClicked -= OnDesktopSurfaceClicked;
             _desktopInputMonitor.DesktopContextMenuRequested -= OnDesktopContextMenuRequested;
             _desktopInputMonitor.DesktopContextMenuCommandRequested -= OnDesktopContextMenuCommandRequested;
@@ -3873,6 +3933,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             _desktopInputMonitor = new DesktopInputMonitor();
             _desktopInputMonitor.IconZoomRequested += OnDesktopIconZoomRequested;
+            _desktopInputMonitor.BoxDragMouseWheelRequested += OnBoxDragMouseWheelRequested;
             _desktopInputMonitor.DesktopSurfaceClicked += OnDesktopSurfaceClicked;
             _desktopInputMonitor.DesktopContextMenuRequested += OnDesktopContextMenuRequested;
             _desktopInputMonitor.DesktopContextMenuCommandRequested += OnDesktopContextMenuCommandRequested;
@@ -3882,6 +3943,8 @@ public sealed class CrabDeskRuntime : IDisposable
         _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
         _desktopInputMonitor.IsPointerOverBox = (x, y) =>
             _surfaceManager?.IsPointOverAnyBox(x, y) == true;
+        _desktopInputMonitor.IsBoxItemDragActive = () =>
+            !_disposed && !IsPaused && _surfaceManager?.IsBoxItemDragActive == true;
         _desktopInputMonitor.CanDeleteDesktopItems = () =>
             !_disposed && !IsPaused && _surfaceManager?.CanDeleteSelectedItems == true;
         _desktopInputMonitor.CanRenameDesktopItems = () =>
@@ -3913,6 +3976,60 @@ public sealed class CrabDeskRuntime : IDisposable
 
             _desktopZoomTimer.Start();
         });
+    }
+
+    private void OnBoxDragMouseWheelRequested(object? sender, DesktopMouseWheelEventArgs eventArgs)
+    {
+        var shouldQueue = false;
+        lock (_boxDragWheelGate)
+        {
+            _pendingBoxDragWheelDelta = Math.Clamp(
+                _pendingBoxDragWheelDelta + eventArgs.Delta,
+                -4800,
+                4800);
+            _pendingBoxDragWheelPoint = new Point(eventArgs.X, eventArgs.Y);
+            if (!_boxDragWheelDispatchQueued)
+            {
+                _boxDragWheelDispatchQueued = true;
+                shouldQueue = true;
+            }
+        }
+        if (!shouldQueue)
+        {
+            return;
+        }
+
+        try
+        {
+            _beginInvoke(DispatchBoxDragMouseWheel);
+        }
+        catch
+        {
+            lock (_boxDragWheelGate)
+            {
+                _boxDragWheelDispatchQueued = false;
+            }
+        }
+    }
+
+    private void DispatchBoxDragMouseWheel()
+    {
+        int delta;
+        Point point;
+        lock (_boxDragWheelGate)
+        {
+            delta = _pendingBoxDragWheelDelta;
+            point = _pendingBoxDragWheelPoint;
+            _pendingBoxDragWheelDelta = 0;
+            _boxDragWheelDispatchQueued = false;
+        }
+
+        if (delta == 0 || _disposed || IsPaused || _surfaceManager?.IsBoxItemDragActive != true)
+        {
+            return;
+        }
+
+        _surfaceManager.TryScrollBoxAt(point.X, point.Y, delta);
     }
 
     private void OnDesktopSurfaceClicked(object? sender, EventArgs eventArgs)

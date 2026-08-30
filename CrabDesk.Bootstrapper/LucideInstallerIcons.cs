@@ -128,24 +128,41 @@ internal static class LucideInstallerIcons
         if (string.IsNullOrEmpty(glyph)) return;
 
         var font = GetFont(emSize);
-        if (font == null) return;
+        if (font == null || _fontFamily == null) return;
 
-        var previousTextRenderingHint = g.TextRenderingHint;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        var previousSmoothingMode = g.SmoothingMode;
+        var previousTransform = g.Transform;
 
-        using (var brush = new SolidBrush(color))
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        var centerX = bounds.X + bounds.Width / 2f;
+        var centerY = bounds.Y + bounds.Height / 2f;
+
+        using (var path = new GraphicsPath())
         {
-            var format = new StringFormat
+            var sf = new StringFormat
             {
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center,
                 FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip
             };
 
-            g.DrawString(glyph, font, brush, bounds, format);
+            path.AddString(glyph, _fontFamily, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+            var glyphBounds = path.GetBounds();
+
+            var glyphCenterX = glyphBounds.X + glyphBounds.Width / 2f;
+            var glyphCenterY = glyphBounds.Y + glyphBounds.Height / 2f;
+
+            using var matrix = previousTransform.Clone();
+            matrix.Translate(centerX - glyphCenterX, centerY - glyphCenterY);
+            g.Transform = matrix;
+
+            using var brush = new SolidBrush(color);
+            g.FillPath(brush, path);
         }
 
-        g.TextRenderingHint = previousTextRenderingHint;
+        g.Transform = previousTransform;
+        g.SmoothingMode = previousSmoothingMode;
     }
 
     public static void DrawIconRotated(Graphics g, LucideIcon icon, RectangleF bounds, Color color, float emSize, float angleDegrees)
@@ -154,35 +171,44 @@ internal static class LucideInstallerIcons
         if (string.IsNullOrEmpty(glyph)) return;
 
         var font = GetFont(emSize);
-        if (font == null) return;
+        if (font == null || _fontFamily == null) return;
 
-        var previousTextRenderingHint = g.TextRenderingHint;
+        var previousSmoothingMode = g.SmoothingMode;
         var previousTransform = g.Transform;
 
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
 
         var centerX = bounds.X + bounds.Width / 2f;
         var centerY = bounds.Y + bounds.Height / 2f;
 
-        using (var matrix = previousTransform.Clone())
+        using (var path = new GraphicsPath())
         {
-            matrix.RotateAt(angleDegrees, new PointF(centerX, centerY));
+            var sf = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+                FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip
+            };
+
+            path.AddString(glyph, _fontFamily, (int)FontStyle.Regular, emSize, new PointF(0, 0), sf);
+            var glyphBounds = path.GetBounds();
+
+            // Calculate precise centroid of glyph geometry to perfectly center rotation
+            var glyphCenterX = glyphBounds.X + glyphBounds.Width / 2f;
+            var glyphCenterY = glyphBounds.Y + glyphBounds.Height / 2f;
+
+            using var matrix = previousTransform.Clone();
+            matrix.Translate(centerX, centerY);
+            matrix.Rotate(angleDegrees);
+            matrix.Translate(-glyphCenterX, -glyphCenterY);
+
             g.Transform = matrix;
 
-            using (var brush = new SolidBrush(color))
-            {
-                var format = new StringFormat
-                {
-                    Alignment = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center,
-                    FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip
-                };
-
-                g.DrawString(glyph, font, brush, bounds, format);
-            }
+            using var brush = new SolidBrush(color);
+            g.FillPath(brush, path);
         }
 
         g.Transform = previousTransform;
-        g.TextRenderingHint = previousTextRenderingHint;
+        g.SmoothingMode = previousSmoothingMode;
     }
 }

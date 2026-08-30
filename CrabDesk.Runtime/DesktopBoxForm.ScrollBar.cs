@@ -8,6 +8,15 @@ internal sealed partial class DesktopBoxForm
 {
     private ScrollBarDragState? _scrollBarDrag;
 
+    internal static LayoutRect CalculateScrollBarViewport(
+        RectangleF boxBounds,
+        RectangleF bodyBounds) =>
+        new(
+            bodyBounds.X,
+            bodyBounds.Y,
+            Math.Max(0, boxBounds.Right - bodyBounds.X),
+            Math.Max(0, bodyBounds.Height));
+
     private VerticalScrollBarLayout? GetScrollBarLayout(BoxGeometry geometry)
     {
         if (geometry.IsCollapsed ||
@@ -23,6 +32,12 @@ internal sealed partial class DesktopBoxForm
             geometry.Body.Y,
             geometry.Body.Width,
             geometry.Body.Height);
+        // Keep icon layout based on the actual body, but let the scrollbar use
+        // the box's right-side padding so it sits beside the icons instead of
+        // overlapping their last column.
+        var scrollbarViewport = CalculateScrollBarViewport(
+            geometry.Bounds,
+            geometry.Body);
         var maxScroll = DesktopItemLayoutEngine.GetScrollExtent(
             geometry.Box.ViewMode,
             body,
@@ -35,7 +50,7 @@ internal sealed partial class DesktopBoxForm
                 appearance.IconVerticalSpacing,
                 geometry.Box.Appearance.IconSize));
         return DesktopScrollBarLayoutEngine.CalculateVertical(
-            body,
+            scrollbarViewport,
             _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)),
             maxScroll);
     }

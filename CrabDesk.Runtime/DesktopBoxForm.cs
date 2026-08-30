@@ -26,7 +26,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private const int WmMouseWheel = 0x020A;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
-    private const int HoverExpansionDelayMilliseconds = 70;
+    // Keep the hover intent guard short enough that expansion feels immediate
+    // while still filtering out a quick pointer pass over the header.
+    private const int HoverExpansionDelayMilliseconds = 45;
     private const int HoverCollapseDelayMilliseconds = 120;
     private const double ScrollAnimationDurationMilliseconds = 190;
     private const double ScrollEaseExponent = 2.2;
@@ -109,7 +111,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private ItemViewKey? _scrollAnimationKey;
     private double _scrollAnimationFrom;
     private double _scrollAnimationTo;
-    private DateTime _scrollAnimationStartedUtc;
+    private long _scrollAnimationStartedTimestamp;
     private readonly DesktopHoverOverlay _itemHoverOverlay;
     private readonly DesktopHoverOverlay _headerActionOverlay;
     private DesktopRenameEditor? _renameEditor;
@@ -405,7 +407,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return presented;
     }
 
-    internal bool RefreshAssignedItems(Guid boxId)
+    internal bool RefreshBoxItems(Guid boxId)
     {
         var box = _runtime.State.Boxes.FirstOrDefault(candidate =>
             candidate.Id == boxId &&
@@ -527,8 +529,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal bool IsTransformActive => _movingBox is not null || _resizingBox is not null;
 
+    internal bool IsItemDragActive => _dragStarted;
+
     private bool IsScrollAnimationActive =>
         _scrollAnimationKey is not null && _animationFrameClock.Enabled;
+
+    internal bool HasDynamicAnimation =>
+        _heightAnimations.Count > 0 || IsScrollAnimationActive;
 
     internal bool HasDynamicVisual =>
         IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null ||
@@ -553,6 +560,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _selectionBox is not null,
             IsScrollAnimationActive);
 
+    internal bool UsesPartialBoxAnimationComposition =>
+        CanUsePartialBoxAnimationComposition(
+            _heightAnimations.Count > 0,
+            IsTransformActive,
+            _selectionBox is not null,
+            IsScrollAnimationActive,
+            IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null);
+
     internal static bool IsPartialBoxAnimationOnly(
         bool heightAnimationActive,
         bool scrollAnimationActive,
@@ -568,6 +583,23 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         !transformActive &&
         !selectionActive &&
         !scrollAnimationActive;
+
+    internal static bool CanUsePartialBoxAnimationComposition(
+        bool heightAnimationActive,
+        bool transformActive,
+        bool selectionActive,
+        bool scrollAnimationActive,
+        bool otherDynamicVisualActive) =>
+        CanUsePartialHeightAnimationComposition(
+            heightAnimationActive,
+            transformActive,
+            selectionActive,
+            scrollAnimationActive) ||
+        (!heightAnimationActive &&
+         scrollAnimationActive &&
+         !transformActive &&
+         !selectionActive &&
+         !otherDynamicVisualActive);
 
     internal static bool ShouldPresentHitMask(bool bitmapPresented, bool presenterLost) =>
         !bitmapPresented || presenterLost;
@@ -970,6 +1002,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 $"clip={clipBounds} scale={_scale:0.###}");
         }
         var transformId = (_movingBox ?? _resizingBox)?.Id;
+        var dragSourceId = _dragStarted ? _pressedBoxId : null;
         var previewId = _dropPreview?.BoxId;
         var selectionId = _selectionBox?.Id;
         var hasDynamicVisual = HasDynamicVisual;
@@ -983,8 +1016,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         foreach (var box in _boxes.Where(box =>
                      box.Bounds.IntersectsWith(clipBounds) &&
                      (!hasDynamicVisual ||
-                      (box.Box.Id != transformId &&
-                       box.Box.Id != previewId &&
+                       (box.Box.Id != transformId &&
+                        box.Box.Id != dragSourceId &&
+                        box.Box.Id != previewId &&
                        !animatedBoxIds.Contains(box.Box.Id)))))
         {
             var isSelectionBox = box.Box.Id == selectionId;
@@ -1013,6 +1047,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         EnsureGeometry();
         var transformBox = _movingBox ?? _resizingBox;
+        var renderedDynamicBoxIds = new HashSet<Guid>();
         if (_selectionBox is { } selectionBox)
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == selectionBox.Id);
@@ -1038,12 +1073,31 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                         includeItemHoverFeedback: false,
                         includeCompositedHeaderActions: true);
                 }
+                renderedDynamicBoxIds.Add(transformBox.Id);
+            }
+        }
+
+        // An item drag originating in this box keeps the source box itself
+        // parent-owned. Render it in this dynamic pass so the settled layer
+        // does not also contribute the same translucent pixels.
+        if (_dragStarted && _pressedBoxId is { } dragSourceId &&
+            dragSourceId != transformBox?.Id)
+        {
+            var geometry = _boxes.FirstOrDefault(box => box.Box.Id == dragSourceId);
+            if (geometry is not null)
+            {
+                DrawBox(
+                    graphics,
+                    geometry,
+                    clipBounds,
+                    includeItemHoverFeedback: false);
+                renderedDynamicBoxIds.Add(dragSourceId);
             }
         }
 
         foreach (var animatedBoxId in _heightAnimations.Keys)
         {
-            if (animatedBoxId == transformBox?.Id)
+            if (!renderedDynamicBoxIds.Add(animatedBoxId))
             {
                 continue;
             }
@@ -1063,8 +1117,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         if (IsScrollAnimationActive &&
             _scrollAnimationKey is { } scrollKey &&
-            scrollKey.BoxId != transformBox?.Id &&
-            !_heightAnimations.ContainsKey(scrollKey.BoxId))
+            renderedDynamicBoxIds.Add(scrollKey.BoxId))
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == scrollKey.BoxId);
             if (geometry is not null)
@@ -1081,7 +1134,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ShouldRenderDropPreviewSeparately(
                 preview.BoxId,
                 transformBox?.Id,
-                _heightAnimations.Keys.ToHashSet()))
+                _heightAnimations.Keys.ToHashSet()) &&
+            renderedDynamicBoxIds.Add(preview.BoxId))
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == preview.BoxId);
             if (geometry is not null)
@@ -1846,7 +1900,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private sealed record BoxHeightAnimation(
         double FromHeight,
         double ToHeight,
-        DateTimeOffset StartedAt,
+        long StartedTimestamp,
         TimeSpan Duration);
 
     private sealed record BoxHeightVisualCache(

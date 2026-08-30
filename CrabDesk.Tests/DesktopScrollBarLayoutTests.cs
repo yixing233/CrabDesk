@@ -45,4 +45,18 @@ public sealed class DesktopScrollBarLayoutTests
         Assert.True(layout.Thumb.Y >= layout.Track.Y);
         Assert.True(layout.Thumb.Y + layout.Thumb.Height <= layout.Track.Y + layout.Track.Height);
     }
+
+    [Fact]
+    public void DefaultScrollbarIsNarrowAndSitsCloseToTheViewportEdge()
+    {
+        var layout = Assert.IsType<VerticalScrollBarLayout>(
+            DesktopScrollBarLayoutEngine.CalculateVertical(
+                new LayoutRect(20, 40, 240, 180),
+                requestedScroll: 0,
+                maxScroll: 720));
+
+        Assert.Equal(4, layout.Track.Width);
+        Assert.Equal(2, (20 + 240) - (layout.Track.X + layout.Track.Width));
+        Assert.Equal(2, layout.Track.Y - 40);
+    }
 }

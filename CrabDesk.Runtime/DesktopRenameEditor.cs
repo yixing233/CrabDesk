@@ -84,7 +84,7 @@ internal sealed class DesktopRenameEditor : Forms.Form
         var requestedBounds = new Rectangle(screenLocation, size);
         Bounds = requestedBounds;
         _input.Text = initialText;
-        _input.TextAlign = Forms.HorizontalAlignment.Center;
+        _input.TextAlign = ResolveTextAlignment(wordWrap);
         _completion = new TaskCompletionSource<string?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         _finished = false;
@@ -125,6 +125,14 @@ internal sealed class DesktopRenameEditor : Forms.Form
         var contentHeight = Math.Max(Math.Max(1f, lineHeight), wrappedTextHeight);
         return Math.Min(available, contentHeight + BorderPixels * 2);
     }
+
+    internal static float CalculateSingleLineEditorHeight(float lineHeight, float availableHeight) =>
+        CalculateEditorHeight(lineHeight, lineHeight, availableHeight);
+
+    internal static Forms.HorizontalAlignment ResolveTextAlignment(bool wordWrap) =>
+        wordWrap
+            ? Forms.HorizontalAlignment.Center
+            : Forms.HorizontalAlignment.Left;
 
     /// <summary>
     /// Commits the pending edit because the pointer clicked a desktop surface

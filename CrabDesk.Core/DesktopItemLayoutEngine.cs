@@ -33,6 +33,22 @@ public static class DesktopItemLayoutEngine
         return Math.Max(Math.Clamp(verticalSpacing, 56, 180), iconSize + 38);
     }
 
+    private static int GetGridColumnCount(double bodyWidth, double minimumCellWidth)
+    {
+        if (bodyWidth <= 0)
+        {
+            return 1;
+        }
+
+        return Math.Max(1, (int)Math.Floor(bodyWidth / minimumCellWidth));
+    }
+
+    private static double GetAdaptiveGridCellWidth(double bodyWidth, double minimumCellWidth)
+    {
+        var columns = GetGridColumnCount(bodyWidth, minimumCellWidth);
+        return bodyWidth > 0 ? bodyWidth / columns : minimumCellWidth;
+    }
+
     // Box icon zoom only changes the box IconSize. Scale the configured
     // global icon spacing with that size so the box grid follows its icons
     // instead of staying pinned to the global default spacing.
@@ -136,9 +152,10 @@ public static class DesktopItemLayoutEngine
             return new DesktopItemLayoutResult(items, scroll, maxScroll);
         }
 
-        var cellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
+        var minimumCellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
         var cellHeight = GetGridCellHeight(iconSize, verticalSpacing);
-        var columns = Math.Max(1, (int)(body.Width / cellWidth));
+        var columns = GetGridColumnCount(body.Width, minimumCellWidth);
+        var cellWidth = GetAdaptiveGridCellWidth(body.Width, minimumCellWidth);
         var rows = (int)Math.Ceiling(itemCount / (double)columns);
         var gridMaxScroll = Math.Max(0, rows * cellHeight - body.Height);
         var gridScroll = Math.Clamp(requestedScroll, 0, gridMaxScroll);
@@ -177,9 +194,9 @@ public static class DesktopItemLayoutEngine
             return Math.Max(0, itemCount * rowHeight - body.Height);
         }
 
-        var cellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
+        var minimumCellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
         var cellHeight = GetGridCellHeight(iconSize, verticalSpacing);
-        var columns = Math.Max(1, (int)(body.Width / cellWidth));
+        var columns = GetGridColumnCount(body.Width, minimumCellWidth);
         var rows = (int)Math.Ceiling(itemCount / (double)columns);
         return Math.Max(0, rows * cellHeight - body.Height);
     }
@@ -220,9 +237,10 @@ public static class DesktopItemLayoutEngine
             return new VisibleDesktopItemLayoutResult(items, scroll, maxScroll);
         }
 
-        var cellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
+        var minimumCellWidth = GetGridCellWidth(iconSize, horizontalSpacing);
         var cellHeight = GetGridCellHeight(iconSize, verticalSpacing);
-        var columns = Math.Max(1, (int)(body.Width / cellWidth));
+        var columns = GetGridColumnCount(body.Width, minimumCellWidth);
+        var cellWidth = GetAdaptiveGridCellWidth(body.Width, minimumCellWidth);
         var rows = (int)Math.Ceiling(itemCount / (double)columns);
         var maxGridScroll = Math.Max(0, rows * cellHeight - body.Height);
         var gridScroll = Math.Clamp(requestedScroll, 0, maxGridScroll);

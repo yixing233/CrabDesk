@@ -96,6 +96,24 @@ public sealed class DesktopItemLayoutTests
     }
 
     [Fact]
+    public void GridLayoutDistributesColumnsAcrossTheAvailableWidth()
+    {
+        var result = DesktopItemLayoutEngine.Calculate(
+            BoxViewMode.Grid,
+            new LayoutRect(10, 20, 280, 200),
+            6,
+            42,
+            82,
+            88,
+            0);
+
+        Assert.Equal(3, result.Items.Take(3).Count());
+        Assert.Equal(280d / 3, result.Items[0].Width, 3);
+        Assert.Equal(10 + 280d / 3, result.Items[1].X, 3);
+        Assert.Equal(290, result.Items[2].X + result.Items[2].Width, 3);
+    }
+
+    [Fact]
     public void CompactDefaultGridKeepsTwoLineLabelsWithoutLooseRows()
     {
         var result = DesktopItemLayoutEngine.Calculate(
@@ -179,6 +197,22 @@ public sealed class DesktopItemLayoutTests
         Assert.Equal(400, result.Items[0].Index);
         Assert.Equal(411, result.Items[^1].Index);
         Assert.True(result.MaxScroll > result.ScrollOffset);
+    }
+
+    [Fact]
+    public void VisibleGridLayoutUsesTheSameAdaptiveColumnWidth()
+    {
+        var result = DesktopItemLayoutEngine.CalculateVisible(
+            BoxViewMode.Grid,
+            new LayoutRect(10, 20, 280, 176),
+            6,
+            42,
+            82,
+            88,
+            0);
+
+        Assert.Equal(280d / 3, result.Items[0].Bounds.Width, 3);
+        Assert.Equal(290, result.Items[2].Bounds.X + result.Items[2].Bounds.Width, 3);
     }
 
     [Fact]

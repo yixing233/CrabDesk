@@ -12,8 +12,8 @@ public sealed record VerticalScrollBarLayout(
 /// </summary>
 public static class DesktopScrollBarLayoutEngine
 {
-    public const double DefaultThickness = 6;
-    public const double DefaultInset = 4;
+    public const double DefaultThickness = 4;
+    public const double DefaultInset = 2;
     public const double DefaultMinimumThumbHeight = 28;
 
     public static VerticalScrollBarLayout? CalculateVertical(

@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
@@ -366,7 +367,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _heightAnimations[box.Id] = new BoxHeightAnimation(
             fromHeight,
             targetHeight,
-            DateTimeOffset.UtcNow,
+            Stopwatch.GetTimestamp(),
             CalculateBoxHeightAnimationDuration(
                 Math.Abs(targetHeight - fromHeight),
                 Math.Abs(box.Bounds.Height - box.Appearance.TitleBarHeight)));
@@ -394,7 +395,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ReleaseHeightAnimationVisualCache(box.Id);
             return targetHeight;
         }
-        var progress = (DateTimeOffset.UtcNow - animation.StartedAt).TotalMilliseconds /
+        var progress = Stopwatch.GetElapsedTime(animation.StartedTimestamp).TotalMilliseconds /
             animation.Duration.TotalMilliseconds;
         return progress >= 1
             ? animation.ToHeight
@@ -408,12 +409,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnAnimationFrame(object? sender, EventArgs eventArgs)
     {
-        var now = DateTimeOffset.UtcNow;
         var hadScrollAnimation = _scrollAnimationKey is not null;
         var scrollCompleted = AdvanceScrollAnimation(requestRender: false);
         var animatedBoxIds = _heightAnimations.Keys.ToArray();
         var completedBoxIds = _heightAnimations
-            .Where(pair => now - pair.Value.StartedAt >= pair.Value.Duration)
+            .Where(pair => Stopwatch.GetElapsedTime(pair.Value.StartedTimestamp) >= pair.Value.Duration)
             .Select(pair => pair.Key)
             .ToArray();
         var completedAnimationBounds = completedBoxIds

@@ -954,9 +954,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Math.Min(
                 item.Bounds.Bottom - textTop - 3,
                 labelFont.GetHeight(graphics) * CompactGridLabelLineCount + 2));
-        var visibleHeight = Math.Max(0, contentBounds.Bottom - textTop - 3);
+        var availableHeight = Math.Max(0, contentBounds.Bottom - textTop - 3);
         var textHeight = isSelected
-            ? Math.Min(visibleHeight, MeasureFullGridLabelHeight(graphics, item.Item.DisplayName, labelFont, textWidth))
+            // Keep the full measured layout even when it extends below the
+            // box body. The body's graphics clip hides the overflow without
+            // forcing an ellipsis or shrinking the selected label.
+            ? ResolveSelectedGridLabelHeight(
+                MeasureFullGridLabelHeight(graphics, item.Item.DisplayName, labelFont, textWidth),
+                availableHeight)
             : compactHeight;
         return new RectangleF(
             item.Bounds.X + 2,
@@ -987,6 +992,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return graphics.MeasureString(displayName, labelFont, new SizeF(width, 100_000), format).Height + 2;
     }
 
+    internal static float ResolveSelectedGridLabelHeight(
+        float measuredHeight,
+        float availableHeight) =>
+        Math.Max(0, measuredHeight);
+
     private static StringFormat CreateItemTextFormat(BoxViewMode viewMode) => new()
     {
         Alignment = viewMode == BoxViewMode.List ? StringAlignment.Near : StringAlignment.Center,
@@ -1003,10 +1013,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         Alignment = StringAlignment.Center,
         LineAlignment = StringAlignment.Near,
-        Trimming = StringTrimming.EllipsisCharacter,
-        // Selection removes the fixed line limit. The text rectangle grows to
-        // the box's visible bottom edge; an ellipsis is only needed if even
-        // that available area cannot contain the complete filename.
+        Trimming = StringTrimming.None,
+        // Selection removes the fixed line limit and vertical truncation. The
+        // box body clip, rather than the label rectangle, decides what remains
+        // visible when the name extends below the box.
         FormatFlags = StringFormatFlags.LineLimit
     };
 

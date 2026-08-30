@@ -580,7 +580,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var listLeft = Math.Max(
                 listWorkArea.Left + 2,
                 Math.Min(listCenterX - listWidth / 2, listWorkArea.Right - listWidth - 2));
-            var listHeight = Math.Max(lineHeight + 2, item.Bounds.Height - 2);
+            var listHeight = DesktopRenameEditor.CalculateSingleLineEditorHeight(
+                lineHeight,
+                item.Bounds.Height);
             var listTop = Math.Max(
                 listWorkArea.Top + 1,
                 item.Bounds.Y + (item.Bounds.Height - listHeight) / 2);

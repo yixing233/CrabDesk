@@ -65,6 +65,34 @@ public sealed class DesktopItemReleaseRefreshTests
     }
 
     [Fact]
+    public void BoxFormReleaseUsesSourceBoxIdsInsteadOfAWorkspaceRefresh()
+    {
+        var solutionDirectory = FindSolutionDirectory();
+        var runtimeSource = File.ReadAllText(Path.Combine(
+            solutionDirectory,
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var releaseStart = runtimeSource.IndexOf(
+            "public Task<bool> ReleaseAssignedItemsToDesktopAsync(",
+            StringComparison.Ordinal);
+        var releaseEnd = runtimeSource.IndexOf(
+            "internal static bool PathsOverlapForTargetedDesktopRefresh(",
+            Math.Max(0, releaseStart),
+            StringComparison.Ordinal);
+
+        Assert.True(releaseStart >= 0);
+        Assert.True(releaseEnd > releaseStart);
+        var releaseMethod = runtimeSource[releaseStart..releaseEnd];
+        Assert.Contains("sourceBoxIds", releaseMethod, StringComparison.Ordinal);
+        Assert.Contains(
+            "NotifyDesktopItemReleaseChanged(unassignedKeys, sourceBoxIds);",
+            releaseMethod,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("UnassignItems(", releaseMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyWorkspaceChanged(true);", releaseMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DesktopFolderDropRefreshesOnlyTheMovedDesktopItems()
     {
         var solutionDirectory = FindSolutionDirectory();

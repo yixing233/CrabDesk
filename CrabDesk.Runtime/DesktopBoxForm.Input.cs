@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
@@ -1424,11 +1425,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return;
         }
-        var point = ToDip(eventArgs.Location);
+
+        EnsureGeometry();
+        TryScrollBox(ToDip(eventArgs.Location), eventArgs.Delta);
+    }
+
+    internal bool TryScrollBoxAt(Point screenPoint, int delta)
+    {
+        if (delta == 0 || IsDisposed || _resourcesDisposed)
+        {
+            return false;
+        }
+
+        EnsureGeometry();
+        return TryScrollBox(ToDip(PointToClient(screenPoint)), delta);
+    }
+
+    private bool TryScrollBox(PointF point, int delta)
+    {
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (box is null)
         {
-            return;
+            return false;
         }
         var scrollKey = GetItemViewKey(box);
         var itemCount = GetVisibleItemsForBox(box).Count;
@@ -1445,7 +1463,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 box.Box.Appearance.IconSize));
         if (extent <= 0)
         {
-            return;
+            return false;
         }
 
         // Continue from the offset that is currently on screen, so rapid
@@ -1462,14 +1480,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var step = CalculateSmoothScrollStep(
             GetScrollUnit(box),
             Forms.SystemInformation.MouseWheelScrollLines,
-            Math.Abs(eventArgs.Delta));
-        var target = Math.Clamp(current - Math.Sign(eventArgs.Delta) * step, 0, extent);
+            Math.Abs(delta));
+        var target = Math.Clamp(current - Math.Sign(delta) * step, 0, extent);
         if (Math.Abs(target - current) < 0.5)
         {
-            return;
+            return false;
         }
 
         StartScrollAnimation(scrollKey, current, target);
+        return true;
     }
 
     private double GetScrollUnit(BoxGeometry box)
@@ -1504,7 +1523,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var progress = Math.Min(
             1,
-            (DateTime.UtcNow - _scrollAnimationStartedUtc).TotalMilliseconds /
+            Stopwatch.GetElapsedTime(_scrollAnimationStartedTimestamp).TotalMilliseconds /
             ScrollAnimationDurationMilliseconds);
         var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
         return _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
@@ -1521,7 +1540,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _scrollAnimationKey = key;
         _scrollAnimationFrom = from;
         _scrollAnimationTo = to;
-        _scrollAnimationStartedUtc = DateTime.UtcNow;
+        _scrollAnimationStartedTimestamp = Stopwatch.GetTimestamp();
         _animationFrameClock.RequestFrames();
         if (startsNewDynamicPass)
         {
@@ -1539,7 +1558,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         var progress = Math.Min(
             1,
-            (DateTime.UtcNow - _scrollAnimationStartedUtc).TotalMilliseconds /
+            Stopwatch.GetElapsedTime(_scrollAnimationStartedTimestamp).TotalMilliseconds /
             ScrollAnimationDurationMilliseconds);
         var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
         var offset = _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
@@ -1582,11 +1601,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             return;
         }
-        _items.Clear();
-        foreach (var box in _boxes.Where(box => !box.IsCollapsed))
-        {
-            BuildItemGeometry(box);
-        }
+        RebuildScrolledBoxItemGeometry(key.BoxId);
         if (requestRender)
         {
             // Scrolling never changes the box input region. In desktop
@@ -1594,6 +1609,59 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // let the icon layer update only the scrolling box rectangle.
             RequestVisualLayerRender();
         }
+    }
+
+    private void RebuildScrolledBoxItemGeometry(Guid boxId)
+    {
+        var geometry = _boxes.FirstOrDefault(box => box.Box.Id == boxId);
+        if (geometry is null || geometry.IsCollapsed)
+        {
+            return;
+        }
+
+        // Scrolling changes only this box's item rectangles. Keep the other
+        // boxes' geometry and ordering intact so every frame avoids a full
+        // layout pass and repeated filtering of unrelated items.
+        var replacement = new List<ItemGeometry>();
+        BuildItemGeometry(geometry, replacement);
+        var firstIndex = _items.FindIndex(item => item.Box.Id == boxId);
+        for (var index = _items.Count - 1; index >= 0; index--)
+        {
+            if (_items[index].Box.Id == boxId)
+            {
+                _items.RemoveAt(index);
+            }
+        }
+
+        if (replacement.Count == 0)
+        {
+            return;
+        }
+
+        if (firstIndex >= 0)
+        {
+            _items.InsertRange(Math.Min(firstIndex, _items.Count), replacement);
+            return;
+        }
+
+        // A box can have no visible items at one offset and gain them at the
+        // next one. Insert the replacement after the preceding box groups to
+        // preserve hit-test/topmost ordering.
+        var insertIndex = 0;
+        foreach (var previousBox in _boxes)
+        {
+            if (previousBox.Box.Id == boxId)
+            {
+                break;
+            }
+
+            var previousIndex = _items.FindLastIndex(item => item.Box.Id == previousBox.Box.Id);
+            if (previousIndex >= 0)
+            {
+                insertIndex = Math.Max(insertIndex, previousIndex + 1);
+            }
+        }
+        _items.InsertRange(Math.Min(insertIndex, _items.Count), replacement);
     }
 
     private void ClearExpandedItemHitBounds(Guid boxId)

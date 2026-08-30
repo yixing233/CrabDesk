@@ -5,6 +5,161 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopAssignmentRefreshTests
 {
     [Fact]
+    public void BoxItemReorderUsesTargetedRefresh()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var methodStart = source.IndexOf(
+            "public bool ReorderBoxItems(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "public bool MoveBoxInStack(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains("NotifyBoxItemsChanged(boxId);", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyWorkspaceChanged(true);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BoxCreationUsesTargetedRefresh()
+    {
+        var solutionDirectory = FindSolutionDirectory();
+        var runtimeSource = File.ReadAllText(Path.Combine(
+            solutionDirectory,
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var addStart = runtimeSource.IndexOf(
+            "public DesktopBox AddBox(",
+            StringComparison.Ordinal);
+        var createCoreStart = runtimeSource.IndexOf(
+            "private DesktopBox CreateBoxCore(",
+            Math.Max(0, addStart),
+            StringComparison.Ordinal);
+
+        Assert.True(addStart >= 0);
+        Assert.True(createCoreStart > addStart);
+        var addMethod = runtimeSource[addStart..createCoreStart];
+        Assert.Contains("NotifyBoxAdded(box.Id);", addMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyWorkspaceChanged(true);", addMethod, StringComparison.Ordinal);
+
+        var managerSource = File.ReadAllText(Path.Combine(
+            solutionDirectory,
+            "CrabDesk.Runtime",
+            "DesktopSurfaceManager.cs"));
+        var refreshStart = managerSource.IndexOf(
+            "internal bool RefreshBoxAdded(",
+            StringComparison.Ordinal);
+        var refreshEnd = managerSource.IndexOf(
+            "internal bool RefreshDesktopItemRelease(",
+            Math.Max(0, refreshStart),
+            StringComparison.Ordinal);
+
+        Assert.True(refreshStart >= 0);
+        Assert.True(refreshEnd > refreshStart);
+        var refreshMethod = managerSource[refreshStart..refreshEnd];
+        Assert.Contains("surface.RefreshBoxItems(boxId)", refreshMethod, StringComparison.Ordinal);
+        Assert.Contains("surface.UpdateInteractionRegion()", refreshMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("Refresh();", refreshMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CollapsedBoxGeometryKeepsTheActiveItemViewAndItsScrollKey()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "DesktopBoxForm.Geometry.cs"));
+        var methodStart = source.IndexOf(
+            "private BoxGeometry CreateBoxGeometry(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private void EnsureGeometry()",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var activeManualView = method.IndexOf(
+            "GetActiveManualTabId(box.Id, availableManualTabs)",
+            StringComparison.Ordinal);
+        var activeMappedView = method.IndexOf(
+            "GetActiveMappedFolderCategory(box.Id, availableCategoryTabs)",
+            StringComparison.Ordinal);
+        var hideTabs = method.IndexOf(
+            "var manualTabs = isCollapsed ? [] : availableManualTabs;",
+            StringComparison.Ordinal);
+        var viewKeyStart = source.IndexOf(
+            "private static ItemViewKey GetItemViewKey(",
+            StringComparison.Ordinal);
+        var viewKeyEnd = source.IndexOf(
+            "private static string GetMappedFolderCategoryLabel",
+            Math.Max(0, viewKeyStart),
+            StringComparison.Ordinal);
+
+        Assert.True(activeManualView >= 0);
+        Assert.True(activeMappedView >= 0);
+        Assert.True(hideTabs > activeManualView);
+        Assert.True(hideTabs > activeMappedView);
+        Assert.True(viewKeyStart >= 0);
+        Assert.True(viewKeyEnd > viewKeyStart);
+        var viewKey = source[viewKeyStart..viewKeyEnd];
+        Assert.Contains("geometry.Box.ManualTabs.Count > 0", viewKey, StringComparison.Ordinal);
+        Assert.DoesNotContain("geometry.ManualTabs.Count > 0", viewKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MovingItemsBetweenManualTabsUsesTargetedRefresh()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var methodStart = source.IndexOf(
+            "public int MoveItemsToManualTab(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "public void DeleteBox(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains("NotifyBoxItemsChanged(boxId);", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyWorkspaceChanged(true);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CrossBoxTransferRefreshesSourceAndTargetWithoutGlobalRefresh()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var methodStart = source.IndexOf(
+            "public async Task<FileImportBatchResult> TransferBoxItemsAsync(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "public bool CanPasteIntoBox(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains("NotifyBoxesItemsChanged([sourceBoxId, targetBoxId]);", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("AssignItems(", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("NotifyWorkspaceChanged(true);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DesktopDropUsesTheTargetedAssignmentRefreshPath()
     {
         var solutionDirectory = FindSolutionDirectory();

@@ -1,6 +1,6 @@
 #define MyAppName "CrabDesk"
 #ifndef MyAppVersion
-  #define MyAppVersion "20260826.02"
+  #define MyAppVersion "20260830.01"
 #endif
 #define MyAppPublisher "CrabDesk"
 #define MyAppExeName "CrabDesk.WinUI.exe"

@@ -50,6 +50,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     }
 
     public event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
+    public event EventHandler<DesktopMouseWheelEventArgs>? BoxDragMouseWheelRequested;
     public event EventHandler? DesktopSurfaceClicked;
     public event EventHandler? DesktopContextMenuRequested;
     public event EventHandler? DesktopContextMenuCommandRequested;
@@ -61,6 +62,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     public IntPtr DesktopListView { get; set; }
     public bool Enabled { get; set; }
     public Func<int, int, bool>? IsPointerOverBox { get; set; }
+    public Func<bool>? IsBoxItemDragActive { get; set; }
     public Func<bool>? CanDeleteDesktopItems { get; set; }
     public Func<bool>? CanRenameDesktopItems { get; set; }
     public Func<DesktopKeyboardCommand, bool>? CanHandleDesktopKeyboardCommand { get; set; }
@@ -132,33 +134,62 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
                 // after that parent item is clicked so the following click on
                 // Name, Size, Type, or Date modified can be recognized.
             }
-            else if (msg == WmMouseWheel &&
-                     GetAsyncKeyState(VkControl) < 0 &&
-                     isDesktopSurface)
+            else if (msg == WmMouseWheel)
             {
                 var delta = unchecked((short)(mouse.MouseData >> 16));
                 if (delta != 0)
                 {
-                    // Ctrl+wheel over a box zooms the icons of that box instead
-                    // of Explorer unassigned-icon layer. Keep forwarding to the
-                    // native ListView only while the pointer is on the desktop.
+                    var controlPressed = GetAsyncKeyState(VkControl) < 0;
                     var overBox = IsPointerOverBox?.Invoke(mouse.Point.X, mouse.Point.Y) == true;
-                    if (IsCurrentProcessWindow(targetWindow) && !overBox)
+                    if (ShouldRouteBoxDragWheel(
+                            controlPressed,
+                            isDesktopSurface,
+                            overBox,
+                            IsBoxItemDragActive?.Invoke() == true,
+                            delta))
                     {
-                        DesktopIconPositionService.ForwardControlMouseWheel(
-                            DesktopListView,
-                            mouse.Point.X,
-                            mouse.Point.Y,
-                            delta);
+                        BoxDragMouseWheelRequested?.Invoke(
+                            this,
+                            new DesktopMouseWheelEventArgs(delta, mouse.Point.X, mouse.Point.Y));
+                        // The hook is the single wheel owner during the OLE drag
+                        // loop. Consuming this message avoids a duplicate WinForms
+                        // MouseWheel if the current drop target happens to dispatch it.
+                        return new IntPtr(1);
                     }
-                    IconZoomRequested?.Invoke(
-                        this,
-                        new DesktopIconZoomEventArgs(delta, mouse.Point.X, mouse.Point.Y));
+
+                    if (controlPressed && isDesktopSurface)
+                    {
+                        // Ctrl+wheel over a box zooms the icons of that box instead
+                        // of Explorer unassigned-icon layer. Keep forwarding to the
+                        // native ListView only while the pointer is on the desktop.
+                        if (IsCurrentProcessWindow(targetWindow) && !overBox)
+                        {
+                            DesktopIconPositionService.ForwardControlMouseWheel(
+                                DesktopListView,
+                                mouse.Point.X,
+                                mouse.Point.Y,
+                                delta);
+                        }
+                        IconZoomRequested?.Invoke(
+                            this,
+                            new DesktopIconZoomEventArgs(delta, mouse.Point.X, mouse.Point.Y));
+                    }
                 }
             }
         }
         return CallNextHookEx(_mouseHook, code, message, data);
     }
+
+    internal static bool ShouldRouteBoxDragWheel(
+        bool controlPressed,
+        bool isDesktopSurface,
+        bool pointerOverBox,
+        bool boxItemDragActive,
+        int delta) =>
+        !controlPressed &&
+        pointerOverBox &&
+        boxItemDragActive &&
+        delta != 0;
 
     private IntPtr KeyboardHook(int code, IntPtr message, IntPtr data)
     {

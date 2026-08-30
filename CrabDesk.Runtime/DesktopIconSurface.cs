@@ -122,6 +122,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private Action? _boxDynamicStateUpdate;
     private Func<Point, bool>? _boxPointerHitTest;
     private Func<bool>? _boxPartialAnimationOnly;
+    private Func<bool>? _boxDynamicAnimationActive;
     private readonly Forms.Timer _hoverReconcileTimer;
     private readonly Forms.Timer _dragPointerTimer;
     private readonly DesktopDragOverlay _dragOverlay;
@@ -411,6 +412,9 @@ internal sealed class DesktopIconSurface : Forms.Form
     internal void SetBoxPartialAnimationOnly(Func<bool>? provider) =>
         _boxPartialAnimationOnly = provider;
 
+    internal void SetBoxDynamicAnimationActive(Func<bool>? provider) =>
+        _boxDynamicAnimationActive = provider;
+
     internal static bool ShouldPresentPartialBoxAnimationInParent(
         bool partialAnimationEligible,
         bool boxVisualsInParent,
@@ -434,10 +438,12 @@ internal sealed class DesktopIconSurface : Forms.Form
         bool parentFrameAvailable,
         bool lastPresentSucceeded,
         int presentedVersion,
-        int currentVersion) =>
+        int currentVersion,
+        bool dynamicAnimationActive = false) =>
         visualsInParent &&
         pointerGhostOverlayActive &&
         !selecting &&
+        !dynamicAnimationActive &&
         !staticFrameChanged &&
         parentFrameAvailable &&
         lastPresentSucceeded &&
@@ -1161,7 +1167,8 @@ internal sealed class DesktopIconSurface : Forms.Form
                         parentFrameAvailable: _layerBitmap is not null,
                         lastPresentSucceeded: _lastPresentSucceeded,
                         presentedVersion: _lastPresentedParentBoxDynamicVersion,
-                        currentVersion: boxDynamicVersion))
+                        currentVersion: boxDynamicVersion,
+                        dynamicAnimationActive: _boxDynamicAnimationActive?.Invoke() == true))
                 {
                     // The target-box pixels have not changed. Keep the
                     // already-presented parent frame and move only the small
@@ -1332,7 +1339,8 @@ internal sealed class DesktopIconSurface : Forms.Form
         _selecting ||
         _dragStarted ||
         _externalDragPaths is { Length: > 0 } ||
-        _boxTransformActive?.Invoke() == true;
+        _boxTransformActive?.Invoke() == true ||
+        _virtualBoxDropTargetEnabled;
 
     private bool PresentDragOverlay(
         RectangleF workAreaBounds,

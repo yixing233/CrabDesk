@@ -47,8 +47,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             height);
         var header = new RectangleF(bounds.X, bounds.Y, bounds.Width, titleBarHeight);
         var headerActions = CalculateHeaderActionBounds(header);
-        var manualTabs = isCollapsed ? [] : GetManualTabs(box);
-        var categoryTabs = manualTabs.Count == 0 && !isCollapsed ? GetMappedFolderTabs(box) : [];
+        // Resolve the active view against the complete tab set before hiding
+        // the tab bar for a collapsed box. Replacing the source tabs with an
+        // empty list first would clear the active manual tab/category and make
+        // the next expansion use a different ItemViewKey (losing its scroll
+        // position).
+        var availableManualTabs = GetManualTabs(box);
+        var availableCategoryTabs = availableManualTabs.Count == 0
+            ? GetMappedFolderTabs(box)
+            : [];
+        var activeMappedFolderCategory =
+            GetActiveMappedFolderCategory(box.Id, availableCategoryTabs);
+        var activeManualTabId = GetActiveManualTabId(box.Id, availableManualTabs);
+        var manualTabs = isCollapsed ? [] : availableManualTabs;
+        var categoryTabs = isCollapsed ? [] : availableCategoryTabs;
         var tabCount = categoryTabs.Count + manualTabs.Count;
         var tabBar = tabCount == 0
             ? RectangleF.Empty
@@ -65,9 +77,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             header,
             tabBar,
             categoryTabs,
-            GetActiveMappedFolderCategory(box.Id, categoryTabs),
+            activeMappedFolderCategory,
             manualTabs,
-            GetActiveManualTabId(box.Id, manualTabs),
+            activeManualTabId,
             new RectangleF(
                 bounds.X + 8,
                 bounds.Y + bodyTop,
@@ -175,14 +187,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bounds.Width,
         bounds.Height);
 
-    private void BuildItemGeometry(BoxGeometry geometry)
+    private void BuildItemGeometry(
+        BoxGeometry geometry,
+        ICollection<ItemGeometry>? destination = null)
     {
         if (_runtime.AreDesktopItemsHidden)
         {
             return;
         }
+
+        destination ??= _items;
         var items = GetVisibleItemsForBox(geometry);
         var appearance = _runtime.State.Settings.Appearance;
+        var viewKey = GetItemViewKey(geometry);
+        var storedScrollOffset = _scrollOffsets.GetValueOrDefault(viewKey);
         var layout = DesktopItemLayoutEngine.CalculateVisible(
             geometry.Box.ViewMode,
             new LayoutRect(geometry.Body.X, geometry.Body.Y, geometry.Body.Width, geometry.Body.Height),
@@ -190,8 +208,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             geometry.Box.Appearance.IconSize,
             DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconHorizontalSpacing, geometry.Box.Appearance.IconSize),
             DesktopItemLayoutEngine.ScaleIconSpacing(appearance.IconVerticalSpacing, geometry.Box.Appearance.IconSize),
-            _scrollOffsets.GetValueOrDefault(GetItemViewKey(geometry)));
-        _scrollOffsets[GetItemViewKey(geometry)] = layout.ScrollOffset;
+            storedScrollOffset);
+        _scrollOffsets[viewKey] = ResolvePersistedScrollOffset(
+            storedScrollOffset,
+            layout.ScrollOffset,
+            _heightAnimations.ContainsKey(geometry.Box.Id));
         foreach (var entry in layout.Items)
         {
             var itemBounds = entry.Bounds;
@@ -202,10 +223,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 (float)itemBounds.Height);
             if (bounds.Bottom >= geometry.Body.Top && bounds.Top <= geometry.Body.Bottom)
             {
-                _items.Add(new ItemGeometry(geometry.Box, items[entry.Index], bounds));
+                destination.Add(new ItemGeometry(geometry.Box, items[entry.Index], bounds));
             }
         }
     }
+
+    internal static double ResolvePersistedScrollOffset(
+        double storedOffset,
+        double calculatedOffset,
+        bool heightAnimationActive) =>
+        heightAnimationActive ? storedOffset : calculatedOffset;
 
     private IReadOnlyList<DesktopItemRef> GetVisibleItemsForBox(BoxGeometry geometry)
     {
@@ -332,7 +359,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private static ItemViewKey GetItemViewKey(BoxGeometry geometry) =>
         new(
             geometry.Box.Id,
-            geometry.ManualTabs.Count > 0
+            geometry.Box.ManualTabs.Count > 0 && !geometry.Box.IsMappedFolder
                 ? $"manual:{geometry.ActiveManualTabId?.ToString("N") ?? "all"}"
                 : $"mapped:{geometry.ActiveMappedFolderCategory}");
 
