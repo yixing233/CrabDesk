@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/yixing233/CrabDesk/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/yixing233/CrabDesk/ci.yml?branch=main&label=CI" alt="CI"></a>
   <a href="https://github.com/yixing233/CrabDesk/releases"><img src="https://img.shields.io/github/v/release/yixing233/CrabDesk?include_prereleases&label=Release" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/yixing233/CrabDesk" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg" alt="GPL-3.0 License"></a>
 </p>
 
 CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可自由排列的「盒子」，把文件、文件夹和快捷方式按自己的习惯收纳进去。**文件始终留在原地** —— 拖入盒子只改变逻辑分组，不复制、不移动，也不改变任何路径。
