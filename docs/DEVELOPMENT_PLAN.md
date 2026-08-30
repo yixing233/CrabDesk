@@ -285,7 +285,7 @@ UpdateCheckResult
 - [x] 增加正式 GitHub Release 下载后验收脚本，验证 `v1.0.0` 发布说明、固定资产、`SHA256SUMS.txt`、便携版与安装包签名、发布者证书、可信时间戳以及隔离安装/卸载生命周期，并原子写入外部验收证据。
 - [ ] 在正式 GitHub 仓库执行首次标签发布并验证 Release 资产与客户端检查结果。
 - [ ] 发布安装包、`SHA256SUMS.txt` 和可验证的 Authenticode 签名。
-- [x] 完成隐私说明和 MIT 许可文件。
++ [x] 完成隐私说明和 GPL-3.0 许可文件。
 - [x] 完成 `v1.0.0` 首次正式发布说明并接入 GitHub Release 工作流。
 - [ ] 在正式 GitHub Release 中验证 `v1.0.0` 发布说明展示。
 

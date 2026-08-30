@@ -16,6 +16,10 @@
 
 CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可自由排列的「盒子」，把文件、文件夹和快捷方式按自己的习惯收纳进去。**文件始终留在原地** —— 拖入盒子只改变逻辑分组，不复制、不移动，也不改变任何路径。
 
+<p align="center">
+  <img src="docs/images/desktop-overview.png" width="100%" alt="CrabDesk 桌面盒子总览">
+</p>
+
 ## ✨ 特性
 
 ### 📦 桌面盒子
@@ -25,6 +29,10 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 - 折叠的盒子在鼠标悬停时自动展开，移开后恢复
 - 圆角抗锯齿渲染，透明边缘透出壁纸；可配置背景与强调色、35%–100% 不透明度、边框和缩放手柄
 - 网格 / 列表两种视图，可调整图标尺寸与间距
+
+<p align="center">
+  <img src="docs/images/box-appearance.png" width="760" alt="CrabDesk 盒子外观设置">
+</p>
 
 ### 🔗 虚拟分组，文件不动
 
@@ -37,6 +45,10 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 - 按类型、扩展名、名称通配符配置整理规则，一键应用到桌面图标
 - 规则用紧凑表格编辑，启用状态、匹配模式和目标盒子一目了然
 - 可选接入 OpenAI 兼容接口做 AI 分类：自定义标签（自动创建同名盒子）和提示词；**只发送图标名称，不上传图标图片或文件内容**，API Key 保存在本机
+
+<p align="center">
+  <img src="docs/images/ai-organization.png" width="760" alt="CrabDesk 智能整理与 AI 分类">
+</p>
 
 ### 📁 映射盒子
 
@@ -59,6 +71,10 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 - 手动与每日自动备份，可配置保留策略；导入、导出、一键恢复
 - 恢复前自动回滚备份；重置布局前自动备份
 
+<p align="center">
+  <img src="docs/images/backup-restore.png" width="760" alt="CrabDesk 备份与恢复">
+</p>
+
 ### ⚡ 效率与更新
 
 - 全局快捷键：「显示桌面」「立即整理」，注册冲突实时提示
@@ -79,6 +95,10 @@ CrabDesk 是一款开源的 Windows 桌面整理工具：在桌面上创建可�
 Setup 自身采用 Native AOT，不依赖目标电脑预先安装 .NET；CrabDesk 应用本体作为内部 Payload 嵌入 Setup，不会作为第二个 Release 下载资源发布。
 
 每个 Release 都附带 `SHA256SUMS.txt` 校验文件，应用内更新也会在安装前自动校验。
+
+<p align="center">
+  <img src="docs/images/installer-upgrade.png" width="760" alt="CrabDesk 安装器依赖检测与覆盖升级">
+</p>
 
 ## 🚀 快速开始
 
@@ -115,16 +135,6 @@ dotnet run --project CrabDesk.WinUI\CrabDesk.WinUI.csproj -c Debug
 
 详细迭代规划见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)，发布门槛见 [docs/EXTERNAL_VALIDATION.md](docs/EXTERNAL_VALIDATION.md)。
 
-## 📦 发布
-
-推送 `vX.Y.Z` 标签后，[release.yml](.github/workflows/release.yml) 会自动运行测试、构建 framework-dependent 应用负载并嵌入 Native AOT 在线安装器，最终只把 Setup 和 `SHA256SUMS.txt` 上传到 GitHub Releases。
-
-```powershell
-.\build\publish.ps1            # 发布产物到 artifacts\publish\win-x64
-.\build\build-installer.ps1    # 构建 framework-dependent Payload
-.\build\publish-bootstrapper.ps1 # 构建唯一公开的在线 Setup
-```
-
 ## 📄 许可证
 
-[MIT](LICENSE) © CrabDesk contributors
+[GPL-3.0](LICENSE) © CrabDesk contributors
