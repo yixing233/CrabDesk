@@ -190,6 +190,46 @@ public sealed class UpdateServiceTests
     }
 
     [Fact]
+    public async Task RateLimitFallsBackToAtomFeedWhenAvailable()
+    {
+        var atomXml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <id>tag:github.com,2008:Repository/123/v20260830.01</id>
+                <updated>2026-08-30T12:00:00Z</updated>
+                <link rel="alternate" type="text/html" href="https://github.com/test-owner/test-repo/releases/tag/v20260830.01"/>
+                <title>Release 20260830.01</title>
+                <content type="html">&lt;p&gt;Bug fixes and improvements&lt;/p&gt;</content>
+              </entry>
+            </feed>
+            """;
+
+        using var rateClient = new HttpClient(new StubHandler(req =>
+        {
+            if (req.RequestUri!.AbsolutePath.EndsWith("releases.atom", StringComparison.OrdinalIgnoreCase))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(atomXml, Encoding.UTF8, "application/atom+xml")
+                };
+            }
+
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+            response.Headers.TryAddWithoutValidation("X-RateLimit-Remaining", "0");
+            return response;
+        })) { BaseAddress = new Uri("https://api.github.test") };
+
+        using var rateService = new GitHubUpdateService(rateClient);
+        var result = await rateService.CheckAsync(Request());
+
+        Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
+        Assert.Equal("20260830.01", result.LatestVersion);
+        Assert.Equal("Release 20260830.01", result.ReleaseName);
+        Assert.Contains("Bug fixes", result.ReleaseNotes);
+    }
+
+    [Fact]
     public async Task MissingReleaseHasClearMessage()
     {
         using var client = new HttpClient(new StubHandler(_ =>

@@ -3313,6 +3313,13 @@ public sealed class CrabDeskRuntime : IDisposable
         _mappedFolderProvider.Dispose();
         _hotkeyService.Pressed -= OnGlobalHotkeyPressed;
         _hotkeyService.Dispose();
+        try
+        {
+            _desktopContextMenu.SetEnabled(false, string.Empty);
+        }
+        catch
+        {
+        }
         if (_desktopInputMonitor is not null)
         {
             _desktopInputMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;

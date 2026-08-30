@@ -9,7 +9,7 @@
     <StripSymbols>true</StripSymbols>
     <ApplicationIcon>Assets\CrabDesk.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version Condition="'$(Version)' == ''">20260830.01</Version>
+    <Version Condition="'$(Version)' == ''">20260830.02</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <DependencyHashPlaceholder Condition="'$(DependencyHashPlaceholder)' == ''">0000000000000000000000000000000000000000000000000000000000000000</DependencyHashPlaceholder>
     <PayloadSha256 Condition="'$(PayloadSha256)' == ''">$(DependencyHashPlaceholder)</PayloadSha256>

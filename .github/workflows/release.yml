@@ -11,6 +11,7 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 25
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true

@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace CrabDesk.Core;
 
@@ -85,6 +87,12 @@ public sealed class GitHubUpdateService : IUpdateService
                 (!response.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining) ||
                  remaining.FirstOrDefault() == "0"))
             {
+                var fallback = await TryCheckViaAtomFeedAsync(owner, repository, currentVersion, cancellationToken).ConfigureAwait(false);
+                if (fallback is not null)
+                {
+                    return fallback;
+                }
+
                 var retryMessage = response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues) &&
                                    long.TryParse(resetValues.FirstOrDefault(), out var resetSeconds)
                     ? $"，预计 {DateTimeOffset.FromUnixTimeSeconds(resetSeconds).ToLocalTime():HH:mm} 后恢复"
@@ -411,6 +419,88 @@ public sealed class GitHubUpdateService : IUpdateService
             request.CachedIsPrerelease,
             request.CachedETag,
             InstallerAssetName: InstallerAssetName);
+    }
+
+    private async Task<UpdateCheckResult?> TryCheckViaAtomFeedAsync(
+        string owner,
+        string repository,
+        SemanticVersion currentVersion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var feedUri = new Uri($"https://github.com/{owner}/{repository}/releases.atom");
+            using var request = new HttpRequestMessage(HttpMethod.Get, feedUri);
+            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var doc = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken).ConfigureAwait(false);
+            var atomNs = XNamespace.Get("http://www.w3.org/2005/Atom");
+
+            var entries = doc.Root?.Elements(atomNs + "entry") ?? Enumerable.Empty<XElement>();
+            foreach (var entry in entries)
+            {
+                var title = entry.Element(atomNs + "title")?.Value?.Trim() ?? string.Empty;
+                var updatedStr = entry.Element(atomNs + "updated")?.Value?.Trim();
+                var linkHref = entry.Element(atomNs + "link")?.Attribute("href")?.Value?.Trim();
+                var id = entry.Element(atomNs + "id")?.Value?.Trim() ?? string.Empty;
+
+                var match = Regex.Match(id, @"tag/(?:v)?([0-9]+\.[0-9]+)", RegexOptions.IgnoreCase);
+                var rawTag = match.Success
+                    ? match.Groups[1].Value
+                    : (linkHref?.Split("/tag/").LastOrDefault()?.TrimStart('v') ?? title.TrimStart('v'));
+
+                var parsedVersion = ParseVersion(rawTag);
+                if (parsedVersion is null)
+                {
+                    continue;
+                }
+
+                var normalizedTag = "v" + parsedVersion.ToString();
+                var releasePageUrl = !string.IsNullOrWhiteSpace(linkHref)
+                    ? linkHref
+                    : $"https://github.com/{owner}/{repository}/releases/tag/{normalizedTag}";
+
+                var installerUrl = $"https://github.com/{owner}/{repository}/releases/download/{normalizedTag}/{InstallerAssetName}";
+                var sha256Url = $"https://github.com/{owner}/{repository}/releases/download/{normalizedTag}/{Sha256AssetName}";
+
+                DateTimeOffset? publishedAt = DateTimeOffset.TryParse(updatedStr, out var dt) ? dt : null;
+                var contentHtml = entry.Element(atomNs + "content")?.Value;
+                var notes = !string.IsNullOrWhiteSpace(contentHtml) ? StripHtmlTags(contentHtml) : string.Empty;
+
+                var isUpdateAvailable = parsedVersion.CompareTo(currentVersion) > 0;
+                return new UpdateCheckResult(
+                    isUpdateAvailable ? UpdateCheckStatus.UpdateAvailable : UpdateCheckStatus.UpToDate,
+                    currentVersion.ToString(),
+                    parsedVersion.ToString(),
+                    string.IsNullOrWhiteSpace(title) ? normalizedTag : title,
+                    publishedAt,
+                    notes,
+                    releasePageUrl,
+                    installerUrl,
+                    sha256Url,
+                    IsPrerelease: false,
+                    ETag: string.Empty,
+                    InstallerAssetName: InstallerAssetName);
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string StripHtmlTags(string html)
+    {
+        var noTags = Regex.Replace(html, @"<[^>]+>", " ");
+        var decoded = WebUtility.HtmlDecode(noTags);
+        return Regex.Replace(decoded, @"\s+", " ").Trim();
     }
 
     private sealed class GitHubRelease
