@@ -63,6 +63,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     public bool Enabled { get; set; }
     public Func<int, int, bool>? IsPointerOverBox { get; set; }
     public Func<bool>? IsBoxItemDragActive { get; set; }
+    public Func<bool>? IsDesktopIconDragActive { get; set; }
     public Func<bool>? CanDeleteDesktopItems { get; set; }
     public Func<bool>? CanRenameDesktopItems { get; set; }
     public Func<DesktopKeyboardCommand, bool>? CanHandleDesktopKeyboardCommand { get; set; }
@@ -145,7 +146,8 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
                             controlPressed,
                             isDesktopSurface,
                             overBox,
-                            IsBoxItemDragActive?.Invoke() == true,
+                            IsBoxItemDragActive?.Invoke() == true ||
+                            IsDesktopIconDragActive?.Invoke() == true,
                             delta))
                     {
                         BoxDragMouseWheelRequested?.Invoke(

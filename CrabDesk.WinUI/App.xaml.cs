@@ -27,6 +27,8 @@ public partial class App : Application
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
     private AiOrganizationWindow? _aiOrganizationWindow;
+    private CrabDeskRuntime? _runtime;
+    private int _runtimeDisposed;
 
     public App()
     {
@@ -42,7 +44,9 @@ public partial class App : Application
             {
                 AppDiagnostic.Error($"WinUI AppDomain exception terminating={args.IsTerminating}", exception);
             }
+            TryDisposeRuntime("AppDomain.UnhandledException");
         };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => TryDisposeRuntime("ProcessExit");
     }
 
     public static App CurrentApp => (App)Current;
@@ -100,6 +104,7 @@ public partial class App : Application
         _undoOrganizationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.UndoOrganization");
 
         var runtime = GetService<CrabDeskRuntime>();
+        _runtime = runtime;
         await runtime.InitializeAsync();
         AppDiagnostic.Info("Runtime initialized; creating MainWindow");
         GetService<IThemeService>().Apply(runtime.State.Settings.ThemeMode);
@@ -189,9 +194,26 @@ public partial class App : Application
     {
         _aiOrganizationWindow?.Close();
         _aiOrganizationWindow = null;
-        GetService<CrabDeskRuntime>().Dispose();
+        TryDisposeRuntime("Shutdown");
         DisposeInstanceResources();
         Exit();
+    }
+
+    private void TryDisposeRuntime(string context)
+    {
+        if (Interlocked.Exchange(ref _runtimeDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _runtime?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            AppDiagnostic.Error($"Runtime disposal failed during {context}", exception);
+        }
     }
 
     private static void ConfigureServices(IServiceCollection services)

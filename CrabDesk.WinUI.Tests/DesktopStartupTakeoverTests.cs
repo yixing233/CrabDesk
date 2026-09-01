@@ -47,6 +47,33 @@ public sealed class DesktopStartupTakeoverTests
         Assert.DoesNotContain("\n            Refresh();", constructor, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AppRegistersExitRecoveryForUnexpectedShutdowns()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.WinUI",
+            "App.xaml.cs"));
+
+        Assert.Contains("AppDomain.CurrentDomain.ProcessExit", source, StringComparison.Ordinal);
+        Assert.Contains("AppDomain.CurrentDomain.UnhandledException", source, StringComparison.Ordinal);
+        Assert.Contains("TryDisposeRuntime(\"Shutdown\")", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DesktopRenderingIsolatesDrawingFailuresFromTheProcess()
+    {
+        var iconSource = ReadRuntimeSource("DesktopIconSurface.cs");
+        var boxSource = ReadRuntimeSource("DesktopBoxForm.cs");
+
+        var iconPresent = ExtractMethod(iconSource, "private bool PresentLayer()", "private bool PresentLayerCore()");
+        var boxPresent = ExtractMethod(boxSource, "private bool PresentLayer()", "private void EnsureHitMaskBitmap");
+        Assert.Contains("catch (Exception exception)", iconPresent, StringComparison.Ordinal);
+        Assert.Contains("catch (Exception exception)", boxPresent, StringComparison.Ordinal);
+        Assert.Contains("Desktop icon surface render failed", iconPresent, StringComparison.Ordinal);
+        Assert.Contains("Desktop box surface render failed", boxPresent, StringComparison.Ordinal);
+    }
+
     private static string ReadRuntimeSource(string fileName) => File.ReadAllText(Path.Combine(
         FindSolutionDirectory(),
         "CrabDesk.Runtime",

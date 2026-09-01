@@ -93,7 +93,7 @@ internal sealed class InstallerWindow
         _theme = new InstallerTheme(dpiScale);
         _state = new InstallerState
         {
-            Version = metadata.GetValueOrDefault("ReleaseVersion", "20260826.02"),
+            Version = metadata.GetValueOrDefault("ReleaseVersion", "20260901.01"),
             IsCheckingDependencies = true
         };
 
@@ -499,19 +499,29 @@ internal sealed class InstallerWindow
                 break;
 
             case "chk_launch":
-                _state.LaunchOnFinish = !_state.LaunchOnFinish;
+                if (!_state.RestartRequired)
+                {
+                    _state.LaunchOnFinish = !_state.LaunchOnFinish;
+                }
                 break;
 
             case "install_btn":
             case "retry_btn":
                 if (!_state.IsCheckingDependencies)
                 {
-                    StartInstallation();
+                    if (_state.DependencyDetectionFailed)
+                    {
+                        StartDependencyDetectionWorkflow();
+                    }
+                    else
+                    {
+                        StartInstallation();
+                    }
                 }
                 break;
 
             case "finish_btn":
-                if (_state.LaunchOnFinish)
+                if (_state.LaunchOnFinish && !_state.RestartRequired)
                 {
                     TryLaunchInstalledApp();
                 }
@@ -662,6 +672,16 @@ internal sealed class InstallerWindow
 
     private void StartDependencyDetectionWorkflow()
     {
+        _state.IsCheckingDependencies = true;
+        _state.DependencyDetectionFailed = false;
+        foreach (var item in _state.Dependencies)
+        {
+            item.Status = DependencyCheckStatus.Pending;
+            item.StatusText = "等待检测";
+        }
+        SetTimer(_hwnd, (IntPtr)TIMER_ANIMATION, 25, IntPtr.Zero);
+        Invalidate();
+
         Task.Run(async () =>
         {
             try
@@ -687,10 +707,11 @@ internal sealed class InstallerWindow
             }
             catch
             {
+                _state.DependencyDetectionFailed = true;
                 foreach (var item in _state.Dependencies)
                 {
-                    item.Status = DependencyCheckStatus.Installed;
-                    item.StatusText = "已就绪 ✓";
+                    item.Status = DependencyCheckStatus.Failed;
+                    item.StatusText = "检测失败";
                 }
             }
             finally
@@ -704,6 +725,7 @@ internal sealed class InstallerWindow
 
     private void StartInstallation()
     {
+        _state.RestartRequired = false;
         _state.InstallPath = SetupPolicy.EnsureAppFolder(_state.InstallPath);
         _state.Page = InstallerPage.Installing;
         _state.ProgressPercentage = 0;
@@ -737,6 +759,10 @@ internal sealed class InstallerWindow
                 await Task.Delay(350, token);
 
                 _state.Page = InstallerPage.Completed;
+                if (_state.RestartRequired)
+                {
+                    _state.LaunchOnFinish = false;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -761,6 +787,27 @@ internal sealed class InstallerWindow
         var missing = _dependencies
             .Where(dep => !DependencyDetector.IsInstalled(dep))
             .ToArray();
+
+        var payloadSize = 0L;
+        try
+        {
+            using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("CrabDesk.Payload.exe");
+            if (payload?.CanSeek == true) payloadSize = payload.Length;
+        }
+        catch
+        {
+        }
+        _state.UpdateRequiredSpace(missing.Length, payloadSize);
+        var (_, isSufficient, _) = _state.GetAvailableSpaceInfo();
+        if (!isSufficient)
+        {
+            throw new IOException($"安装所需空间约 {_state.GetRequiredSpaceText()}，目标磁盘可用空间不足。");
+        }
+        if (SetupPolicy.TryGetAvailableDiskSpace(Path.GetTempPath(), out var temporaryAvailable) &&
+            !SetupPolicy.HasSufficientSpace(temporaryAvailable, _state.RequiredSpaceBytes))
+        {
+            throw new IOException($"临时文件磁盘可用空间不足，安装需要约 {_state.GetRequiredSpaceText()}。");
+        }
 
         var tempRoot = Path.Combine(Path.GetTempPath(), "CrabDesk-Setup", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempRoot);
@@ -821,6 +868,12 @@ internal sealed class InstallerWindow
                     {
                         throw new InvalidOperationException($"{dep.DisplayName} 安装失败，退出代码：{exitCode}。");
                     }
+
+                    _state.RestartRequired |= SetupPolicy.RequiresRestart(exitCode);
+                    if (!DependencyDetector.IsInstalled(dep))
+                    {
+                        throw new InvalidOperationException($"{dep.DisplayName} 安装后仍未检测到。");
+                    }
                 }
             }
 
@@ -860,6 +913,7 @@ internal sealed class InstallerWindow
             {
                 throw new InvalidOperationException($"CrabDesk 安装过程返回错误代码：{payloadExit}。");
             }
+            _state.RestartRequired |= SetupPolicy.RequiresRestart(payloadExit);
 
             // Step 4: Finalize
             _state.TargetProgressPercentage = 100.0;
@@ -909,8 +963,7 @@ internal sealed class InstallerWindow
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"无法启动 {Path.GetFileName(path)}。");
-        process.WaitForExit();
-        return process.ExitCode;
+        return SetupPolicy.WaitForInstaller(process);
     }
 
     private void TryLaunchInstalledApp()

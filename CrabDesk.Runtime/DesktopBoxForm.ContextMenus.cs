@@ -63,26 +63,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         var accentMenu = new FluentToolStripMenuItem("强调色");
         LucideRuntimeIcons.SetMenuIcon(accentMenu, LucideRuntimeIcon.Palette);
-        var stackMenu = new FluentToolStripMenuItem("层级");
-        LucideRuntimeIcons.SetMenuIcon(stackMenu, LucideRuntimeIcon.Layers);
-        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
-            "置于顶层",
-            LucideRuntimeIcon.BringToFront,
-            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToFront)));
-        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
-            "上移一层",
-            LucideRuntimeIcon.ArrowUp,
-            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.Forward)));
-        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
-            "下移一层",
-            LucideRuntimeIcon.ArrowDown,
-            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.Backward)));
-        stackMenu.DropDownItems.Add(CreateLucideMenuItem(
-            "置于底层",
-            LucideRuntimeIcon.SendToBack,
-            (_, _) => _runtime.MoveBoxInStack(box.Id, BoxStackMove.ToBack)));
-        menu.Items.Add(stackMenu);
-        menu.Items.Add(new Forms.ToolStripSeparator());
 
         foreach (var (name, hex) in AccentPalette)
         {
@@ -194,6 +174,58 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         menu.Items.Add(tabMenu);
+    }
+
+    private Forms.ContextMenuStrip BuildManualTabContextMenu(
+        DesktopBox box,
+        DesktopBoxTab? tab)
+    {
+        var menu = CreateContextMenu(box.Id);
+        var activeTabId = _activeManualTabIds.GetValueOrDefault(box.Id);
+
+        if (tab is not null)
+        {
+            var isActive = activeTabId == tab.Id;
+            var activate = CreateLucideMenuItem(
+                isActive ? "当前标签" : "切换到此标签",
+                LucideRuntimeIcon.Tags,
+                (_, _) => ActivateManualTabFromMenu(box, tab.Id));
+            activate.Checked = isActive;
+            activate.Enabled = !isActive;
+            menu.Items.Add(activate);
+            menu.Items.Add(new Forms.ToolStripSeparator());
+            menu.Items.Add(CreateLucideMenuItem(
+                "重命名标签…",
+                LucideRuntimeIcon.Pencil,
+                (_, _) => BeginInvoke((Action)(() => RenameManualTab(box, tab)))));
+            menu.Items.Add(CreateLucideMenuItem(
+                "删除标签",
+                LucideRuntimeIcon.Trash2,
+                (_, _) => BeginInvoke((Action)(async () => await DeleteManualTab(box, tab)))));
+            menu.Items.Add(new Forms.ToolStripSeparator());
+        }
+
+        menu.Items.Add(CreateLucideMenuItem(
+            "新建子标签…",
+            LucideRuntimeIcon.SquarePlus,
+            (_, _) => BeginInvoke((Action)(() => CreateManualTab(box)))));
+        return menu;
+    }
+
+    private void ActivateManualTabFromMenu(DesktopBox box, Guid tabId)
+    {
+        if (!box.ManualTabs.Any(tab => tab.Id == tabId))
+        {
+            return;
+        }
+
+        _activeManualTabIds[box.Id] = tabId;
+        _scrollOffsets.Remove(new ItemViewKey(box.Id, $"manual:{tabId:N}"));
+        ClearBoxItemSelection(box.Id);
+        _geometryDirty = true;
+        EnsureGeometry();
+        InvalidateDip(_boxes.FirstOrDefault(candidate => candidate.Box.Id == box.Id)?.TabBar ?? RectangleF.Empty);
+        InvalidateDip(_boxes.FirstOrDefault(candidate => candidate.Box.Id == box.Id)?.Body ?? RectangleF.Empty);
     }
 
     private string[] GetSelectedItemKeys(Guid boxId) => GetCachedItemsForBox(boxId)
@@ -322,62 +354,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private string? PromptForManualTabTitle(string title, string label, string initialValue)
     {
-        var isDark = _runtime.IsDarkTheme;
-        using var dialog = new Forms.Form
-        {
-            Text = title,
-            AccessibleName = title,
-            AutoScaleMode = Forms.AutoScaleMode.Dpi,
-            BackColor = isDark ? Color.FromArgb(32, 32, 32) : Color.FromArgb(250, 250, 250),
-            ClientSize = new Size(360, 160),
-            FormBorderStyle = Forms.FormBorderStyle.FixedDialog,
-            MaximizeBox = false,
-            MinimizeBox = false,
-            ShowInTaskbar = false,
-            StartPosition = Forms.FormStartPosition.CenterParent,
-            Font = CreateFont("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point)
-        };
-        var foreground = isDark ? Color.FromArgb(245, 245, 245) : Color.FromArgb(31, 31, 31);
-        var input = new Forms.TextBox
-        {
-            AccessibleName = label,
-            Font = CreateFont("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point),
-            Location = new Point(20, 54),
-            Size = new Size(320, 28),
-            Text = initialValue
-        };
-        var labelControl = new Forms.Label
-        {
-            AutoSize = true,
-            ForeColor = foreground,
-            Location = new Point(20, 24),
-            Text = label
-        };
-        var cancel = new Forms.Button
-        {
-            DialogResult = Forms.DialogResult.Cancel,
-            Location = new Point(174, 108),
-            Size = new Size(78, 30),
-            Text = "取消"
-        };
-        var confirm = new Forms.Button
-        {
-            DialogResult = Forms.DialogResult.OK,
-            Location = new Point(262, 108),
-            Size = new Size(78, 30),
-            Text = "确定"
-        };
-        dialog.Controls.AddRange([labelControl, input, cancel, confirm]);
-        dialog.AcceptButton = confirm;
-        dialog.CancelButton = cancel;
-        dialog.Shown += (_, _) =>
-        {
-            input.SelectAll();
-            input.Focus();
-        };
-        return dialog.ShowDialog(this) == Forms.DialogResult.OK && !string.IsNullOrWhiteSpace(input.Text)
-            ? input.Text.Trim()
-            : null;
+        return DesktopTextInputDialog.Show(this, _runtime.IsDarkTheme, title, label, initialValue);
     }
 
     private void ShowAccentColorDialog(DesktopBox box)

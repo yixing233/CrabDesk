@@ -15,7 +15,8 @@ internal enum DependencyCheckStatus
     Pending,
     Checking,
     Installed,
-    Missing
+    Missing,
+    Failed
 }
 
 internal sealed class DependencyItemState
@@ -29,7 +30,7 @@ internal sealed class DependencyItemState
 internal sealed class InstallerState
 {
     public InstallerPage Page { get; set; } = InstallerPage.Welcome;
-    public string Version { get; set; } = "20260826.02";
+    public string Version { get; set; } = "20260901.01";
     public bool IsUpgrade { get; set; } = false;
     public string? ExistingVersion { get; set; }
     public string InstallPath { get; set; }
@@ -38,9 +39,16 @@ internal sealed class InstallerState
     public bool LaunchOnFinish { get; set; } = true;
 
     public bool IsCheckingDependencies { get; set; } = true;
+    public bool DependencyDetectionFailed { get; set; }
+    public bool RestartRequired { get; set; }
     public float CheckingAnimationAngle { get; set; } = 0f;
 
     public long RequiredSpaceBytes { get; set; } = 85L * 1024 * 1024; // 约 85 MB
+
+    public void UpdateRequiredSpace(int missingDependencyCount, long payloadBytes = 0)
+    {
+        RequiredSpaceBytes = SetupPolicy.CalculateRequiredSpaceBytes(payloadBytes, missingDependencyCount);
+    }
 
     public List<DependencyItemState> Dependencies { get; set; } = [];
 

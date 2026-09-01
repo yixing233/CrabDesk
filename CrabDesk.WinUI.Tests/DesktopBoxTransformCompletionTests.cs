@@ -5,6 +5,31 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopBoxTransformCompletionTests
 {
     [Fact]
+    public void BoxSelectionCompletionRestoresHoverOwnedHeaderActions()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "DesktopBoxForm.Input.cs"));
+        var methodStart = source.IndexOf(
+            "private void FinishSelectionGesture()",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private void OnMouseUp(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var settledFrameRequest = method.IndexOf("RequestVisualLayerRender();", StringComparison.Ordinal);
+        var hoverReconcile = method.IndexOf("QueueHoverReconcile();", StringComparison.Ordinal);
+
+        Assert.True(settledFrameRequest >= 0);
+        Assert.True(hoverReconcile > settledFrameRequest);
+    }
+
+    [Fact]
     public void BoxTransformCompletionRestoresHoverOwnedHeaderActions()
     {
         var source = File.ReadAllText(Path.Combine(

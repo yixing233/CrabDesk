@@ -63,6 +63,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 }
                 ShowItemContextMenu(item.Box, item.Item, eventArgs.Location);
             }
+            else if (box is not null &&
+                     !box.Box.IsMappedFolder &&
+                     GetManualBoxTabAtPoint(box, point) is { } manualTabHit)
+            {
+                var tab = manualTabHit.Id is { } tabId
+                    ? box.Box.ManualTabs.FirstOrDefault(candidate => candidate.Id == tabId)
+                    : null;
+                BuildManualTabContextMenu(box.Box, tab).Show(this, eventArgs.Location);
+            }
             else if (box is not null)
             {
                 BuildBoxMenu(box.Box).Show(this, eventArgs.Location);
@@ -241,6 +250,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _dragStarted = false;
             return;
         }
+        var sourceGeometry = _pressedItem is null
+            ? null
+            : _items.LastOrDefault(item => item.Item.Key == _pressedItem.Key);
+        var sourceIconBounds = sourceGeometry is null
+            ? RectangleF.Empty
+            : GetItemIconBounds(sourceGeometry);
+        _dragIconGrabOffset = sourceIconBounds.IsEmpty
+            ? new PointF(16, 16)
+            : new PointF(
+                Math.Clamp((_pressPoint.X - sourceIconBounds.X) / sourceIconBounds.Width, 0f, 1f) * 32f,
+                Math.Clamp((_pressPoint.Y - sourceIconBounds.Y) / sourceIconBounds.Height, 0f, 1f) * 32f);
         var data = new Forms.DataObject();
         var itemKeys = selected.Select(candidate => candidate.Key.ToString()).ToArray();
         var dragSession = new InternalDragSession();
@@ -262,6 +282,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _dragCancelled = false;
         _showVirtualDesktopDropCursor = !sourceMapped;
         _runtime.SetVirtualBoxDesktopDropEnabled(!sourceMapped);
+        // Publish the initial ghost before OLE starts dispatching DragOver.
+        // Otherwise the source icon remains painted in place for the first
+        // drag frames and the preview appears to jump when entering a box.
+        _iconDragStateForward?.Invoke(_pressPoint, null, itemKeys, _dragIconGrabOffset);
+        RequestDragRender();
         var shouldReleaseToDesktop = false;
         var dragEffect = Forms.DragDropEffects.None;
         try
@@ -403,6 +428,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _dynamicVisualVersion++;
         }
         _dragStarted = false;
+        _dragIconGrabOffset = PointF.Empty;
         _dragDropCommitted = false;
         _dragCancelled = false;
         _pressedItem = null;
@@ -535,22 +561,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         Cursor = Forms.Cursors.Default;
-        var headerActionsChanged = SetHoveredBox(null);
+
+        // Keep the hover-expansion controller in sync when a layered child
+        // (for example an icon) reports MouseLeave after the pointer has
+        // already left the form.  The old path only cleared visual hover
+        // state, so a box that had already expanded never received the
+        // "pointer left" timestamp and therefore never started its collapse
+        // timer.
+        UpdateHoverState(ToDip(clientPoint), updateItemHover: false);
         ClearAutoExpandHover();
-        if (_hoveredItemKey is not null)
-        {
-            var previousHoveredItem = _items.LastOrDefault(candidate => string.Equals(
-                candidate.Item.Key.ToString(),
-                _hoveredItemKey,
-                StringComparison.OrdinalIgnoreCase));
-            _hoveredItemKey = null;
-            HideItemHoverOverlay();
-            InvalidateItem(previousHoveredItem);
-        }
-        if (headerActionsChanged)
-        {
-            RequestHeaderActionVisualUpdate();
-        }
+        ClearItemHover();
     }
 
     private bool IsPointerOverInteractiveBox()
@@ -565,10 +585,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var searchBoxId = _boxes.LastOrDefault(box => box.Search.Contains(point))?.Box.Id;
         var autoExpandBoxId = _boxes.LastOrDefault(box => box.AutoExpand.Contains(point))?.Box.Id;
-        if (_hoveredSearchBoxId != searchBoxId || _hoveredAutoExpandBoxId != autoExpandBoxId)
+        var menuBoxId = _boxes.LastOrDefault(box => box.Menu.Contains(point))?.Box.Id;
+        if (_hoveredSearchBoxId != searchBoxId ||
+            _hoveredAutoExpandBoxId != autoExpandBoxId ||
+            _hoveredMenuBoxId != menuBoxId)
         {
             _hoveredSearchBoxId = searchBoxId;
             _hoveredAutoExpandBoxId = autoExpandBoxId;
+            _hoveredMenuBoxId = menuBoxId;
             _headerToolTip.SetToolTip(this, null);
             if (searchBoxId is not null)
             {
@@ -580,6 +604,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 _headerToolTip.SetToolTip(
                     this,
                     enabled ? "切换为固定展开" : "切换为悬停自动展开");
+            }
+            else if (menuBoxId is not null)
+            {
+                _headerToolTip.SetToolTip(this, "盒子菜单");
             }
             RequestHeaderActionVisualUpdate();
         }
@@ -794,7 +822,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 box.AutoExpand.Contains(point) ||
                 box.Menu.Contains(point)))?.Box.Id;
         var pointerInsideExpandedBox = _hoverExpansion.ExpandedBoxId is { } expandedBoxId &&
-            hoveredBoxId == expandedBoxId;
+            DesktopBoxes.FirstOrDefault(box => box.Id == expandedBoxId) is { } expandedBox &&
+            IsPointerInsideExpandedBox(
+                expandedBox.Bounds,
+                GetInteractionBoxHeight(expandedBox),
+                point);
         var autoExpandEnabled = _hoverExpansion.ExpandedBoxId is not null ||
             collapsedHeaderBoxId is not null;
         var now = DateTimeOffset.UtcNow;
@@ -997,6 +1029,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             PresentItemHoverOverlay();
         }
+        // The marquee frame temporarily hides the header-action overlay.
+        // Restore it after the settled selection frame when the pointer is
+        // still inside the same box, just like box-transform completion.
+        QueueHoverReconcile();
     }
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
@@ -1189,8 +1225,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _startBounds.Height).Clamp(
                 new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height),
                 GetMinimumBoxWidth(box));
+        nextBounds = DesktopBoxAlignmentEngine.Align(
+            nextBounds,
+            GetBoxAlignmentPeerBounds(box),
+            new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height));
         ApplyBoxTransform(box, nextBounds);
     }
+
+    private IEnumerable<LayoutRect> GetBoxAlignmentPeerBounds(DesktopBox box) =>
+        _runtime.State.Boxes
+            .Where(candidate =>
+                candidate.Id != box.Id &&
+                string.Equals(candidate.MonitorId, box.MonitorId, StringComparison.OrdinalIgnoreCase))
+            .Select(candidate => candidate.Bounds);
 
     private void SnapBoxPositionForCommit(DesktopBox box)
     {
@@ -1205,7 +1252,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             box.Bounds.Height).Clamp(
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
             GetMinimumBoxWidth(box));
-        box.Bounds = snappedBounds;
+        // Grid rounding is only a baseline. Re-apply box alignment after it
+        // so releasing a drag cannot undo an edge or center-line alignment by
+        // a few DIPs. Use the target monitor's peers because the box may have
+        // crossed monitors during the drag.
+        box.Bounds = DesktopBoxAlignmentEngine.Align(
+            snappedBounds,
+            GetBoxAlignmentPeerBounds(box),
+            new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height));
     }
 
     private static double SnapDipToMonitorPixel(double value, double scale) =>

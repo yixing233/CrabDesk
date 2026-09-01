@@ -290,6 +290,9 @@ internal static class InstallerRenderer
                 case DependencyCheckStatus.Missing:
                     LucideInstallerIcons.DrawIcon(g, LucideIcon.Download, iconBounds, theme.WarningColor, 13 * scale);
                     break;
+                case DependencyCheckStatus.Failed:
+                    LucideInstallerIcons.DrawIcon(g, LucideIcon.CircleAlert, iconBounds, theme.ErrorColor, 13 * scale);
+                    break;
                 case DependencyCheckStatus.Pending:
                 default:
                     LucideInstallerIcons.DrawIcon(g, LucideIcon.Clock, iconBounds, theme.TextMuted, 13 * scale);
@@ -323,6 +326,10 @@ internal static class InstallerRenderer
                 case DependencyCheckStatus.Missing:
                     badgeText = "需自动下载";
                     badgeColor = theme.WarningColor;
+                    break;
+                case DependencyCheckStatus.Failed:
+                    badgeText = "检测失败";
+                    badgeColor = theme.ErrorColor;
                     break;
                 case DependencyCheckStatus.Pending:
                 default:
@@ -396,8 +403,11 @@ internal static class InstallerRenderer
         DrawButton(g, theme, "取消", cancelBounds, false, state.HoveredControlId == "cancel_btn", state.PressedControlId == "cancel_btn", true);
 
         var isChecking = state.IsCheckingDependencies;
+        var detectionFailed = state.DependencyDetectionFailed;
         var defaultBtnText = state.IsUpgrade ? "立即更新" : "立即安装";
-        var installText = isChecking ? (state.IsUpgrade ? "检查更新环境中..." : "环境检测中...") : defaultBtnText;
+        var installText = isChecking
+            ? (state.IsUpgrade ? "检查更新环境中..." : "环境检测中...")
+            : detectionFailed ? "重新检测" : defaultBtnText;
         DrawButton(g, theme, installText, installBounds, true, state.HoveredControlId == "install_btn", state.PressedControlId == "install_btn", !isChecking);
     }
 
@@ -493,9 +503,11 @@ internal static class InstallerRenderer
             g.DrawString(completedTitle, theme.TitleFont, titleBrush, (winW - size.Width) / 2, (int)(155 * scale));
         }
 
-        var completedDesc = state.IsUpgrade
-            ? $"已成功升级至版本 v{state.Version}，您的桌面分区与配置已完整保留。"
-            : "运行环境与桌面右键菜单已全部就绪。";
+        var completedDesc = state.RestartRequired
+            ? "依赖组件已安装完成。请重新启动 Windows 后再运行 CrabDesk。"
+            : state.IsUpgrade
+                ? $"已成功升级至版本 v{state.Version}，您的桌面分区与配置已完整保留。"
+                : "运行环境与桌面右键菜单已全部就绪。";
         using (var descBrush = new SolidBrush(theme.TextSecondary))
         {
             var size = g.MeasureString(completedDesc, theme.NormalFont);
@@ -504,7 +516,7 @@ internal static class InstallerRenderer
 
         // Checkbox: Launch Now
         var launchBounds = GetLaunchCheckBounds(scale);
-        DrawCheckbox(g, theme, "立即启动 CrabDesk", launchBounds, state.LaunchOnFinish, state.HoveredControlId == "chk_launch");
+        DrawCheckbox(g, theme, "立即启动 CrabDesk", launchBounds, state.LaunchOnFinish && !state.RestartRequired, state.HoveredControlId == "chk_launch");
 
         // Finish Button (clean presentation without separator line)
         var finishBounds = GetFinishButtonBounds(scale);

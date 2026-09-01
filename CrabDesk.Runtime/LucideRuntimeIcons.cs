@@ -49,7 +49,8 @@ internal enum LucideRuntimeIcon
     ToggleLeft,
     ToggleRight,
     Trash2,
-    TriangleAlert
+    TriangleAlert,
+    X
 }
 
 internal static class LucideRuntimeIcons
@@ -102,6 +103,7 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.ToggleRight => "\uE18C",
         LucideRuntimeIcon.Trash2 => "\uE18E",
         LucideRuntimeIcon.TriangleAlert => "\uE193",
+        LucideRuntimeIcon.X => "\uE1B2",
         _ => string.Empty
     };
 
@@ -112,6 +114,11 @@ internal static class LucideRuntimeIcons
         Color color,
         float emSize)
     {
+        if (TryDrawVectorIcon(graphics, icon, bounds, color, emSize))
+        {
+            return;
+        }
+
         var font = GetDrawingFont(AlignEmSizeToPhysicalPixels(
             emSize,
             GetGraphicsScale(graphics)));
@@ -129,15 +136,117 @@ internal static class LucideRuntimeIcons
             graphics.CompositingQuality = CompositingQuality.HighQuality;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            using var brush = new SolidBrush(color);
+            using var path = new GraphicsPath();
             using var format = new StringFormat(StringFormat.GenericTypographic)
             {
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center,
                 FormatFlags = StringFormatFlags.NoClip
             };
-            graphics.DrawString(glyph, font, brush, bounds, format);
+            path.AddString(
+                glyph,
+                font.FontFamily,
+                (int)font.Style,
+                font.Size,
+                PointF.Empty,
+                format);
+
+            // Fill the glyph outline as a vector path instead of asking GDI+
+            // to rasterize text directly. This keeps Lucide's thin strokes
+            // smooth at the small title-bar sizes used by the box actions.
+            var glyphBounds = path.GetBounds();
+            if (!glyphBounds.IsEmpty)
+            {
+                var glyphCenter = new PointF(
+                    glyphBounds.Left + glyphBounds.Width / 2f,
+                    glyphBounds.Top + glyphBounds.Height / 2f);
+                var targetCenter = new PointF(
+                    bounds.Left + bounds.Width / 2f,
+                    bounds.Top + bounds.Height / 2f);
+                using var translation = new Matrix();
+                translation.Translate(
+                    targetCenter.X - glyphCenter.X,
+                    targetCenter.Y - glyphCenter.Y,
+                    MatrixOrder.Append);
+                path.Transform(translation);
+
+                using var brush = new SolidBrush(color);
+                graphics.FillPath(brush, path);
+            }
+        }
+        finally
+        {
+            graphics.Restore(state);
+        }
+    }
+
+    private static bool TryDrawVectorIcon(
+        Graphics graphics,
+        LucideRuntimeIcon icon,
+        RectangleF bounds,
+        Color color,
+        float emSize)
+    {
+        if (icon is not (
+                LucideRuntimeIcon.Search or
+                LucideRuntimeIcon.Menu or
+                LucideRuntimeIcon.ChevronsUpDown) ||
+            bounds.Width <= 0 || bounds.Height <= 0 ||
+            !float.IsFinite(emSize) || emSize <= 0)
+        {
+            return false;
+        }
+
+        var size = AlignEmSizeToPhysicalPixels(emSize, GetGraphicsScale(graphics));
+        var scale = size / 24f;
+        var left = bounds.Left + (bounds.Width - size) / 2f;
+        var top = bounds.Top + (bounds.Height - size) / 2f;
+        var state = graphics.Save();
+        try
+        {
+            graphics.CompositingQuality = CompositingQuality.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            using var pen = new Pen(color, 2f * scale)
+            {
+                StartCap = LineCap.Round,
+                EndCap = LineCap.Round,
+                LineJoin = LineJoin.Round
+            };
+            using var path = new GraphicsPath();
+            switch (icon)
+            {
+                case LucideRuntimeIcon.Search:
+                    path.AddEllipse(
+                        left + 3f * scale,
+                        top + 3f * scale,
+                        16f * scale,
+                        16f * scale);
+                    path.StartFigure();
+                    path.AddLine(
+                        left + 16.65f * scale,
+                        top + 16.65f * scale,
+                        left + 21f * scale,
+                        top + 21f * scale);
+                    break;
+                case LucideRuntimeIcon.Menu:
+                    path.AddLine(left + 4f * scale, top + 6f * scale, left + 20f * scale, top + 6f * scale);
+                    path.StartFigure();
+                    path.AddLine(left + 4f * scale, top + 12f * scale, left + 20f * scale, top + 12f * scale);
+                    path.StartFigure();
+                    path.AddLine(left + 4f * scale, top + 18f * scale, left + 20f * scale, top + 18f * scale);
+                    break;
+                case LucideRuntimeIcon.ChevronsUpDown:
+                    path.AddLine(left + 7f * scale, top + 9f * scale, left + 12f * scale, top + 4f * scale);
+                    path.AddLine(left + 12f * scale, top + 4f * scale, left + 17f * scale, top + 9f * scale);
+                    path.StartFigure();
+                    path.AddLine(left + 7f * scale, top + 15f * scale, left + 12f * scale, top + 20f * scale);
+                    path.AddLine(left + 12f * scale, top + 20f * scale, left + 17f * scale, top + 15f * scale);
+                    break;
+            }
+
+            graphics.DrawPath(pen, path);
+            return true;
         }
         finally
         {

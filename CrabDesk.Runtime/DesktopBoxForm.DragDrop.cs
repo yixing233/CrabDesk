@@ -255,69 +255,24 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return null;
         }
 
-        var sourceBox = _pressedBoxId is { } boxId
-            ? _runtime.State.Boxes.FirstOrDefault(box => box.Id == boxId)
-            : null;
-        var iconSize = Math.Clamp(
-            (int)Math.Round((sourceBox?.Appearance.IconSize ?? 40) * _scale),
-            24,
-            64);
-        const int padding = 8;
-        var stackCount = Math.Min(3, selected.Count);
-        var offset = (stackCount - 1) * 4;
-        var badgeDiameter = selected.Count > 1 ? 20 : 0;
-        var width = iconSize + offset + padding * 2 + badgeDiameter / 2;
-        var height = iconSize + offset + padding * 2;
-        var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var primary = pressedItem is null
+            ? selected[0]
+            : selected.FirstOrDefault(item => item.Key == pressedItem.Key) ?? selected[0];
+        var iconSize = (float)(
+            _runtime.State.Boxes.FirstOrDefault(box => box.Id == _pressedBoxId)?.Appearance.IconSize ?? 40);
+        var icon = GetIconBitmap(primary, iconSize) ?? ShellIconProvider.GetGenericFileIcon();
+        using var font = ResolveDragLabelFont();
+        Bitmap? bitmap = null;
         try
         {
-            using var graphics = Graphics.FromImage(bitmap);
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            graphics.Clear(Color.Transparent);
-            var accent = sourceBox is null
-                ? ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor)
-                : ParseOpaqueColor(sourceBox.Appearance.Accent);
-            for (var index = stackCount - 1; index >= 0; index--)
-            {
-                var tileOffset = index * 4;
-                var tile = new RectangleF(
-                    padding + tileOffset - 2,
-                    padding + tileOffset - 2,
-                    iconSize + 4,
-                    iconSize + 4);
-                using var tileFill = new SolidBrush(Color.FromArgb(32 + index * 8, accent));
-                using var tileBorder = new Pen(Color.FromArgb(150, accent), 1);
-                using var tilePath = RoundedRectangle(tile, 5);
-                graphics.FillPath(tileFill, tilePath);
-                graphics.DrawPath(tileBorder, tilePath);
-            }
-
-            var primary = pressedItem is null
-                ? selected[0]
-                : selected.FirstOrDefault(item => item.Key == pressedItem.Key) ?? selected[0];
-            var icon = GetIconBitmap(primary, (float)(sourceBox?.Appearance.IconSize ?? 40)) ??
-                       ShellIconProvider.GetGenericFileIcon();
-            if (icon is not null)
-            {
-                graphics.DrawImage(icon, new Rectangle(padding, padding, iconSize, iconSize));
-            }
-
-            if (selected.Count > 1)
-            {
-                var badge = new RectangleF(width - badgeDiameter - 2, height - badgeDiameter - 2, badgeDiameter, badgeDiameter);
-                using var badgeFill = new SolidBrush(Color.FromArgb(245, accent));
-                using var badgePath = RoundedRectangle(badge, badgeDiameter / 2f);
-                using var badgeText = new SolidBrush(Color.White);
-                using var badgeFont = new Font("Segoe UI", 8, FontStyle.Bold, GraphicsUnit.Point);
-                using var format = new StringFormat
-                {
-                    Alignment = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center
-                };
-                graphics.FillPath(badgeFill, badgePath);
-                graphics.DrawString(selected.Count.ToString(), badgeFont, badgeText, badge, format);
-            }
+            bitmap = DragGhostRenderer.CreateBitmap(
+                icon,
+                primary.DisplayName,
+                selected.Count,
+                font,
+                _scale,
+                out _,
+                iconSize);
 
             var sourceGeometry = pressedItem is null
                 ? null
@@ -331,21 +286,38 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var relativeCursorY = sourceIconBounds.IsEmpty
                 ? 0.5f
                 : Math.Clamp((_pressPoint.Y - sourceIconBounds.Y) / sourceIconBounds.Height, 0f, 1f);
-            var cursorOffset = sourceIconBounds.IsEmpty
-                ? new Point(padding + iconSize / 2, padding + iconSize / 2)
-                : new Point(
-                    padding + (int)Math.Round(relativeCursorX * Math.Max(0, iconSize - 1)),
-                    padding + (int)Math.Round(relativeCursorY * Math.Max(0, iconSize - 1)));
+            // DragGhostRenderer places the primary icon at pointer + 10 DIP.
+            // Keep the original grab point inside that icon for OLE drags.
+            var stackOffset = (Math.Min(3, Math.Max(1, selected.Count)) - 1) * 3f;
+            var iconLeftDip = 50f + 10f - stackOffset * 0.5f;
+            var iconTopDip = 10f + 10f - stackOffset * 0.5f;
+            var cursorOffset = new Point(
+                (int)Math.Round((iconLeftDip + relativeCursorX * iconSize) * (float)_scale),
+                (int)Math.Round((iconTopDip + relativeCursorY * iconSize) * (float)_scale));
             cursorOffset = new Point(
-                Math.Clamp(cursorOffset.X, 0, width - 1),
-                Math.Clamp(cursorOffset.Y, 0, height - 1));
+                Math.Clamp(cursorOffset.X, 0, bitmap.Width - 1),
+                Math.Clamp(cursorOffset.Y, 0, bitmap.Height - 1));
             return new DragImage(bitmap, cursorOffset);
         }
         catch
         {
-            bitmap.Dispose();
+            bitmap?.Dispose();
             return null;
         }
+    }
+
+    private Font ResolveDragLabelFont()
+    {
+        var appearance = _runtime.State.Settings.Appearance;
+        var family = appearance.IconLabelFontFamily;
+        var size = appearance.IconLabelFontSize;
+        if (string.IsNullOrWhiteSpace(family) || size <= 0)
+        {
+            var systemFont = SystemFonts.IconTitleFont;
+            family = systemFont?.FontFamily.Name ?? "Segoe UI";
+            size = systemFont?.Size ?? 9;
+        }
+        return CreateFont(family, (float)size, FontStyle.Regular, GraphicsUnit.Point);
     }
 
     private void OnDragOver(object? sender, Forms.DragEventArgs eventArgs)
@@ -505,7 +477,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 eventArgs.Data.GetData(DesktopIconSurface.DesktopIconDragSessionFormat) is
                     DesktopIconSurfaceDragSession desktopDrag)
             {
-                forward(point, null, desktopDrag.ItemKeys);
+                forward(point, null, desktopDrag.ItemKeys, null);
                 return;
             }
 
@@ -513,7 +485,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // the stable keys so the ghost stays independent of box redraws.
             if (eventArgs.Data.GetDataPresent(ItemKeysFormat))
             {
-                forward(point, null, GetDragItemKeys(eventArgs));
+                forward(point, null, GetDragItemKeys(eventArgs), _dragIconGrabOffset);
                 return;
             }
 
@@ -523,7 +495,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 externalPaths = paths;
             }
-            forward(point, externalPaths, null);
+            forward(point, externalPaths, null, null);
         }
         catch (Exception exception)
         {
@@ -534,7 +506,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnDragLeave(object? sender, EventArgs eventArgs)
     {
         ClearDropPreview();
-        _iconDragStateForward?.Invoke(PointF.Empty, null, null);
+        _iconDragStateForward?.Invoke(PointF.Empty, null, null, null);
     }
 
     private void UpdateOleDropPreview(
@@ -622,7 +594,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // The OLE drag ends with the drop. WinForms does not reliably raise
         // DragLeave afterwards, so clear the icon surface's ghost state here
         // or a stale card can stay frozen on screen after the drop.
-        _iconDragStateForward?.Invoke(PointF.Empty, null, null);
+        _iconDragStateForward?.Invoke(PointF.Empty, null, null, null);
         try
         {
             if (eventArgs.Data is null)

@@ -268,7 +268,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+        var accent = ResolveAccentColor(
+            ParseOpaqueColor(geometry.Box.Appearance.Background),
+            ParseOpaqueColor(geometry.Box.Appearance.Accent));
         var outline = RectangleF.Inflate(geometry.Bounds, -1.5f, -1.5f);
         var alpha = preview.AcceptsDrop ? 220 : 132;
         using var border = new Pen(Color.FromArgb(alpha, accent), preview.AcceptsDrop ? 2 : 1)
@@ -309,7 +311,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+        var accent = ResolveAccentColor(
+            ParseOpaqueColor(geometry.Box.Appearance.Background),
+            ParseOpaqueColor(geometry.Box.Appearance.Accent));
         // External file drags and desktop-icon drags already carry their own
         // mouse-following ghost, so only box-item drags (which have no shell
         // drag image) draw the shared card here.
@@ -405,7 +409,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 includeCompositedHeaderActions) &&
             ShouldShowHeaderActions(geometry.Box.Id, _hoveredBoxId, _searchingBoxId))
         {
-            var headerAccent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+            var headerAccent = ResolveAccentColor(
+                baseColor,
+                ParseOpaqueColor(geometry.Box.Appearance.Accent));
             DrawSearchButton(
                 graphics,
                 geometry.Search,
@@ -422,12 +428,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 headerAccent,
                 textColor,
                 isDarkSurface);
-            DrawMenuIcon(graphics, geometry.Menu, textColor);
+            DrawMenuButton(
+                graphics,
+                geometry.Menu,
+                _hoveredMenuBoxId == geometry.Box.Id,
+                textColor,
+                isDarkSurface);
         }
         DrawBoxTabs(
             graphics,
             geometry,
-            ParseOpaqueColor(geometry.Box.Appearance.Accent),
+            ResolveAccentColor(
+                baseColor,
+                ParseOpaqueColor(geometry.Box.Appearance.Accent)),
             textColor,
             isDarkSurface);
 
@@ -515,7 +528,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         DrawVerticalScrollBar(
             graphics,
             geometry,
-            ParseOpaqueColor(geometry.Box.Appearance.Accent),
+            ResolveAccentColor(
+                baseColor,
+                ParseOpaqueColor(geometry.Box.Appearance.Accent)),
             textColor);
 
         if (includeDropPreview)
@@ -880,7 +895,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var bitmap = GetIconBitmap(item.Item, iconSize) ?? ShellIconProvider.GetGenericFileIcon();
         if (bitmap is not null)
         {
-            graphics.DrawImage(bitmap, iconBounds);
+            var imageBounds = IconImageLayout.Contain(bitmap, iconBounds);
+            if (!imageBounds.IsEmpty)
+            {
+                graphics.DrawImage(bitmap, imageBounds);
+            }
         }
         if (!item.Box.Appearance.ShowItemLabels)
         {
@@ -1032,7 +1051,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         graphics.CompositingQuality = CompositingQuality.HighSpeed;
-        graphics.SmoothingMode = SmoothingMode.HighSpeed;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.InterpolationMode = InterpolationMode.Low;
         graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
         graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
@@ -1110,7 +1129,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
         var textColor = ResolveAutoTextColor(baseColor);
         var isDarkSurface = UsesLightText(baseColor);
-        var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+        var accent = ResolveAccentColor(
+            baseColor,
+            ParseOpaqueColor(geometry.Box.Appearance.Accent));
         DrawSearchButton(
             graphics,
             geometry.Search,
@@ -1127,7 +1148,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             accent,
             textColor,
             isDarkSurface);
-        DrawMenuIcon(graphics, geometry.Menu, textColor);
+        DrawMenuButton(
+            graphics,
+            geometry.Menu,
+            _hoveredMenuBoxId == geometry.Box.Id,
+            textColor,
+            isDarkSurface);
         graphics.ResetTransform();
     }
 
@@ -1160,13 +1186,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             : RectangleF.Union(item.Bounds, textBounds);
     }
 
-    private static void DrawMenuIcon(Graphics graphics, RectangleF bounds, Color color)
+    private static void DrawMenuButton(
+        Graphics graphics,
+        RectangleF bounds,
+        bool hovered,
+        Color textColor,
+        bool isDark)
     {
+        if (hovered)
+        {
+            using var fill = new SolidBrush(Color.FromArgb(isDark ? 36 : 24, textColor));
+            using var path = RoundedRectangle(RectangleF.Inflate(bounds, -2, -2), 4);
+            graphics.FillPath(fill, path);
+        }
+
         LucideRuntimeIcons.Draw(
             graphics,
             LucideRuntimeIcon.Menu,
             bounds,
-            color,
+            textColor,
             15f);
     }
 
@@ -1198,7 +1236,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             graphics,
             LucideRuntimeIcon.Search,
             bounds,
-            active ? accent : textColor,
+            textColor,
             15f);
     }
 
@@ -1230,7 +1268,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             graphics,
             LucideRuntimeIcon.ChevronsUpDown,
             bounds,
-            enabled ? accent : textColor,
+            textColor,
             15f);
     }
 

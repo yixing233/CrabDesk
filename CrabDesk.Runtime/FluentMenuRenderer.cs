@@ -45,17 +45,17 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
 
     protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs eventArgs)
     {
-        if (!eventArgs.Item.Selected && !eventArgs.Item.Pressed) return;
+        var pointerHovered = eventArgs.ToolStrip is FluentContextMenuStrip menu &&
+            ReferenceEquals(menu.PointerHoveredItem, eventArgs.Item);
+        if (!ShouldRenderItemBackground(
+                eventArgs.Item.Selected,
+                eventArgs.Item.Pressed,
+                pointerHovered))
+        {
+            return;
+        }
         var dpiScale = GetDpiScale(eventArgs.Graphics);
-        var horizontalInset = (int)Math.Round(4 * dpiScale);
-        var verticalInset = Math.Max(1, (int)Math.Round(dpiScale));
-        var bounds = new Rectangle(
-            horizontalInset,
-            verticalInset,
-            Math.Max(
-                eventArgs.Item.Width,
-                eventArgs.ToolStrip?.DisplayRectangle.Width ?? eventArgs.Item.Width) - horizontalInset * 2,
-            eventArgs.Item.Height - verticalInset * 2);
+        var bounds = CalculateItemBackgroundBounds(eventArgs.Item.Size, dpiScale);
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
         eventArgs.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = CreateRoundedPath(bounds, (int)Math.Round(5 * dpiScale));
@@ -63,18 +63,37 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
         eventArgs.Graphics.FillPath(brush, path);
     }
 
+    internal static bool ShouldRenderItemBackground(
+        bool selected,
+        bool pressed,
+        bool pointerHovered) =>
+        selected || pressed || pointerHovered;
+
+    internal static Rectangle CalculateItemBackgroundBounds(Size itemSize, float dpiScale)
+    {
+        dpiScale = Math.Max(0.75f, dpiScale);
+        var horizontalInset = (int)Math.Round(4 * dpiScale);
+        var verticalInset = Math.Max(1, (int)Math.Round(dpiScale));
+        return new Rectangle(
+            horizontalInset,
+            verticalInset,
+            Math.Max(0, itemSize.Width - horizontalInset * 2),
+            Math.Max(0, itemSize.Height - verticalInset * 2));
+    }
+
     protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs eventArgs)
     {
         var dpiScale = GetDpiScale(eventArgs.Graphics);
         var hasArrow = eventArgs.Item is ToolStripMenuItem { HasDropDownItems: true };
         var layout = CalculateItemLayout(eventArgs.Item.Size, dpiScale, hasArrow);
+        var textColor = ResolveItemTextColor(eventArgs.Item.Enabled, eventArgs.TextColor, _isDark);
         if (LucideRuntimeIcons.TryGetMenuIcon(eventArgs.Item, out var icon))
         {
             LucideRuntimeIcons.Draw(
                 eventArgs.Graphics,
                 icon,
                 layout.IconBounds,
-                eventArgs.TextColor,
+                textColor,
                 layout.IconBounds.Width);
         }
         else if (eventArgs.Item is ToolStripMenuItem { Checked: true })
@@ -92,13 +111,20 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
             eventArgs.Text,
             eventArgs.TextFont,
             layout.TextBounds,
-            eventArgs.TextColor,
+            textColor,
             TextFormatFlags.Left |
             TextFormatFlags.VerticalCenter |
             TextFormatFlags.SingleLine |
             TextFormatFlags.EndEllipsis |
             TextFormatFlags.NoPadding);
     }
+
+    internal static Color ResolveItemTextColor(bool enabled, Color requested, bool isDark) =>
+        enabled
+            ? requested
+            : isDark
+                ? Color.FromArgb(125, 130, 138)
+                : Color.FromArgb(145, 150, 158);
 
     protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs eventArgs)
     {

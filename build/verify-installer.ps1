@@ -1,5 +1,6 @@
 param(
-    [string]$SetupExecutable = "..\artifacts\release\CrabDesk-Setup-x64.exe"
+    [string]$SetupExecutable = "..\artifacts\release\CrabDesk-Setup-x64.exe",
+    [string]$ExpectedVersion = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,7 +100,17 @@ try {
         }
     }
     $productVersion = (Get-Item -LiteralPath $installedApp).VersionInfo.ProductVersion
-    if (-not $productVersion.StartsWith("0.6.0", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ([string]::IsNullOrWhiteSpace($ExpectedVersion)) {
+        $projectPath = Join-Path $PSScriptRoot "..\CrabDesk.WinUI\CrabDesk.WinUI.csproj"
+        [xml]$project = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
+        $ExpectedVersion = [string]@($project.Project.PropertyGroup.Version | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })[0]
+    }
+    $expectedProductPrefix = if ($ExpectedVersion -match '^(\d{4})(\d{2})(\d{2})\.(\d{2})$') {
+        "{0}.{1}.{2}" -f $Matches[1], [int]$Matches[2], [int]$Matches[3]
+    }
+    else { $ExpectedVersion }
+    if ([string]::IsNullOrWhiteSpace($expectedProductPrefix) -or
+        -not $productVersion.StartsWith($expectedProductPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Installed application version is unexpected: $productVersion"
     }
 

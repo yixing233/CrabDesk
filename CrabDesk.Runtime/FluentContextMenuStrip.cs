@@ -94,11 +94,13 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     private bool _closingAnimation;
     private bool _allowImmediateClose;
     private ToolStripDropDownCloseReason _pendingCloseReason;
+    private ToolStripItem? _pointerHoveredItem;
 
     internal int MinimumMenuWidth { get; init; } = 112;
     internal bool OpacityAnimationAllowed { get; init; } = true;
     internal float? PreferredDpiScale { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
+    internal ToolStripItem? PointerHoveredItem => _pointerHoveredItem;
 
     protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
 
@@ -189,6 +191,29 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         }
     }
 
+    protected override void OnMouseMove(MouseEventArgs eventArgs)
+    {
+        base.OnMouseMove(eventArgs);
+        var hoveredItem = GetItemAt(eventArgs.Location);
+        if (ReferenceEquals(_pointerHoveredItem, hoveredItem))
+        {
+            return;
+        }
+
+        var previousItem = _pointerHoveredItem;
+        _pointerHoveredItem = hoveredItem;
+        previousItem?.Invalidate();
+        hoveredItem?.Invalidate();
+    }
+
+    protected override void OnMouseLeave(EventArgs eventArgs)
+    {
+        var previousItem = _pointerHoveredItem;
+        _pointerHoveredItem = null;
+        previousItem?.Invalidate();
+        base.OnMouseLeave(eventArgs);
+    }
+
     protected override void OnClosing(ToolStripDropDownClosingEventArgs eventArgs)
     {
         if (!_allowImmediateClose && OpacityAnimationAllowed && AnimationsEnabled && Visible && !IsDisposed)
@@ -208,6 +233,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     {
         StopOpacityAnimation();
         _closingAnimation = false;
+        _pointerHoveredItem = null;
         Opacity = 1;
         StopOutsideClickMonitor();
         base.OnClosed(eventArgs);
@@ -303,7 +329,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
             {
                 var width = Math.Max(
                     1,
-                    ClientSize.Width - Padding.Right - item.Bounds.Left - item.Margin.Right);
+                    ClientSize.Width - item.Bounds.Left - item.Margin.Right);
                 item.AutoSize = false;
                 item.Width = width;
             }

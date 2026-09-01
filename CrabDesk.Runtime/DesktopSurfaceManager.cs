@@ -210,6 +210,42 @@ internal sealed class DesktopSurfaceManager : IDisposable
         return RefreshBoxItems([boxId]);
     }
 
+    internal bool RefreshBox(Guid boxId) => RefreshBoxes([boxId]);
+
+    internal bool RefreshBoxes(IReadOnlyCollection<Guid> boxIds)
+    {
+        if (boxIds.Count == 0)
+        {
+            return false;
+        }
+
+        var requestedIds = boxIds.ToHashSet();
+        var refreshed = false;
+        foreach (var surface in _surfaces)
+        {
+            var surfaceRefreshed = false;
+            foreach (var boxId in requestedIds)
+            {
+                surfaceRefreshed |= surface.RefreshBoxItems(boxId);
+            }
+
+            if (!surfaceRefreshed)
+            {
+                continue;
+            }
+
+            refreshed = true;
+            if (!surface.UpdateInteractionRegion())
+            {
+                DiagnosticLog.Error(
+                    "Targeted desktop box refresh could not update the interaction region.",
+                    new InvalidOperationException("The desktop box interaction region could not be updated."));
+            }
+        }
+
+        return refreshed;
+    }
+
     internal bool RefreshBoxItems(IReadOnlyCollection<Guid> boxIds)
     {
         if (boxIds.Count == 0)
@@ -483,8 +519,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
             {
                 boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
                 boxSurface.SetIconLayerPartialRenderRequest(iconSurface.RequestBoxVisualFrame);
-                boxSurface.SetIconDragStateForward((point, paths, keys) =>
-                    iconSurface.ForwardDragFromBox(point, paths, keys));
+                boxSurface.SetIconDragStateForward((point, paths, keys, grabOffset) =>
+                    iconSurface.ForwardDragFromBox(point, paths, keys, grabOffset));
             }
         }
     }
@@ -980,11 +1016,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
         _iconSurfaces.Any(surface => surface.IsPointerInteractionActive) ||
         _surfaces.Any(surface => surface.IsMarqueeSelectionActive);
 
-    internal bool IsDesktopIconDragActive =>
-        _iconSurfaces.Any(surface => surface.IsItemDragActive);
-
     internal bool IsBoxItemDragActive =>
         _surfaces.Any(surface => surface.IsItemDragActive);
+
+    internal bool IsDesktopIconDragActive =>
+        _iconSurfaces.Any(surface => surface.IsItemDragActive);
 
     internal void SetVirtualBoxDropTargetEnabled(bool enabled)
     {

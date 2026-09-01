@@ -89,6 +89,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private GridCell? _lastDragPreviewAnchorCell;
     private bool _dragPointerOverBox;
     private PointF? _boxDragPointer;
+    private PointF? _boxDragGrabOffset;
     private string? _boxDragPrimaryKey;
     private IReadOnlyList<string>? _virtualBoxDragItemKeys;
     private DesktopBoxForm.InternalDragSession? _virtualBoxDragSession;
@@ -1015,6 +1016,15 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             return PresentLayerCore();
         }
+        catch (Exception exception)
+        {
+            _lastPresentSucceeded = false;
+            _lastPresentDiagnostic = $"Desktop icon rendering failed: {exception.Message}";
+            DiagnosticLog.Error(
+                $"Desktop icon surface render failed monitor={_monitor.Id}",
+                exception);
+            return false;
+        }
         finally
         {
             _presentingLayer = false;
@@ -1824,7 +1834,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         graphics.CompositingQuality = CompositingQuality.HighSpeed;
-        graphics.SmoothingMode = SmoothingMode.HighSpeed;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
         graphics.InterpolationMode = InterpolationMode.Low;
         graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
@@ -2014,7 +2024,24 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             if (_boxDragPointer is { } pointer)
             {
-                bounds = UnionVisualBounds(bounds, new RectangleF(pointer.X - 40, pointer.Y - 40, 112, 112));
+                var iconSize = Math.Max(16f, _iconSize);
+                var stackOffset = (Math.Min(3, _boxDropItemKeys.Count) - 1) * 3f;
+                var grabOffset = ScaleBoxGrabOffset(_boxDragGrabOffset);
+                var origin = grabOffset is { } grab
+                    ? new PointF(
+                        pointer.X - grab.X - stackOffset * 0.5f,
+                        pointer.Y - grab.Y - stackOffset * 0.5f)
+                    : new PointF(
+                        pointer.X + 10f - stackOffset * 0.5f,
+                        pointer.Y + 10f - stackOffset * 0.5f);
+                var labelWidth = Math.Max(iconSize + 8f, _horizontalSpacing - 4f);
+                var labelHeight = Math.Max(32f, _verticalSpacing - iconSize);
+                var ghostBounds = new RectangleF(
+                    origin.X + (iconSize - labelWidth) / 2f - 12f,
+                    origin.Y - 14f,
+                    labelWidth + 24f,
+                    iconSize + stackOffset + 3f + labelHeight + 16f);
+                bounds = UnionVisualBounds(bounds, ghostBounds);
             }
         }
 
@@ -2768,13 +2795,40 @@ internal sealed class DesktopIconSurface : Forms.Form
                     Math.Clamp((int)Math.Round(_iconSize * _scale), 16, 256))
                 ?? ShellIconProvider.GetGenericFileIcon();
         using var font = ResolveIconLabelFont();
+        var labelWidth = Math.Max(_iconSize + 8f, _horizontalSpacing - 4f);
+        var labelHeight = Math.Max(
+            font.GetHeight(graphics) * CompactLabelLineCount + 2f,
+            MeasureFullLabelHeight(
+                graphics,
+                primaryItem?.DisplayName ?? _boxDropItemKeys.FirstOrDefault() ?? string.Empty,
+                font,
+                labelWidth));
         DragGhostRenderer.Draw(
             graphics,
             pointer,
             icon,
             primaryItem?.DisplayName ?? _boxDropItemKeys.FirstOrDefault() ?? string.Empty,
             _boxDropItemKeys.Count,
-            font);
+            font,
+            ScaleBoxGrabOffset(_boxDragGrabOffset),
+            _iconSize,
+            labelWidth,
+            labelHeight);
+    }
+
+    private PointF? ScaleBoxGrabOffset(PointF? sourceOffset)
+    {
+        if (sourceOffset is not { } offset)
+        {
+            return null;
+        }
+
+        // Box input records the grab point in the historical 32 DIP preview
+        // space. Convert that normalized point to the actual desktop icon
+        // size so a grab near an edge remains at the same relative pixel.
+        const float sourcePreviewSize = 32f;
+        var factor = _iconSize / sourcePreviewSize;
+        return new PointF(offset.X * factor, offset.Y * factor);
     }
 
     private DesktopGrid CreateCurrentGrid()
@@ -2816,10 +2870,16 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private static void DrawImageWithAlpha(Graphics graphics, Image image, RectangleF bounds, float alpha)
     {
+        var imageBounds = IconImageLayout.Contain(image, bounds);
+        if (imageBounds.IsEmpty)
+        {
+            return;
+        }
+
         alpha = Math.Clamp(alpha, 0, 1);
         if (alpha >= 0.999f)
         {
-            graphics.DrawImage(image, bounds);
+            graphics.DrawImage(image, imageBounds);
             return;
         }
 
@@ -2827,7 +2887,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         var matrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = alpha };
         attributes.SetColorMatrix(matrix, System.Drawing.Imaging.ColorMatrixFlag.Default,
             System.Drawing.Imaging.ColorAdjustType.Bitmap);
-        graphics.DrawImage(image, Rectangle.Round(bounds), 0, 0, image.Width, image.Height,
+        graphics.DrawImage(image, Rectangle.Round(imageBounds), 0, 0, image.Width, image.Height,
             GraphicsUnit.Pixel, attributes);
     }
 
@@ -3342,7 +3402,8 @@ internal sealed class DesktopIconSurface : Forms.Form
     internal void ForwardDragFromBox(
         PointF pointDip,
         IReadOnlyList<string>? externalPaths,
-        IReadOnlyList<string>? itemKeys)
+        IReadOnlyList<string>? itemKeys,
+        PointF? grabOffset = null)
     {
         if (IsDisposed || !IsHandleCreated)
         {
@@ -3371,6 +3432,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                 _boxDropItemKeys.UnionWith(itemKeys);
                 _boxDragPrimaryKey = itemKeys.FirstOrDefault();
             }
+            _boxDragGrabOffset = grabOffset;
             var publishGhost = ShouldPublishVirtualBoxGhostFromOle(
                 keysChanged,
                 _boxDragPointer is not null);
@@ -3401,6 +3463,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             _externalDragPaths = null;
             RequestDragRender();
         }
+        _boxDragGrabOffset = null;
     }
 
     private void OnDragLeave(object? sender, EventArgs eventArgs)
@@ -3652,6 +3715,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         _boxDropTargetCell = null;
         _boxDropItemKeys.Clear();
         _boxDragPointer = null;
+        _boxDragGrabOffset = null;
         _boxDragPrimaryKey = null;
         RequestDragRender();
     }

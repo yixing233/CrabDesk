@@ -1,6 +1,9 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Net.Sockets;
+
+namespace CrabDesk.Bootstrapper;
 
 internal sealed record DownloadProgressReport(
     long BytesDownloaded,
@@ -25,10 +28,72 @@ internal static class DownloadVerifier
             throw new InvalidDataException("下载地址必须使用 HTTPS。");
         }
 
+        var partialPath = destination + ".partial";
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+        Exception? lastError = null;
+        try
+        {
+            for (var attempt = 1; attempt <= SetupPolicy.DownloadMaxAttempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    await DownloadAttemptAsync(client, uri, partialPath, maximumBytes, progress, cancellationToken)
+                        .ConfigureAwait(false);
+                    File.Move(partialPath, destination, true);
+                    return;
+                }
+                catch (Exception exception) when (IsRetryable(exception, cancellationToken) && attempt < SetupPolicy.DownloadMaxAttempts)
+                {
+                    lastError = exception;
+                    TryDelete(partialPath);
+                    await Task.Delay(SetupPolicy.GetRetryDelay(attempt), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    lastError = exception;
+                    throw;
+                }
+            }
+        }
+        finally
+        {
+            if (lastError is not null)
+            {
+                TryDelete(partialPath);
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("下载失败。");
+    }
+
+    internal static bool IsRetryable(Exception exception, CancellationToken cancellationToken = default)
+    {
+        if (exception is OperationCanceledException)
+        {
+            return !cancellationToken.IsCancellationRequested;
+        }
+
+        if (exception is HttpRequestException http)
+        {
+            return http.StatusCode is null || SetupPolicy.IsTransientDownloadStatus(http.StatusCode);
+        }
+
+        return exception is IOException or SocketException;
+    }
+
+    private static async Task DownloadAttemptAsync(
+        HttpClient client,
+        Uri uri,
+        string destination,
+        long maximumBytes,
+        IProgress<DownloadProgressReport>? progress,
+        CancellationToken cancellationToken)
+    {
         using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        if (response.RequestMessage?.RequestUri is not { Scheme: "https" } finalUri)
+        if (response.RequestMessage?.RequestUri is not { Scheme: "https" })
         {
             throw new InvalidDataException("下载重定向到了非 HTTPS 地址。");
         }
@@ -39,56 +104,38 @@ internal static class DownloadVerifier
         }
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using var target = new FileStream(
-            destination,
-            FileMode.Create,
-            FileAccess.Write,
-            FileShare.None,
-            128 * 1024,
+        await using var target = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 128 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var buffer = new byte[128 * 1024];
         long written = 0;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var lastReportTime = stopwatch.ElapsedMilliseconds;
         long lastReportBytes = 0;
-        double currentSpeed = 0;
-
         while (true)
         {
             var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-
+            if (read == 0) break;
             written += read;
-            if (written > maximumBytes)
-            {
-                throw new InvalidDataException("下载文件超过允许的大小。");
-            }
-
+            if (written > maximumBytes) throw new InvalidDataException("下载文件超过允许的大小。");
             await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-
             var elapsedMs = stopwatch.ElapsedMilliseconds;
             if (elapsedMs - lastReportTime >= 150)
             {
-                var timeDeltaSec = (elapsedMs - lastReportTime) / 1000.0;
-                if (timeDeltaSec > 0)
-                {
-                    currentSpeed = (written - lastReportBytes) / timeDeltaSec;
-                }
+                var delta = Math.Max(0.001, (elapsedMs - lastReportTime) / 1000.0);
+                var speed = (written - lastReportBytes) / delta;
                 lastReportTime = elapsedMs;
                 lastReportBytes = written;
-
-                var percent = totalBytes.HasValue && totalBytes.Value > 0
-                    ? Math.Clamp((double)written / totalBytes.Value * 100.0, 0.0, 100.0)
-                    : 0.0;
-                progress?.Report(new DownloadProgressReport(written, totalBytes, currentSpeed, percent));
+                var percent = totalBytes is > 0 ? Math.Clamp((double)written / totalBytes.Value * 100.0, 0, 100) : 0;
+                progress?.Report(new DownloadProgressReport(written, totalBytes, speed, percent));
             }
         }
         await target.FlushAsync(cancellationToken).ConfigureAwait(false);
+        progress?.Report(new DownloadProgressReport(written, totalBytes, 0, 100));
+    }
 
-        progress?.Report(new DownloadProgressReport(written, totalBytes, 0, 100.0));
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch { }
     }
 
     internal static void VerifySha256(string path, string expectedHash)

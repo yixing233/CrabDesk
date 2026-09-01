@@ -12,7 +12,7 @@ internal static class DependencyDetector
         SetupDependencyKind.VisualCppRuntime =>
             IsVisualCppRuntimeInstalled(dependency.MinimumVersion ?? new Version(14, 0)),
         SetupDependencyKind.WindowsAppRuntime =>
-            IsWindowsAppRuntimeInstalled(dependency.RequiredPackageName),
+            IsWindowsAppRuntimeInstalled(dependency.RequiredPackageName, dependency.MinimumVersion),
         _ => false
     };
 
@@ -64,9 +64,7 @@ internal static class DependencyDetector
             var sharedFramework = Path.Combine(root, "shared", "Microsoft.WindowsDesktop.App");
             try
             {
-                if (Directory.Exists(sharedFramework) && Directory.EnumerateDirectories(sharedFramework)
-                    .Select(Path.GetFileName)
-                    .Any(name => name is not null && IsSupportedRuntimeDirectory(name, requiredMajorVersion, minimumVersion)))
+                if (AreDotNetFrameworksSupported(root, requiredMajorVersion, minimumVersion))
                 {
                     return true;
                 }
@@ -77,6 +75,34 @@ internal static class DependencyDetector
         }
 
         return false;
+    }
+
+    internal static bool AreDotNetFrameworksSupported(
+        string root,
+        int requiredMajorVersion,
+        Version? minimumVersion = null)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            return false;
+        }
+
+        static bool HasSupportedVersion(string path, int major, Version? minimum)
+        {
+            try
+            {
+                return Directory.Exists(path) && Directory.EnumerateDirectories(path)
+                    .Select(Path.GetFileName)
+                    .Any(name => name is not null && IsSupportedRuntimeDirectory(name, major, minimum));
+            }
+            catch (Exception exception) when (exception is UnauthorizedAccessException or IOException)
+            {
+                return false;
+            }
+        }
+
+        return HasSupportedVersion(Path.Combine(root, "shared", "Microsoft.NETCore.App"), requiredMajorVersion, minimumVersion) &&
+            HasSupportedVersion(Path.Combine(root, "shared", "Microsoft.WindowsDesktop.App"), requiredMajorVersion, minimumVersion);
     }
 
     private static bool IsVisualCppRuntimeInstalled(Version minimumVersion)
@@ -99,7 +125,17 @@ internal static class DependencyDetector
         }
     }
 
-    private static bool IsWindowsAppRuntimeInstalled(string packageName)
+    internal static bool IsSupportedPackageVersion(string? versionText, Version? minimumVersion)
+    {
+        if (!Version.TryParse(versionText?.Trim(), out var version))
+        {
+            return false;
+        }
+
+        return minimumVersion is null || version >= minimumVersion;
+    }
+
+    private static bool IsWindowsAppRuntimeInstalled(string packageName, Version? minimumVersion)
     {
         if (string.IsNullOrWhiteSpace(packageName) ||
             packageName.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '_'))
@@ -109,7 +145,8 @@ internal static class DependencyDetector
 
         var command = $"$package = Get-AppxPackage -Name '{packageName}' -ErrorAction SilentlyContinue | " +
                       "Where-Object { $_.Architecture -eq 'X64' -or $_.Architecture -eq 'Neutral' } | " +
-                      "Select-Object -First 1; if ($null -ne $package) { $package.PackageFullName }";
+                      "Sort-Object Version -Descending | Select-Object -First 1; " +
+                      "if ($null -ne $package) { $package.Version.ToString() }";
         try
         {
             using var process = Process.Start(new ProcessStartInfo
@@ -133,7 +170,8 @@ internal static class DependencyDetector
                 return false;
             }
 
-            return process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output);
+            return process.ExitCode == 0 &&
+                IsSupportedPackageVersion(output, minimumVersion);
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -194,11 +232,11 @@ internal static class DependencyDetector
                 try
                 {
                     var fvi = FileVersionInfo.GetVersionInfo(exe);
-                    installedVersion = fvi.ProductVersion ?? fvi.FileVersion ?? "20260826.02";
+                    installedVersion = fvi.ProductVersion ?? fvi.FileVersion ?? "20260901.01";
                 }
                 catch
                 {
-                    installedVersion = "20260826.02";
+                    installedVersion = "20260901.01";
                 }
                 return true;
             }

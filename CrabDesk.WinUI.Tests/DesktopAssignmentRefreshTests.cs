@@ -201,6 +201,36 @@ public sealed class DesktopAssignmentRefreshTests
     }
 
     [Fact]
+    public void BoxAppearanceAndViewChangesUseTargetedRefresh()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+
+        foreach (var methodName in new[]
+                 {
+                     "SetBoxAccent",
+                     "SetBoxViewMode",
+                     "SetBoxSortMode",
+                     "CreateManualTab",
+                     "RenameManualTab",
+                     "DeleteManualTab"
+                 })
+        {
+            var methodStart = source.IndexOf($"public ", StringComparison.Ordinal);
+            methodStart = source.IndexOf(methodName + "(", Math.Max(0, methodStart), StringComparison.Ordinal);
+            var methodEnd = source.IndexOf("\n    public ", Math.Max(0, methodStart + 1), StringComparison.Ordinal);
+
+            Assert.True(methodStart >= 0, $"Method {methodName} was not found.");
+            Assert.True(methodEnd > methodStart, $"Method {methodName} boundary was not found.");
+            var method = source[methodStart..methodEnd];
+            Assert.Contains("NotifyBoxWorkspaceChanged", method, StringComparison.Ordinal);
+            Assert.DoesNotContain("NotifyWorkspaceChanged(true);", method, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void BoxDropCalculatesDesktopInsertionOnlyAfterDrop()
     {
         var solutionDirectory = FindSolutionDirectory();

@@ -86,8 +86,73 @@ public sealed class BootstrapperTests
     public void InstallerState_HasValidVersionAndInitialProperties()
     {
         var state = new InstallerState();
-        Assert.Equal("20260826.02", state.Version);
+        Assert.Equal("20260901.01", state.Version);
         Assert.False(string.IsNullOrWhiteSpace(state.InstallPath));
+    }
+
+    [Fact]
+    public void DotNetDesktopRuntimeRequiresCoreAndDesktopFrameworks()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CrabDesk.RuntimeTest", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "shared", "Microsoft.WindowsDesktop.App", "8.0.30"));
+            Assert.False(DependencyDetector.AreDotNetFrameworksSupported(root, 8, Version.Parse("8.0.30")));
+
+            Directory.CreateDirectory(Path.Combine(root, "shared", "Microsoft.NETCore.App", "8.0.30"));
+            Assert.True(DependencyDetector.AreDotNetFrameworksSupported(root, 8, Version.Parse("8.0.30")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("1.8.260710003", "1.8.260710003", true)]
+    [InlineData("1.8.260710004", "1.8.260710003", true)]
+    [InlineData("1.8.260709999", "1.8.260710003", false)]
+    [InlineData("invalid", "1.8.260710003", false)]
+    public void WindowsAppRuntimeVersionPolicyComparesMinimum(string actual, string minimum, bool expected)
+    {
+        Assert.Equal(expected, DependencyDetector.IsSupportedPackageVersion(actual, Version.Parse(minimum)));
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 4)]
+    public void DownloadRetryDelayUsesExponentialBackoff(int attempt, int seconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(seconds), SetupPolicy.GetRetryDelay(attempt));
+    }
+
+    [Fact]
+    public void RequiredSpaceIncludesDependencyAllowanceAndMargin()
+    {
+        var required = SetupPolicy.CalculateRequiredSpaceBytes(100, 2);
+        Assert.Equal(100 + (2 * SetupPolicy.DependencyDownloadAllowanceBytes) + SetupPolicy.DiskSafetyMarginBytes, required);
+        Assert.True(SetupPolicy.HasSufficientSpace(required, required));
+        Assert.False(SetupPolicy.HasSufficientSpace(required - 1, required));
+    }
+
+    [Fact]
+    public void DownloadRetryPolicyDistinguishesTransientFailures()
+    {
+        Assert.True(DownloadVerifier.IsRetryable(new HttpRequestException("network")));
+        Assert.True(DownloadVerifier.IsRetryable(new HttpRequestException("busy", null, System.Net.HttpStatusCode.ServiceUnavailable)));
+        Assert.False(DownloadVerifier.IsRetryable(new HttpRequestException("missing", null, System.Net.HttpStatusCode.NotFound)));
+        Assert.True(DownloadVerifier.IsRetryable(new IOException("connection reset")));
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.False(DownloadVerifier.IsRetryable(new OperationCanceledException(), cancelled.Token));
+    }
+
+    [Fact]
+    public void InstallerTimeoutPolicyIsBounded()
+    {
+        Assert.InRange(SetupPolicy.InstallerTimeoutMilliseconds, 60_000, 30 * 60 * 1000);
     }
     [Fact]
     public void TestGlyphCenter()

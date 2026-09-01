@@ -65,6 +65,23 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void HoverExpansionSchedulesCollapseWhenReconciledOutsideForm()
+    {
+        var controller = new HoverExpansionController(
+            TimeSpan.FromMilliseconds(120),
+            TimeSpan.FromMilliseconds(180));
+        var boxId = Guid.NewGuid();
+        var reconciledAt = DateTimeOffset.Parse("2026-08-23T00:00:00Z");
+
+        controller.AdoptExpanded(boxId);
+
+        var transition = controller.Update(null, pointerInsideExpandedBox: false, reconciledAt);
+
+        Assert.False(transition.Changed);
+        Assert.Equal(reconciledAt.AddMilliseconds(180), controller.NextTransitionAt);
+    }
+
+    [Fact]
     public void HoverExpansionCanAdoptAnAlreadyOpenBoxAndCloseItAfterPointerLeaves()
     {
         var controller = new HoverExpansionController(

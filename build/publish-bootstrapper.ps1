@@ -34,6 +34,7 @@ $properties = @(
     "-p:DotNetDesktopMinimumVersion=$($dependencies.DotNetVersion)",
     "-p:WindowsAppRuntimeInstallerUrl=$($dependencies.WindowsAppRuntimeUrl)",
     "-p:WindowsAppRuntimeInstallerSha256=$($dependencies.WindowsAppRuntimeSha256)",
+    "-p:WindowsAppRuntimeMinimumVersion=$($dependencies.WindowsAppRuntimeVersion)",
     "-p:VisualCppInstallerUrl=$($dependencies.VisualCppUrl)",
     "-p:VisualCppInstallerSha256=$($dependencies.VisualCppSha256)",
     "-p:VisualCppMinimumVersion=$($dependencies.VisualCppVersion)",

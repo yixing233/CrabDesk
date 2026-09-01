@@ -80,12 +80,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var autoExpandBoxId = _hoveredAutoExpandBoxId;
         var searchBoxId = _hoveredSearchBoxId;
-        if (autoExpandBoxId is null && searchBoxId is null)
+        var menuBoxId = _hoveredMenuBoxId;
+        if (autoExpandBoxId is null && searchBoxId is null && menuBoxId is null)
         {
             return;
         }
         _hoveredSearchBoxId = null;
         _hoveredAutoExpandBoxId = null;
+        _hoveredMenuBoxId = null;
         _headerToolTip.SetToolTip(this, null);
         RequestHeaderActionVisualUpdate();
     }

@@ -70,6 +70,8 @@ internal static class Program
             .Where(dependency => !DependencyDetector.IsInstalled(dependency))
             .ToArray();
 
+        EnsureSufficientDiskSpace(missing.Length, args);
+
         var temporaryRoot = Path.Combine(
             Path.GetTempPath(),
             "CrabDesk-Setup",
@@ -100,7 +102,7 @@ internal static class Program
                 }
 
                 restartRequired |= SetupPolicy.RequiresRestart(exitCode);
-                if (!restartRequired && !DependencyDetector.IsInstalled(dependency))
+                if (!DependencyDetector.IsInstalled(dependency))
                 {
                     throw new InvalidOperationException($"{dependency.DisplayName} 安装后仍未检测到。");
                 }
@@ -132,7 +134,10 @@ internal static class Program
                 return 3010;
             }
 
-            TryLaunchInstalledApp();
+            if (!restartRequired)
+            {
+                TryLaunchInstalledApp();
+            }
             return 0;
         }
         finally
@@ -184,6 +189,11 @@ internal static class Program
             throw new InvalidDataException("DotNetDesktopMinimumVersion 格式无效。");
         }
 
+        if (!Version.TryParse(GetRequiredMetadata(metadata, "WindowsAppRuntimeMinimumVersion"), out var windowsAppRuntimeVersion))
+        {
+            throw new InvalidDataException("WindowsAppRuntimeMinimumVersion 格式无效。");
+        }
+
         return
         [
             new SetupDependency(
@@ -210,6 +220,7 @@ internal static class Program
                 GetRequiredMetadata(metadata, "WindowsAppRuntimeInstallerSha256"),
                 "windowsappruntimeinstall-x64.exe",
                 "--quiet",
+                MinimumVersion: windowsAppRuntimeVersion,
                 RequiredPackageName: "Microsoft.WindowsAppRuntime.1.8")
         ];
     }
@@ -325,8 +336,39 @@ internal static class Program
 
         using var process = Process.Start(startInfo) ??
             throw new InvalidOperationException($"无法启动 {Path.GetFileName(path)}。");
-        process.WaitForExit();
-        return process.ExitCode;
+        return SetupPolicy.WaitForInstaller(process);
+    }
+
+    private static void EnsureSufficientDiskSpace(int missingDependencyCount, string[]? setupArguments = null)
+    {
+        var payloadBytes = 0L;
+        try
+        {
+            using var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("CrabDesk.Payload.exe");
+            if (payload?.CanSeek == true) payloadBytes = payload.Length;
+        }
+        catch
+        {
+        }
+
+        var required = SetupPolicy.CalculateRequiredSpaceBytes(payloadBytes, missingDependencyCount);
+        var installPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "CrabDesk");
+        var dirArgument = setupArguments?.FirstOrDefault(arg => arg.StartsWith("/DIR=", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(dirArgument))
+        {
+            installPath = dirArgument[5..].Trim().Trim('"');
+        }
+        EnsurePathHasSpace(installPath, payloadBytes + SetupPolicy.DiskSafetyMarginBytes, "目标磁盘");
+        EnsurePathHasSpace(Path.GetTempPath(), required, "临时文件磁盘");
+    }
+
+    private static void EnsurePathHasSpace(string path, long required, string label)
+    {
+        if (SetupPolicy.TryGetAvailableDiskSpace(path, out var available) &&
+            !SetupPolicy.HasSufficientSpace(available, required))
+        {
+            throw new IOException($"安装所需空间约 {required / (1024 * 1024)} MB，但{label}仅剩 {available / (1024 * 1024)} MB。");
+        }
     }
 
     private static void TryLaunchInstalledApp()

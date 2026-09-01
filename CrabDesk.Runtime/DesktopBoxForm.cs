@@ -164,6 +164,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private Guid? _hoveredBoxId;
     private Guid? _hoveredSearchBoxId;
     private Guid? _hoveredAutoExpandBoxId;
+    private Guid? _hoveredMenuBoxId;
     private Guid? _openBoxMenuBoxId;
     private LayoutRect? _transformDirtyBounds;
     private string? _lastRegionDiagnostic;
@@ -174,7 +175,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool _isCompositedByIconSurface;
     private Action? _iconLayerRenderRequest;
     private Action<RectangleF>? _iconLayerPartialRenderRequest;
-    private Action<PointF, IReadOnlyList<string>?, IReadOnlyList<string>?>? _iconDragStateForward;
+    private Action<PointF, IReadOnlyList<string>?, IReadOnlyList<string>?, PointF?>? _iconDragStateForward;
+    private PointF _dragIconGrabOffset;
     private int _iconCacheVersion;
     private int _dynamicVisualVersion;
     private int _paintCount;
@@ -430,6 +432,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         HideItemHoverOverlay();
         _boxItems[boxId] = _runtime.GetItemsForBox(boxId);
         _geometryDirty = true;
+        EnsureGeometry();
+        var currentBounds = _boxes.FirstOrDefault(candidate => candidate.Box.Id == boxId)?.Bounds;
+        if (currentBounds is { } updatedBounds)
+        {
+            dirtyBounds = RectangleF.Union(dirtyBounds, updatedBounds);
+        }
         var visibleKeys = _boxItems.Values
             .SelectMany(items => items)
             .Select(item => item.Key.ToString())
@@ -723,6 +731,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         PointF pointer) =>
         visualBounds.Contains(pointer);
 
+    internal static bool IsPointerInsideExpandedBox(
+        LayoutRect bounds,
+        double interactionHeight,
+        PointF pointer) =>
+        pointer.X >= bounds.X &&
+        pointer.X <= bounds.X + bounds.Width &&
+        pointer.Y >= bounds.Y &&
+        pointer.Y <= bounds.Y + Math.Max(bounds.Height, interactionHeight);
+
     internal static bool ShouldCloseBoxSearchForPointer(
         bool searchVisible,
         bool pointerInsideActiveBox) =>
@@ -958,7 +975,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     // and payload so the ghost keeps following the mouse. Null payloads mean
     // the drag left this surface or ended.
     internal void SetIconDragStateForward(
-        Action<PointF, IReadOnlyList<string>?, IReadOnlyList<string>?> forward) =>
+        Action<PointF, IReadOnlyList<string>?, IReadOnlyList<string>?, PointF?> forward) =>
         _iconDragStateForward = forward;
 
     /// <summary>
@@ -1267,6 +1284,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     new InvalidOperationException(_lastPresentDiagnostic));
             }
             return _lastPresentSucceeded;
+        }
+        catch (Exception exception)
+        {
+            _lastPresentSucceeded = false;
+            _lastPresentDiagnostic = $"Desktop box rendering failed: {exception.Message}";
+            DiagnosticLog.Error(
+                $"Desktop box surface render failed monitor={_monitor.Id}",
+                exception);
+            return false;
         }
         finally
         {
@@ -1747,6 +1773,34 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return ResolveAutoTextColor(boxBackground);
         }
         return ParseOpaqueColor(value);
+    }
+
+    internal static Color ResolveAccentColor(Color background, Color accent)
+    {
+        const double minimumContrast = 2.6d;
+        if (ContrastRatio(background, accent) >= minimumContrast)
+        {
+            return Color.FromArgb(255, accent.R, accent.G, accent.B);
+        }
+
+        var target = UsesLightText(background)
+            ? Color.White
+            : Color.FromArgb(31, 35, 41);
+        for (var step = 1; step <= 10; step++)
+        {
+            var amount = step / 10d;
+            var adjusted = Color.FromArgb(
+                255,
+                (int)Math.Round(accent.R + (target.R - accent.R) * amount),
+                (int)Math.Round(accent.G + (target.G - accent.G) * amount),
+                (int)Math.Round(accent.B + (target.B - accent.B) * amount));
+            if (ContrastRatio(background, adjusted) >= minimumContrast)
+            {
+                return adjusted;
+            }
+        }
+
+        return target;
     }
 
     private static Color ResolveAutoTextColor(Color background) => UsesLightText(background)

@@ -757,6 +757,23 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
+    [InlineData(120, 280, 200, true)]
+    [InlineData(120, 280, 390, false)]
+    public void ExpandedHoverHitTestUsesTargetInteractionHeight(
+        double boxHeight,
+        double interactionHeight,
+        double pointerY,
+        bool expected)
+    {
+        var inside = DesktopBoxForm.IsPointerInsideExpandedBox(
+            new LayoutRect(100, 100, 240, boxHeight),
+            interactionHeight,
+            new PointF(120, (float)pointerY));
+
+        Assert.Equal(expected, inside);
+    }
+
+    [Theory]
     [InlineData(false, false, true)]
     [InlineData(true, true, true)]
     [InlineData(true, false, false)]
@@ -1002,6 +1019,28 @@ public sealed class DesktopIconInteractionTests
                 remainingDistance,
                 fullDistance).TotalMilliseconds,
             precision: 3);
+    }
+
+    [Theory]
+    [InlineData(nameof(LucideRuntimeIcon.Menu), 24, 18)]
+    [InlineData(nameof(LucideRuntimeIcon.ChevronsUpDown), 24, 24)]
+    public void RuntimeLucideIconsKeepIndependentStrokesDisconnected(
+        string iconName,
+        int probeX,
+        int probeY)
+    {
+        using var bitmap = new Bitmap(48, 48);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.Transparent);
+
+        LucideRuntimeIcons.Draw(
+            graphics,
+            Enum.Parse<LucideRuntimeIcon>(iconName),
+            new RectangleF(0, 0, 48, 48),
+            Color.White,
+            48f);
+
+        Assert.Equal(0, bitmap.GetPixel(probeX, probeY).A);
     }
 
     [Theory]

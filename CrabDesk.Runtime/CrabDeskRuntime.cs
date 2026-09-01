@@ -754,7 +754,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         box.MappedFolder.Path = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
         await RefreshMappedFoldersAsync(false);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(box.Id);
     }
 
     public void SetMappedFolderReadOnly(DesktopBox box, bool isReadOnly)
@@ -764,7 +764,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
         box.MappedFolder.IsReadOnly = isReadOnly;
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(box.Id);
     }
 
     public void SetMappedFolderCategoryTabsEnabled(DesktopBox box, bool enabled)
@@ -774,7 +774,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
         box.MappedFolder.EnableCategoryTabs = enabled;
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(box.Id);
     }
 
     public DesktopBoxTab CreateManualTab(Guid boxId, string title)
@@ -794,7 +794,7 @@ public sealed class CrabDeskRuntime : IDisposable
         // Re-run layout normalization so legacy no-tab magnetic heights are
         // promoted before the surface is redrawn.
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
         return tab;
     }
 
@@ -816,7 +816,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         tab.Title = normalizedTitle;
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
         return true;
     }
 
@@ -841,7 +841,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.ItemTabAssignments.Remove(itemKey);
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
         return true;
     }
 
@@ -910,6 +910,12 @@ public sealed class CrabDeskRuntime : IDisposable
     /// surface refresh, rather than repeating both once per icon.
     /// </summary>
     public int AssignItems(IEnumerable<string> itemKeys, Guid boxId)
+        => AssignItemsCore(itemKeys, boxId, notify: true);
+
+    private int AssignItemsCore(
+        IEnumerable<string> itemKeys,
+        Guid boxId,
+        bool notify)
     {
         if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder != false)
         {
@@ -939,7 +945,10 @@ public sealed class CrabDeskRuntime : IDisposable
             return 0;
         }
 
-        NotifyWorkspaceChanged(true);
+        if (notify)
+        {
+            NotifyWorkspaceChanged(true);
+        }
         return assignedKeys.Count;
     }
 
@@ -1035,6 +1044,17 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             NotifyWorkspaceChanged(true);
         }
+    }
+
+    private void NotifyBoxWorkspaceChanged(Guid? boxId)
+    {
+        if (boxId is { } id)
+        {
+            NotifyTargetedWorkspaceChanged(manager => manager.RefreshBox(id));
+            return;
+        }
+
+        NotifyWorkspaceChanged(true);
     }
 
     /// <summary>
@@ -1413,7 +1433,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return imported;
         }
 
-        await RefreshItemsAsync();
+        await RefreshItemsCoreAsync(refreshSurfaces: false);
         var importedSet = imported.ImportedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var item in Items.Where(item => item.FileSystemPath is not null && importedSet.Contains(Path.GetFullPath(item.FileSystemPath))))
         {
@@ -1443,7 +1463,8 @@ public sealed class CrabDeskRuntime : IDisposable
         var imported = await _fileOperations.ImportAsync(paths, box.MappedFolder.Path, move);
         if (imported.SucceededCount > 0)
         {
-            await RefreshMappedFoldersAsync();
+            await RefreshMappedFoldersAsync(false);
+            NotifyBoxWorkspaceChanged(boxId);
         }
         return imported;
     }
@@ -1473,7 +1494,8 @@ public sealed class CrabDeskRuntime : IDisposable
         var imported = await _fileOperations.ImportAsync(paths, targetDirectory, move);
         if (imported.SucceededCount > 0)
         {
-            await RefreshMappedFoldersAsync();
+            await RefreshMappedFoldersAsync(false);
+            NotifyBoxWorkspaceChanged(boxId);
         }
         return imported;
     }
@@ -1492,8 +1514,9 @@ public sealed class CrabDeskRuntime : IDisposable
         var imported = await _fileOperations.ImportAsync(paths, targetFolderPath, move);
         if (imported.SucceededCount > 0)
         {
-            await RefreshItemsAsync();
-            await RefreshMappedFoldersAsync();
+            await RefreshItemsCoreAsync(refreshSurfaces: false);
+            await RefreshMappedFoldersAsync(false);
+            NotifyWorkspaceChanged(true);
         }
         return imported;
     }
@@ -1583,6 +1606,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return FileImportBatchResult.Empty;
         }
         var imported = await ImportFilesToBoxAsync(paths, targetBoxId, move);
+        var sourceItemsChanged = false;
         if (move && !source.IsMappedFolder)
         {
             var movedSources = imported.SuccessfulItems
@@ -1596,12 +1620,22 @@ public sealed class CrabDeskRuntime : IDisposable
             }
             if (movedItems.Length > 0)
             {
-                await RefreshItemsAsync(false);
+                sourceItemsChanged = true;
+                await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
+                _surfaceManager?.RefreshDesktopItemsRemoved(
+                    movedItems
+                        .Where(item => item.FileSystemPath is not null)
+                        .Select(item => item.FileSystemPath!)
+                        .ToArray());
             }
         }
         if (source.IsMappedFolder)
         {
-            await RefreshMappedFoldersAsync();
+            await RefreshMappedFoldersAsync(false);
+        }
+        if (sourceItemsChanged || source.IsMappedFolder)
+        {
+            NotifyBoxesItemsChanged([sourceBoxId, targetBoxId]);
         }
         return imported;
     }
@@ -1664,12 +1698,16 @@ public sealed class CrabDeskRuntime : IDisposable
                 external.Add(fullPath);
             }
         }
-        var assigned = AssignItems(assignedKeys, boxId);
+        var assigned = AssignItemsCore(assignedKeys, boxId, notify: external.Count == 0);
         var imported = FileImportBatchResult.Empty;
         if (external.Count > 0)
         {
             imported = await ImportFilesAsync(external, boxId, clipboard.Move);
             assigned += imported.SucceededCount;
+            if (imported.SucceededCount == 0 && assignedKeys.Count > 0)
+            {
+                NotifyWorkspaceChanged(true);
+            }
         }
         if (clipboard.Move &&
             assignedKeys.Count + imported.SucceededCount == clipboard.Paths.Count)
@@ -1693,19 +1731,19 @@ public sealed class CrabDeskRuntime : IDisposable
         if (boxId is { } mappedBoxId &&
             State.Boxes.FirstOrDefault(box => box.Id == mappedBoxId)?.IsMappedFolder == true)
         {
-            await RefreshMappedFoldersAsync();
+            await RefreshMappedFoldersAsync(false);
             var renamedMapped = GetItemsForBox(mappedBoxId).FirstOrDefault(candidate =>
                 candidate.FileSystemPath is not null &&
                 string.Equals(Path.GetFullPath(candidate.FileSystemPath), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase));
             if (renamedMapped is not null)
             {
                 ReplaceItemOrderKey(oldKey, renamedMapped.Key.ToString());
-                NotifyWorkspaceChanged(true);
             }
+            NotifyBoxWorkspaceChanged(mappedBoxId);
             return;
         }
 
-        await RefreshItemsAsync(false);
+        await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
         var renamed = Items.FirstOrDefault(candidate => candidate.FileSystemPath is not null &&
             string.Equals(Path.GetFullPath(candidate.FileSystemPath), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase));
         if (renamed is null)
@@ -2270,7 +2308,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.Background = value;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxAccent(Guid? boxId, string value)
@@ -2279,7 +2317,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.Accent = value;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxOpacity(Guid? boxId, double value)
@@ -2288,7 +2326,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.Opacity = Math.Clamp(value, 0.35, 1);
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxTitleBarHeight(Guid? boxId, double value)
@@ -2298,7 +2336,7 @@ public sealed class CrabDeskRuntime : IDisposable
             box.Appearance.TitleBarHeight = Math.Clamp(value, 32, 56);
         }
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxTitleColor(Guid? boxId, string value)
@@ -2307,7 +2345,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.TitleColor = value;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxTitleFontSize(Guid? boxId, double value)
@@ -2316,7 +2354,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.TitleFontSize = Math.Clamp(value, 8, 20);
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxTitleFontFamily(Guid? boxId, string value)
@@ -2326,7 +2364,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.TitleFontFamily = family;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxTitleFontBold(Guid? boxId, bool enabled)
@@ -2335,7 +2373,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.TitleFontBold = enabled;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetOrganizationEnabled(bool enabled)
@@ -3165,7 +3203,7 @@ public sealed class CrabDeskRuntime : IDisposable
             box.Appearance.IconSize = Math.Clamp(value, 24, 96);
         }
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxLabelFontSize(Guid? boxId, double value)
@@ -3174,7 +3212,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.LabelFontSize = Math.Clamp(value, 8, 16);
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxLabelFontFamily(Guid? boxId, string value)
@@ -3184,7 +3222,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.LabelFontFamily = family;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxShowItemLabels(Guid? boxId, bool enabled)
@@ -3193,7 +3231,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.Appearance.ShowItemLabels = enabled;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void ResetAppearance()
@@ -3213,7 +3251,7 @@ public sealed class CrabDeskRuntime : IDisposable
             box.ViewMode = mode;
         }
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetBoxSortMode(Guid? boxId, BoxSortMode mode)
@@ -3222,7 +3260,7 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             box.SortMode = mode;
         }
-        NotifyWorkspaceChanged(true);
+        NotifyBoxWorkspaceChanged(boxId);
     }
 
     public void SetThemeMode(ApplicationThemeMode mode)
@@ -3748,6 +3786,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private async Task RefreshMappedFoldersAsync(bool notify = true)
     {
         var changed = false;
+        var changedBoxIds = new HashSet<Guid>();
         await _mappedRefreshLock.WaitAsync();
         try
         {
@@ -3758,13 +3797,19 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 _mappedFolderSnapshots.Remove(staleId);
                 changed = true;
+                changedBoxIds.Add(staleId);
             }
 
             foreach (var box in mappedBoxes)
             {
                 var snapshot = await _mappedFolderProvider.EnumerateAsync(box.MappedFolder!.Path);
-                changed |= !_mappedFolderSnapshots.TryGetValue(box.Id, out var previous) ||
+                var boxChanged = !_mappedFolderSnapshots.TryGetValue(box.Id, out var previous) ||
                     !MappedSnapshotsEqual(previous, snapshot);
+                changed |= boxChanged;
+                if (boxChanged)
+                {
+                    changedBoxIds.Add(box.Id);
+                }
                 _mappedFolderSnapshots[box.Id] = snapshot;
             }
             _lastMappedHealthCheckAt = DateTimeOffset.UtcNow;
@@ -3776,7 +3821,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (notify && changed)
         {
-            _surfaceManager?.Refresh();
+            _surfaceManager?.RefreshBoxes(changedBoxIds);
             Changed?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -3952,6 +3997,8 @@ public sealed class CrabDeskRuntime : IDisposable
             _surfaceManager?.IsPointOverAnyBox(x, y) == true;
         _desktopInputMonitor.IsBoxItemDragActive = () =>
             !_disposed && !IsPaused && _surfaceManager?.IsBoxItemDragActive == true;
+        _desktopInputMonitor.IsDesktopIconDragActive = () =>
+            !_disposed && !IsPaused && _surfaceManager?.IsDesktopIconDragActive == true;
         _desktopInputMonitor.CanDeleteDesktopItems = () =>
             !_disposed && !IsPaused && _surfaceManager?.CanDeleteSelectedItems == true;
         _desktopInputMonitor.CanRenameDesktopItems = () =>
@@ -4031,7 +4078,9 @@ public sealed class CrabDeskRuntime : IDisposable
             _boxDragWheelDispatchQueued = false;
         }
 
-        if (delta == 0 || _disposed || IsPaused || _surfaceManager?.IsBoxItemDragActive != true)
+        if (delta == 0 || _disposed || IsPaused ||
+            (_surfaceManager?.IsBoxItemDragActive != true &&
+             _surfaceManager?.IsDesktopIconDragActive != true))
         {
             return;
         }
@@ -4787,7 +4836,6 @@ public sealed class CrabDeskRuntime : IDisposable
             var width = Math.Max(
                 1,
                 dropDown.ClientSize.Width -
-                dropDown.Padding.Right -
                 item.Bounds.Left -
                 item.Margin.Right);
             item.AutoSize = false;

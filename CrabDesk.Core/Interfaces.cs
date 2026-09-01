@@ -68,6 +68,9 @@ public interface IDesktopInputMonitor : IDisposable
     // The OLE box-item drag loop does not reliably dispatch ordinary WinForms
     // MouseWheel events. The low-level hook only routes them while this is true.
     Func<bool>? IsBoxItemDragActive { get; set; }
+    // Desktop-icon OLE drags also target box surfaces, where the same wheel
+    // routing must remain active while the pointer is over a scrollable box.
+    Func<bool>? IsDesktopIconDragActive { get; set; }
     // Called by the low-level keyboard hook before it consumes Delete.
     // Explorer keeps its normal behavior while CrabDesk has no custom selection.
     Func<bool>? CanDeleteDesktopItems { get; set; }

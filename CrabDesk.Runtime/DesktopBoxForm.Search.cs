@@ -250,7 +250,9 @@ internal sealed partial class DesktopBoxForm
 
         var background = ParseOpaqueColor(geometry.Box.Appearance.Background);
         var foreground = ResolveTitleColor(geometry.Box.Appearance.TitleColor, background);
-        var accent = ParseOpaqueColor(geometry.Box.Appearance.Accent);
+        var accent = ResolveAccentColor(
+            ParseOpaqueColor(geometry.Box.Appearance.Background),
+            ParseOpaqueColor(geometry.Box.Appearance.Accent));
         var fieldBackground = UsesLightText(background)
             ? DesktopItemVisualStyle.Brighten(background, 0.14f)
             : DesktopItemVisualStyle.Brighten(background, 0.52f);
@@ -287,6 +289,25 @@ internal sealed partial class DesktopBoxForm
             Math.Max(ToPixel(72), right - left),
             height);
         _searchWindow.Bounds = new Rectangle(PointToScreen(clientBounds.Location), clientBounds.Size);
+        ApplySearchWindowRegion(clientBounds.Size);
+    }
+
+    private void ApplySearchWindowRegion(Size size)
+    {
+        if (size.Width <= 0 || size.Height <= 0)
+        {
+            return;
+        }
+
+        // The WPF Border is rounded, but its borderless WinForms host is not.
+        // Clip the host to the same rounded shape so its background cannot
+        // show through as a rectangular halo at the input's corners.
+        using var path = RoundedRectangle(
+            new RectangleF(0, 0, size.Width, size.Height),
+            Math.Max(1, ToPixel(6)));
+        var previousRegion = _searchWindow.Region;
+        _searchWindow.Region = new Region(path);
+        previousRegion?.Dispose();
     }
 
     private void EnsureBoxSearchHandle()

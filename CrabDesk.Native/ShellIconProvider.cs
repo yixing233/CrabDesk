@@ -189,9 +189,10 @@ public sealed class ShellIconProvider
         {
             // Image files render their thumbnail preview; everything else
             // keeps the type icon (folders, executables, unknown documents).
+            var isPreviewableImage = IsPreviewableImage(parsingName);
             var flags = ShellItemImageFlags.BiggerSizeOk |
                         ShellItemImageFlags.ScaleUp;
-            if (!IsPreviewableImage(parsingName))
+            if (!isPreviewableImage)
             {
                 flags |= ShellItemImageFlags.IconOnly;
             }
@@ -203,7 +204,9 @@ public sealed class ShellIconProvider
             {
                 return null;
             }
-            return CreateAlphaBitmap(bitmapHandle, pixelSize);
+            // Shell thumbnails can be wide or tall. Keep that aspect ratio for
+            // image previews; regular file icons remain square icon surfaces.
+            return CreateAlphaBitmap(bitmapHandle, pixelSize, isPreviewableImage);
         }
         catch (COMException)
         {
@@ -369,7 +372,10 @@ public sealed class ShellIconProvider
         ScaleUp = 0x100
     }
 
-    private static Bitmap? CreateAlphaBitmap(IntPtr bitmapHandle, int pixelSize)
+    private static Bitmap? CreateAlphaBitmap(
+        IntPtr bitmapHandle,
+        int pixelSize,
+        bool preserveAspectRatio)
     {
         if (GetObject(bitmapHandle, Marshal.SizeOf<NativeBitmap>(), out var native) == 0)
         {
@@ -428,13 +434,24 @@ public sealed class ShellIconProvider
             return source;
         }
 
-        var scaled = new Bitmap(pixelSize, pixelSize, PixelFormat.Format32bppArgb);
+        var targetWidth = pixelSize;
+        var targetHeight = pixelSize;
+        if (preserveAspectRatio)
+        {
+            var scale = Math.Min(
+                (double)pixelSize / width,
+                (double)pixelSize / height);
+            targetWidth = Math.Max(1, (int)Math.Round(width * scale));
+            targetHeight = Math.Max(1, (int)Math.Round(height * scale));
+        }
+
+        var scaled = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(scaled))
         {
             graphics.Clear(Color.Transparent);
             graphics.CompositingMode = CompositingMode.SourceCopy;
             graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            graphics.DrawImage(source, new Rectangle(0, 0, pixelSize, pixelSize));
+            graphics.DrawImage(source, new Rectangle(0, 0, targetWidth, targetHeight));
         }
         source.Dispose();
         return scaled;
