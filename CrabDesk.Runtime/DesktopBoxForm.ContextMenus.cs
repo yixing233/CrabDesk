@@ -304,7 +304,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         try
         {
-            var result = await _runtime.PasteIntoBoxAsync(box.Id);
+            // Paste into the sub-tab the box is currently showing; otherwise the
+            // pasted item lands in "全部" and is filtered out of the visible view.
+            var result = await _runtime.PasteIntoBoxAsync(
+                box.Id,
+                _activeManualTabIds.GetValueOrDefault(box.Id));
             ShowImportFailures(result.ImportResult);
         }
         catch (Exception exception)

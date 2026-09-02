@@ -12,6 +12,30 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopIconInteractionTests
 {
     [Theory]
+    [InlineData(true, null, "primary", false, true)]
+    [InlineData(false, null, "secondary", false, false)]
+    [InlineData(true, "secondary", "primary", true, false)]
+    [InlineData(false, "secondary", "secondary", true, true)]
+    [InlineData(false, "SECONDARY", "secondary", true, true)]
+    [InlineData(true, "detached", "primary", false, true)]
+    [InlineData(false, "detached", "secondary", false, false)]
+    public void DesktopItemsRenderOnlyOnTheirAssignedMonitor(
+        bool isPrimary,
+        string? placementMonitorId,
+        string monitorId,
+        bool placementMonitorConnected,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopIconSurface.ShouldRenderDesktopItemOnMonitor(
+                isPrimary,
+                placementMonitorId,
+                monitorId,
+                placementMonitorConnected));
+    }
+
+    [Theory]
     [InlineData(LucideIconName.Archive)]
     [InlineData(LucideIconName.ArrowDown)]
     [InlineData(LucideIconName.ArrowRight)]
@@ -599,10 +623,27 @@ public sealed class DesktopIconInteractionTests
         Assert.True(DesktopBoxForm.ShouldUsePartialTransformCommit(
             isCompositedByIconSurface: true,
             hasPartialRenderer: true));
-        Assert.False(DesktopBoxForm.ShouldRebuildWorkspaceAfterBoxTransform());
+        Assert.False(DesktopBoxForm.ShouldRebuildWorkspaceAfterBoxTransform(monitorChanged: false));
+        Assert.True(DesktopBoxForm.ShouldRebuildWorkspaceAfterBoxTransform(monitorChanged: true));
         Assert.False(DesktopBoxForm.ShouldPresentAfterRegionUpdate(
             isCompositedByIconSurface: true,
             hitMaskPresented: true));
+    }
+
+    [Fact]
+    public void RoundTripMonitorTransferRefreshesTheMonitorJustLeft()
+    {
+        var outbound = DesktopSurfaceManager.ResolveIconDragFrameMonitorIds(
+            sourceMonitorId: "A",
+            activeMonitorId: "B",
+            previousMonitorId: "A");
+        var returning = DesktopSurfaceManager.ResolveIconDragFrameMonitorIds(
+            sourceMonitorId: "A",
+            activeMonitorId: "A",
+            previousMonitorId: "B");
+
+        Assert.Equal(["A", "B"], outbound.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(["A", "B"], returning.Order(StringComparer.Ordinal).ToArray());
     }
 
     [Theory]
@@ -866,6 +907,54 @@ public sealed class DesktopIconInteractionTests
                 previewBoxId,
                 transformBoxId,
                 animatedBoxIds));
+    }
+
+    [Theory]
+    [InlineData(null, "A", "A", true, true)]
+    [InlineData(null, "A", "B", true, false)]
+    [InlineData(null, "A", "A", false, false)]
+    [InlineData("B", "A", "B", true, true)]
+    [InlineData("B", "A", "A", true, false)]
+    [InlineData("b", "A", "B", true, true)]
+    public void ADraggedBoxOwnsTheDynamicFrameOfTheMonitorItCurrentlyOccupies(
+        string? transformBoxMonitorId,
+        string surfaceMonitorId,
+        string monitorId,
+        bool hasDynamicVisual,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.HasDynamicVisualForMonitor(
+                transformBoxMonitorId,
+                surfaceMonitorId,
+                monitorId,
+                hasDynamicVisual));
+    }
+
+    // A box crossing into another monitor must stay on that monitor's
+    // monitor-sized parent layer. Handing it to the target monitor's drag
+    // overlay leaves the first crossing's pixels on the parent frame.
+    [Fact]
+    public void ACrossMonitorDragKeepsTheBoxOnTheTargetMonitorParentLayer()
+    {
+        var targetOwnsDynamicFrame = DesktopBoxForm.HasDynamicVisualForMonitor(
+            transformBoxMonitorId: "B",
+            surfaceMonitorId: "A",
+            monitorId: "B",
+            hasDynamicVisual: true);
+        var sourceOwnsDynamicFrame = DesktopBoxForm.HasDynamicVisualForMonitor(
+            transformBoxMonitorId: "B",
+            surfaceMonitorId: "A",
+            monitorId: "A",
+            hasDynamicVisual: true);
+
+        Assert.True(DesktopBoxForm.ShouldCompositeBoxVisualsInParent(
+            targetOwnsDynamicFrame,
+            heightAnimationOnly: false));
+        Assert.False(DesktopBoxForm.ShouldCompositeBoxVisualsInParent(
+            sourceOwnsDynamicFrame,
+            heightAnimationOnly: false));
     }
 
     [Theory]

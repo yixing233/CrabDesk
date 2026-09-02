@@ -49,32 +49,6 @@ public sealed class DesktopSelectionPolicyTests
         Assert.Equal(2, result.BlockedCount);
     }
 
-    [Fact]
-    public void SingleItemDeleteConfirmationNamesTheSelectedFile()
-    {
-        var item = Item("report.pdf", @"C:\Desktop\report.pdf");
-        var selection = DesktopSelectionPolicy.BuildDeleteSelection([item], [item]);
-
-        var confirmation = DesktopSelectionPolicy.BuildDeleteConfirmation(selection);
-
-        Assert.Equal("确认删除“report.pdf”？", confirmation.Title);
-        Assert.Equal("删除", confirmation.PrimaryText);
-    }
-
-    [Fact]
-    public void MultipleItemDeleteConfirmationShowsTheFileCount()
-    {
-        var first = Item("first.txt", @"C:\Desktop\first.txt");
-        var second = Item("second.txt", @"C:\Desktop\second.txt");
-        var selection = DesktopSelectionPolicy.BuildDeleteSelection(
-            [first, second],
-            [first, second]);
-
-        var confirmation = DesktopSelectionPolicy.BuildDeleteConfirmation(selection);
-
-        Assert.Equal("确认删除 2 个文件？", confirmation.Title);
-    }
-
     private static DesktopItemRef Item(string key, string? path = null) => new()
     {
         Key = new DesktopItemKey(path is null ? "shell" : "path", key),

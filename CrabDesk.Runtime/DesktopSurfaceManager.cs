@@ -212,6 +212,35 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     internal bool RefreshBox(Guid boxId) => RefreshBoxes([boxId]);
 
+    internal bool RefreshBoxMonitorChanged(
+        Guid boxId,
+        string previousMonitorId,
+        string currentMonitorId)
+    {
+        var refreshed = false;
+        foreach (var surface in _surfaces.Where(surface =>
+                     string.Equals(surface.MonitorId, previousMonitorId, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(surface.MonitorId, currentMonitorId, StringComparison.OrdinalIgnoreCase)))
+        {
+            refreshed |= surface.RefreshWorkspace();
+            if (!surface.UpdateInteractionRegion())
+            {
+                DiagnosticLog.Error(
+                    "Targeted desktop box monitor refresh could not update the interaction region.",
+                    new InvalidOperationException("The desktop box interaction region could not be updated."));
+            }
+        }
+
+        foreach (var iconSurface in _iconSurfaces.Where(surface =>
+                     string.Equals(surface.MonitorId, previousMonitorId, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(surface.MonitorId, currentMonitorId, StringComparison.OrdinalIgnoreCase)))
+        {
+            refreshed |= iconSurface.RequestRender();
+        }
+
+        return refreshed;
+    }
+
     internal bool RefreshBoxes(IReadOnlyCollection<Guid> boxIds)
     {
         if (boxIds.Count == 0)
@@ -296,8 +325,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
             refreshedAllSourceBoxes = false;
         }
 
-        var refreshedDesktop = _iconSurfaces.Any(surface =>
-            surface.RefreshReleasedItems(releasedItemKeys));
+        var refreshedDesktop = false;
+        foreach (var surface in _iconSurfaces)
+        {
+            refreshedDesktop |= surface.RefreshReleasedItems(releasedItemKeys);
+        }
         return refreshedAllSourceBoxes && refreshedDesktop;
     }
 
@@ -311,8 +343,15 @@ internal sealed class DesktopSurfaceManager : IDisposable
         return refreshed;
     }
 
-    internal bool RefreshDesktopItemsAdded(IReadOnlyCollection<string> addedItemKeys) =>
-        _iconSurfaces.Any(surface => surface.RefreshReleasedItems(addedItemKeys));
+    internal bool RefreshDesktopItemsAdded(IReadOnlyCollection<string> addedItemKeys)
+    {
+        var refreshed = false;
+        foreach (var surface in _iconSurfaces)
+        {
+            refreshed |= surface.RefreshReleasedItems(addedItemKeys);
+        }
+        return refreshed;
+    }
 
     internal void SetDesktopIconsVisible(bool visible)
     {
@@ -438,6 +477,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     iconSurface.MonitorId,
                     StringComparison.OrdinalIgnoreCase))
                 .ToArray();
+            var allBoxSurfaces = _surfaces.ToArray();
             iconSurface.SetBoxRenderer((graphics, clipBounds) =>
             {
                 foreach (var boxSurface in monitorBoxes)
@@ -447,24 +487,33 @@ internal sealed class DesktopSurfaceManager : IDisposable
             });
             iconSurface.SetDragBoxRenderer((graphics, clipBounds) =>
             {
-                foreach (var boxSurface in monitorBoxes)
+                foreach (var boxSurface in allBoxSurfaces)
                 {
-                    boxSurface.RenderDragOnIconLayer(graphics, clipBounds);
+                    boxSurface.RenderDragOnIconLayerForMonitor(
+                        graphics,
+                        clipBounds,
+                        iconSurface.MonitorId);
                 }
             });
-            iconSurface.SetBoxTransformActive(() => monitorBoxes.Any(surface => surface.HasDynamicVisual));
-            iconSurface.SetBoxVisualsInParent(() => monitorBoxes.Any(surface =>
+            iconSurface.SetBoxTransformActive(() => allBoxSurfaces.Any(surface =>
+                surface.HasDynamicVisualForMonitor(iconSurface.MonitorId)));
+            // A box dragged across monitors joins the target monitor's dynamic
+            // frame while its form still belongs to the source monitor. Scope
+            // the ownership test to the rendered monitor so the target surface
+            // keeps the box on its own parent layer instead of handing it to a
+            // cold-started drag overlay on the first crossing.
+            iconSurface.SetBoxVisualsInParent(() => allBoxSurfaces.Any(surface =>
                     DesktopBoxForm.ShouldCompositeBoxVisualsInParent(
-                        surface.HasDynamicVisual,
+                        surface.HasDynamicVisualForMonitor(iconSurface.MonitorId),
                         surface.IsPartialAnimationOnly)));
             iconSurface.SetBoxPointerHitTest(screenPoint =>
                 monitorBoxes.Any(surface => surface.IsPointOverBox(screenPoint)));
             iconSurface.SetBoxDynamicBounds(() =>
             {
                 RectangleF? bounds = null;
-                foreach (var boxSurface in monitorBoxes)
+                foreach (var boxSurface in allBoxSurfaces)
                 {
-                    if (boxSurface.GetDynamicVisualBounds() is not { } candidate)
+                    if (boxSurface.GetDynamicVisualBoundsForMonitor(iconSurface.MonitorId) is not { } candidate)
                     {
                         continue;
                     }
@@ -477,9 +526,9 @@ internal sealed class DesktopSurfaceManager : IDisposable
             iconSurface.SetBoxDynamicDirtyBounds(() =>
             {
                 RectangleF? bounds = null;
-                foreach (var boxSurface in monitorBoxes)
+                foreach (var boxSurface in allBoxSurfaces)
                 {
-                    if (boxSurface.GetDynamicVisualDirtyBounds() is not { } candidate)
+                    if (boxSurface.GetDynamicVisualDirtyBoundsForMonitor(iconSurface.MonitorId) is not { } candidate)
                     {
                         continue;
                     }
@@ -492,9 +541,12 @@ internal sealed class DesktopSurfaceManager : IDisposable
             iconSurface.SetBoxDynamicVersion(() =>
             {
                 var version = 17;
-                foreach (var boxSurface in monitorBoxes)
+                foreach (var boxSurface in allBoxSurfaces)
                 {
-                    version = unchecked(version * 31 + boxSurface.DynamicVisualVersion);
+                    if (boxSurface.HasDynamicVisualForMonitor(iconSurface.MonitorId))
+                    {
+                        version = unchecked(version * 31 + boxSurface.DynamicVisualVersion);
+                    }
                 }
                 return version;
             });
@@ -507,17 +559,20 @@ internal sealed class DesktopSurfaceManager : IDisposable
             });
             iconSurface.SetBoxPartialAnimationOnly(() =>
             {
-                var dynamicBoxes = monitorBoxes
-                    .Where(surface => surface.HasDynamicVisual)
+                var dynamicBoxes = allBoxSurfaces
+                    .Where(surface => surface.HasDynamicVisualForMonitor(iconSurface.MonitorId))
                     .ToArray();
                 return dynamicBoxes.Length > 0 &&
                     dynamicBoxes.All(surface => surface.UsesPartialBoxAnimationComposition);
             });
             iconSurface.SetBoxDynamicAnimationActive(() =>
-                monitorBoxes.Any(surface => surface.HasDynamicAnimation));
+                allBoxSurfaces.Any(surface =>
+                    surface.HasDynamicVisualForMonitor(iconSurface.MonitorId) &&
+                    surface.HasDynamicAnimation));
             foreach (var boxSurface in monitorBoxes)
             {
-                boxSurface.SetIconLayerRenderRequest(iconSurface.RequestDragFrame);
+                boxSurface.SetIconLayerRenderRequest(() =>
+                    RequestIconDragFrames(boxSurface));
                 boxSurface.SetIconLayerPartialRenderRequest(iconSurface.RequestBoxVisualFrame);
                 boxSurface.SetIconDragStateForward((point, paths, keys, grabOffset) =>
                     iconSurface.ForwardDragFromBox(point, paths, keys, grabOffset));
@@ -611,6 +666,50 @@ internal sealed class DesktopSurfaceManager : IDisposable
         foreach (var surface in _surfaces)
         {
             surface.ClearSelection();
+        }
+    }
+
+    internal static IReadOnlySet<string> ResolveIconDragFrameMonitorIds(
+        string sourceMonitorId,
+        string? activeMonitorId,
+        string? previousMonitorId)
+    {
+        var monitorIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (activeMonitorId is not null)
+        {
+            monitorIds.Add(activeMonitorId);
+        }
+        if (previousMonitorId is not null)
+        {
+            monitorIds.Add(previousMonitorId);
+        }
+        else if (activeMonitorId is null)
+        {
+            monitorIds.Add(sourceMonitorId);
+        }
+        return monitorIds;
+    }
+
+    private void RequestIconDragFrames(DesktopBoxForm sourceSurface)
+    {
+        var previousMonitorId = sourceSurface.ConsumeMonitorTransferPreviousMonitorId();
+        var transferRefreshPending = previousMonitorId is not null;
+        var monitorIds = ResolveIconDragFrameMonitorIds(
+            sourceSurface.MonitorId,
+            sourceSurface.TransformMonitorId,
+            previousMonitorId);
+
+        foreach (var surface in _iconSurfaces)
+        {
+            if (monitorIds.Contains(surface.MonitorId))
+            {
+                var isPreviousMonitor = string.Equals(
+                    surface.MonitorId,
+                    previousMonitorId,
+                    StringComparison.OrdinalIgnoreCase);
+                surface.RequestDragFrame(
+                    forceFullFrame: transferRefreshPending && isPreviousMonitor);
+            }
         }
     }
 
@@ -740,7 +839,8 @@ internal sealed class DesktopSurfaceManager : IDisposable
             DesktopKeyboardCommand.SelectAll => CanSelectAllItems(),
             DesktopKeyboardCommand.Copy => GetSelectedFileSystemItems(includeReadOnly: true).Count > 0,
             DesktopKeyboardCommand.Cut => CanCutSelectedItems(),
-            DesktopKeyboardCommand.Paste => GetPasteTargetSurface() is not null,
+            DesktopKeyboardCommand.Paste => GetPasteTargetSurface() is not null ||
+                _runtime.CanPasteToDesktop(),
             DesktopKeyboardCommand.Open => GetSelectedItems().Count == 1,
             _ => false
         };
@@ -780,6 +880,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 if (target is not null)
                 {
                     await target.PasteIntoSelectedOrHoveredBoxAsync(System.Windows.Forms.Cursor.Position);
+                }
+                else
+                {
+                    await PasteToDesktopAsync();
                 }
                 break;
             }
@@ -845,11 +949,6 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 return;
             }
 
-            if (!await ConfirmDeleteAsync(selection))
-            {
-                return;
-            }
-
             deleteAttempted = true;
             await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);
         }
@@ -876,32 +975,43 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
-    private async Task<bool> ConfirmDeleteAsync(DesktopDeleteSelection selection)
+    // Ctrl+V on the replacement desktop is handled here instead of falling
+    // through to Explorer: the shell's file-based paste refuses to copy an item
+    // into the folder it already lives in, while the import service resolves the
+    // collision with an automatic "_2" suffix.
+    private async Task PasteToDesktopAsync()
     {
-        System.Windows.Forms.Form? owner = (System.Windows.Forms.Form?)_surfaces.FirstOrDefault() ??
-            _iconSurfaces.FirstOrDefault();
-        if (owner is null)
+        try
         {
-            return false;
+            var imported = await _runtime.PasteToDesktopAsync();
+            if (imported.HasFailures)
+            {
+                ShowImportFailureMessage(imported);
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Failed to paste clipboard files onto the desktop.", exception);
+            ShowDeleteMessage("粘贴失败", exception.Message, DesktopDialogKind.Error);
+        }
+    }
+
+    private void ShowImportFailureMessage(FileImportBatchResult result)
+    {
+        var details = string.Join(
+            Environment.NewLine,
+            result.FailedItems.Take(3).Select(item =>
+                $"- {Path.GetFileName(item.SourcePath)}: {item.ErrorMessage}"));
+        if (result.FailedCount > 3)
+        {
+            details += Environment.NewLine + $"另有 {result.FailedCount - 3} 项未粘贴。";
         }
 
-        var confirmation = DesktopSelectionPolicy.BuildDeleteConfirmation(selection);
-        var handler = _runtime.DesktopConfirmationHandler;
-        if (handler is null)
-        {
-            return DesktopConfirmationDialog.Show(
-                owner,
-                _runtime.IsDarkTheme,
-                confirmation.Title,
-                confirmation.Message,
-                confirmation.PrimaryText);
-        }
-
-        return await handler(new DesktopConfirmationRequest(
-            owner.Handle,
-            confirmation.Title,
-            confirmation.Message,
-            confirmation.PrimaryText));
+        ShowDeleteMessage(
+            "粘贴未完成",
+            $"已粘贴 {result.SucceededCount} 项，{result.FailedCount} 项失败。" +
+            $"{Environment.NewLine}{Environment.NewLine}{details}",
+            DesktopDialogKind.Warning);
     }
 
     private void ShowDeleteMessage(string title, string message, DesktopDialogKind kind)

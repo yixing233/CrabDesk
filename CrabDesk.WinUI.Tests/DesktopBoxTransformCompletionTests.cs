@@ -54,6 +54,62 @@ public sealed class DesktopBoxTransformCompletionTests
         Assert.True(hoverReconcile > settledFrameCommit);
     }
 
+    [Fact]
+    public void CaptureLossStillCommitsAMonitorTransfer()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "DesktopBoxForm.Input.cs"));
+        var methodStart = source.IndexOf(
+            "protected override void OnMouseCaptureChanged(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private void CompleteBoxTransform(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains(
+            "CompleteBoxTransform(_movingBox, _resizingBox, grabOffsetX, grabOffsetY, true);",
+            method,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BoxTransformCompletionCommitsTheActualPreviousMonitor()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "DesktopBoxForm.Input.cs"));
+        var methodStart = source.IndexOf(
+            "private void CompleteBoxTransform(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private void UpdateMovingBox(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains(
+            "var previousMonitorId = _monitorTransferLastPreviousMonitorId;",
+            method,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "monitorChanged ? previousMonitorId : null",
+            method,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "monitorChanged ? _monitor.Id : null",
+            method,
+            StringComparison.Ordinal);
+    }
+
     private static string FindSolutionDirectory()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);

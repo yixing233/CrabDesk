@@ -5,6 +5,44 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopAssignmentRefreshTests
 {
     [Fact]
+    public void OwnedRenameAlwaysRefreshesDesktopSurfacesAfterUpdatingTheSnapshot()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var methodStart = source.IndexOf(
+            "public async Task RenameItemAsync(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "private async Task RefreshItemsCoreAsync(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        var snapshotRefresh = method.IndexOf(
+            "await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);",
+            StringComparison.Ordinal);
+        var surfaceRefresh = method.IndexOf(
+            "NotifyWorkspaceChanged(true);",
+            Math.Max(0, snapshotRefresh),
+            StringComparison.Ordinal);
+
+        Assert.True(snapshotRefresh >= 0);
+        Assert.True(surfaceRefresh > snapshotRefresh);
+        Assert.Contains(
+            "if (renamed is not null && boxId is { } targetBoxId)",
+            method,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "if (renamed is null)",
+            method[snapshotRefresh..surfaceRefresh],
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BoxItemReorderUsesTargetedRefresh()
     {
         var source = File.ReadAllText(Path.Combine(
@@ -558,6 +596,59 @@ public sealed class DesktopAssignmentRefreshTests
         Assert.True(desktopItems >= 0);
         Assert.True(settledBoxes > desktopItems);
         Assert.True(dynamicBoxes > settledBoxes);
+    }
+
+    [Fact]
+    public void CrossMonitorTransferForcesASynchronousSourceIconFrame()
+    {
+        var solutionDirectory = FindSolutionDirectory();
+        var source = File.ReadAllText(Path.Combine(
+            solutionDirectory,
+            "CrabDesk.Runtime",
+            "DesktopSurfaceManager.cs"));
+        var methodStart = source.IndexOf(
+            "private void RequestIconDragFrames(DesktopBoxForm sourceSurface)",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "internal bool CommitActiveInlineRename()",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains(
+            "forceFullFrame: transferRefreshPending",
+            method,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TargetMonitorOwnsTheDynamicFrameOfABoxDraggedIntoIt()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "DesktopSurfaceManager.cs"));
+        var configureStart = source.IndexOf(
+            "iconSurface.SetBoxVisualsInParent(",
+            StringComparison.Ordinal);
+        var configureEnd = source.IndexOf(
+            "iconSurface.SetBoxPointerHitTest(",
+            Math.Max(0, configureStart),
+            StringComparison.Ordinal);
+
+        Assert.True(configureStart >= 0);
+        Assert.True(configureEnd > configureStart);
+        var configuration = source[configureStart..configureEnd];
+        Assert.Contains(
+            "surface.HasDynamicVisualForMonitor(iconSurface.MonitorId)",
+            configuration,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "string.Equals(surface.MonitorId, iconSurface.MonitorId",
+            configuration,
+            StringComparison.Ordinal);
     }
 
     private static string FindSolutionDirectory()

@@ -15,7 +15,7 @@ public sealed class DesktopDeleteInteractionTests
             "internal async Task DeleteSelectedItemsAsync()",
             StringComparison.Ordinal);
         var methodEnd = source.IndexOf(
-            "private async Task<bool> ConfirmDeleteAsync",
+            "private async Task PasteToDesktopAsync()",
             methodStart,
             StringComparison.Ordinal);
         var method = source[methodStart..methodEnd];

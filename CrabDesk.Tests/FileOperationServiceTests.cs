@@ -212,6 +212,43 @@ public sealed class FileOperationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportRenamesCollidingNamesWithAnUnderscoreNumberSuffix()
+    {
+        var sources = Path.Combine(_root, "sources");
+        var destination = Path.Combine(_root, "destination");
+        var sourceFile = Path.Combine(sources, "Snipaste_2025-12-03.png");
+        var sourceFolder = Path.Combine(sources, "folder");
+        Directory.CreateDirectory(sourceFolder);
+        Directory.CreateDirectory(destination);
+        await File.WriteAllTextAsync(sourceFile, "image");
+        await File.WriteAllTextAsync(Path.Combine(sourceFolder, "nested.txt"), "nested");
+        var service = new FileOperationService();
+
+        var first = await service.ImportAsync([sourceFile, sourceFolder], destination, false);
+        var second = await service.ImportAsync([sourceFile, sourceFolder], destination, false);
+        var third = await service.ImportAsync([sourceFile], destination, false);
+
+        Assert.Equal(2, first.SucceededCount);
+        Assert.Equal(2, second.SucceededCount);
+        Assert.Equal(1, third.SucceededCount);
+        Assert.Equal(
+            Path.Combine(destination, "Snipaste_2025-12-03.png"),
+            first.SuccessfulItems[0].DestinationPath);
+        Assert.Equal(
+            Path.Combine(destination, "Snipaste_2025-12-03_2.png"),
+            second.SuccessfulItems[0].DestinationPath);
+        Assert.Equal(
+            Path.Combine(destination, "folder_2"),
+            second.SuccessfulItems[1].DestinationPath);
+        Assert.Equal(
+            Path.Combine(destination, "Snipaste_2025-12-03_3.png"),
+            third.SuccessfulItems[0].DestinationPath);
+        Assert.Equal(
+            "nested",
+            await File.ReadAllTextAsync(Path.Combine(destination, "folder_2", "nested.txt")));
+    }
+
+    [Fact]
     public async Task ImportContinuesAfterAnIndividualPathFails()
     {
         var sources = Path.Combine(_root, "sources");

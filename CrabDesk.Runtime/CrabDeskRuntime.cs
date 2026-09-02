@@ -915,7 +915,8 @@ public sealed class CrabDeskRuntime : IDisposable
     private int AssignItemsCore(
         IEnumerable<string> itemKeys,
         Guid boxId,
-        bool notify)
+        bool notify,
+        Guid? targetTabId = null)
     {
         if (State.Boxes.FirstOrDefault(box => box.Id == boxId)?.IsMappedFolder != false)
         {
@@ -937,7 +938,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
             var itemKey = item.Key.ToString();
             State.Assignments[itemKey] = boxId;
-            MoveItemOrderKey(itemKey, boxId);
+            MoveItemOrderKey(itemKey, boxId, targetTabId: targetTabId);
             assignedKeys.Add(itemKey);
         }
         if (assignedKeys.Count == 0)
@@ -1402,7 +1403,10 @@ public sealed class CrabDeskRuntime : IDisposable
         return complete;
     }
 
-    public void BoxChanged(DesktopBox box, bool rebuild = false)
+    public void BoxChanged(
+        DesktopBox box,
+        bool rebuild = false,
+        string? previousMonitorId = null)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.Id == box.MonitorId)
             ?? Monitors.FirstOrDefault(candidate => candidate.IsPrimary)
@@ -1421,10 +1425,35 @@ public sealed class CrabDeskRuntime : IDisposable
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
             minimumWidth,
             minimumHeight);
+        if (rebuild && !string.IsNullOrWhiteSpace(previousMonitorId))
+        {
+            NotifyBoxMonitorChanged(box, previousMonitorId);
+            return;
+        }
+
         NotifyWorkspaceChanged(rebuild);
     }
 
-    public async Task<FileImportBatchResult> ImportFilesAsync(IEnumerable<string> paths, Guid boxId, bool move)
+    private void NotifyBoxMonitorChanged(DesktopBox box, string previousMonitorId)
+    {
+        _workspaceRevision++;
+        try
+        {
+            _surfaceManager?.RefreshBoxMonitorChanged(box.Id, previousMonitorId, box.MonitorId);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Targeted desktop surface refresh failed after a box monitor change", exception);
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+        ScheduleSave();
+    }
+
+    public async Task<FileImportBatchResult> ImportFilesAsync(
+        IEnumerable<string> paths,
+        Guid boxId,
+        bool move,
+        Guid? targetTabId = null)
     {
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var imported = await _fileOperations.ImportAsync(paths, desktop, move);
@@ -1438,7 +1467,7 @@ public sealed class CrabDeskRuntime : IDisposable
         foreach (var item in Items.Where(item => item.FileSystemPath is not null && importedSet.Contains(Path.GetFullPath(item.FileSystemPath))))
         {
             State.Assignments[item.Key.ToString()] = boxId;
-            MoveItemOrderKey(item.Key.ToString(), boxId);
+            MoveItemOrderKey(item.Key.ToString(), boxId, targetTabId: targetTabId);
         }
         NotifyWorkspaceChanged(true);
         return imported;
@@ -1656,7 +1685,67 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    public async Task<BoxPasteResult> PasteIntoBoxAsync(Guid boxId)
+    /// <summary>
+    /// Reports whether the clipboard currently holds files that can be pasted
+    /// onto the replacement desktop surface.
+    /// </summary>
+    public bool CanPasteToDesktop()
+    {
+        try
+        {
+            return _fileOperations.GetClipboardFiles().HasFiles;
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Pastes clipboard files into the real desktop folder. Name collisions are
+    /// resolved by the import service's automatic numbering, so pasting a copy
+    /// of an existing desktop file never raises a shell conflict prompt.
+    /// </summary>
+    public async Task<FileImportBatchResult> PasteToDesktopAsync()
+    {
+        var clipboard = _fileOperations.GetClipboardFiles();
+        if (!clipboard.HasFiles)
+        {
+            return FileImportBatchResult.Empty;
+        }
+
+        var desktopDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var paths = clipboard.Paths
+            .Where(path => File.Exists(path) || Directory.Exists(path))
+            .Where(path => DesktopPastePolicy.CanPasteSource(path, desktopDirectory, clipboard.Move))
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            return FileImportBatchResult.Empty;
+        }
+
+        RegisterTargetedDesktopRefresh(paths.Append(desktopDirectory));
+        var imported = await _fileOperations.ImportAsync(paths, desktopDirectory, clipboard.Move);
+        if (imported.SucceededCount > 0)
+        {
+            RegisterTargetedDesktopRefresh(imported.ImportedPaths);
+            await RefreshItemsCoreAsync(refreshSurfaces: true, applyDesktopRules: false);
+        }
+        if (clipboard.Move &&
+            imported.FailedCount == 0 &&
+            imported.SucceededCount == paths.Length)
+        {
+            _fileOperations.ClearClipboardFiles();
+        }
+        return imported;
+    }
+
+    /// <summary>
+    /// Pastes clipboard files into a box. <paramref name="targetTabId"/> is the
+    /// sub-tab currently shown by the box, so a pasted item lands in the view
+    /// the user is looking at instead of being filtered out of it.
+    /// </summary>
+    public async Task<BoxPasteResult> PasteIntoBoxAsync(Guid boxId, Guid? targetTabId = null)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
         if (box.MappedFolder?.IsReadOnly == true)
@@ -1671,10 +1760,21 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (box.IsMappedFolder)
         {
-            var mappedImport = await ImportFilesToBoxAsync(clipboard.Paths, boxId, clipboard.Move);
+            var mappedPaths = clipboard.Paths
+                .Where(path => DesktopPastePolicy.CanPasteSource(
+                    path,
+                    box.MappedFolder!.Path,
+                    clipboard.Move))
+                .ToArray();
+            if (mappedPaths.Length == 0)
+            {
+                return new BoxPasteResult(0, FileImportBatchResult.Empty);
+            }
+
+            var mappedImport = await ImportFilesToBoxAsync(mappedPaths, boxId, clipboard.Move);
             if (clipboard.Move &&
                 mappedImport.FailedCount == 0 &&
-                mappedImport.SucceededCount == clipboard.Paths.Count)
+                mappedImport.SucceededCount == mappedPaths.Length)
             {
                 _fileOperations.ClearClipboardFiles();
             }
@@ -1686,10 +1786,13 @@ public sealed class CrabDeskRuntime : IDisposable
             .ToDictionary(item => Path.GetFullPath(item.FileSystemPath!), StringComparer.OrdinalIgnoreCase);
         var external = new List<string>();
         var assignedKeys = new List<string>();
+        // Only a cut moves an existing desktop item into the box. A copy has to
+        // duplicate the file, otherwise pasting a copied box item just reassigns
+        // it to the box it already belongs to and nothing appears.
         foreach (var path in clipboard.Paths)
         {
             var fullPath = Path.GetFullPath(path);
-            if (desktopItems.TryGetValue(fullPath, out var item))
+            if (clipboard.Move && desktopItems.TryGetValue(fullPath, out var item))
             {
                 assignedKeys.Add(item.Key.ToString());
             }
@@ -1698,11 +1801,16 @@ public sealed class CrabDeskRuntime : IDisposable
                 external.Add(fullPath);
             }
         }
-        var assigned = AssignItemsCore(assignedKeys, boxId, notify: external.Count == 0);
+        var manualTabId = ResolveManualTabTarget(box, targetTabId);
+        var assigned = AssignItemsCore(
+            assignedKeys,
+            boxId,
+            notify: external.Count == 0,
+            targetTabId: manualTabId);
         var imported = FileImportBatchResult.Empty;
         if (external.Count > 0)
         {
-            imported = await ImportFilesAsync(external, boxId, clipboard.Move);
+            imported = await ImportFilesAsync(external, boxId, clipboard.Move, manualTabId);
             assigned += imported.SucceededCount;
             if (imported.SucceededCount == 0 && assignedKeys.Count > 0)
             {
@@ -1716,6 +1824,11 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         return new BoxPasteResult(assigned, imported);
     }
+
+    private static Guid? ResolveManualTabTarget(DesktopBox box, Guid? targetTabId) =>
+        targetTabId is { } tabId && box.ManualTabs.Any(tab => tab.Id == tabId)
+            ? tabId
+            : null;
 
     public async Task RenameItemAsync(DesktopItemRef item, string newName, Guid? boxId = null)
     {
@@ -1746,18 +1859,18 @@ public sealed class CrabDeskRuntime : IDisposable
         await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
         var renamed = Items.FirstOrDefault(candidate => candidate.FileSystemPath is not null &&
             string.Equals(Path.GetFullPath(candidate.FileSystemPath), Path.GetFullPath(destination), StringComparison.OrdinalIgnoreCase));
-        if (renamed is null)
+        if (renamed is not null && boxId is { } targetBoxId)
         {
-            return;
+            var newKey = renamed.Key.ToString();
+            State.Assignments.Remove(oldKey);
+            State.Assignments[newKey] = targetBoxId;
+            ReplaceItemOrderKey(oldKey, newKey);
         }
-        if (boxId is not { } targetBoxId)
-        {
-            return;
-        }
-        var newKey = renamed.Key.ToString();
-        State.Assignments.Remove(oldKey);
-        State.Assignments[newKey] = targetBoxId;
-        ReplaceItemOrderKey(oldKey, newKey);
+
+        // The application owns this rename, so update its surfaces directly.
+        // FileSystemWatcher notifications can be filtered, coalesced, or
+        // arrive before the replacement snapshot is ready; relying on them
+        // leaves geometry holding the old path even though the move succeeded.
         NotifyWorkspaceChanged(true);
     }
 

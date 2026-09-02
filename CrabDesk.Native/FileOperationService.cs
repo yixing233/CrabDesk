@@ -199,10 +199,13 @@ public sealed class FileOperationService : IFileOperationService
             return candidate;
         }
 
+        // Collisions are resolved with an "_2" style suffix so a paste or drop
+        // of an existing name produces a predictable new file instead of the
+        // shell's "source and destination are the same" conflict dialog.
         var (stem, extension) = DesktopItemName.SplitFileName(name);
         for (var index = 2; ; index++)
         {
-            candidate = Path.Combine(directory, $"{stem} ({index}){extension}");
+            candidate = Path.Combine(directory, $"{stem}_{index}{extension}");
             if (!File.Exists(candidate) && !Directory.Exists(candidate))
             {
                 return candidate;

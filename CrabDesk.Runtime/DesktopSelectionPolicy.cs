@@ -14,11 +14,6 @@ internal sealed record DesktopDeleteSelection(
     int SelectedCount,
     int BlockedCount);
 
-internal sealed record DesktopDeleteConfirmation(
-    string Title,
-    string Message,
-    string PrimaryText);
-
 internal static class DesktopSelectionPolicy
 {
     internal static bool PreserveExistingSelection(
@@ -58,40 +53,5 @@ internal static class DesktopSelectionPolicy
             deletable,
             selected.Length,
             blockedCount);
-    }
-
-    internal static DesktopDeleteConfirmation BuildDeleteConfirmation(
-        DesktopDeleteSelection selection)
-    {
-        if (selection.DeletableItems.Count == 0)
-        {
-            throw new ArgumentException(
-                "A delete confirmation requires at least one deletable item.",
-                nameof(selection));
-        }
-
-        var title = selection.DeletableItems.Count == 1
-            ? $"确认删除“{selection.DeletableItems[0].DisplayName}”？"
-            : $"确认删除 {selection.DeletableItems.Count} 个{GetDeleteItemNoun(selection.DeletableItems)}？";
-        var skipped = selection.BlockedCount > 0
-            ? $"{Environment.NewLine}其中 {selection.BlockedCount} 个只读或系统项目不会被删除。"
-            : string.Empty;
-
-        return new DesktopDeleteConfirmation(
-            title,
-            $"删除后将移入回收站，可从回收站恢复。{skipped}",
-            "删除");
-    }
-
-    private static string GetDeleteItemNoun(IReadOnlyList<DesktopItemRef> items)
-    {
-        if (items.All(item => item.Kind == DesktopItemKind.Folder))
-        {
-            return "文件夹";
-        }
-
-        return items.All(item => item.Kind is DesktopItemKind.File or DesktopItemKind.Shortcut)
-            ? "文件"
-            : "项目";
     }
 }

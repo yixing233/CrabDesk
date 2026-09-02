@@ -40,6 +40,12 @@ public static class LayeredWindowPresenter
             return false;
         }
 
+        if (!TryResolveDestinationLocation(hwnd, screenLocation, out var destinationLocation))
+        {
+            diagnostic = $"Unable to resolve the layered desktop child position error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+
         var screenDc = GetDC(IntPtr.Zero);
         if (screenDc == IntPtr.Zero)
         {
@@ -65,7 +71,7 @@ public static class LayeredWindowPresenter
                     Surfaces[hwnd] = surface;
                 }
 
-                return surface.Present(hwnd, bitmap, screenLocation, screenDc, out diagnostic);
+                return surface.Present(hwnd, bitmap, destinationLocation, screenDc, out diagnostic);
             }
         }
         catch (Exception exception)
@@ -131,6 +137,12 @@ public static class LayeredWindowPresenter
             return false;
         }
 
+        if (!TryResolveDestinationLocation(hwnd, screenLocation, out var destinationLocation))
+        {
+            diagnostic = $"Unable to resolve the layered desktop child position error={Marshal.GetLastWin32Error()}";
+            return false;
+        }
+
         var bitmapBounds = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
         var clippedDirtyPixels = Rectangle.Intersect(bitmapBounds, dirtyPixels);
         if (clippedDirtyPixels.Width <= 0 || clippedDirtyPixels.Height <= 0)
@@ -165,7 +177,7 @@ public static class LayeredWindowPresenter
                 return surface.PresentPartial(
                     hwnd,
                     bitmap,
-                    screenLocation,
+                    destinationLocation,
                     clippedDirtyPixels,
                     screenDc,
                     out diagnostic);
@@ -180,6 +192,38 @@ public static class LayeredWindowPresenter
         {
             ReleaseDC(IntPtr.Zero, screenDc);
         }
+    }
+
+    internal static bool TryResolveDestinationLocation(
+        IntPtr hwnd,
+        Point screenLocation,
+        out Point destinationLocation)
+    {
+        destinationLocation = screenLocation;
+        var style = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlStyle).ToInt64();
+        if ((style & NativeMethods.WsChild) == 0)
+        {
+            return true;
+        }
+
+        var parent = NativeMethods.GetParent(hwnd);
+        if (parent == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var point = new NativeMethods.Point
+        {
+            X = screenLocation.X,
+            Y = screenLocation.Y
+        };
+        if (!NativeMethods.ScreenToClient(parent, ref point))
+        {
+            return false;
+        }
+
+        destinationLocation = new Point(point.X, point.Y);
+        return true;
     }
 
     /// <summary>
@@ -288,7 +332,7 @@ public static class LayeredWindowPresenter
         internal bool Present(
             IntPtr hwnd,
             Bitmap sourceBitmap,
-            Point screenLocation,
+            Point destinationLocation,
             IntPtr screenDc,
             out string diagnostic)
         {
@@ -298,7 +342,7 @@ public static class LayeredWindowPresenter
                 return false;
             }
 
-            var destination = new NativePoint(screenLocation.X, screenLocation.Y);
+            var destination = new NativePoint(destinationLocation.X, destinationLocation.Y);
             var source = new NativePoint(0, 0);
             var size = new NativeSize(_width, _height);
             var blend = new BlendFunction(AcSrcOver, 0, byte.MaxValue, AcSrcAlpha);
@@ -325,7 +369,7 @@ public static class LayeredWindowPresenter
         internal bool PresentPartial(
             IntPtr hwnd,
             Bitmap sourceBitmap,
-            Point screenLocation,
+            Point destinationLocation,
             Rectangle dirtyPixels,
             IntPtr screenDc,
             out string diagnostic)
@@ -337,7 +381,7 @@ public static class LayeredWindowPresenter
             }
 
             Marshal.StructureToPtr(
-                new NativePoint(screenLocation.X, screenLocation.Y),
+                new NativePoint(destinationLocation.X, destinationLocation.Y),
                 _destinationPointer,
                 false);
             Marshal.StructureToPtr(

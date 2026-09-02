@@ -333,7 +333,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal bool RefreshReleasedItems(IReadOnlyCollection<string> releasedItemKeys)
     {
-        if (!_monitor.IsPrimary || releasedItemKeys.Count == 0 || IsDisposed || !IsHandleCreated)
+        if (releasedItemKeys.Count == 0 || IsDisposed || !IsHandleCreated)
         {
             return false;
         }
@@ -382,6 +382,19 @@ internal sealed class DesktopIconSurface : Forms.Form
     }
 
     internal string MonitorId => _monitor.Id;
+
+    // Monitor ids are Windows device names (\\.\DISPLAYn) and change when
+    // displays are reconnected. A placement that points at a monitor which is
+    // no longer present must fall back to the primary surface, otherwise the
+    // item would be filtered out of every surface and disappear.
+    internal static bool ShouldRenderDesktopItemOnMonitor(
+        bool isPrimary,
+        string? placementMonitorId,
+        string monitorId,
+        bool placementMonitorConnected) =>
+        string.IsNullOrWhiteSpace(placementMonitorId) || !placementMonitorConnected
+            ? isPrimary
+            : string.Equals(placementMonitorId, monitorId, StringComparison.OrdinalIgnoreCase);
 
     internal void SetBoxRenderer(Action<Graphics, RectangleF>? renderer) =>
         _boxRenderer = renderer;
@@ -598,8 +611,18 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal bool RequestRender() => PresentLayer();
 
-    internal void RequestDragFrame()
+    internal void RequestDragFrame(bool forceFullFrame = false)
     {
+        if (forceFullFrame)
+        {
+            // A cross-monitor transfer removes the box from this surface's
+            // settled layer. Present synchronously so the old monitor bitmap
+            // cannot remain visible while the target drag frame is active.
+            CancelPendingDragRender();
+            PresentLayer();
+            return;
+        }
+
         if (IsDragCompositeActive)
         {
             // A box selection can receive several mouse messages before the
@@ -2129,12 +2152,20 @@ internal sealed class DesktopIconSurface : Forms.Form
         _expandedItemHitBounds.Clear();
         var desktopViewState = DesktopIconPositionService.GetDesktopViewState();
         SynchronizeNativeMetrics(desktopViewState);
-        if (!_monitor.IsPrimary)
-        {
-            return;
-        }
-
-        var desktopItems = _runtime.GetUnassignedDesktopItems().ToArray();
+        var connectedMonitorIds = _runtime.Monitors
+            .Select(monitor => monitor.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var desktopItems = _runtime.GetUnassignedDesktopItems()
+            .Where(item =>
+            {
+                var placement = _runtime.State.DesktopIconLayout.GetValueOrDefault(item.Key.ToString());
+                return ShouldRenderDesktopItemOnMonitor(
+                    _monitor.IsPrimary,
+                    placement?.MonitorId,
+                    _monitor.Id,
+                    placement is not null && connectedMonitorIds.Contains(placement.MonitorId));
+            })
+            .ToArray();
         var grid = CreateCurrentGrid();
         var gridTopology = new DesktopGridTopology(grid.ColumnCount, grid.RowCount);
         var occupiedCells = new HashSet<GridCell>();
@@ -2294,15 +2325,30 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
 
-        var layout = _items.ToDictionary(
-            item => item.Item.Key.ToString(),
-            item => new DesktopIconLayoutSnapshot
+        var desktopKeys = _runtime.GetUnassignedDesktopItems()
+            .Select(item => item.Key.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var layout = storedLayout
+            .Where(entry => desktopKeys.Contains(entry.Key) &&
+                !string.Equals(entry.Value.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                entry => entry.Key,
+                entry => new DesktopIconLayoutSnapshot
+                {
+                    MonitorId = entry.Value.MonitorId,
+                    Column = entry.Value.Column,
+                    Row = entry.Value.Row
+                },
+                StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _items)
+        {
+            layout[item.Item.Key.ToString()] = new DesktopIconLayoutSnapshot
             {
                 MonitorId = _monitor.Id,
                 Column = item.Cell.Column,
                 Row = item.Cell.Row
-            },
-            StringComparer.OrdinalIgnoreCase);
+            };
+        }
         var needsSnapshot = layout.Count != storedLayout.Count ||
             layout.Any(entry =>
                 !storedLayout.TryGetValue(entry.Key, out var stored) ||
@@ -3303,12 +3349,6 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         if (TryGetDesktopIconDrag(eventArgs, out var desktopDrag))
         {
-            if (!ReferenceEquals(desktopDrag.Source, this))
-            {
-                eventArgs.Effect = Forms.DragDropEffects.None;
-                return;
-            }
-
             var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
             var folderTarget = GetDesktopFolderDropTarget(dropPoint, desktopDrag);
             var folderTargetChanged = SetDesktopFolderDropTarget(folderTarget);
@@ -3321,7 +3361,10 @@ internal sealed class DesktopIconSurface : Forms.Form
                 ClearBoxDropState();
                 RequestDragRender();
             }
-            UpdateDesktopOleDropPreview(new Point(eventArgs.X, eventArgs.Y));
+            if (ReferenceEquals(desktopDrag.Source, this))
+            {
+                UpdateDesktopOleDropPreview(new Point(eventArgs.X, eventArgs.Y));
+            }
             eventArgs.Effect = ResolveDesktopDragEffect(
                 eventArgs.AllowedEffect,
                 acceptsFolder: folderTarget is not null,
@@ -3489,27 +3532,36 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             if (TryGetDesktopIconDrag(eventArgs, out var desktopDrag))
             {
-                if (ReferenceEquals(desktopDrag.Source, this))
+                var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+                var folderTarget = GetDesktopFolderDropTarget(dropPoint, desktopDrag);
+                _desktopFolderDropTargetKey = null;
+                if (folderTarget is not null)
                 {
-                    var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
-                    var folderTarget = GetDesktopFolderDropTarget(dropPoint, desktopDrag);
-                    _desktopFolderDropTargetKey = null;
-                    if (folderTarget is not null)
+                    _overRecycleBin = false;
+                    RequestDragRender();
+                    await CompleteDesktopFolderDropAsync(
+                        desktopDrag,
+                        folderTarget.Item,
+                        move: (eventArgs.KeyState & 8) == 0);
+                }
+                else if (_overRecycleBin && IsOverRecycleBin(dropPoint))
+                {
+                    CompleteRecycleBinDrop(desktopDrag);
+                }
+                else if (ReferenceEquals(desktopDrag.Source, this))
+                {
+                    CompleteDesktopOleDrop(desktopDrag, new Point(eventArgs.X, eventArgs.Y));
+                }
+                else
+                {
+                    var paths = desktopDrag.ItemKeys
+                        .Select(key => _runtime.FindItemByKey(key)?.FileSystemPath)
+                        .Where(path => !string.IsNullOrWhiteSpace(path))
+                        .Cast<string>()
+                        .ToArray();
+                    if (PlaceExistingDesktopPathsAtPoint(paths, dropPoint))
                     {
-                        _overRecycleBin = false;
-                        RequestDragRender();
-                        await CompleteDesktopFolderDropAsync(
-                            desktopDrag,
-                            folderTarget.Item,
-                            move: (eventArgs.KeyState & 8) == 0);
-                    }
-                    else if (_overRecycleBin && IsOverRecycleBin(dropPoint))
-                    {
-                        CompleteRecycleBinDrop(desktopDrag);
-                    }
-                    else
-                    {
-                        CompleteDesktopOleDrop(desktopDrag, new Point(eventArgs.X, eventArgs.Y));
+                        desktopDrag.HandledByDesktop = true;
                     }
                 }
                 return;
@@ -3582,8 +3634,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         itemKeys = [];
         dragSession = null!;
-        if (!_runtime.IsVirtualBoxDesktopDropEnabled ||
-            !_monitor.IsPrimary)
+        if (!_runtime.IsVirtualBoxDesktopDropEnabled)
         {
             return false;
         }
@@ -3649,12 +3700,6 @@ internal sealed class DesktopIconSurface : Forms.Form
             // uploads cannot flood and stall the nested drag loop.
             _boxDragPointer = point;
         }
-        if (!_monitor.IsPrimary)
-        {
-            _boxDropTargetCell = null;
-            return false;
-        }
-
         var target = GetCellAtPoint(point);
         _boxDropTargetCell = target;
         if (publishGhost)
@@ -4264,9 +4309,10 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         var draggedKeySet = dragSession.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var draggedItems = _items
-            .Where(item => draggedKeySet.Contains(item.Item.Key.ToString()))
-            .Select(item => item.Item)
+        var draggedItems = draggedKeySet
+            .Select(_runtime.FindItemByKey)
+            .Where(item => item is not null)
+            .Cast<DesktopItemRef>()
             .ToArray();
         return draggedItems.Length == draggedKeySet.Count &&
                DesktopFolderDropPolicy.CanAccept(draggedItems, candidate.Item)
@@ -4296,9 +4342,10 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         dragSession.HandledByDesktop = true;
         var draggedKeySet = dragSession.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var draggedItems = _items
-            .Where(item => draggedKeySet.Contains(item.Item.Key.ToString()))
-            .Select(item => item.Item)
+        var draggedItems = draggedKeySet
+            .Select(_runtime.FindItemByKey)
+            .Where(item => item is not null)
+            .Cast<DesktopItemRef>()
             .ToArray();
         if (draggedItems.Length != draggedKeySet.Count ||
             draggedItems.Any(item => item.FileSystemPath is null) ||
@@ -4371,9 +4418,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private bool DraggedKeysAreFileSystemItems(DesktopIconSurfaceDragSession dragSession) =>
         dragSession.ItemKeys.Count > 0 &&
-        dragSession.ItemKeys.All(key => _items.Any(item =>
-            string.Equals(item.Item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase) &&
-            item.Item.FileSystemPath is not null));
+        dragSession.ItemKeys.All(key => _runtime.FindItemByKey(key)?.FileSystemPath is not null);
 
     // A drop on the Recycle Bin moves the dragged files there instead of
     // placing them in the grid. The OLE drag loop owns the state cleanup
@@ -4382,11 +4427,10 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         _overRecycleBin = false;
         dragSession.HandledByDesktop = true;
-        var items = _items
-            .Where(item => dragSession.ItemKeys.Contains(
-                item.Item.Key.ToString(),
-                StringComparer.OrdinalIgnoreCase))
-            .Select(item => item.Item)
+        var items = dragSession.ItemKeys
+            .Select(_runtime.FindItemByKey)
+            .Where(item => item?.FileSystemPath is not null)
+            .Cast<DesktopItemRef>()
             .Where(item => item.FileSystemPath is not null)
             .ToArray();
         if (items.Length == 0)
@@ -4514,8 +4558,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             $"autoArrange={_runtime.IsDesktopAutoArrangeEnabled} primary={_monitor.IsPrimary} " +
             $"layoutKeys={_runtime.State.DesktopIconLayout.Count}");
         if (importedPaths.Count == 0 ||
-            _runtime.IsDesktopAutoArrangeEnabled ||
-            !_monitor.IsPrimary)
+            _runtime.IsDesktopAutoArrangeEnabled)
         {
             DiagnosticLog.Info(
                 $"Place dropped items skipped: empty={importedPaths.Count == 0} " +
@@ -4601,8 +4644,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         PointF dropPointDip)
     {
         if (existingDesktopPaths.Count == 0 ||
-            _runtime.IsDesktopAutoArrangeEnabled ||
-            !_monitor.IsPrimary)
+            _runtime.IsDesktopAutoArrangeEnabled)
         {
             return false;
         }
@@ -4621,15 +4663,32 @@ internal sealed class DesktopIconSurface : Forms.Form
             return false;
         }
 
-        var result = DesktopIconDragLayoutEngine.Calculate(
-            _items.Select(item => new DesktopIconGridItem(
+        var movingKeySet = movingKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stationary = _items
+            .Where(item => !movingKeySet.Contains(item.Key))
+            .Select(item => new DesktopIconGridItem(
                 item.Key,
-                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row))),
-            movingKeys,
-            movingKeys[0],
-            new DesktopIconGridCell(targetCell.Column, targetCell.Row),
-            grid.ColumnCount,
-            grid.RowCount);
+                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row)));
+        var allMovingKeysAreLocal = movingKeys.All(key => _items.Any(item =>
+            string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase)));
+        var result = allMovingKeysAreLocal
+            ? DesktopIconDragLayoutEngine.Calculate(
+                stationary.Concat(_items
+                    .Where(item => movingKeySet.Contains(item.Key))
+                    .Select(item => new DesktopIconGridItem(
+                        item.Key,
+                        new DesktopIconGridCell(item.Cell.Column, item.Cell.Row)))),
+                movingKeys,
+                movingKeys[0],
+                new DesktopIconGridCell(targetCell.Column, targetCell.Row),
+                grid.ColumnCount,
+                grid.RowCount)
+            : DesktopIconDragLayoutEngine.CalculateInsertion(
+                stationary,
+                movingKeys,
+                new DesktopIconGridCell(targetCell.Column, targetCell.Row),
+                grid.ColumnCount,
+                grid.RowCount);
         if (!result.IsValid)
         {
             return false;

@@ -149,6 +149,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private Guid? _pressedBoxId;
     private LayoutRect _startBounds;
     private PointF _pressPoint;
+    private bool _monitorTransferSeen;
+    private string? _monitorTransferPreviousMonitorId;
+    // The render request consumes _monitorTransferPreviousMonitorId so the
+    // source icon surface can be refreshed immediately. Keep the latest
+    // source monitor until transform completion for the targeted model commit.
+    private string? _monitorTransferLastPreviousMonitorId;
     private PointF _selectionStart;
     private RectangleF _selectionRectangle;
     private bool _dragStarted;
@@ -537,6 +543,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal bool IsTransformActive => _movingBox is not null || _resizingBox is not null;
 
+    internal string? TransformMonitorId => (_movingBox ?? _resizingBox)?.MonitorId;
+
+    internal void MarkMonitorTransferRefreshPending(string previousMonitorId)
+    {
+        _monitorTransferPreviousMonitorId = previousMonitorId;
+        _monitorTransferLastPreviousMonitorId = previousMonitorId;
+    }
+
+    internal string? ConsumeMonitorTransferPreviousMonitorId()
+    {
+        var previousMonitorId = _monitorTransferPreviousMonitorId;
+        _monitorTransferPreviousMonitorId = null;
+        return previousMonitorId;
+    }
+
     internal bool IsItemDragActive => _dragStarted;
 
     private bool IsScrollAnimationActive =>
@@ -548,6 +569,29 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     internal bool HasDynamicVisual =>
         IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null ||
         _heightAnimations.Count > 0 || IsScrollAnimationActive;
+
+    internal bool HasDynamicVisualForMonitor(string monitorId) =>
+        HasDynamicVisualForMonitor(
+            (_movingBox ?? _resizingBox)?.MonitorId,
+            _monitor.Id,
+            monitorId,
+            HasDynamicVisual);
+
+    /// <summary>
+    /// A box being moved or resized keeps belonging to the form of the monitor
+    /// where the gesture started, so ownership of its dynamic frame follows the
+    /// live box instead of the form. Every other dynamic visual stays on the
+    /// monitor the form itself covers.
+    /// </summary>
+    internal static bool HasDynamicVisualForMonitor(
+        string? transformBoxMonitorId,
+        string surfaceMonitorId,
+        string monitorId,
+        bool hasDynamicVisual) =>
+        transformBoxMonitorId is not null
+            ? string.Equals(transformBoxMonitorId, monitorId, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(surfaceMonitorId, monitorId, StringComparison.OrdinalIgnoreCase) &&
+                hasDynamicVisual;
 
     /// <summary>
     /// True when the only dynamic visual on this surface is the hover
@@ -625,7 +669,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool hasPartialRenderer) =>
         isCompositedByIconSurface && hasPartialRenderer;
 
-    internal static bool ShouldRebuildWorkspaceAfterBoxTransform() => false;
+    internal static bool ShouldRebuildWorkspaceAfterBoxTransform(bool monitorChanged) =>
+        monitorChanged;
 
     internal static bool ShouldPresentAfterRegionUpdate(
         bool isCompositedByIconSurface,
@@ -866,12 +911,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     internal RectangleF? GetDynamicVisualBounds() =>
         GetDynamicVisualBounds(useAnimationDirtyBounds: false);
 
+    internal RectangleF? GetDynamicVisualBoundsForMonitor(string monitorId) =>
+        GetDynamicVisualBounds(useAnimationDirtyBounds: false, monitorId);
+
     internal RectangleF? GetDynamicVisualDirtyBounds() =>
         GetDynamicVisualBounds(useAnimationDirtyBounds: true);
 
-    private RectangleF? GetDynamicVisualBounds(bool useAnimationDirtyBounds)
+    internal RectangleF? GetDynamicVisualDirtyBoundsForMonitor(string monitorId) =>
+        GetDynamicVisualBounds(useAnimationDirtyBounds: true, monitorId);
+
+    private RectangleF? GetDynamicVisualBounds(
+        bool useAnimationDirtyBounds,
+        string? monitorId = null)
     {
         if (IsDisposed || _resourcesDisposed || !HasDynamicVisual)
+        {
+            return null;
+        }
+
+        if (monitorId is not null && !HasDynamicVisualForMonitor(monitorId))
         {
             return null;
         }
@@ -893,9 +951,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (transformBox is not null)
         {
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == transformBox.Id);
+            if (!string.Equals(transformBox.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase) &&
+                monitorId is not null &&
+                string.Equals(transformBox.MonitorId, monitorId, StringComparison.OrdinalIgnoreCase))
+            {
+                geometry = CreateBoxGeometry(
+                    transformBox,
+                    (float)GetVisualBoxHeight(transformBox),
+                    IsEffectivelyCollapsed(transformBox));
+            }
             if (geometry is not null)
             {
-                bounds = GetTransformGeometry(geometry).Bounds;
+                bounds = string.Equals(transformBox.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase)
+                    ? GetTransformGeometry(geometry).Bounds
+                    : geometry.Bounds;
             }
         }
 
@@ -1056,6 +1125,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     /// moved/resized or the one currently receiving a desktop-item preview.
     /// </summary>
     internal void RenderDragOnIconLayer(Graphics graphics, RectangleF clipBounds)
+        => RenderDragOnIconLayerForMonitor(graphics, clipBounds, _monitor.Id);
+
+    internal void RenderDragOnIconLayerForMonitor(
+        Graphics graphics,
+        RectangleF clipBounds,
+        string monitorId)
     {
         if (IsDisposed || _resourcesDisposed)
         {
@@ -1076,11 +1151,35 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         if (transformBox is not null)
         {
+            if (!string.Equals(transformBox.MonitorId, monitorId, StringComparison.OrdinalIgnoreCase))
+            {
+                transformBox = null;
+            }
+        }
+
+        if (transformBox is not null)
+        {
+            // During a cross-monitor move the shared model changes
+            // MonitorId before the source form is rebuilt. Its local geometry
+            // is therefore temporarily absent; create the target-monitor
+            // geometry directly from the live box so the target icon surface
+            // can keep rendering the drag frame.
             var geometry = _boxes.FirstOrDefault(box => box.Box.Id == transformBox.Id);
+            if (!string.Equals(transformBox.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                var height = (float)GetVisualBoxHeight(transformBox);
+                geometry = CreateBoxGeometry(
+                    transformBox,
+                    height,
+                    IsEffectivelyCollapsed(transformBox));
+            }
             if (geometry is not null)
             {
-                var transformGeometry = GetTransformGeometry(geometry);
+                var transformGeometry = string.Equals(transformBox.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase)
+                    ? GetTransformGeometry(geometry)
+                    : geometry;
                 if (_movingBox is null ||
+                    !string.Equals(transformBox.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase) ||
                     !DrawMovingBoxVisualCache(graphics, transformGeometry, clipBounds))
                 {
                     DrawBox(

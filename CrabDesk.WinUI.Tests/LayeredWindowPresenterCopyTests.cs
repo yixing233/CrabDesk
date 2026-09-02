@@ -1,4 +1,6 @@
 using CrabDesk.Native;
+using System.Drawing;
+using System.Windows.Forms;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
@@ -23,5 +25,33 @@ public sealed class LayeredWindowPresenterCopyTests
         Assert.Equal(source[..8], destination[4..12]);
         Assert.Equal(source[12..20], destination[24..32]);
         Assert.All(destination[..4], value => Assert.Equal(0xEE, value));
+    }
+
+    [Fact]
+    public void ChildLayeredDestinationUsesParentClientCoordinates()
+    {
+        using var parent = new Form
+        {
+            StartPosition = FormStartPosition.Manual,
+            Location = new Point(-1200, 80),
+            ClientSize = new Size(1600, 900)
+        };
+        using var child = new Panel
+        {
+            Location = new Point(120, 40),
+            Size = new Size(400, 300)
+        };
+        parent.Controls.Add(child);
+        _ = parent.Handle;
+        _ = child.Handle;
+
+        var expected = new Point(320, 180);
+        var screenLocation = parent.PointToScreen(expected);
+
+        Assert.True(LayeredWindowPresenter.TryResolveDestinationLocation(
+            child.Handle,
+            screenLocation,
+            out var actual));
+        Assert.Equal(expected, actual);
     }
 }

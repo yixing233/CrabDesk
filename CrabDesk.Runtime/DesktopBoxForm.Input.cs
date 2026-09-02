@@ -128,6 +128,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         _startBounds = box.Box.Bounds;
+        _monitorTransferSeen = false;
+        _monitorTransferPreviousMonitorId = null;
+        _monitorTransferLastPreviousMonitorId = null;
         if (box.Search.Contains(point))
         {
             ToggleBoxSearch(box.Box);
@@ -1153,7 +1156,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // swept area so a half-finished drag cannot leave pixels behind.
         var grabOffsetX = _pressPoint.X - _startBounds.X;
         var grabOffsetY = _pressPoint.Y - _startBounds.Y;
-        CompleteBoxTransform(_movingBox, _resizingBox, grabOffsetX, grabOffsetY, false);
+        CompleteBoxTransform(_movingBox, _resizingBox, grabOffsetX, grabOffsetY, true);
     }
 
     private void CompleteBoxTransform(
@@ -1179,10 +1182,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             Capture = false;
         }
+        var monitorChanged = _monitorTransferSeen;
+        var previousMonitorId = _monitorTransferLastPreviousMonitorId;
         if (movingBox is not null && allowMonitorTransfer)
         {
             var cursor = Forms.Cursor.Position;
-            LayoutCoordinator.TryMoveBoxToMonitor(
+            var beforeMonitorId = movingBox.MonitorId;
+            var moved = LayoutCoordinator.TryMoveBoxToMonitor(
                 movingBox,
                 _runtime.Monitors,
                 cursor.X,
@@ -1190,6 +1196,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 grabOffsetX,
                 grabOffsetY,
                 LayoutGrid.DefaultStep);
+            monitorChanged |= moved;
+            if (moved)
+            {
+                previousMonitorId = beforeMonitorId;
+            }
         }
 
         if (movingBox is not null)
@@ -1201,11 +1212,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         FlushTransformTrail();
         if (movingBox is not null)
         {
-            _runtime.BoxChanged(movingBox, ShouldRebuildWorkspaceAfterBoxTransform());
+            _runtime.BoxChanged(
+                movingBox,
+                ShouldRebuildWorkspaceAfterBoxTransform(monitorChanged),
+                monitorChanged ? previousMonitorId : null);
         }
         else if (resizingBox is not null)
         {
-            _runtime.BoxChanged(resizingBox, ShouldRebuildWorkspaceAfterBoxTransform());
+            _runtime.BoxChanged(
+                resizingBox,
+                ShouldRebuildWorkspaceAfterBoxTransform(monitorChanged: false));
         }
         if (movingBox is not null || resizingBox is not null)
         {
@@ -1218,6 +1234,77 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void UpdateMovingBox(DesktopBox box, PointF point)
     {
+        var cursor = Forms.Cursor.Position;
+        var target = _runtime.Monitors.FirstOrDefault(monitor =>
+            monitor.PixelBounds.Contains(cursor.X, cursor.Y));
+        // Once the live box has transferred away from this source surface,
+        // continue tracking it in global screen coordinates. Falling back to
+        // the source form's client point would clamp the box back into the
+        // source monitor on the very next mouse move.
+        if (!string.Equals(box.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            if (target is null)
+            {
+                _iconLayerRenderRequest?.Invoke();
+                return;
+            }
+
+            var targetScale = Math.Max(target.DpiScale, 0.01d);
+            var grabOffsetX = (_pressPoint.X - _startBounds.X) * _scale / targetScale;
+            var grabOffsetY = (_pressPoint.Y - _startBounds.Y) * _scale / targetScale;
+            if (!string.Equals(target.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase))
+            {
+                var previousMonitorId = box.MonitorId;
+                var moved = LayoutCoordinator.TryMoveBoxToMonitor(
+                    box,
+                    _runtime.Monitors,
+                    cursor.X,
+                    cursor.Y,
+                    grabOffsetX,
+                    grabOffsetY,
+                    LayoutGrid.DefaultStep);
+                _monitorTransferSeen |= moved;
+                if (moved)
+                {
+                    MarkMonitorTransferRefreshPending(previousMonitorId);
+                }
+                _iconLayerRenderRequest?.Invoke();
+                return;
+            }
+
+            var localCursorX = (cursor.X - target.PixelBounds.X) / targetScale;
+            var localCursorY = (cursor.Y - target.PixelBounds.Y) / targetScale;
+            var transferredBounds = new LayoutRect(
+                SnapDipToPixel(localCursorX - grabOffsetX),
+                SnapDipToPixel(localCursorY - grabOffsetY),
+                _startBounds.Width,
+                _startBounds.Height).Clamp(
+                    new LayoutRect(0, 0, target.WorkArea.Width, target.WorkArea.Height),
+                    GetMinimumBoxWidth(box));
+            ApplyBoxTransform(box, transferredBounds);
+            _iconLayerRenderRequest?.Invoke();
+            return;
+        }
+
+        if (target is not null && !string.Equals(target.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase))
+        {
+            var previousMonitorId = box.MonitorId;
+            var moved = LayoutCoordinator.TryMoveBoxToMonitor(
+                box,
+                _runtime.Monitors,
+                cursor.X,
+                cursor.Y,
+                (_pressPoint.X - _startBounds.X) * _scale / Math.Max(target.DpiScale, 0.01),
+                (_pressPoint.Y - _startBounds.Y) * _scale / Math.Max(target.DpiScale, 0.01),
+                LayoutGrid.DefaultStep);
+            _monitorTransferSeen |= moved;
+            if (moved)
+            {
+                MarkMonitorTransferRefreshPending(previousMonitorId);
+            }
+            _iconLayerRenderRequest?.Invoke();
+            return;
+        }
         var nextBounds = new LayoutRect(
             SnapDipToPixel(_startBounds.X + point.X - _pressPoint.X),
             SnapDipToPixel(_startBounds.Y + point.Y - _pressPoint.Y),
