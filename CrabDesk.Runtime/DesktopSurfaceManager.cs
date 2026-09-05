@@ -353,6 +353,33 @@ internal sealed class DesktopSurfaceManager : IDisposable
         return refreshed;
     }
 
+    // Assigning desktop items to a box is the inverse of releasing them: the
+    // box gains the items and the desktop cells they occupied are repainted.
+    // Both sides are partial updates, so no other monitor or box is touched.
+    internal bool RefreshDesktopItemsAssigned(
+        Guid boxId,
+        IReadOnlyCollection<string> assignedItemKeys)
+    {
+        if (assignedItemKeys.Count == 0)
+        {
+            return false;
+        }
+
+        var refreshedBox = false;
+        foreach (var surface in _surfaces)
+        {
+            refreshedBox |= surface.RefreshBoxItems(boxId);
+        }
+
+        var refreshedDesktop = false;
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            refreshedDesktop |= iconSurface.RefreshReleasedItems(assignedItemKeys);
+        }
+
+        return refreshedBox && refreshedDesktop;
+    }
+
     internal void SetDesktopIconsVisible(bool visible)
     {
         if (_desktopIconsVisible == visible)
@@ -825,6 +852,45 @@ internal sealed class DesktopSurfaceManager : IDisposable
         !_surfaces.Any(surface => surface.IsTitleEditing) &&
         GetRenameSelectionCount() == 1;
 
+    /// <summary>
+    /// Decides whether the low-level keyboard hook consumes a desktop command
+    /// key. This runs on the hook's own thread, which holds the key event (and
+    /// therefore all system input) until it returns, so it reads atomic state
+    /// only: enumerating a selection, resolving box geometry, or opening the
+    /// clipboard here would stall every application's input.
+    /// <para>
+    /// The answer is deliberately permissive. <see
+    /// cref="ExecuteDesktopKeyboardCommandAsync"/> repeats the exact check on
+    /// the UI thread before it acts, so an intercepted key that turns out to
+    /// have no target is simply dropped rather than misapplied.
+    /// </para>
+    /// </summary>
+    internal bool CanInterceptDesktopKeyboardCommand(DesktopKeyboardCommand command)
+    {
+        if (_deleteInProgress)
+        {
+            return false;
+        }
+
+        return command switch
+        {
+            // Only the offered clipboard formats are inspected; the paste
+            // itself resolves the target box and reads the file list.
+            DesktopKeyboardCommand.Paste => _runtime.CanPasteToDesktop(),
+            // F5 acts on the whole icon layer, so an empty selection — the
+            // normal state when the user reaches for it — must not veto it.
+            DesktopKeyboardCommand.Refresh => true,
+            _ => HasAnyDesktopSelection()
+        };
+    }
+
+    // Count reads on the surfaces' own selection sets. A set that the UI
+    // thread happens to be changing yields the count from either side of that
+    // change, which is all this decision needs.
+    private bool HasAnyDesktopSelection() =>
+        _iconSurfaces.Any(surface => surface.HasSelection) ||
+        _surfaces.Any(surface => surface.HasSelection);
+
     internal bool CanHandleDesktopKeyboardCommand(DesktopKeyboardCommand command)
     {
         if (_deleteInProgress || _surfaces.Any(surface => surface.IsTitleEditing))
@@ -842,6 +908,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             DesktopKeyboardCommand.Paste => GetPasteTargetSurface() is not null ||
                 _runtime.CanPasteToDesktop(),
             DesktopKeyboardCommand.Open => GetSelectedItems().Count == 1,
+            DesktopKeyboardCommand.Refresh => true,
             _ => false
         };
     }
@@ -903,6 +970,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 }
                 break;
             }
+            case DesktopKeyboardCommand.Refresh:
+                // Shares the context-menu Refresh pipeline, so holding F5 down
+                // coalesces into one pass instead of stacking rebuilds.
+                _runtime.RequestDesktopRefresh();
+                break;
         }
     }
 
@@ -938,6 +1010,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
         _deleteInProgress = true;
         var deleteAttempted = false;
+        var deletedPaths = Array.Empty<string>();
         try
         {
             if (selection.DeletableItems.Count == 0)
@@ -950,6 +1023,9 @@ internal sealed class DesktopSurfaceManager : IDisposable
             }
 
             deleteAttempted = true;
+            deletedPaths = selection.DeletableItems
+                .Select(item => item.FileSystemPath!)
+                .ToArray();
             await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);
         }
         catch (Exception exception)
@@ -963,7 +1039,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             {
                 try
                 {
-                    await _runtime.RefreshItemsAsync(false);
+                    await _runtime.RefreshAfterDesktopItemsDeletedAsync(deletedPaths);
                 }
                 catch (Exception exception)
                 {

@@ -3,6 +3,11 @@ using CrabDesk.Core;
 
 namespace CrabDesk.Native;
 
+public readonly record struct DesktopHostSnapshot(
+    IntPtr DesktopParent,
+    IntPtr DesktopListView,
+    IntPtr DesktopView);
+
 /// <summary>
 /// Locates the Explorer desktop windows used as the parent and stacking anchor
 /// for CrabDesk surfaces. It deliberately does not redraw, enumerate, or
@@ -18,16 +23,27 @@ public sealed class DesktopHostService : IDesktopHost
 
     public bool Refresh()
     {
+        return Apply(Probe());
+    }
+
+    public static DesktopHostSnapshot Probe()
+    {
         var view = FindDesktopView();
         var parent = view == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetParent(view);
         var listView = view == IntPtr.Zero
             ? IntPtr.Zero
             : NativeMethods.FindWindowEx(view, IntPtr.Zero, "SysListView32", "FolderView");
+        return new DesktopHostSnapshot(parent, listView, view);
+    }
 
-        var changed = parent != DesktopParent || listView != DesktopListView || view != DesktopView;
-        DesktopParent = parent;
-        DesktopListView = listView;
-        DesktopView = view;
+    public bool Apply(DesktopHostSnapshot snapshot)
+    {
+        var changed = snapshot.DesktopParent != DesktopParent ||
+                      snapshot.DesktopListView != DesktopListView ||
+                      snapshot.DesktopView != DesktopView;
+        DesktopParent = snapshot.DesktopParent;
+        DesktopListView = snapshot.DesktopListView;
+        DesktopView = snapshot.DesktopView;
         return changed;
     }
 

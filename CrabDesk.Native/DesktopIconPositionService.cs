@@ -49,12 +49,75 @@ public static class DesktopIconPositionService
         new("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     private static readonly Guid ShellDatePropertyFormat =
         new("F29F85E0-4FF9-1068-AB91-08002B27B3D9");
+    private static readonly object ShellReadCacheGate = new();
+    private static DesktopIconViewState _cachedViewState;
+    private static bool _hasCachedViewState;
+    private static IntPtr _cachedSpacingListView;
+    private static System.Drawing.Size _cachedSpacing;
+    private static bool _cachedSpacingValid;
 
     /// <summary>
     /// Reads the live desktop view first. Explorer can apply context-menu
-    /// changes before it persists the matching Bag value.
+    /// changes before it persists the matching Bag value. Callers that watch
+    /// for a change use this, so it always performs the live read and only
+    /// refreshes the cache the render path shares.
     /// </summary>
     public static DesktopIconViewState GetDesktopViewState()
+    {
+        var state = ReadDesktopViewState();
+        lock (ShellReadCacheGate)
+        {
+            _cachedViewState = state;
+            _hasCachedViewState = true;
+        }
+        return state;
+    }
+
+    /// <summary>
+    /// Returns the last desktop view published by a live reader. Rendering
+    /// must never cross into explorer.exe over COM; before the first live
+    /// snapshot it uses the persisted registry state instead.
+    /// </summary>
+    public static DesktopIconViewState GetCachedDesktopViewState()
+    {
+        lock (ShellReadCacheGate)
+        {
+            if (_hasCachedViewState)
+            {
+                return _cachedViewState;
+            }
+        }
+
+        var persistedState = ReadPersistedDesktopViewState();
+        lock (ShellReadCacheGate)
+        {
+            if (_hasCachedViewState)
+            {
+                return _cachedViewState;
+            }
+            _cachedViewState = persistedState;
+            _hasCachedViewState = true;
+            return _cachedViewState;
+        }
+    }
+
+    /// <summary>
+    /// Drops cached Shell reads after CrabDesk asks Explorer to change the
+    /// desktop view. Non-blocking render readers use persisted state until the
+    /// next explicit live reader publishes a new snapshot.
+    /// </summary>
+    public static void InvalidateCachedDesktopView()
+    {
+        lock (ShellReadCacheGate)
+        {
+            _hasCachedViewState = false;
+            _cachedSpacingListView = IntPtr.Zero;
+            _cachedSpacing = default;
+            _cachedSpacingValid = false;
+        }
+    }
+
+    private static DesktopIconViewState ReadDesktopViewState()
     {
         if (TryReadExplorerDesktopView(out var explorerView))
         {
@@ -73,6 +136,11 @@ public static class DesktopIconPositionService
             return new DesktopIconViewState(sort, iconSize, iconsVisible, autoArrange, signature);
         }
 
+        return ReadPersistedDesktopViewState();
+    }
+
+    private static DesktopIconViewState ReadPersistedDesktopViewState()
+    {
         var persistedSort = GetDesktopSortValue();
         var persistedIconSize = GetPersistedDesktopIconSize();
         return new DesktopIconViewState(
@@ -168,6 +236,9 @@ public static class DesktopIconPositionService
             return false;
         }
 
+        // Explorer applies the new icon size and grid spacing asynchronously,
+        // so the cached view must not answer for the state it just left.
+        InvalidateCachedDesktopView();
         var wheel = unchecked((uint)(ushort)(short)delta);
         var keysAndDelta = new IntPtr(unchecked((int)((wheel << 16) | MkControl)));
         var coordinates = unchecked((uint)(ushort)(short)screenX) |
@@ -185,11 +256,42 @@ public static class DesktopIconPositionService
             : new System.Drawing.Size(88, 96);
 
     /// <summary>
+    /// Returns the last icon spacing explicitly published for this ListView.
+    /// Rendering never sends a synchronous message into Explorer; startup and
+    /// explicit icon-zoom synchronization publish fresh values instead.
+    /// </summary>
+    public static bool TryGetCachedItemSpacing(IntPtr listView, out System.Drawing.Size spacing)
+    {
+        lock (ShellReadCacheGate)
+        {
+            if (_cachedSpacingListView == listView)
+            {
+                spacing = _cachedSpacing;
+                return _cachedSpacingValid;
+            }
+        }
+        spacing = default;
+        return false;
+    }
+
+    /// <summary>
     /// Reads the live icon grid spacing without replacing a transient Shell
     /// timeout with a different layout. Callers that render an existing icon
     /// surface can retain their last valid spacing when this returns false.
     /// </summary>
     public static bool TryGetItemSpacing(IntPtr listView, out System.Drawing.Size spacing)
+    {
+        var read = ReadItemSpacing(listView, out spacing);
+        lock (ShellReadCacheGate)
+        {
+            _cachedSpacingListView = listView;
+            _cachedSpacing = spacing;
+            _cachedSpacingValid = read;
+        }
+        return read;
+    }
+
+    private static bool ReadItemSpacing(IntPtr listView, out System.Drawing.Size spacing)
     {
         spacing = default;
         if (listView == IntPtr.Zero || !NativeMethods.IsWindow(listView) ||

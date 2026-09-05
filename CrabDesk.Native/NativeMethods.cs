@@ -8,6 +8,7 @@ internal static class NativeMethods
     internal const uint WmCommand = 0x0111;
     internal const uint WmContextMenu = 0x007B;
     internal const uint SmtoAbortIfHung = 0x0002;
+    internal const uint CfHdrop = 15;
     internal const int GwlStyle = -16;
     internal const int GwlExStyle = -20;
     internal const int WsChild = 0x40000000;
@@ -113,6 +114,10 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsClipboardFormatAvailable(uint format);
 
     internal const uint EmSetCharFormat = 0x0444;
     internal const uint EmSetSel = 0x00B1;

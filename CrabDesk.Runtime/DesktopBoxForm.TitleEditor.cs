@@ -356,9 +356,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void StartBoxHeightAnimation(DesktopBox box, double fromHeight)
     {
-        var targetHeight = IsEffectivelyCollapsed(box)
-            ? box.Appearance.TitleBarHeight
-            : box.Bounds.Height;
+        var targetHeight = GetSettledBoxHeight(box);
         if (!_runtime.State.Settings.Appearance.AnimationEnabled || Math.Abs(targetHeight - fromHeight) < 0.5)
         {
             _heightAnimations.Remove(box.Id);
@@ -377,11 +375,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _animationFrameClock.RequestFrames();
     }
 
-    private double GetVisualBoxHeight(DesktopBox box)
-    {
-        var targetHeight = IsEffectivelyCollapsed(box)
+    private double GetSettledBoxHeight(DesktopBox box) =>
+        IsEffectivelyCollapsed(box)
             ? box.Appearance.TitleBarHeight
             : box.Bounds.Height;
+
+    private double GetVisualBoxHeight(DesktopBox box)
+    {
+        var targetHeight = GetSettledBoxHeight(box);
         if (!_runtime.State.Settings.Appearance.AnimationEnabled)
         {
             _heightAnimations.Remove(box.Id);

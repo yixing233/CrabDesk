@@ -26,6 +26,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private const int WmMouseWheel = 0x020A;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
+    private const int WsExNoParentNotify = 0x00000004;
     // Keep the hover intent guard short enough that expansion feels immediate
     // while still filtering out a quick pointer pass over the header.
     private const int HoverExpansionDelayMilliseconds = 45;
@@ -87,6 +88,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         TimeSpan.FromMilliseconds(HoverExpansionDelayMilliseconds),
         TimeSpan.FromMilliseconds(HoverCollapseDelayMilliseconds));
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
+    // Where a Shift+click range starts, together with the box that owns it: a
+    // range never spans two boxes or two tabs. Shift itself leaves the anchor
+    // untouched so repeated Shift+clicks re-extend from the same item.
+    private string? _selectionAnchorKey;
+    private Guid? _selectionAnchorBoxId;
     private readonly Dictionary<ItemViewKey, double> _scrollOffsets = [];
     private readonly Dictionary<Guid, MappedFolderItemCategory> _activeMappedFolderCategories = [];
     private readonly Dictionary<Guid, Guid?> _activeManualTabIds = [];
@@ -286,7 +292,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // The box child itself is a near-transparent input layer. The
             // visual boxes are composited above desktop icons by their shared
             // icon layer, avoiding sibling-composition differences in Explorer.
-            parameters.ExStyle |= WsExLayered;
+            // WS_EX_NOPARENTNOTIFY keeps every button press out of Explorer's
+            // desktop window chain, which answers WM_PARENTNOTIFY synchronously.
+            parameters.ExStyle |= WsExLayered | WsExNoParentNotify;
             return parameters;
         }
     }
@@ -297,6 +305,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     protected override void WndProc(ref Forms.Message message)
     {
+        var diagnosticMessage = message.Msg;
+        var diagnosticStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        using var watchdogScope = UiThreadWatchdog.EnterWindowMessage("box window", diagnosticMessage);
+        try
+        {
         if (_shellContextMenu?.TryHandleMessage(
                 message.Msg,
                 message.WParam,
@@ -360,6 +373,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         base.WndProc(ref message);
+        }
+        finally
+        {
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(diagnosticStarted);
+            if (elapsed.TotalMilliseconds >= 100)
+            {
+                DiagnosticLog.Info(
+                    $"Slow box window message monitor={_monitor.Id} " +
+                    $"msg=0x{diagnosticMessage:X4} elapsedMs={elapsed.TotalMilliseconds:0}");
+            }
+        }
     }
 
     private IReadOnlyList<DesktopBox> DesktopBoxes =>
@@ -417,6 +441,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal bool RefreshBoxItems(Guid boxId)
     {
+        var diagnosticStarted = System.Diagnostics.Stopwatch.StartNew();
         var box = _runtime.State.Boxes.FirstOrDefault(candidate =>
             candidate.Id == boxId &&
             string.Equals(candidate.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase));
@@ -460,6 +485,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             PresentLayer();
         }
+        DiagnosticLog.Info(
+            $"Box item refresh timing monitor={_monitor.Id} box={boxId} " +
+            $"elapsedMs={diagnosticStarted.ElapsedMilliseconds}");
         return true;
     }
 
@@ -1490,6 +1518,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal void ClearSelection()
     {
+        // The range anchor belongs to this surface's selection and dies with it,
+        // even when another surface already took the selection over.
+        _selectionAnchorKey = null;
+        _selectionAnchorBoxId = null;
         if (_selection.Count == 0)
         {
             return;
@@ -1731,7 +1763,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         // Pure model-space hit test so the low-level input hook can query it
-        // without touching WinForms controls from its callback thread.
+        // without touching WinForms controls from its callback thread. The
+        // settled height is used on purpose: reading the animated height also
+        // prunes finished animations and releases their cached bitmaps, which
+        // belongs to the UI thread alone.
         var localX = (float)((screenPoint.X - _monitor.PixelBounds.X) / _scale);
         var localY = (float)((screenPoint.Y - _monitor.PixelBounds.Y) / _scale);
         return DesktopBoxes.LastOrDefault(box =>
@@ -1740,7 +1775,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 (float)box.Bounds.X,
                 (float)box.Bounds.Y,
                 (float)box.Bounds.Width,
-                (float)GetVisualBoxHeight(box));
+                (float)GetSettledBoxHeight(box));
             return bounds.Contains(localX, localY);
         });
     }

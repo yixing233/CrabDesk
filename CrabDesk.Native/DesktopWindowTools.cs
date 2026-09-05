@@ -8,6 +8,7 @@ namespace CrabDesk.Native;
 public static class DesktopWindowTools
 {
     private const long WsExNoActivate = 0x08000000L;
+    private const long WsExNoParentNotify = 0x00000004L;
 
     /// <summary>
     /// Routes a background right-click from a CrabDesk desktop child back to
@@ -83,7 +84,7 @@ public static class DesktopWindowTools
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
         // The window region limits input to CrabDesk content; transparent style switching can starve child input.
         extendedStyle &= ~NativeMethods.WsExTransparent;
-        extendedStyle |= NativeMethods.WsExToolWindow | WsExNoActivate;
+        extendedStyle |= NativeMethods.WsExToolWindow | WsExNoActivate | WsExNoParentNotify;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
         NativeMethods.SetParent(hwnd, desktopParent);
         NormalizeDesktopSurfaceStyles(hwnd);
@@ -245,8 +246,11 @@ public static class DesktopWindowTools
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlStyle, new IntPtr(expectedStyle));
 
         var extendedStyle = NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GwlExStyle).ToInt64();
+        // WS_EX_NOPARENTNOTIFY: USER32 otherwise sends WM_PARENTNOTIFY
+        // synchronously to this surface's Explorer parent on every button press,
+        // so a busy Explorer desktop thread stalls CrabDesk's own input.
         var expectedExtendedStyle = (extendedStyle & ~NativeMethods.WsExTransparent) |
-            NativeMethods.WsExToolWindow | WsExNoActivate;
+            NativeMethods.WsExToolWindow | WsExNoActivate | WsExNoParentNotify;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(expectedExtendedStyle));
         NativeMethods.SetWindowPos(
             hwnd,

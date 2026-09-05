@@ -55,6 +55,26 @@ internal sealed class DesktopRenameEditor : Forms.Form
         }
     }
 
+    protected override void WndProc(ref Forms.Message message)
+    {
+        var diagnosticMessage = message.Msg;
+        var diagnosticStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            base.WndProc(ref message);
+        }
+        finally
+        {
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(diagnosticStarted);
+            if (elapsed.TotalMilliseconds >= 100)
+            {
+                DiagnosticLog.Info(
+                    $"Slow rename window message msg=0x{diagnosticMessage:X4} " +
+                    $"elapsedMs={elapsed.TotalMilliseconds:0}");
+            }
+        }
+    }
+
     internal bool IsActive => _completion is not null && !_finished;
 
     internal Task<string?> ShowAsync(
@@ -96,7 +116,13 @@ internal sealed class DesktopRenameEditor : Forms.Form
         _input.Focus();
         DiagnosticLog.Info(
             $"Rename editor shown requested={requestedBounds} actual={Bounds} dpi={DeviceDpi} wrap={wordWrap}");
+        var selectStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         SelectStem(initialText, selectNameStem);
+        var selectElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(selectStarted);
+        if (selectElapsed.TotalMilliseconds >= 100)
+        {
+            DiagnosticLog.Info($"Rename editor selection timing elapsedMs={selectElapsed.TotalMilliseconds:0}");
+        }
         return _completion.Task;
     }
 

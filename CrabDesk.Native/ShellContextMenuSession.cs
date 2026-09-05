@@ -5,7 +5,11 @@ namespace CrabDesk.Native;
 public enum ShellContextMenuCommand
 {
     None,
-    Rename
+    Rename,
+    Copy,
+    Cut,
+    Paste,
+    Delete
 }
 
 [Flags]
@@ -38,6 +42,21 @@ public sealed class ShellContextMenuSession : IDisposable
     private readonly IContextMenu2? _contextMenu2;
     private readonly IContextMenu3? _contextMenu3;
     private bool _disposed;
+
+    // Shell verbs the replacement desktop performs itself. Going through
+    // IContextMenu::InvokeCommand hands the operation to Explorer and every
+    // installed shell hook, which costs seconds on a machine with security
+    // software attached and raises Explorer's own collision and confirmation
+    // prompts. The managed equivalents are immediate, silent, and resolve a
+    // name collision with the "_2" suffix.
+    private static readonly Dictionary<string, ShellContextMenuCommand> InterceptedCanonicalVerbs =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["copy"] = ShellContextMenuCommand.Copy,
+        ["cut"] = ShellContextMenuCommand.Cut,
+        ["paste"] = ShellContextMenuCommand.Paste,
+        ["delete"] = ShellContextMenuCommand.Delete
+    };
 
     private static readonly HashSet<string> FileMutationCanonicalVerbs = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -190,6 +209,7 @@ public sealed class ShellContextMenuSession : IDisposable
         int screenX,
         int screenY,
         bool interceptRename = false,
+        bool interceptFileOperations = false,
         ShellContextMenuRestrictions restrictions = ShellContextMenuRestrictions.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -253,6 +273,12 @@ public sealed class ShellContextMenuSession : IDisposable
                 string.Equals(canonicalVerb, "rename", StringComparison.OrdinalIgnoreCase))
             {
                 return ShellContextMenuCommand.Rename;
+            }
+            if (interceptFileOperations &&
+                canonicalVerb is not null &&
+                InterceptedCanonicalVerbs.TryGetValue(canonicalVerb, out var fileOperation))
+            {
+                return fileOperation;
             }
 
             var commandOffsetPointer = new IntPtr(commandOffset);

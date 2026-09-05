@@ -431,7 +431,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 screenPoint.X,
                 screenPoint.Y,
                 canRename,
-                box.MappedFolder?.IsReadOnly == true
+                restrictions: box.MappedFolder?.IsReadOnly == true
                     ? ShellContextMenuRestrictions.BlockFileMutations
                     : ShellContextMenuRestrictions.None);
         }

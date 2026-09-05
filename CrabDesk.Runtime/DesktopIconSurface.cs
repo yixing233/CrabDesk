@@ -46,6 +46,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private const int WmContextMenu = 0x007B;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
+    private const int WsExNoParentNotify = 0x00000004;
     private const float DefaultIconSize = 48;
     private const float DefaultHorizontalSpacing = 88;
     private const float DefaultVerticalSpacing = 96;
@@ -65,6 +66,10 @@ internal sealed class DesktopIconSurface : Forms.Form
     private readonly List<DesktopIconGeometry> _items = [];
     private readonly HashSet<string> _selection = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectionBase = new(StringComparer.OrdinalIgnoreCase);
+    // Where a Shift+click range starts. Set by every plain or Ctrl click and
+    // deliberately left alone by Shift itself, so repeated Shift+clicks keep
+    // re-extending from the same item instead of growing one cell at a time.
+    private string? _selectionAnchorKey;
     private readonly HashSet<string> _dragItemKeys = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyDictionary<string, RectangleF>? _desktopDragInitialVisualBounds;
     private GridCell? _boxDropTargetCell;
@@ -73,8 +78,12 @@ internal sealed class DesktopIconSurface : Forms.Form
     private readonly Dictionary<string, RectangleF> _expandedItemHitBounds = new(StringComparer.OrdinalIgnoreCase);
     // The shell provider owns and may evict its cached bitmaps. Keep copies
     // here because this full-surface renderer can reuse an icon across frames.
-    private readonly Dictionary<(string ParsingName, int PixelSize), Bitmap> _desktopIconCache = [];
-    private readonly HashSet<(string ParsingName, int PixelSize)> _pendingDesktopIconLoads = [];
+    private readonly Dictionary<(string ParsingName, int PixelSize, long ModifiedTicks), Bitmap> _desktopIconCache = [];
+    private readonly HashSet<(string ParsingName, int PixelSize, long ModifiedTicks)> _pendingDesktopIconLoads = [];
+    // A full desktop can contain hundreds of Shell items. Loading all of them
+    // concurrently makes their delayed completions flood the UI message queue.
+    // Keep only a small number of Shell calls in flight on each monitor.
+    private readonly SemaphoreSlim _desktopIconLoadGate = new(2, 2);
     private readonly CancellationTokenSource _desktopIconLoadCancellation = new();
     private int _desktopIconCacheVersion;
     private readonly HashSet<string> _boxDropItemKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -224,13 +233,21 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             var parameters = base.CreateParams;
             parameters.Style &= ~WsClipSiblings;
-            parameters.ExStyle |= WsExLayered;
+            // Without this, USER32 sends WM_PARENTNOTIFY synchronously up
+            // Explorer's desktop window chain on every button press in this
+            // child, so a busy Explorer stalls CrabDesk's own input handling.
+            parameters.ExStyle |= WsExLayered | WsExNoParentNotify;
             return parameters;
         }
     }
 
     protected override void WndProc(ref Forms.Message message)
     {
+        var diagnosticMessage = message.Msg;
+        var diagnosticStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        using var watchdogScope = UiThreadWatchdog.EnterWindowMessage("icon window", diagnosticMessage);
+        try
+        {
         if (_shellContextMenu?.TryHandleMessage(
                 message.Msg,
                 message.WParam,
@@ -251,6 +268,17 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
         base.WndProc(ref message);
+        }
+        finally
+        {
+            var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(diagnosticStarted);
+            if (elapsed.TotalMilliseconds >= 100)
+            {
+                DiagnosticLog.Info(
+                    $"Slow icon window message monitor={_monitor.Id} " +
+                    $"msg=0x{diagnosticMessage:X4} elapsedMs={elapsed.TotalMilliseconds:0}");
+            }
+        }
     }
 
     protected override void OnPaintBackground(Forms.PaintEventArgs eventArgs)
@@ -325,10 +353,11 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal bool RefreshWorkspace()
     {
-        ClearDesktopIconCache();
         _geometryDirty = true;
         _dragBaseReady = false;
-        return PresentLayer();
+        var presented = PresentLayer();
+        PruneDesktopIconCache();
+        return presented;
     }
 
     internal bool RefreshReleasedItems(IReadOnlyCollection<string> releasedItemKeys)
@@ -707,6 +736,9 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
 
+        var diagnosticStarted = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
         _boxVisualRenderPending = false;
         if (_pendingDesktopReleaseInitialVisualBounds is not null && IsDragCompositeActive)
         {
@@ -733,7 +765,19 @@ internal sealed class DesktopIconSurface : Forms.Form
                 settledVisualBounds,
                 releasedItemKeys,
                 dirtyBounds);
-            var partialPresentSucceeded = releaseDirtyBounds.Count > 0;
+            // An empty dirty region means none of the changed items render on
+            // this monitor and its remaining icons kept their cells, so the
+            // layer already matches the new snapshot. Presenting it anyway
+            // would repaint a whole monitor for a change that never reached it.
+            if (releaseDirtyBounds.Count == 0)
+            {
+                DiagnosticLog.Info(
+                    $"Desktop change left monitor={_monitor.Id} unchanged " +
+                    $"items={releasedItemKeys.Length}");
+                return;
+            }
+
+            var partialPresentSucceeded = true;
             foreach (var releaseBounds in releaseDirtyBounds)
             {
                 if (PresentSettledPartialFrame(releaseBounds))
@@ -764,6 +808,13 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (dirtyBounds is not { } bounds || !PresentSettledPartialFrame(bounds))
         {
             PresentLayer();
+        }
+        }
+        finally
+        {
+            DiagnosticLog.Info(
+                $"Queued box visual timing monitor={_monitor.Id} " +
+                $"elapsedMs={diagnosticStarted.ElapsedMilliseconds}");
         }
     }
 
@@ -968,6 +1019,10 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal void ClearSelection()
     {
+        // The anchor belongs to this surface's selection, so it dies with it —
+        // including when another surface took the selection over and there is
+        // nothing left here to clear.
+        _selectionAnchorKey = null;
         if (_selection.Count == 0)
         {
             return;
@@ -2150,7 +2205,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     {
         _items.Clear();
         _expandedItemHitBounds.Clear();
-        var desktopViewState = DesktopIconPositionService.GetDesktopViewState();
+        var desktopViewState = DesktopIconPositionService.GetCachedDesktopViewState();
         SynchronizeNativeMetrics(desktopViewState);
         var connectedMonitorIds = _runtime.Monitors
             .Select(monitor => monitor.Id)
@@ -2171,7 +2226,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         var occupiedCells = new HashSet<GridCell>();
         var placedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var useStoredLayout = !desktopViewState.AutoArrange &&
-            !_runtime.IsDesktopSortCommandPending;
+            !_runtime.IsDesktopResortPending;
         var storedLayout = useStoredLayout
             ? _runtime.State.DesktopIconLayout
             : new Dictionary<string, DesktopIconLayoutSnapshot>(StringComparer.OrdinalIgnoreCase);
@@ -2236,9 +2291,10 @@ internal sealed class DesktopIconSurface : Forms.Form
                 storedCell));
         }
 
-        // Newly created desktop entries fill the next vacant grid cell. They
-        // are then captured in the layout below, so later refreshes do not
-        // reorder items simply because the active sort property still exists.
+        // Newly created desktop entries fill the next vacant grid cell. They are
+        // then captured in the layout below, so a rebuild triggered by anything
+        // other than a sort or an explicit Refresh — a file appearing, a monitor
+        // change, a repaint — leaves the icons the user arranged where they are.
         foreach (var item in OrderDesktopItems(
                      desktopItems.Where(item => !placedKeys.Contains(item.Key.ToString())).ToArray(),
                      desktopViewState.Sort))
@@ -2668,7 +2724,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private Bitmap? GetDesktopIconBitmap(DesktopItemRef item, int pixelSize)
     {
-        var key = (item.ParsingName, pixelSize);
+        var key = CreateDesktopIconCacheKey(item, pixelSize);
         if (_desktopIconCache.TryGetValue(key, out var cached))
         {
             return cached;
@@ -2686,17 +2742,25 @@ internal sealed class DesktopIconSurface : Forms.Form
     }
 
     private async Task LoadDesktopIconAsync(
-        (string ParsingName, int PixelSize) key,
+        (string ParsingName, int PixelSize, long ModifiedTicks) key,
         int cacheVersion)
     {
         Bitmap? bitmap = null;
         try
         {
-            bitmap = await Task.Run(() =>
+            await _desktopIconLoadGate.WaitAsync(_desktopIconLoadCancellation.Token).ConfigureAwait(false);
+            try
             {
-                var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
-                return source is null ? null : new Bitmap(source);
-            }, _desktopIconLoadCancellation.Token).ConfigureAwait(false);
+                bitmap = await Task.Run(() =>
+                {
+                    var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
+                    return source is null ? null : new Bitmap(source);
+                }, _desktopIconLoadCancellation.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _desktopIconLoadGate.Release();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -2724,7 +2788,9 @@ internal sealed class DesktopIconSurface : Forms.Form
                     return;
                 }
                 _pendingDesktopIconLoads.Remove(key);
-                if (bitmap is null || _desktopIconCache.ContainsKey(key))
+                var isStillVisible = _items.Any(item =>
+                    CreateDesktopIconCacheKey(item.Item, key.PixelSize) == key);
+                if (bitmap is null || !isStillVisible || _desktopIconCache.ContainsKey(key))
                 {
                     bitmap?.Dispose();
                     return;
@@ -2746,6 +2812,24 @@ internal sealed class DesktopIconSurface : Forms.Form
         catch (InvalidOperationException)
         {
             bitmap?.Dispose();
+        }
+    }
+
+    private static (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(
+        DesktopItemRef item,
+        int pixelSize) =>
+        (item.ParsingName, pixelSize, item.ModifiedAt?.UtcDateTime.Ticks ?? 0);
+
+    private void PruneDesktopIconCache()
+    {
+        var pixelSize = Math.Clamp((int)Math.Round(_iconSize * _scale), 16, 256);
+        var activeKeys = _items
+            .Select(item => CreateDesktopIconCacheKey(item.Item, pixelSize))
+            .ToHashSet();
+        foreach (var key in _desktopIconCache.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
+        {
+            _desktopIconCache[key].Dispose();
+            _desktopIconCache.Remove(key);
         }
     }
 
@@ -3022,6 +3106,18 @@ internal sealed class DesktopIconSurface : Forms.Form
         return graphics.MeasureString(displayName, font, new SizeF(width, 100_000), format).Height + 2;
     }
 
+    /// <summary>
+    /// The keys of this monitor's icons in the desktop's reading order. The grid
+    /// fills top to bottom before moving right, so the sequence is column-major.
+    /// <see cref="_items"/> cannot supply it directly: <see cref="RebuildGeometry"/>
+    /// appends items with a stored cell first and auto-placed ones afterwards.
+    /// </summary>
+    private IReadOnlyList<string> GetReadingOrderKeys() => _items
+        .OrderBy(item => item.Cell.Column)
+        .ThenBy(item => item.Cell.Row)
+        .Select(item => item.Key)
+        .ToArray();
+
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
         // A click on the desktop while an inline rename is open commits the
@@ -3093,7 +3189,10 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         if (item is null)
         {
-            var additive = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+            // Shift behaves like Ctrl for a rubber band: an empty-space drag
+            // must not throw away the range the user just built with Shift.
+            var additive = (Forms.Control.ModifierKeys &
+                (Forms.Keys.Control | Forms.Keys.Shift)) != 0;
             _runtime.PrepareDesktopSelection(
                 this,
                 DesktopSelectionPolicy.PreserveExistingSelection(
@@ -3108,6 +3207,7 @@ internal sealed class DesktopIconSurface : Forms.Form
             else
             {
                 _selection.Clear();
+                _selectionAnchorKey = null;
             }
             _pressedItem = null;
             _dragStarted = false;
@@ -3125,13 +3225,53 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         var itemKey = item.Item.Key.ToString();
         var controlPressed = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+        var shiftPressed = (Forms.Control.ModifierKeys & Forms.Keys.Shift) != 0;
         var targetAlreadySelected = _selection.Contains(itemKey);
+        if (shiftPressed)
+        {
+            var range = DesktopSelectionPolicy.BuildRangeSelectionKeys(
+                GetReadingOrderKeys(),
+                _selectionAnchorKey,
+                itemKey);
+            if (range.Count > 0)
+            {
+                _runtime.PrepareDesktopSelection(
+                    this,
+                    DesktopSelectionPolicy.PreserveExistingSelection(
+                        DesktopSelectionGesture.RangeItem,
+                        controlPressed,
+                        targetAlreadySelected));
+                if (!controlPressed)
+                {
+                    _selection.Clear();
+                }
+                foreach (var rangeKey in range)
+                {
+                    _selection.Add(rangeKey);
+                }
+                _selectionBase.Clear();
+                _pressedItem = item.Item;
+                _pressPoint = point;
+                _dragStarted = false;
+                _selecting = false;
+                Capture = true;
+                DiagnosticLog.Verbose(
+                    $"Desktop range selection monitor={_monitor.Id} span={range.Count} " +
+                    $"extend={controlPressed} selected={_selection.Count}");
+                PresentLayer();
+                return;
+            }
+        }
+
         _runtime.PrepareDesktopSelection(
             this,
             DesktopSelectionPolicy.PreserveExistingSelection(
                 DesktopSelectionGesture.PrimaryItem,
                 controlPressed,
                 targetAlreadySelected));
+        // Every press that is not a range extension becomes the next anchor,
+        // Ctrl+click included, matching how the shell moves focus.
+        _selectionAnchorKey = itemKey;
         if (controlPressed && targetAlreadySelected)
         {
             _selection.Remove(itemKey);
@@ -4440,8 +4580,9 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         try
         {
+            var deletedPaths = items.Select(item => item.FileSystemPath!).ToArray();
             await _runtime.FileOperations.DeleteAsync(items);
-            await _runtime.RefreshItemsAsync(false);
+            await _runtime.RefreshAfterDesktopItemsDeletedAsync(deletedPaths);
         }
         catch (Exception exception)
         {
@@ -4775,7 +4916,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                     : DesktopItemKind.File
             }).ToArray();
             await _runtime.FileOperations.DeleteAsync(items);
-            await _runtime.RefreshItemsAsync(applyDesktopRules: false);
+            await _runtime.RefreshAfterDesktopItemsDeletedAsync(paths);
         }
         catch (Exception exception)
         {
@@ -5144,7 +5285,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         // same metrics makes its grid align with the selected desktop icon
         // size and lets Ctrl+wheel update the visual layer immediately.
         var nativeIconSize = desktopViewState.IconSize ?? (int)DefaultIconSize;
-        if (DesktopIconPositionService.TryGetItemSpacing(_desktopListView, out var nativeSpacing))
+        if (DesktopIconPositionService.TryGetCachedItemSpacing(_desktopListView, out var nativeSpacing))
         {
             _lastKnownNativeSpacing = nativeSpacing;
         }

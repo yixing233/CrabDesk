@@ -29,6 +29,11 @@ public sealed class CrabDeskRuntime : IDisposable
     // in its sort-pending state for this short interval so a saved manual
     // layout cannot win the first redraw.
     private static readonly TimeSpan DesktopSortCommandMinimumWait = TimeSpan.FromMilliseconds(160);
+    // How long a file operation CrabDesk performed itself stays recognizable in
+    // the watcher notifications it causes. Those notifications arrive a quarter
+    // second after each write, and a slow clipboard owner or a large selection
+    // can delay the operation well past its own start.
+    private static readonly TimeSpan TargetedDesktopRefreshWindow = TimeSpan.FromSeconds(10);
     private readonly Action<Action> _beginInvoke;
     private readonly ILayoutStore _layoutStore = new JsonLayoutStore();
     private readonly IMonitorTopologyService _monitorService = new MonitorTopologyService();
@@ -45,6 +50,7 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly IUpdateService _updateService = new GitHubUpdateService();
     private readonly ShellIconProvider _iconProvider = new();
     private readonly RuntimeTimer _hostTimer;
+    private readonly RuntimeTimer _uiHeartbeatTimer;
     private readonly RuntimeTimer _saveTimer;
     private readonly RuntimeTimer _desktopZoomTimer;
     private readonly RuntimeTimer _desktopViewRefreshTimer;
@@ -52,6 +58,15 @@ public sealed class CrabDeskRuntime : IDisposable
     private readonly SemaphoreSlim _saveLock = new(1, 1);
     private readonly SemaphoreSlim _mappedRefreshLock = new(1, 1);
     private readonly SemaphoreSlim _updateLock = new(1, 1);
+
+    /// <summary>
+    /// Serializes paste operations. A queued burst of Ctrl+V — which is what a
+    /// UI-thread stall flushes once it recovers — would otherwise start several
+    /// pastes that interleave at their awaits, each running a clipboard COM read
+    /// and a full desktop enumeration, turning one hiccup into a cascade.
+    /// Serializing rather than dropping keeps every paste the user asked for.
+    /// </summary>
+    private readonly SemaphoreSlim _pasteGate = new(1, 1);
     private readonly AiOrganizationOperationGate _aiOrganizationGate = new();
     private readonly CancellationTokenSource _updateCancellation = new();
     private readonly Dictionary<Guid, MappedFolderSnapshot> _mappedFolderSnapshots = [];
@@ -86,44 +101,75 @@ public sealed class CrabDeskRuntime : IDisposable
     private bool _desktopMenuRefreshInProgress;
     private bool _desktopSortCommandPending;
     private DateTimeOffset? _desktopSortCommandReadyAt;
+    // Set only for the rebuild an explicit Refresh performs. It is kept apart
+    // from _desktopSortCommandPending so neither path can consume the other's
+    // one-shot redraw when both land in the same message pump turn.
+    private bool _desktopRefreshResortPending;
     private readonly object _boxDragWheelGate = new();
     private int _pendingBoxDragWheelDelta;
     private Point _pendingBoxDragWheelPoint;
     private bool _boxDragWheelDispatchQueued;
+    private long _lastUiHeartbeatTimestamp;
+    private RuntimeTimerLatency _lastUiHeartbeatLatency;
 
     public CrabDeskRuntime(Action<Action> beginInvoke)
     {
         _beginInvoke = beginInvoke;
+        UiThreadWatchdog.Start();
         _hostTimer = new RuntimeTimer(
             TimeSpan.FromSeconds(2),
             true,
             beginInvoke,
-            () => OnHostTimer(null, EventArgs.Empty));
+            () => OnHostTimer(null, EventArgs.Empty),
+            "host timer");
+        _uiHeartbeatTimer = new RuntimeTimer(
+            TimeSpan.FromMilliseconds(250),
+            true,
+            beginInvoke,
+            OnUiHeartbeat,
+            "ui heartbeat",
+            latency => _lastUiHeartbeatLatency = latency);
         _saveTimer = new RuntimeTimer(
             TimeSpan.FromMilliseconds(350),
             false,
             beginInvoke,
-            () => OnSaveTimer(null, EventArgs.Empty));
+            () => OnSaveTimer(null, EventArgs.Empty),
+            "autosave");
         _desktopZoomTimer = new RuntimeTimer(
             TimeSpan.FromMilliseconds(250),
             false,
             beginInvoke,
-            SynchronizeDesktopIconZoom);
+            SynchronizeDesktopIconZoom,
+            "desktop zoom sync");
         _desktopViewRefreshTimer = new RuntimeTimer(
             DesktopViewRefreshInterval,
             false,
             beginInvoke,
-            SynchronizeExplorerDesktopView);
+            SynchronizeExplorerDesktopView,
+            "explorer view sync");
         _desktopMenuRefreshTimer = new RuntimeTimer(
             DesktopMenuRefreshDelay,
             false,
             beginInvoke,
-            RefreshAfterDesktopMenuCommandAsync);
-        _itemProvider.ItemsChanged += (sender, args) => _beginInvoke(() => OnDesktopItemsChanged(sender, args));
-        _mappedFolderProvider.ItemsChanged += (_, _) => _beginInvoke(async () => await RefreshMappedFoldersAsync());
+            RefreshAfterDesktopMenuCommandAsync,
+            "menu refresh");
+        _itemProvider.ItemsChanged += (sender, args) =>
+            BeginInvoke("desktop items changed", () => OnDesktopItemsChanged(sender, args));
+        _mappedFolderProvider.ItemsChanged += (_, _) =>
+            BeginInvoke("mapped folder refresh", async () => await RefreshMappedFoldersAsync());
         _hotkeyService.Pressed += OnGlobalHotkeyPressed;
         _aiOrganizationGate.Changed += (_, _) => Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// Dispatches <paramref name="action"/> to the UI thread with a watchdog
+    /// breadcrumb, so a stall report can name the work that is still running.
+    /// </summary>
+    private void BeginInvoke(string name, Action action) => _beginInvoke(() =>
+    {
+        using var scope = UiThreadWatchdog.Enter(name);
+        action();
+    });
 
     public event EventHandler? Changed;
     public event EventHandler<ShowSettingsRequestedEventArgs>? ShowSettingsRequested;
@@ -291,7 +337,7 @@ public sealed class CrabDeskRuntime : IDisposable
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
         _desktopHost.Refresh();
         EnsureDesktopInput("startup");
-        var initialDesktopViewState = DesktopIconPositionService.GetDesktopViewState();
+        var initialDesktopViewState = await Task.Run(ReadInitialDesktopShellState);
         _desktopSortSignature = initialDesktopViewState.Signature;
         _desktopSortState = initialDesktopViewState.Sort;
         _desktopAutoArrange = initialDesktopViewState.AutoArrange;
@@ -323,12 +369,32 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         _hostTimer.Start();
+        _lastUiHeartbeatTimestamp = Stopwatch.GetTimestamp();
+        _uiHeartbeatTimer.Start();
         ScheduleSave();
         if (State.Settings.Updates.CheckOnStartup)
         {
             _ = CheckForUpdatesAsync(false);
         }
         DiagnosticLog.Info($"Runtime initialization completed paused={IsPaused} monitors={Monitors.Count} items={Items.Count}");
+    }
+
+    private DesktopIconViewState ReadInitialDesktopShellState()
+    {
+        var viewState = DesktopIconPositionService.GetDesktopViewState();
+        const int spacingAttempts = 3;
+        for (var attempt = 0; attempt < spacingAttempts; attempt++)
+        {
+            if (DesktopIconPositionService.TryGetItemSpacing(_desktopHost.DesktopListView, out _))
+            {
+                break;
+            }
+            if (attempt + 1 < spacingAttempts)
+            {
+                Thread.Sleep(100);
+            }
+        }
+        return viewState;
     }
 
     public IReadOnlyList<DesktopItemRef> GetItemsForBox(Guid boxId)
@@ -472,10 +538,16 @@ public sealed class CrabDeskRuntime : IDisposable
     internal IReadOnlyList<DesktopItemRef> GetUnassignedDesktopItems() =>
         Items.Where(item => !State.Assignments.ContainsKey(item.Key.ToString())).ToArray();
 
+    // Read while a surface rebuilds its grid, so it uses the shared short-lived
+    // view snapshot instead of crossing into Explorer again for every rebuild.
     internal bool IsDesktopAutoArrangeEnabled =>
-        DesktopIconPositionService.GetDesktopViewState().AutoArrange;
+        DesktopIconPositionService.GetCachedDesktopViewState().AutoArrange;
 
-    internal bool IsDesktopSortCommandPending => _desktopSortCommandPending;
+    // True while a geometry rebuild must ignore the persisted manual grid and
+    // lay every icon out in Explorer's active sort order: once after a native
+    // Sort by command, and for the rebuild an explicit Refresh performs.
+    internal bool IsDesktopResortPending =>
+        _desktopSortCommandPending || _desktopRefreshResortPending;
 
     internal bool TryDropDesktopItemsIntoBox(
         System.Drawing.Point screenPoint,
@@ -948,7 +1020,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
         if (notify)
         {
-            NotifyWorkspaceChanged(true);
+            NotifyDesktopItemsAssignedToBox(boxId, assignedKeys);
         }
         return assignedKeys.Count;
     }
@@ -996,6 +1068,15 @@ public sealed class CrabDeskRuntime : IDisposable
         NotifyBoxItemsChanged(boxId);
     }
 
+    // Assigning desktop items to a box changes that box and the desktop cells
+    // the items vacated. Refresh exactly those instead of rebuilding every
+    // surface, which repaints all monitors and reloads their icon caches.
+    private void NotifyDesktopItemsAssignedToBox(
+        Guid boxId,
+        IReadOnlyCollection<string> itemKeys) =>
+        NotifyTargetedWorkspaceChangedOrRefresh(manager =>
+            manager.RefreshDesktopItemsAssigned(boxId, itemKeys));
+
     private void NotifyBoxItemsChanged(Guid boxId) =>
         NotifyTargetedWorkspaceChanged(manager => manager.RefreshBoxItems(boxId));
 
@@ -1004,6 +1085,40 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void NotifyBoxAdded(Guid boxId) =>
         NotifyTargetedWorkspaceChanged(manager => manager.RefreshBoxAdded(boxId));
+
+    // A targeted refresh that reports it repainted nothing has left the
+    // surfaces stale, so it falls back to the full pass. The fallback keeps the
+    // narrow paths honest: they can be precise without risking a missing icon.
+    private void NotifyTargetedWorkspaceChangedOrRefresh(Func<DesktopSurfaceManager, bool> refresh)
+    {
+        var diagnosticStarted = Stopwatch.StartNew();
+        var refreshed = false;
+        _workspaceRevision++;
+        try
+        {
+            if (_surfaceManager is not null)
+            {
+                refreshed = refresh(_surfaceManager);
+                if (!refreshed)
+                {
+                    _surfaceManager.Refresh();
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Targeted desktop surface refresh failed after a workspace change", exception);
+        }
+        var refreshElapsed = diagnosticStarted.ElapsedMilliseconds;
+        var changedStarted = Stopwatch.StartNew();
+        Changed?.Invoke(this, EventArgs.Empty);
+        var changedElapsed = changedStarted.ElapsedMilliseconds;
+        ScheduleSave();
+        DiagnosticLog.Info(
+            "Paste-path timing " +
+            $"refreshMs={refreshElapsed} changedMs={changedElapsed} totalMs={diagnosticStarted.ElapsedMilliseconds} " +
+            $"targeted={refreshed}");
+    }
 
     private void NotifyTargetedWorkspaceChanged(Action<DesktopSurfaceManager> refresh)
     {
@@ -1056,6 +1171,111 @@ public sealed class CrabDeskRuntime : IDisposable
         }
 
         NotifyWorkspaceChanged(true);
+    }
+
+    // A paste adds a known set of files, so the desktop only repaints the cells
+    // those items occupy. An imported path that cannot be matched to a desktop
+    // item leaves the affected cells unknown, so that case still refreshes all.
+    private void NotifyDesktopItemsAdded(IReadOnlyCollection<string> importedPaths)
+    {
+        var addedKeys = ResolveDesktopItemKeys(importedPaths);
+        if (addedKeys.Count != importedPaths.Count)
+        {
+            NotifyWorkspaceChanged(true);
+            return;
+        }
+
+        // A stored assignment can already claim an imported file (a stable file
+        // key is reused after its previous owner is gone), and such an item
+        // joins that box instead of taking a desktop cell.
+        var assignedBoxIds = addedKeys
+            .Select(key => State.Assignments.TryGetValue(key, out var boxId) ? (Guid?)boxId : null)
+            .OfType<Guid>()
+            .ToHashSet();
+        var desktopKeys = addedKeys
+            .Where(key => !State.Assignments.ContainsKey(key))
+            .ToArray();
+        NotifyTargetedWorkspaceChangedOrRefresh(manager =>
+        {
+            var refreshedDesktop = desktopKeys.Length == 0 ||
+                manager.RefreshDesktopItemsAdded(desktopKeys);
+            var refreshedBoxes = assignedBoxIds.Count == 0 ||
+                manager.RefreshBoxItems(assignedBoxIds);
+            return refreshedDesktop && refreshedBoxes;
+        });
+    }
+
+    // A deletion only vacates the cells its items occupied and the boxes that
+    // held them, so the surfaces repaint exactly those instead of rebuilding
+    // every monitor. Registering the paths lets the watcher notification that
+    // follows be reconciled against the new snapshot rather than triggering a
+    // second full pass a quarter second later.
+    internal async Task RefreshAfterDesktopItemsDeletedAsync(IEnumerable<string> deletedPaths)
+    {
+        var paths = deletedPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        RegisterTargetedDesktopRefresh(paths);
+        var removedKeys = ResolveDesktopItemKeys(paths);
+        var changedBoxIds = removedKeys
+            .Select(key => State.Assignments.TryGetValue(key, out var boxId) ? (Guid?)boxId : null)
+            .OfType<Guid>()
+            .ToHashSet();
+        // A mapped box mirrors a real folder instead of the desktop, so its
+        // deleted items are absent from the desktop snapshot and are matched by
+        // path against the snapshot taken before the delete.
+        foreach (var box in State.Boxes.Where(box => box.IsMappedFolder))
+        {
+            if (GetMappedFolderSnapshot(box.Id)?.Items.Any(item =>
+                    item.FileSystemPath is not null &&
+                    paths.Contains(Path.GetFullPath(item.FileSystemPath))) == true)
+            {
+                changedBoxIds.Add(box.Id);
+            }
+        }
+        var removedDesktopKeys = removedKeys
+            .Where(key => !State.Assignments.ContainsKey(key))
+            .ToArray();
+        await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
+        // A path that no surface was rendering (an external file dragged onto
+        // the Recycle Bin) leaves every surface exactly as it was.
+        if (removedKeys.Count == 0 && changedBoxIds.Count == 0)
+        {
+            DiagnosticLog.Info($"Desktop deletion left every surface unchanged paths={paths.Count}");
+            return;
+        }
+
+        var refreshedDesktop = removedDesktopKeys.Length == 0 ||
+            _surfaceManager?.RefreshDesktopItemsRemoved(removedDesktopKeys) == true;
+        var refreshedBoxes = changedBoxIds.Count == 0 ||
+            _surfaceManager?.RefreshBoxItems(changedBoxIds) == true;
+        if (refreshedDesktop && refreshedBoxes)
+        {
+            DiagnosticLog.Info(
+                "Desktop deletion refreshed without a full pass " +
+                $"removed={removedDesktopKeys.Length} boxes={changedBoxIds.Count}");
+            return;
+        }
+
+        _surfaceManager?.Refresh();
+    }
+
+    private IReadOnlyCollection<string> ResolveDesktopItemKeys(IEnumerable<string> paths)
+    {
+        var itemsByPath = Items
+            .Where(item => item.FileSystemPath is not null)
+            .GroupBy(item => Path.GetFullPath(item.FileSystemPath!), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            if (itemsByPath.TryGetValue(Path.GetFullPath(path), out var item))
+            {
+                keys.Add(item.Key.ToString());
+            }
+        }
+        return keys;
     }
 
     /// <summary>
@@ -1128,9 +1348,16 @@ public sealed class CrabDeskRuntime : IDisposable
                 _targetedDesktopRefreshPaths.Add(Path.GetFullPath(path));
             }
         }
-        _targetedDesktopRefreshExpiresAt = DateTimeOffset.Now.AddSeconds(2);
+        _targetedDesktopRefreshExpiresAt = DateTimeOffset.Now + TargetedDesktopRefreshWindow;
     }
 
+    /// <summary>
+    /// Reports whether a watcher notification describes a change CrabDesk is
+    /// making itself, so it can be reconciled against the new snapshot instead
+    /// of rebuilding every surface. A match extends the window: copying a large
+    /// selection produces a cascade of notifications, and the operation is
+    /// still the owner of the last one even when it outran the initial window.
+    /// </summary>
     internal bool ShouldSuppressTargetedDesktopRefresh(string path)
     {
         if (DateTimeOffset.Now > _targetedDesktopRefreshExpiresAt)
@@ -1138,7 +1365,14 @@ public sealed class CrabDeskRuntime : IDisposable
             _targetedDesktopRefreshPaths.Clear();
             return false;
         }
-        return _targetedDesktopRefreshPaths.Any(target => PathsOverlapForTargetedDesktopRefresh(target, path));
+        if (!_targetedDesktopRefreshPaths.Any(target =>
+                PathsOverlapForTargetedDesktopRefresh(target, path)))
+        {
+            return false;
+        }
+
+        _targetedDesktopRefreshExpiresAt = DateTimeOffset.Now + TargetedDesktopRefreshWindow;
+        return true;
     }
 
     internal async Task RefreshItemsSnapshotAsync(bool applyDesktopRules = false)
@@ -1455,21 +1689,44 @@ public sealed class CrabDeskRuntime : IDisposable
         bool move,
         Guid? targetTabId = null)
     {
+        var diagnosticStarted = Stopwatch.StartNew();
         var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var imported = await _fileOperations.ImportAsync(paths, desktop, move);
+        var sourcePaths = paths.ToArray();
+        RegisterTargetedDesktopRefresh(sourcePaths);
+        var imported = await _fileOperations.ImportAsync(sourcePaths, desktop, move);
+        var importElapsed = diagnosticStarted.ElapsedMilliseconds;
         if (imported.SucceededCount == 0)
         {
+            DiagnosticLog.Info($"Box paste stages importMs={importElapsed} succeeded=0");
             return imported;
         }
 
+        RegisterTargetedDesktopRefresh(imported.ImportedPaths);
         await RefreshItemsCoreAsync(refreshSurfaces: false);
+        var refreshElapsed = diagnosticStarted.ElapsedMilliseconds - importElapsed;
         var importedSet = imported.ImportedPaths.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var assignedKeys = new List<string>();
         foreach (var item in Items.Where(item => item.FileSystemPath is not null && importedSet.Contains(Path.GetFullPath(item.FileSystemPath))))
         {
             State.Assignments[item.Key.ToString()] = boxId;
             MoveItemOrderKey(item.Key.ToString(), boxId, targetTabId: targetTabId);
+            assignedKeys.Add(item.Key.ToString());
         }
-        NotifyWorkspaceChanged(true);
+        // Every imported file was assigned, so only the box changed. An
+        // unmatched import would still be a plain desktop icon and needs the
+        // full surface pass to appear.
+        if (assignedKeys.Count == imported.SucceededCount)
+        {
+            NotifyBoxItemsChanged(boxId);
+        }
+        else
+        {
+            NotifyWorkspaceChanged(true);
+        }
+        DiagnosticLog.Info(
+            $"Box paste stages importMs={importElapsed} refreshMs={refreshElapsed} " +
+            $"assignMs={diagnosticStarted.ElapsedMilliseconds - importElapsed - refreshElapsed} " +
+            $"totalMs={diagnosticStarted.ElapsedMilliseconds}");
         return imported;
     }
 
@@ -1564,8 +1821,16 @@ public sealed class CrabDeskRuntime : IDisposable
         var result = await _fileOperations.ImportAsync(paths, destinationFolderPath, !isMove);
         if (isMove && result.ImportedPaths.Count > 0)
         {
+            var movedSources = result.SuccessfulItems
+                .Select(item => Path.GetFullPath(item.SourcePath))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var movedItemKeys = items
+                .Where(item => item.FileSystemPath is not null &&
+                    movedSources.Contains(Path.GetFullPath(item.FileSystemPath)))
+                .Select(item => item.Key.ToString())
+                .ToArray();
             await RefreshItemsCoreAsync(refreshSurfaces: false);
-            _surfaceManager?.RefreshDesktopItemsRemoved(result.ImportedPaths);
+            _surfaceManager?.RefreshDesktopItemsRemoved(movedItemKeys);
             Changed?.Invoke(this, EventArgs.Empty);
             ScheduleSave();
         }
@@ -1677,7 +1942,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         try
         {
-            return _fileOperations.GetClipboardFiles().HasFiles;
+            return _fileOperations.HasClipboardFiles();
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
@@ -1687,13 +1952,16 @@ public sealed class CrabDeskRuntime : IDisposable
 
     /// <summary>
     /// Reports whether the clipboard currently holds files that can be pasted
-    /// onto the replacement desktop surface.
+    /// onto the replacement desktop surface. Only the offered formats are
+    /// inspected: the low-level keyboard hook asks this before it consumes
+    /// Ctrl+V, and reading the data object itself waits for the process that
+    /// owns the clipboard while all system input stays queued behind the hook.
     /// </summary>
     public bool CanPasteToDesktop()
     {
         try
         {
-            return _fileOperations.GetClipboardFiles().HasFiles;
+            return _fileOperations.HasClipboardFiles();
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
@@ -1708,7 +1976,20 @@ public sealed class CrabDeskRuntime : IDisposable
     /// </summary>
     public async Task<FileImportBatchResult> PasteToDesktopAsync()
     {
-        var clipboard = _fileOperations.GetClipboardFiles();
+        await _pasteGate.WaitAsync();
+        try
+        {
+            return await PasteToDesktopCoreAsync();
+        }
+        finally
+        {
+            _pasteGate.Release();
+        }
+    }
+
+    private async Task<FileImportBatchResult> PasteToDesktopCoreAsync()
+    {
+        var clipboard = await _fileOperations.GetClipboardFilesAsync();
         if (!clipboard.HasFiles)
         {
             return FileImportBatchResult.Empty;
@@ -1729,13 +2010,14 @@ public sealed class CrabDeskRuntime : IDisposable
         if (imported.SucceededCount > 0)
         {
             RegisterTargetedDesktopRefresh(imported.ImportedPaths);
-            await RefreshItemsCoreAsync(refreshSurfaces: true, applyDesktopRules: false);
+            await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
+            NotifyDesktopItemsAdded(imported.ImportedPaths);
         }
         if (clipboard.Move &&
             imported.FailedCount == 0 &&
             imported.SucceededCount == paths.Length)
         {
-            _fileOperations.ClearClipboardFiles();
+            await _fileOperations.ClearClipboardFilesAsync();
         }
         return imported;
     }
@@ -1747,12 +2029,27 @@ public sealed class CrabDeskRuntime : IDisposable
     /// </summary>
     public async Task<BoxPasteResult> PasteIntoBoxAsync(Guid boxId, Guid? targetTabId = null)
     {
+        await _pasteGate.WaitAsync();
+        try
+        {
+            return await PasteIntoBoxCoreAsync(boxId, targetTabId);
+        }
+        finally
+        {
+            _pasteGate.Release();
+        }
+    }
+
+    private async Task<BoxPasteResult> PasteIntoBoxCoreAsync(Guid boxId, Guid? targetTabId)
+    {
+        var diagnosticStarted = Stopwatch.StartNew();
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
         if (box.MappedFolder?.IsReadOnly == true)
         {
             throw new InvalidOperationException("此映射盒子已设为只读。");
         }
-        var clipboard = _fileOperations.GetClipboardFiles();
+        var clipboard = await _fileOperations.GetClipboardFilesAsync();
+        var clipboardElapsed = diagnosticStarted.ElapsedMilliseconds;
         if (!clipboard.HasFiles)
         {
             return new BoxPasteResult(0, FileImportBatchResult.Empty);
@@ -1776,7 +2073,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 mappedImport.FailedCount == 0 &&
                 mappedImport.SucceededCount == mappedPaths.Length)
             {
-                _fileOperations.ClearClipboardFiles();
+                await _fileOperations.ClearClipboardFilesAsync();
             }
             return new BoxPasteResult(mappedImport.SucceededCount, mappedImport);
         }
@@ -1814,13 +2111,17 @@ public sealed class CrabDeskRuntime : IDisposable
             assigned += imported.SucceededCount;
             if (imported.SucceededCount == 0 && assignedKeys.Count > 0)
             {
-                NotifyWorkspaceChanged(true);
+                NotifyDesktopItemsAssignedToBox(boxId, assignedKeys);
             }
         }
+        DiagnosticLog.Info(
+            $"Box paste outer stages clipboardMs={clipboardElapsed} " +
+            $"afterClipboardMs={diagnosticStarted.ElapsedMilliseconds - clipboardElapsed} " +
+            $"totalMs={diagnosticStarted.ElapsedMilliseconds}");
         if (clipboard.Move &&
             assignedKeys.Count + imported.SucceededCount == clipboard.Paths.Count)
         {
-            _fileOperations.ClearClipboardFiles();
+            await _fileOperations.ClearClipboardFilesAsync();
         }
         return new BoxPasteResult(assigned, imported);
     }
@@ -1876,7 +2177,9 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private async Task RefreshItemsCoreAsync(bool refreshSurfaces = true, bool applyDesktopRules = true)
     {
+        var diagnosticStarted = Stopwatch.StartNew();
         var items = await _itemProvider.EnumerateAsync();
+        var enumerateElapsed = diagnosticStarted.ElapsedMilliseconds;
         // A failed or degraded enumeration (Explorer restart, cloud placeholder
         // lock, permission transition) must not wipe the persisted grouping or
         // make every desktop item disappear. Keep the previous snapshot when
@@ -1891,7 +2194,9 @@ public sealed class CrabDeskRuntime : IDisposable
         Items = State.Settings.ShowSystemItems
             ? items
             : items.Where(item => !item.IsSystem || State.Assignments.ContainsKey(item.Key.ToString())).ToArray();
+        var modelElapsed = diagnosticStarted.ElapsedMilliseconds - enumerateElapsed;
         await RefreshMappedFoldersAsync(false);
+        var mappedElapsed = diagnosticStarted.ElapsedMilliseconds - enumerateElapsed - modelElapsed;
         if (applyDesktopRules && State.Organization.Enabled && State.Organization.RunOnDesktopChanges)
         {
             ApplyOrganizationRules(false);
@@ -1902,6 +2207,10 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
+        DiagnosticLog.Info(
+            $"Refresh items stages enumerateMs={enumerateElapsed} modelMs={modelElapsed} " +
+            $"mappedMs={mappedElapsed} tailMs={diagnosticStarted.ElapsedMilliseconds - enumerateElapsed - modelElapsed - mappedElapsed} " +
+            $"totalMs={diagnosticStarted.ElapsedMilliseconds}");
     }
 
     public async Task RefreshItemsAsync(bool applyDesktopRules = true)
@@ -3443,6 +3752,7 @@ public sealed class CrabDeskRuntime : IDisposable
         DiagnosticLog.Info(
             "Runtime disposal started\n" + Environment.StackTrace);
         _hostTimer.Stop();
+        _uiHeartbeatTimer.Stop();
         _saveTimer.Stop();
         _desktopZoomTimer.Stop();
         _desktopViewRefreshTimer.Stop();
@@ -3496,9 +3806,11 @@ public sealed class CrabDeskRuntime : IDisposable
         SaveNowAsync().GetAwaiter().GetResult();
         _saveLock.Dispose();
         _mappedRefreshLock.Dispose();
+        _pasteGate.Dispose();
         _desktopZoomTimer.Dispose();
         _desktopViewRefreshTimer.Dispose();
         _desktopMenuRefreshTimer.Dispose();
+        _uiHeartbeatTimer.Dispose();
         DiagnosticLog.Info("Runtime disposal completed");
     }
 
@@ -3962,7 +4274,41 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 await RefreshMappedFoldersAsync();
             }
-            var hostChanged = _desktopHost.Refresh();
+            // Explorer is still publishing Shell notifications for a file
+            // operation CrabDesk just completed. Probing and potentially
+            // rebuilding its child-window host during that interval can race
+            // the Shell's own desktop refresh.
+            if (DateTimeOffset.Now <= _targetedDesktopRefreshExpiresAt)
+            {
+                return;
+            }
+            var probeStarted = Stopwatch.StartNew();
+            var healthSnapshot = await Task.Run(() =>
+            {
+                var nativeProbe = Stopwatch.StartNew();
+                var host = DesktopHostService.Probe();
+                var systemIconVisibilitySignature =
+                    DesktopItemProvider.GetSystemDesktopIconVisibilitySignature();
+                var monitors = _monitorService.GetMonitors();
+                return (
+                    Host: host,
+                    SystemIconVisibilitySignature: systemIconVisibilitySignature,
+                    Monitors: monitors,
+                    NativeMs: nativeProbe.ElapsedMilliseconds);
+            });
+            if (probeStarted.ElapsedMilliseconds >= 100)
+            {
+                // nativeMs is the probe itself. Anything beyond it is pool
+                // queueing plus the wait for the UI thread to resume this await,
+                // so only nativeMs indicts Explorer.
+                DiagnosticLog.Info(
+                    $"Host health probe timing elapsedMs={probeStarted.ElapsedMilliseconds} " +
+                    $"nativeMs={healthSnapshot.NativeMs}");
+            }
+            // The background probe is immutable. Apply all three related
+            // handles together on the UI thread so surfaces never observe a
+            // partially updated Explorer host.
+            var hostChanged = _desktopHost.Apply(healthSnapshot.Host);
             if (hostChanged)
             {
                 DiagnosticLog.Info(
@@ -3975,10 +4321,11 @@ public sealed class CrabDeskRuntime : IDisposable
             {
                 _desktopInputMonitor.DesktopListView = _desktopHost.DesktopListView;
             }
-            var desktopViewChanged = CaptureDesktopViewState(
-                DesktopIconPositionService.GetDesktopViewState());
-            var systemIconVisibilitySignature =
-                DesktopItemProvider.GetSystemDesktopIconVisibilitySignature();
+            // Sort, zoom, and visibility synchronization is armed by the
+            // corresponding desktop input events. The health tick must not poll
+            // Explorer's automation view while it is processing file changes.
+            var desktopViewChanged = false;
+            var systemIconVisibilitySignature = healthSnapshot.SystemIconVisibilitySignature;
             var systemIconVisibilityChanged = !string.Equals(
                 _desktopSystemIconVisibilitySignature,
                 systemIconVisibilitySignature,
@@ -3989,7 +4336,7 @@ public sealed class CrabDeskRuntime : IDisposable
                 await RefreshItemsAsync(false);
                 DiagnosticLog.Info("Windows desktop system-icon visibility synchronized.");
             }
-            var monitors = _monitorService.GetMonitors();
+            var monitors = healthSnapshot.Monitors;
             var topologyChanged = !monitors.Select(monitor =>
                     $"{monitor.Id}:{monitor.PixelBounds}:{monitor.PixelWorkArea}:{monitor.DpiScale}")
                 .SequenceEqual(Monitors.Select(monitor =>
@@ -4028,6 +4375,30 @@ public sealed class CrabDeskRuntime : IDisposable
         finally
         {
             _hostCheckInProgress = false;
+        }
+    }
+
+    private void OnUiHeartbeat()
+    {
+        UiThreadWatchdog.ReportAlive();
+        var now = Stopwatch.GetTimestamp();
+        var previous = Interlocked.Exchange(ref _lastUiHeartbeatTimestamp, now);
+        if (previous == 0)
+        {
+            return;
+        }
+
+        var elapsed = Stopwatch.GetElapsedTime(previous, now);
+        if (elapsed >= TimeSpan.FromMilliseconds(750))
+        {
+            // poolIntervalMs isolates thread-pool starvation; dispatchMs is the
+            // time this tick spent queued for the UI thread and is the only one
+            // of the two that means the UI thread itself was blocked.
+            var latency = _lastUiHeartbeatLatency;
+            DiagnosticLog.Info(
+                $"UI heartbeat delayed elapsedMs={elapsed.TotalMilliseconds:0} " +
+                $"poolIntervalMs={latency.PoolIntervalMs:0} " +
+                $"dispatchMs={latency.DispatchMs:0}");
         }
     }
 
@@ -4073,7 +4444,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void OnGlobalHotkeyPressed(object? sender, GlobalHotkeyPressedEventArgs eventArgs)
     {
-        _beginInvoke(() =>
+        BeginInvoke("global hotkey", () =>
         {
             try
             {
@@ -4116,8 +4487,11 @@ public sealed class CrabDeskRuntime : IDisposable
             !_disposed && !IsPaused && _surfaceManager?.CanDeleteSelectedItems == true;
         _desktopInputMonitor.CanRenameDesktopItems = () =>
             !_disposed && !IsPaused && _surfaceManager?.CanRenameSelectedItem == true;
+        // Answered on the input hook's thread while the key event waits, so
+        // the manager's cheap interception check is used here. The precise
+        // check runs in ExecuteDesktopKeyboardCommandAsync on the UI thread.
         _desktopInputMonitor.CanHandleDesktopKeyboardCommand = command =>
-            !_disposed && !IsPaused && _surfaceManager?.CanHandleDesktopKeyboardCommand(command) == true;
+            !_disposed && !IsPaused && _surfaceManager?.CanInterceptDesktopKeyboardCommand(command) == true;
         _desktopInputMonitor.Enabled = true;
     }
 
@@ -4126,7 +4500,7 @@ public sealed class CrabDeskRuntime : IDisposable
         // The low-level hook can run outside the UI thread; route the zoom
         // through the captured synchronization context like the other hook
         // originated handlers.
-        _beginInvoke(() =>
+        BeginInvoke("desktop icon zoom", () =>
         {
             if (_disposed || IsPaused)
             {
@@ -4168,7 +4542,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
         try
         {
-            _beginInvoke(DispatchBoxDragMouseWheel);
+            BeginInvoke("box drag wheel", DispatchBoxDragMouseWheel);
         }
         catch
         {
@@ -4203,7 +4577,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void OnDesktopSurfaceClicked(object? sender, EventArgs eventArgs)
     {
-        _beginInvoke(() =>
+        BeginInvoke("desktop surface click", () =>
         {
             // The low-level hook can observe the same button-down before the
             // icon surface's WinForms handler starts capture. Let that handler
@@ -4219,12 +4593,12 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void OnDesktopDeleteRequested(object? sender, EventArgs eventArgs)
     {
-        _beginInvoke(() => _ = DeleteSelectedDesktopItemsAsync());
+        BeginInvoke("desktop delete", () => _ = DeleteSelectedDesktopItemsAsync());
     }
 
     private void OnDesktopRenameRequested(object? sender, EventArgs eventArgs)
     {
-        _beginInvoke(() =>
+        BeginInvoke("desktop rename", () =>
         {
             if (_disposed || IsPaused)
             {
@@ -4239,7 +4613,9 @@ public sealed class CrabDeskRuntime : IDisposable
         object? sender,
         DesktopKeyboardCommandEventArgs eventArgs)
     {
-        _beginInvoke(() => _ = ExecuteDesktopKeyboardCommandAsync(eventArgs.Command));
+        BeginInvoke(
+            $"desktop keyboard command {eventArgs.Command}",
+            () => _ = ExecuteDesktopKeyboardCommandAsync(eventArgs.Command));
     }
 
     private async Task ExecuteDesktopKeyboardCommandAsync(DesktopKeyboardCommand command)
@@ -4281,7 +4657,7 @@ public sealed class CrabDeskRuntime : IDisposable
         // Explorer commits a native context-menu command only after the menu
         // closes. Poll briefly after the request so a chosen sort mode reaches
         // the replacement icon layer without waiting for the host health tick.
-        _beginInvoke(() =>
+        BeginInvoke("desktop context menu opened", () =>
         {
             if (_disposed || IsPaused)
             {
@@ -4308,7 +4684,7 @@ public sealed class CrabDeskRuntime : IDisposable
         // A sort item can be selected repeatedly without changing Explorer's
         // SortColumns signature. Clear the saved grid before the command is
         // applied so the next redraw is still a one-time native sort.
-        _beginInvoke(() =>
+        BeginInvoke("desktop menu command", () =>
         {
             if (_disposed || IsPaused)
             {
@@ -4326,22 +4702,34 @@ public sealed class CrabDeskRuntime : IDisposable
 
     private void OnDesktopContextMenuRefreshRequested(object? sender, EventArgs eventArgs)
     {
-        _beginInvoke(() =>
+        BeginInvoke("desktop menu refresh request", () =>
         {
             if (_disposed || IsPaused)
             {
                 return;
             }
 
-            // A Refresh command leaves Explorer's sort, size, and visibility
-            // state unchanged, so the normal context-menu synchronization has
-            // no change token to act on. Defer briefly so Explorer completes
-            // its command, then refresh the replacement icon layer directly.
-            _desktopMenuRefreshPending = true;
-            _desktopViewRefreshDeadline = null;
-            _desktopViewRefreshTimer.Stop();
-            _desktopMenuRefreshTimer.Start();
+            RequestDesktopRefresh();
         });
+    }
+
+    /// <summary>
+    /// Queues the refresh that both the desktop context menu's Refresh item and
+    /// F5 ask for. Must be called on the UI thread.
+    /// </summary>
+    /// <remarks>
+    /// A Refresh command leaves Explorer's sort, size, and visibility state
+    /// unchanged, so the normal context-menu synchronization has no change token
+    /// to act on. The short delay lets Explorer finish its own command first,
+    /// and coalesces a burst — a held F5, a double-taken menu click — into one
+    /// pass over the replacement icon layer.
+    /// </remarks>
+    internal void RequestDesktopRefresh()
+    {
+        _desktopMenuRefreshPending = true;
+        _desktopViewRefreshDeadline = null;
+        _desktopViewRefreshTimer.Stop();
+        _desktopMenuRefreshTimer.Start();
     }
 
     private async void RefreshAfterDesktopMenuCommandAsync()
@@ -4363,10 +4751,21 @@ public sealed class CrabDeskRuntime : IDisposable
 
         _desktopMenuRefreshPending = false;
         _desktopMenuRefreshInProgress = true;
+        // A Refresh re-places every icon in the order Explorer currently sorts
+        // by, the same way a Sort by command does. Dropping the persisted grid
+        // before the rebuild is what restarts the sequence from the first cell;
+        // the pending flag makes the icon surfaces ignore the saved grid for
+        // the rebuild RefreshItemsAsync performs, after which they persist the
+        // new cells as the manual layout again.
+        var sortState = _desktopSortState;
+        _desktopRefreshResortPending = true;
+        ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
         try
         {
             await RefreshItemsAsync(false);
-            DiagnosticLog.Info($"Explorer desktop refresh synchronized items={Items.Count}");
+            DiagnosticLog.Info(
+                $"Explorer desktop refresh synchronized items={Items.Count} " +
+                $"resorted mode={sortState.Mode} descending={sortState.Descending}");
         }
         catch (Exception exception)
         {
@@ -4374,6 +4773,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         finally
         {
+            _desktopRefreshResortPending = false;
             _desktopMenuRefreshInProgress = false;
             if (_desktopMenuRefreshPending && !_disposed && !IsPaused)
             {
@@ -4382,23 +4782,35 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void SynchronizeDesktopIconZoom()
+    private async void SynchronizeDesktopIconZoom()
     {
         if (_disposed)
         {
             return;
         }
 
-        var desktopViewState = DesktopIconPositionService.GetDesktopViewState();
+        var shellState = await Task.Run(() =>
+        {
+            var desktopViewState = DesktopIconPositionService.GetDesktopViewState();
+            var hasSpacing = DesktopIconPositionService.TryGetItemSpacing(
+                _desktopHost.DesktopListView,
+                out var spacing);
+            return (DesktopViewState: desktopViewState, HasSpacing: hasSpacing, Spacing: spacing);
+        });
+        if (_disposed)
+        {
+            return;
+        }
+        var desktopViewState = shellState.DesktopViewState;
         if (desktopViewState.IconSize is not { } nativeIconSize)
         {
             return;
         }
 
         var viewChanged = CaptureDesktopViewState(desktopViewState);
-        var spacing = DesktopIconPositionService.GetItemSpacing(_desktopHost.DesktopListView);
         DiagnosticLog.Info(
-            $"Desktop icon zoom synchronized size={nativeIconSize} spacing={spacing.Width}x{spacing.Height}");
+            $"Desktop icon zoom synchronized size={nativeIconSize} " +
+            $"spacing={(shellState.HasSpacing ? $"{shellState.Spacing.Width}x{shellState.Spacing.Height}" : "unchanged")}");
         // Desktop icon zoom belongs to Explorer's unassigned-icon layer. Box
         // icon sizes remain an explicit per-box appearance setting.
         if (!TryApplyPendingDesktopSort(viewChanged) && !_desktopSortCommandPending)
@@ -4407,7 +4819,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void SynchronizeExplorerDesktopView()
+    private async void SynchronizeExplorerDesktopView()
     {
         if (_disposed || IsPaused)
         {
@@ -4417,7 +4829,13 @@ public sealed class CrabDeskRuntime : IDisposable
 
         try
         {
-            var viewChanged = CaptureDesktopViewState(DesktopIconPositionService.GetDesktopViewState());
+            var desktopViewState = await Task.Run(DesktopIconPositionService.GetDesktopViewState);
+            if (_disposed || IsPaused)
+            {
+                _desktopViewRefreshDeadline = null;
+                return;
+            }
+            var viewChanged = CaptureDesktopViewState(desktopViewState);
             if (TryApplyPendingDesktopSort(viewChanged))
             {
                 return;
@@ -4536,7 +4954,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
 
-        _beginInvoke(() => ApplyTheme(true));
+        BeginInvoke("system theme changed", () => ApplyTheme(true));
     }
 
     private void OnPowerModeChanged(object sender, Microsoft.Win32.PowerModeChangedEventArgs eventArgs)
@@ -4547,7 +4965,7 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         if (eventArgs.Mode == Microsoft.Win32.PowerModes.Suspend)
         {
-            _beginInvoke(async () =>
+            BeginInvoke("power suspend", async () =>
             {
                 if (_disposed)
                 {
@@ -4562,7 +4980,7 @@ public sealed class CrabDeskRuntime : IDisposable
             return;
         }
 
-        _beginInvoke(async () =>
+        BeginInvoke("power resume", async () =>
         {
             await Task.Delay(1200);
             if (_disposed)
@@ -4695,9 +5113,11 @@ public sealed class CrabDeskRuntime : IDisposable
     private async void OnSaveTimer(object? sender, EventArgs eventArgs)
     {
         _saveTimer.Stop();
+        var diagnosticStarted = Stopwatch.StartNew();
         try
         {
             await SaveNowAsync();
+            DiagnosticLog.Info($"Autosave timing elapsedMs={diagnosticStarted.ElapsedMilliseconds}");
         }
         catch (Exception exception)
         {
@@ -5055,6 +5475,14 @@ public sealed class CrabDeskRuntime : IDisposable
         }
         try
         {
+            if (!realtimeOrganization &&
+                eventArgs is FileSystemEventArgs ownedArgs &&
+                ShouldSuppressTargetedDesktopRefresh(ownedArgs.FullPath))
+            {
+                await RefreshDesktopItemsAfterOwnedChangeAsync();
+                return;
+            }
+
             await RefreshItemsAsync();
         }
         catch (Exception exception)
@@ -5062,6 +5490,79 @@ public sealed class CrabDeskRuntime : IDisposable
             DiagnosticLog.Error("Desktop item refresh failed", exception);
         }
     }
+
+    // Reconciles the snapshot after a change CrabDesk performed itself. The
+    // operation already repainted its own region, so running the full surface
+    // pass here would rebuild every monitor and drop every icon cache a quarter
+    // second after the paste finished. The snapshot is still refreshed, so a
+    // change that slipped in alongside the owned one is not lost: only the
+    // desktop cells and boxes that actually changed are repainted, and anything
+    // this diff cannot express falls back to the full pass.
+    private async Task RefreshDesktopItemsAfterOwnedChangeAsync()
+    {
+        var previous = GetDesktopItemIdentities();
+        var previousAssignments = new Dictionary<string, Guid>(State.Assignments, StringComparer.OrdinalIgnoreCase);
+        await RefreshItemsCoreAsync(refreshSurfaces: false, applyDesktopRules: false);
+        var current = GetDesktopItemIdentities();
+
+        // A stable key survives a rename, so an item that kept its key while
+        // its name or path changed is neither an addition nor a removal and
+        // cannot be expressed as a set of dirty cells.
+        if (current.Any(entry =>
+                previous.TryGetValue(entry.Key, out var previousIdentity) &&
+                !string.Equals(previousIdentity, entry.Value, StringComparison.Ordinal)))
+        {
+            _surfaceManager?.Refresh();
+            return;
+        }
+
+        var addedKeys = current.Keys.Where(key => !previous.ContainsKey(key)).ToArray();
+        var removedKeys = previous.Keys.Where(key => !current.ContainsKey(key)).ToArray();
+        if (addedKeys.Length == 0 && removedKeys.Length == 0)
+        {
+            DiagnosticLog.Info("Desktop change already reflected by the operation that caused it");
+            return;
+        }
+
+        // An item that belongs to a box changes that box, not a desktop cell.
+        var changedBoxIds = addedKeys
+            .Select(key => State.Assignments.TryGetValue(key, out var boxId) ? (Guid?)boxId : null)
+            .Concat(removedKeys.Select(key =>
+                previousAssignments.TryGetValue(key, out var boxId) ? (Guid?)boxId : null))
+            .OfType<Guid>()
+            .ToHashSet();
+        var addedDesktopKeys = addedKeys
+            .Where(key => !State.Assignments.ContainsKey(key))
+            .ToArray();
+        var removedDesktopKeys = removedKeys
+            .Where(key => !previousAssignments.ContainsKey(key))
+            .ToArray();
+
+        DiagnosticLog.Info(
+            "Desktop change reconciled without a full refresh " +
+            $"added={addedDesktopKeys.Length} removed={removedDesktopKeys.Length} boxes={changedBoxIds.Count}");
+        if (changedBoxIds.Count > 0)
+        {
+            _surfaceManager?.RefreshBoxItems(changedBoxIds);
+        }
+        if (removedDesktopKeys.Length > 0)
+        {
+            _surfaceManager?.RefreshDesktopItemsRemoved(removedDesktopKeys);
+        }
+        if (addedDesktopKeys.Length > 0)
+        {
+            _surfaceManager?.RefreshDesktopItemsAdded(addedDesktopKeys);
+        }
+    }
+
+    // "|" cannot appear in a Windows file name, so it safely separates the two
+    // parts of the rename-detection identity.
+    private Dictionary<string, string> GetDesktopItemIdentities() => Items
+        .GroupBy(item => item.Key.ToString(), StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(
+            group => group.Key,
+            group => $"{group.First().DisplayName}|{group.First().FileSystemPath}",
+            StringComparer.OrdinalIgnoreCase);
 
     private void MoveItemOrderKey(string itemKey, Guid? targetBoxId, string? beforeKey = null, Guid? targetTabId = null)
     {

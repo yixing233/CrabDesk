@@ -93,13 +93,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             var key = item.Item.Key.ToString();
             var controlPressed = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+            var shiftPressed = (Forms.Control.ModifierKeys & Forms.Keys.Shift) != 0;
             var targetAlreadySelected = _selection.Contains(key);
+            if (shiftPressed &&
+                _selectionAnchorBoxId == item.Box.Id &&
+                TryApplyRangeSelection(item, key, controlPressed, targetAlreadySelected))
+            {
+                return;
+            }
+
             _runtime.PrepareDesktopSelection(
                 this,
                 DesktopSelectionPolicy.PreserveExistingSelection(
                     DesktopSelectionGesture.PrimaryItem,
                     controlPressed,
                     targetAlreadySelected));
+            // Every press that is not a range extension becomes the next anchor,
+            // Ctrl+click included, matching how the shell moves focus.
+            _selectionAnchorKey = key;
+            _selectionAnchorBoxId = item.Box.Id;
             if (controlPressed && targetAlreadySelected)
             {
                 _selection.Remove(key);
@@ -163,7 +175,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         else if (box.Body.Contains(point))
         {
-            var additive = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
+            // Shift behaves like Ctrl for a rubber band: an empty-space drag
+            // must not throw away the range the user just built with Shift.
+            var additive = (Forms.Control.ModifierKeys &
+                (Forms.Keys.Control | Forms.Keys.Shift)) != 0;
             _runtime.PrepareDesktopSelection(
                 this,
                 DesktopSelectionPolicy.PreserveExistingSelection(
@@ -184,6 +199,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             else
             {
                 _selection.Clear();
+                _selectionAnchorKey = null;
+                _selectionAnchorBoxId = null;
             }
             _dynamicVisualVersion++;
             // Establish the baseline before the first pointer move. The
@@ -201,6 +218,57 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             RequestDragRender();
         }
         Capture = _movingBox is not null || _resizingBox is not null || _selectionBox is not null;
+    }
+
+    /// <summary>
+    /// Extends the selection from the anchor to <paramref name="item"/> inside
+    /// one box. Returns false when the anchor is no longer laid out — filtered
+    /// away by a search, scrolled out of the body, or on another tab — so the
+    /// caller falls back to treating the press as a plain click.
+    /// </summary>
+    private bool TryApplyRangeSelection(
+        ItemGeometry item,
+        string key,
+        bool controlPressed,
+        bool targetAlreadySelected)
+    {
+        // _items already holds each box's visible items in layout order, so the
+        // list order is the reading order the user sees.
+        var orderedKeys = _items
+            .Where(candidate => candidate.Box.Id == item.Box.Id)
+            .Select(candidate => candidate.Item.Key.ToString())
+            .ToArray();
+        var range = DesktopSelectionPolicy.BuildRangeSelectionKeys(
+            orderedKeys,
+            _selectionAnchorKey,
+            key);
+        if (range.Count == 0)
+        {
+            return false;
+        }
+
+        _runtime.PrepareDesktopSelection(
+            this,
+            DesktopSelectionPolicy.PreserveExistingSelection(
+                DesktopSelectionGesture.RangeItem,
+                controlPressed,
+                targetAlreadySelected));
+        if (!controlPressed)
+        {
+            _selection.Clear();
+        }
+        foreach (var rangeKey in range)
+        {
+            _selection.Add(rangeKey);
+        }
+        _pressedItem = item.Item;
+        _pressedBoxId = item.Box.Id;
+        DiagnosticLog.Verbose(
+            $"Box range selection box={item.Box.Id} span={range.Count} " +
+            $"extend={controlPressed} selected={_selection.Count}");
+        Invalidate();
+        RequestItemHoverVisualUpdate();
+        return true;
     }
 
     private void OnMouseMove(object? sender, Forms.MouseEventArgs eventArgs)
@@ -1562,6 +1630,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseWheel(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        // WinForms otherwise forwards WM_MOUSEWHEEL synchronously to this
+        // child window's Explorer parent after raising MouseWheel. Explorer
+        // can take seconds to answer while publishing a pasted file. Mark the
+        // original handled event instead of replaying the native message.
+        if (eventArgs is Forms.HandledMouseEventArgs handledEventArgs)
+        {
+            handledEventArgs.Handled = true;
+        }
         if ((Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
         {
             return;

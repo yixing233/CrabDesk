@@ -135,12 +135,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             await _iconLoadGate.WaitAsync(token).ConfigureAwait(false);
             try
             {
-                var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
-                if (source is not null)
+                bitmap = await Task.Run(() =>
                 {
-                    bitmap = new Bitmap(source);
-                }
-                else if (!_iconLoadRetries.ContainsKey(key))
+                    var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
+                    return source is null ? null : new Bitmap(source);
+                }, token).ConfigureAwait(false);
+                if (bitmap is null && !_iconLoadRetries.ContainsKey(key))
                 {
                     DiagnosticLog.Info(
                         $"Icon load returned no image parsingName={key.ParsingName} pixelSize={key.PixelSize}");

@@ -40,7 +40,14 @@ public enum DesktopKeyboardCommand
     Paste,
     Open,
     Delete,
-    Rename
+    Rename,
+
+    /// <summary>
+    /// F5 on the desktop. Unlike every other command this one needs no
+    /// selection, so surfaces must allow it explicitly rather than fall through
+    /// to their "is anything selected" default.
+    /// </summary>
+    Refresh
 }
 
 public sealed class DesktopKeyboardCommandEventArgs(DesktopKeyboardCommand command) : EventArgs
@@ -125,7 +132,16 @@ public interface IFileOperationService
     Task<FileImportBatchResult> ImportAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool move, CancellationToken cancellationToken = default);
     void SetClipboardFiles(IEnumerable<DesktopItemRef> items, bool move);
     FileClipboardContent GetClipboardFiles();
+    // Reads the file list on a dedicated apartment thread. The clipboard is
+    // owned by whichever process filled it, so the read waits for that process
+    // to answer and must never run on the thread that paints the desktop.
+    Task<FileClipboardContent> GetClipboardFilesAsync(CancellationToken cancellationToken = default);
+    // Answers "is there anything to paste" for the low-level keyboard hook and
+    // for menu enablement. Reading the contents marshals the data object out of
+    // the owning process, so that read must stay off those latency paths.
+    bool HasClipboardFiles();
     void ClearClipboardFiles();
+    Task ClearClipboardFilesAsync(CancellationToken cancellationToken = default);
 }
 
 public interface ILayoutStore

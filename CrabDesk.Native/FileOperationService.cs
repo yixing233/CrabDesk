@@ -182,13 +182,78 @@ public sealed class FileOperationService : IFileOperationService
     public FileClipboardContent GetClipboardFiles() =>
         FileClipboardCodec.Read(Clipboard.GetDataObject());
 
+    /// <summary>
+    /// Reads the clipboard file list without occupying the calling thread. The
+    /// data object belongs to the process that filled the clipboard, so the
+    /// read waits for that process to answer; on the paste path the caller is
+    /// the thread that paints the desktop and cannot afford that wait.
+    /// </summary>
+    public Task<FileClipboardContent> GetClipboardFilesAsync(
+        CancellationToken cancellationToken = default) =>
+        RunOnClipboardApartmentAsync(GetClipboardFiles, cancellationToken);
+
+    /// <summary>
+    /// Reports whether the clipboard offers files without opening it. Reading
+    /// the data object marshals it out of the process that owns the clipboard
+    /// and blocks for as long as that process takes to answer; the offered
+    /// format list is kept by the window manager and costs a single call.
+    /// </summary>
+    public bool HasClipboardFiles() =>
+        NativeMethods.IsClipboardFormatAvailable(NativeMethods.CfHdrop);
+
     public void ClearClipboardFiles()
     {
-        var content = GetClipboardFiles();
-        if (content.HasFiles)
+        if (HasClipboardFiles())
         {
             Clipboard.Clear();
         }
+    }
+
+    /// <summary>
+    /// Clears the clipboard without occupying the calling thread. Taking
+    /// ownership away from another process waits for it exactly as a read does.
+    /// </summary>
+    public Task ClearClipboardFilesAsync(CancellationToken cancellationToken = default) =>
+        RunOnClipboardApartmentAsync<object?>(
+            () =>
+            {
+                ClearClipboardFiles();
+                return null;
+            },
+            cancellationToken);
+
+    /// <summary>
+    /// Runs one clipboard operation on its own short-lived apartment thread.
+    /// OLE clipboard access requires a single-threaded apartment, which thread
+    /// pool threads do not provide, and a thread of its own means a slow
+    /// clipboard owner delays this operation alone.
+    /// </summary>
+    private static Task<TResult> RunOnClipboardApartmentAsync<TResult>(
+        Func<TResult> operation,
+        CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource<TResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.TrySetResult(operation());
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "CrabDesk clipboard access"
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
     }
 
     private static string GetUniqueDestination(string directory, string name)
