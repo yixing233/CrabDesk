@@ -674,11 +674,29 @@ public sealed class LayoutTests
 
     [Theory]
     [InlineData(0, 300)]
-    [InlineData(0.5, 83)]
+    [InlineData(0.5, 125)]
     [InlineData(1, 52)]
-    public void CollapseAnimationUsesClampedEaseOutCubic(double progress, double expected)
+    [InlineData(-0.5, 300)]
+    [InlineData(1.5, 52)]
+    public void CollapseAnimationUsesClampedDeceleratingSine(double progress, double expected)
     {
         Assert.Equal(expected, AnimationMath.Interpolate(300, 52, progress), 0);
+    }
+
+    [Fact]
+    public void TheHeightCurveOpensWithAnOrdinaryStepInsteadOfAJump()
+    {
+        // One frame of a 220 ms animation at the ~15.6 ms the frame clock can
+        // actually deliver. An EaseOutCubic spent nearly twice this much of the
+        // travel on that single frame, which is what made the box look like it
+        // snapped and then crawled.
+        const double firstFrameProgress = 15.6 / 220;
+        var travelled = (300 - AnimationMath.Interpolate(300, 52, firstFrameProgress)) / (300 - 52);
+
+        Assert.InRange(travelled, 0.09, 0.14);
+        Assert.True(
+            travelled < 1 - Math.Pow(1 - firstFrameProgress, 3),
+            "The curve must not front-load the travel the way a cubic ease-out does.");
     }
 
     [Fact]

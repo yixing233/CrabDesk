@@ -1094,9 +1094,9 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(248, 248, 150)]
-    [InlineData(124, 248, 75)]
-    [InlineData(20, 248, 60)]
+    [InlineData(248, 248, 220)]
+    [InlineData(186, 248, 165)]
+    [InlineData(20, 248, 110)]
     public void BoxHeightAnimationUsesResponsiveDistanceScaledTiming(
         double remainingDistance,
         double fullDistance,

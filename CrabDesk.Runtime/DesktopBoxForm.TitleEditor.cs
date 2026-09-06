@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -414,22 +414,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         var hadScrollAnimation = _scrollAnimationKey is not null;
         var scrollCompleted = AdvanceScrollAnimation(requestRender: false);
-        var animatedBoxIds = _heightAnimations.Keys.ToArray();
-        var completedBoxIds = _heightAnimations
-            .Where(pair => Stopwatch.GetElapsedTime(pair.Value.StartedTimestamp) >= pair.Value.Duration)
-            .Select(pair => pair.Key)
-            .ToArray();
-        var completedAnimationBounds = completedBoxIds
-            .Select(id => DesktopBoxes.FirstOrDefault(box => box.Id == id))
-            .Where(box => box is not null)
-            .Select(box => new RectangleF(
-                (float)box!.Bounds.X,
-                (float)box.Bounds.Y,
-                (float)box.Bounds.Width,
-                (float)box.Bounds.Height))
-            .Aggregate((RectangleF?)null, (current, candidate) => current is { } existing
-                ? RectangleF.Union(existing, candidate)
-                : candidate);
+        var animatedBoxIds = _animationFrameBoxIds;
+        var completedBoxIds = _animationFrameCompletedBoxIds;
+        animatedBoxIds.Clear();
+        completedBoxIds.Clear();
+        foreach (var pair in _heightAnimations)
+        {
+            animatedBoxIds.Add(pair.Key);
+            if (Stopwatch.GetElapsedTime(pair.Value.StartedTimestamp) >= pair.Value.Duration)
+            {
+                completedBoxIds.Add(pair.Key);
+            }
+        }
+        RectangleF? completedAnimationBounds = null;
         foreach (var id in completedBoxIds)
         {
             _heightAnimations.Remove(id);
@@ -439,17 +436,29 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 ReleaseHeightAnimationVisualCache(id);
             }
+            if (box is null)
+            {
+                continue;
+            }
+            var settledBounds = new RectangleF(
+                (float)box.Bounds.X,
+                (float)box.Bounds.Y,
+                (float)box.Bounds.Width,
+                (float)box.Bounds.Height);
+            completedAnimationBounds = completedAnimationBounds is { } union
+                ? RectangleF.Union(union, settledBounds)
+                : settledBounds;
         }
         var otherDynamicVisualActive =
             IsTransformActive || _dragStarted || _dropPreview is not null || _selectionBox is not null;
         var animationStillActive = _heightAnimations.Count > 0 || IsScrollAnimationActive;
         var commitCompletionPartially = ShouldCommitCompletedHeightAnimationPartially(
             _isCompositedByIconSurface,
-            completedBoxIds.Length > 0,
+            completedBoxIds.Count > 0,
             animationStillActive,
             otherDynamicVisualActive,
             _iconLayerPartialRenderRequest is not null);
-        if (completedBoxIds.Length > 0 && !commitCompletionPartially)
+        if (completedBoxIds.Count > 0 && !commitCompletionPartially)
         {
             // The shared icon layer caches a settled base that excludes every
             // animated box. When one of multiple overlapping height animations
@@ -457,14 +466,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             // restored while the remaining box continues animating.
             _dynamicVisualVersion++;
         }
-        if (completedBoxIds.Length > 0 && !animationStillActive)
+        if (completedBoxIds.Count > 0 && !animationStillActive)
         {
             _pendingHeightAnimationFrameDirtyBounds = null;
         }
         _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
         if (ShouldRebuildHeightAnimationGeometry(
                 _isCompositedByIconSurface,
-                completedBoxIds.Length > 0))
+                completedBoxIds.Count > 0))
         {
             _geometryDirty = true;
         }
@@ -477,7 +486,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             UpdateWindowRegion();
             RequestLayerRender();
         }
-        else if (completedBoxIds.Length > 0)
+        else if (completedBoxIds.Count > 0)
         {
             UpdateWindowRegion();
             if (commitCompletionPartially && completedAnimationBounds is { } dirtyBounds)
@@ -489,11 +498,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 RequestLayerRender();
             }
         }
-        else if (animatedBoxIds.Length > 0 || hadScrollAnimation)
+        else if (animatedBoxIds.Count > 0 || hadScrollAnimation)
         {
             RequestVisualLayerRender();
         }
-        if (completedBoxIds.Length > 0 || scrollCompleted)
+        if (completedBoxIds.Count > 0 || scrollCompleted)
         {
             RequestHeaderActionVisualUpdate();
         }

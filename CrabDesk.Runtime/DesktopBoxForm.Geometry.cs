@@ -99,7 +99,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
     }
 
-    private void UpdateHeightAnimationGeometry(IEnumerable<Guid> animatedBoxIds)
+    private void UpdateHeightAnimationGeometry(List<Guid> animatedBoxIds)
     {
         if (_geometryDirty)
         {

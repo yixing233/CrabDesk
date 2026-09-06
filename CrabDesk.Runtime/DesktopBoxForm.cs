@@ -35,8 +35,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private const double ScrollEaseExponent = 2.2;
     private const double ScrollWheelStepFraction = 0.75;
     private const int ScrollHoverResumeDelayMilliseconds = 120;
-    private const int BoxHeightAnimationMilliseconds = 150;
-    private const int MinimumBoxHeightAnimationMilliseconds = 60;
+    // Budgeted in frames, not in milliseconds: the frame clock can only deliver
+    // one frame per ~15.6 ms system tick, so 150 ms was a nine-frame animation
+    // at best and a five-frame one at the rate the clock actually ran. 220 ms is
+    // about fourteen frames, which is what makes the travel read as motion
+    // rather than as a few large steps. The floor matters for the same reason:
+    // 60 ms could only ever be four frames, so short distances snapped.
+    private const int BoxHeightAnimationMilliseconds = 220;
+    private const int MinimumBoxHeightAnimationMilliseconds = 110;
     private const int DragRenderCoalesceMilliseconds = 16;
     private const float MappedFolderTabBarHeight = (float)DesktopItemLayoutEngine.TabBarHeight;
     private const int CompactGridLabelLineCount = 2;
@@ -98,6 +104,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly Dictionary<Guid, Guid?> _activeManualTabIds = [];
     private readonly Dictionary<Guid, IReadOnlyList<DesktopItemRef>> _boxItems = [];
     private readonly Dictionary<Guid, BoxHeightAnimation> _heightAnimations = [];
+    // Refilled on every animation frame rather than reallocated. This runs ~64
+    // times a second for as long as a box is moving, and a gen0 collection that
+    // lands inside a 220 ms animation is a dropped frame the user can see.
+    private readonly List<Guid> _animationFrameBoxIds = [];
+    private readonly List<Guid> _animationFrameCompletedBoxIds = [];
     private readonly Dictionary<Guid, BoxHeightVisualCache> _heightAnimationVisualCaches = [];
     private readonly HashSet<Guid> _heightAnimationCacheRequestBoxIds = [];
     private RectangleF? _pendingHeightAnimationFrameDirtyBounds;

@@ -2,15 +2,23 @@ namespace CrabDesk.Core;
 
 public static class AnimationMath
 {
-    public static double EaseOutCubic(double progress)
-    {
-        progress = Math.Clamp(progress, 0, 1);
-        var remaining = 1 - progress;
-        return 1 - remaining * remaining * remaining;
-    }
+    /// <summary>
+    /// Decelerating ease for box height changes. It starts at about 1.6x the
+    /// average speed and settles at zero.
+    /// <para>
+    /// An <c>EaseOutCubic</c> starts at 3x instead, which puts a quarter of the
+    /// whole travel into the very first frame — the box appeared to jump and
+    /// then crawl rather than glide. The cubic tail is also wasteful: it has
+    /// covered 99.9% of the distance with a tenth of the time left, so those
+    /// frames are spent on motion nobody can see. This curve gives the first
+    /// frame an ordinary step and still lands softly.
+    /// </para>
+    /// </summary>
+    public static double EaseOutSine(double progress) =>
+        Math.Sin(Math.Clamp(progress, 0, 1) * Math.PI / 2);
 
     public static double Interpolate(double from, double to, double progress) =>
-        from + (to - from) * EaseOutCubic(progress);
+        from + (to - from) * EaseOutSine(progress);
 
     public static TimeSpan ScaleDurationByDistance(
         double remainingDistance,

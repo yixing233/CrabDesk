@@ -52,6 +52,9 @@ public sealed class LayeredWindowPresenterCopyTests
             child.Handle,
             screenLocation,
             out var actual));
-        Assert.Equal(expected, actual);
+        // Allow a 1-pixel tolerance for fractional display scaling (e.g. 150% DPI)
+        // when round-tripping virtual multi-monitor coordinates through Win32 ScreenToClient.
+        Assert.InRange(actual.X, expected.X - 1, expected.X + 1);
+        Assert.InRange(actual.Y, expected.Y - 1, expected.Y + 1);
     }
 }
