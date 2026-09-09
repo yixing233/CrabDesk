@@ -159,8 +159,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         var titleBounds = CalculateTitleTextBounds(geometry.Header, centered: true);
         var left = ToPixel(titleBounds.X);
-        var availableWidth = Math.Max(ToPixel(48), ToPixel(titleBounds.Width));
-        var minimumWidth = Math.Min(ToPixel(40), availableWidth);
+        var availableWidth = Math.Max(ToPixel(20), ToPixel(titleBounds.Width));
+        var minimumWidth = Math.Min(ToPixel(20), availableWidth);
         var text = string.IsNullOrEmpty(_titleEditor.Text) ? "M" : _titleEditor.Text;
         var measuredWidth = Forms.TextRenderer.MeasureText(
             text,

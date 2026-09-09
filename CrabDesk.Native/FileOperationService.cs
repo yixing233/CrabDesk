@@ -117,7 +117,6 @@ public sealed class FileOperationService : IFileOperationService
         var sources = sourcePaths.ToArray();
         return Task.Run(() =>
         {
-            Directory.CreateDirectory(destinationDirectory);
             var results = new List<FileImportItemResult>(sources.Length);
             foreach (var source in sources)
             {
@@ -125,31 +124,45 @@ public sealed class FileOperationService : IFileOperationService
                 string? destination = null;
                 try
                 {
-                    destination = GetUniqueDestination(destinationDirectory, Path.GetFileName(source));
-                    if (Directory.Exists(source))
+                    var normalizedSource = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+                    if (Directory.Exists(normalizedSource))
+                    {
+                        ValidateDirectoryDestination(normalizedSource, destinationDirectory);
+                    }
+                    Directory.CreateDirectory(destinationDirectory);
+                    destination = GetUniqueDestination(destinationDirectory, Path.GetFileName(normalizedSource));
+                    if (Directory.Exists(normalizedSource))
                     {
                         if (move)
                         {
-                            MoveDirectory(source, destination, cancellationToken);
+                            MoveDirectory(normalizedSource, destination, cancellationToken);
                         }
                         else
                         {
-                            CopyDirectory(source, destination, cancellationToken);
+                            CopyDirectory(normalizedSource, destination, cancellationToken);
                         }
                     }
                     else if (move)
                     {
-                        MoveFile(source, destination);
+                        MoveFile(normalizedSource, destination);
                     }
                     else
                     {
-                        File.Copy(source, destination);
+                        File.Copy(normalizedSource, destination);
                     }
                     results.Add(new FileImportItemResult(source, destination, null));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    if (destination is not null)
+                    {
+                        RemoveIncompleteDestination(destination);
+                    }
                     throw;
+                }
+                catch (SourceRemovalFailedException exception)
+                {
+                    results.Add(new FileImportItemResult(source, null, exception.Message));
                 }
                 catch (Exception exception)
                 {
@@ -300,6 +313,7 @@ public sealed class FileOperationService : IFileOperationService
 
     private static void CopyDirectory(string source, string destination, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destination);
         foreach (var file in Directory.EnumerateFiles(source))
         {
@@ -312,6 +326,42 @@ public sealed class FileOperationService : IFileOperationService
         }
     }
 
+    private static void ValidateDirectoryDestination(string source, string destinationDirectory)
+    {
+        var sourcePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
+        var targetPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destinationDirectory));
+        var sourcePrefix = Path.EndsInDirectorySeparator(sourcePath)
+            ? sourcePath
+            : sourcePath + Path.DirectorySeparatorChar;
+
+        if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase) ||
+            targetPath.StartsWith(sourcePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException("不能将文件夹复制或移动到其自身或子文件夹中。");
+        }
+    }
+
+    private sealed class SourceRemovalFailedException : IOException
+    {
+        public SourceRemovalFailedException(string destination, Exception innerException)
+            : base($"文件已复制到“{destination}”，但删除源文件失败。目标副本已保留。{innerException.Message}", innerException)
+        {
+        }
+    }
+
+    private static void DeleteSourceAfterCopy(Action deleteSource, string destination)
+    {
+        try
+        {
+            deleteSource();
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            throw new SourceRemovalFailedException(destination, exception);
+        }
+    }
+
     private static void MoveDirectory(string source, string destination, CancellationToken cancellationToken)
     {
         if (SameVolume(source, destination))
@@ -321,7 +371,7 @@ public sealed class FileOperationService : IFileOperationService
         }
         CopyDirectory(source, destination, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        Directory.Delete(source, true);
+        DeleteSourceAfterCopy(() => Directory.Delete(source, true), destination);
     }
 
     private static void MoveFile(string source, string destination)
@@ -332,7 +382,7 @@ public sealed class FileOperationService : IFileOperationService
             return;
         }
         File.Copy(source, destination);
-        File.Delete(source);
+        DeleteSourceAfterCopy(() => File.Delete(source), destination);
     }
 
     private static bool SameVolume(string first, string second) =>

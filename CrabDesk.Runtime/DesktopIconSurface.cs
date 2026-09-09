@@ -176,6 +176,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     private int _lastBoxDynamicVersion = int.MinValue;
     private int _lastPresentedParentBoxDynamicVersion = int.MinValue;
     private RectangleF? _lastParentBoxVisualBounds;
+    private RectangleF? _lastDynamicBoxBaseBounds;
     private bool _boxRendererDiagnosticWritten;
 
     internal DesktopIconSurface(
@@ -348,6 +349,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                 ClientSize.Width,
                 ClientSize.Height);
             _dragBaseReady = false;
+            _lastDynamicBoxBaseBounds = null;
         }
     }
 
@@ -543,10 +545,57 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     internal static RectangleF CalculateDynamicBoxFrameDirtyBounds(
         RectangleF? previousBounds,
-        RectangleF currentBounds) =>
-        previousBounds is { } previous
-            ? RectangleF.Union(previous, currentBounds)
-            : currentBounds;
+        RectangleF currentBounds)
+    {
+        var hasPrevious = TryGetVisualBounds(previousBounds, out var previous);
+        var hasCurrent = HasVisualArea(currentBounds);
+
+        if (hasPrevious && hasCurrent)
+        {
+            return RectangleF.Union(previous, currentBounds);
+        }
+
+        if (hasPrevious)
+        {
+            return previous;
+        }
+
+        return currentBounds;
+    }
+
+    private RectangleF? CalculateDynamicBoxBaseDirtyBounds(RectangleF? currentBounds)
+    {
+        if (TryGetVisualBounds(currentBounds, out var current))
+        {
+            return CalculateDynamicBoxFrameDirtyBounds(_lastDynamicBoxBaseBounds, current);
+        }
+
+        return TryGetVisualBounds(_lastDynamicBoxBaseBounds, out var previous)
+            ? previous
+            : null;
+    }
+
+    private void SetDynamicBoxBaseBounds(RectangleF? currentBounds)
+    {
+        _lastDynamicBoxBaseBounds = TryGetVisualBounds(currentBounds, out var bounds)
+            ? bounds
+            : null;
+    }
+
+    private static bool TryGetVisualBounds(RectangleF? candidate, out RectangleF bounds)
+    {
+        if (candidate is { } value && HasVisualArea(value))
+        {
+            bounds = value;
+            return true;
+        }
+
+        bounds = RectangleF.Empty;
+        return false;
+    }
+
+    private static bool HasVisualArea(RectangleF bounds) =>
+        bounds.Width > 0 && bounds.Height > 0;
 
     internal static IReadOnlyList<RectangleF> CalculateDesktopDropDirtyBounds(
         IReadOnlyDictionary<string, RectangleF> before,
@@ -1199,9 +1248,11 @@ internal sealed class DesktopIconSurface : Forms.Form
             var staticFrameChanged = !_dragBaseReady;
             if (staticFrameChanged)
             {
+                var dynamicBounds = _boxDynamicBounds?.Invoke();
+                var dirtyBounds = CalculateDynamicBoxBaseDirtyBounds(dynamicBounds);
                 var preparedPartially = !_selecting &&
-                    _boxDynamicBounds?.Invoke() is { } dynamicBounds &&
-                    TryPrepareDynamicBoxBase(workAreaBounds, dynamicBounds);
+                    dirtyBounds is { } baseDirtyBounds &&
+                    TryPrepareDynamicBoxBase(workAreaBounds, baseDirtyBounds);
                 if (!preparedPartially)
                 {
                     using var baseGraphics = Graphics.FromImage(_staticLayerBitmap!);
@@ -1212,6 +1263,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                         selectedItemKeys: _selecting ? _selectionBase : null,
                         includeSelectionRectangle: !_selecting);
                 }
+                SetDynamicBoxBaseBounds(dynamicBounds);
                 _dragBaseReady = true;
             }
 
@@ -1316,6 +1368,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         _dragBaseReady = false;
         _lastPresentedParentBoxDynamicVersion = int.MinValue;
         _lastParentBoxVisualBounds = null;
+        _lastDynamicBoxBaseBounds = null;
 
         _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
             Handle,
@@ -1506,6 +1559,20 @@ internal sealed class DesktopIconSurface : Forms.Form
     private bool PresentBoxVisualsInParentFallbackFrame(RectangleF workAreaBounds)
     {
         EnsureLayerBitmap();
+        EnsureStaticLayerBitmap();
+        if (!_dragBaseReady)
+        {
+            using var baseGraphics = Graphics.FromImage(_staticLayerBitmap!);
+            DrawSettledLayer(
+                baseGraphics,
+                workAreaBounds,
+                includeBoxDragGhost: false,
+                selectedItemKeys: _selecting ? _selectionBase : null,
+                includeSelectionRectangle: !_selecting);
+            SetDynamicBoxBaseBounds(_boxDynamicBounds?.Invoke());
+            _dragBaseReady = true;
+        }
+
         using (var graphics = Graphics.FromImage(_layerBitmap!))
         {
             graphics.CompositingMode = CompositingMode.SourceCopy;
@@ -1760,6 +1827,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (_lastPresentSucceeded)
         {
             _lastParentBoxVisualBounds = null;
+            _lastDynamicBoxBaseBounds = null;
             _dragOverlay.HideOverlay();
         }
         return _lastPresentSucceeded;
@@ -1768,6 +1836,20 @@ internal sealed class DesktopIconSurface : Forms.Form
     private bool PresentPartialBoxAnimationFallbackFrame(RectangleF workAreaBounds)
     {
         EnsureLayerBitmap();
+        EnsureStaticLayerBitmap();
+        if (!_dragBaseReady)
+        {
+            using var baseGraphics = Graphics.FromImage(_staticLayerBitmap!);
+            DrawSettledLayer(
+                baseGraphics,
+                workAreaBounds,
+                includeBoxDragGhost: false,
+                selectedItemKeys: _selecting ? _selectionBase : null,
+                includeSelectionRectangle: !_selecting);
+            SetDynamicBoxBaseBounds(_boxDynamicBounds?.Invoke());
+            _dragBaseReady = true;
+        }
+
         using (var graphics = Graphics.FromImage(_layerBitmap!))
         {
             graphics.CompositingMode = CompositingMode.SourceCopy;

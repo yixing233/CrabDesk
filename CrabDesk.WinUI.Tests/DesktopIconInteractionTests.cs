@@ -489,6 +489,23 @@ public sealed class DesktopIconInteractionTests
         Assert.Equal(title.Left - header.Left, header.Right - title.Right);
     }
 
+    [Theory]
+    [InlineData(160)]
+    [InlineData(180)]
+    [InlineData(200)]
+    public void NarrowBoxTitleDoesNotOverlapHeaderActions(float boxWidth)
+    {
+        var header = new RectangleF(50, 20, boxWidth, 38);
+        var actions = DesktopBoxForm.CalculateHeaderActionBounds(header);
+
+        var title = DesktopBoxForm.CalculateTitleTextBounds(header, centered: true);
+
+        // Title bounds must never overlap the search button or right buttons
+        Assert.True(title.Left >= actions.Search.Right);
+        Assert.True(title.Right <= actions.AutoExpand.Left);
+        Assert.True(title.Width > 0);
+    }
+
     [Fact]
     public void HeaderActionsAreDistributedAcrossBothSidesOfTitle()
     {
@@ -1548,5 +1565,82 @@ public sealed class DesktopIconInteractionTests
         var bottomGap = menu.ClientSize.Height - menu.Items[^1].Bounds.Bottom;
         Assert.True(topGap >= 6, $"Expected at least 6 px above the first item, got {topGap}.");
         Assert.Equal(topGap, bottomGap);
+    }
+
+    [Fact]
+    public void DynamicBoxFrameDirtyBoundsIncludeCompletedBoxWhenAnotherBoxIsStillAnimating()
+    {
+        // When Box A and Box B were both animating in the previous frame:
+        var boxA = new RectangleF(100, 100, 200, 200);
+        var boxB = new RectangleF(400, 100, 200, 200);
+        var previous = RectangleF.Union(boxA, boxB);
+
+        // In the current frame, Box A has finished animating, and only Box B is still animating:
+        var current = boxB;
+
+        var dirtyBounds = DesktopIconSurface.CalculateDynamicBoxFrameDirtyBounds(previous, current);
+
+        // The dirty bounds for rebuilding the base must include the completed Box A
+        Assert.True(dirtyBounds.Contains(boxA));
+        Assert.True(dirtyBounds.Contains(boxB));
+        Assert.Equal(previous, dirtyBounds);
+    }
+
+    [Fact]
+    public void DynamicBoxFrameDirtyBoundsIncludeLastCompletedBoxWhenAllAnimationsFinish()
+    {
+        var boxB = new RectangleF(400, 100, 200, 200);
+        var dirtyBounds = DesktopIconSurface.CalculateDynamicBoxFrameDirtyBounds(boxB, RectangleF.Empty);
+
+        Assert.Equal(boxB, dirtyBounds);
+    }
+
+    [Fact]
+    public void DesktopIconSurfaceRebuildsDynamicBoxBaseCoveringCompletedBoxesAndGuaranteesValidFallbackBase()
+    {
+        var solutionDir = FindSolutionDirectory();
+        var surfaceSource = File.ReadAllText(Path.Combine(
+            solutionDir,
+            "CrabDesk.Runtime",
+            "DesktopIconSurface.cs"));
+
+        // Verify that dynamic box base preparation incorporates previous visual bounds
+        Assert.Contains(
+            "CalculateDynamicBoxFrameDirtyBounds(",
+            surfaceSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_lastDynamicBoxBaseBounds",
+            surfaceSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TryPrepareDynamicBoxBase(workAreaBounds, baseDirtyBounds)",
+            surfaceSource,
+            StringComparison.Ordinal);
+
+        // Verify fallback frames ensure settled base is valid
+        Assert.Contains(
+            "private bool PresentBoxVisualsInParentFallbackFrame(RectangleF workAreaBounds)",
+            surfaceSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "private bool PresentPartialBoxAnimationFallbackFrame(RectangleF workAreaBounds)",
+            surfaceSource,
+            StringComparison.Ordinal);
+    }
+
+    private static string FindSolutionDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "CrabDesk.sln")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the CrabDesk solution directory.");
     }
 }

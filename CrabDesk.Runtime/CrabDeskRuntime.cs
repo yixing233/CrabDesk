@@ -1818,7 +1818,10 @@ public sealed class CrabDeskRuntime : IDisposable
             .Select(path => path!)
             .ToArray();
         RegisterTargetedDesktopRefresh(paths);
-        var result = await _fileOperations.ImportAsync(paths, destinationFolderPath, !isMove);
+        var result = await _fileOperations.ImportAsync(
+            paths,
+            destinationFolderPath,
+            move: isMove);
         if (isMove && result.ImportedPaths.Count > 0)
         {
             var movedSources = result.SuccessfulItems

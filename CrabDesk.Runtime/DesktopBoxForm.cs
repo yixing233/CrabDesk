@@ -889,14 +889,53 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     internal static RectangleF CalculateTitleTextBounds(RectangleF header, bool centered)
     {
-        const float centeredSideInset = 80;
-        const float leftAlignedInset = 52;
-        const float rightInset = 80;
-        var leftInset = centered ? centeredSideInset : leftAlignedInset;
+        // Calculate the physical forbidden zones defined by header buttons.
+        // Left zone: Search button occupies [header.X + 18, header.X + 44].
+        // Right zone: AutoExpand + Menu occupy [header.Right - 74, header.Right - 18].
+        const float buttonMargin = 6f;
+        var minLeft = header.X + 44f + buttonMargin;
+        var maxRight = header.Right - 74f - buttonMargin;
+
+        if (maxRight <= minLeft)
+        {
+            var fallbackCenter = (minLeft + maxRight) / 2;
+            return new RectangleF(fallbackCenter, header.Y, 0, header.Height);
+        }
+
+        var availableBetweenButtons = maxRight - minLeft;
+
+        if (!centered)
+        {
+            var leftAligned = Math.Max(minLeft, header.X + 52f);
+            return new RectangleF(
+                leftAligned,
+                header.Y,
+                Math.Max(0, maxRight - leftAligned),
+                header.Height);
+        }
+
+        // When centered:
+        // Try box-geometric center first (requires symmetric insets from box edges).
+        var symmetricSideInset = Math.Max(header.Right - maxRight, minLeft - header.X);
+        var symmetricWidth = header.Width - symmetricSideInset * 2;
+
+        // If the box is wide enough to afford symmetric clearance (at least 60px available),
+        // use box-geometric center so it looks perfectly balanced relative to the entire box.
+        if (symmetricWidth >= 60f)
+        {
+            return new RectangleF(
+                header.X + symmetricSideInset,
+                header.Y,
+                symmetricWidth,
+                header.Height);
+        }
+
+        // Otherwise (narrow box, e.g. 2 columns or tight resizing), adapt gracefully:
+        // center the title within the available space between the search button and the right buttons.
         return new RectangleF(
-            header.X + leftInset,
+            minLeft,
             header.Y,
-            Math.Max(0, header.Width - leftInset - rightInset),
+            availableBetweenButtons,
             header.Height);
     }
 

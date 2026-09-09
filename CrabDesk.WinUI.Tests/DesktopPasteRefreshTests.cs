@@ -213,6 +213,22 @@ public sealed class DesktopPasteRefreshTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ImportDesktopItemsIntoFolderPreservesMoveParameterSemantics(bool isMove)
+    {
+        var method = ReadRuntimeMethod(
+            "internal async Task<FileImportBatchResult> ImportDesktopItemsIntoFolderAsync(",
+            "internal async Task ReconcileExternalDesktopMoveAsync(");
+
+        Assert.DoesNotContain("!isMove", method, StringComparison.Ordinal);
+        if (isMove)
+        {
+            Assert.Contains("move: isMove", method, StringComparison.Ordinal);
+        }
+    }
+
     private static string ReadRuntimeMethod(string startAnchor, string endAnchor) =>
         ReadMethod("CrabDeskRuntime.cs", startAnchor, endAnchor);
 
