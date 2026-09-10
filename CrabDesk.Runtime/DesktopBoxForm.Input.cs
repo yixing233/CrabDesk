@@ -951,6 +951,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _hoverTimer.Stop();
         if (_hoverExpansion.NextTransitionAt is not { } due)
         {
+            // An acrylic child spans the monitor, with input clipped to its
+            // boxes. USER32 can keep TME_LEAVE armed when the pointer moves
+            // into a transparent part of that client rectangle. Reconcile
+            // the physical pointer while a standalone box is expanded so
+            // its collapse deadline does not depend on WM_MOUSELEAVE.
+            if (!_isCompositedByIconSurface && _hoverExpansion.ExpandedBoxId is not null)
+            {
+                _hoverTimer.Interval = 50;
+                _hoverTimer.Start();
+            }
             return;
         }
 

@@ -319,6 +319,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 _iconLayerRenderRequest();
                 return;
             }
+            // PresentLayer publishes the foreground and its backdrop bounds together.
+
             UpdateWindowRegion();
             PresentLayer();
             return;

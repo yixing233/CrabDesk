@@ -11,6 +11,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
     private readonly CrabDeskRuntime _runtime;
     private readonly DesktopHostService _host;
     private readonly IntPtr _desktopListView;
+    private readonly IntPtr _iconSurfaceAnchor;
+    private IntPtr _boxSurfaceAnchor;
+    private DesktopAcrylicHost? _acrylicHost;
+    private bool _visible = true;
     private bool _desktopIconViewWasVisible;
     private bool _desktopIconViewHidden;
     private bool _desktopIconsVisible = true;
@@ -18,6 +22,12 @@ internal sealed class DesktopSurfaceManager : IDisposable
     private bool _boxHoverReconcilePending;
 
     internal int SurfaceCount => _surfaces.Count;
+    internal bool AcrylicRequested { get; }
+
+    internal readonly record struct SurfaceVisibility(bool ShowIcons, bool ShowBoxes);
+
+    internal static SurfaceVisibility ResolveVisibility(bool appVisible, bool desktopIconsVisible) =>
+        new(appVisible && desktopIconsVisible, appVisible);
 
     internal DesktopSurfaceManager(
         CrabDeskRuntime runtime,
@@ -25,8 +35,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
         IReadOnlyList<MonitorLayout> monitors)
     {
         _runtime = runtime;
+        AcrylicRequested = runtime.State.Settings.Appearance.UseAcrylicBoxes;
         _host = host;
         _desktopListView = host.DesktopListView;
+        _iconSurfaceAnchor = host.DesktopListView;
+        _boxSurfaceAnchor = host.DesktopListView;
         try
         {
             // A forced process exit can leave Explorer's ListView hidden even
@@ -43,19 +56,45 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     "The Explorer desktop icon view could not be restored before visual takeover.");
             }
 
-            var parentHandle = host.DesktopView;
-            var parentBounds = DesktopWindowTools.GetWindowBounds(parentHandle);
+            var iconParentHandle = host.DesktopView;
+            var boxParentHandle = host.DesktopView;
+            if (runtime.State.Settings.Appearance.UseAcrylicBoxes && DesktopAcrylicHost.IsSupported)
+            {
+                try
+                {
+                    _acrylicHost = new DesktopAcrylicHost(host.DesktopView, monitors);
+                    _acrylicHost.InitializeComposition();
+                    boxParentHandle = _acrylicHost.Handle;
+                    _boxSurfaceAnchor = _acrylicHost.AnchorHandle;
+                    _acrylicHost.EffectsChanged = () =>
+                    {
+                        foreach (var boxSurface in _surfaces)
+                            boxSurface.SetAcrylicBackground(_acrylicHost.EffectsEnabled);
+                        Refresh();
+                    };
+                }
+                catch (Exception exception)
+                {
+                    _acrylicHost?.Dispose();
+                    _acrylicHost = null;
+                    boxParentHandle = host.DesktopView;
+                    _boxSurfaceAnchor = host.DesktopListView;
+                    DiagnosticLog.Error("Acrylic initialization failed; retaining desktop surfaces", exception);
+                }
+            }
+            var iconParentBounds = DesktopWindowTools.GetWindowBounds(iconParentHandle);
+            var boxParentBounds = DesktopWindowTools.GetWindowBounds(boxParentHandle);
             foreach (var monitor in monitors)
             {
                 var iconSurface = new DesktopIconSurface(runtime, monitor, host.DesktopListView);
                 try
                 {
-                    DesktopWindowTools.AttachAsDesktopChild(iconSurface.Handle, parentHandle);
+                    DesktopWindowTools.AttachAsDesktopChild(iconSurface.Handle, iconParentHandle);
                     DesktopWindowTools.PositionAboveDesktop(
                         iconSurface.Handle,
-                        host.DesktopListView,
-                        (int)(monitor.PixelBounds.X - parentBounds.X),
-                        (int)(monitor.PixelBounds.Y - parentBounds.Y),
+                        _iconSurfaceAnchor,
+                        (int)(monitor.PixelBounds.X - iconParentBounds.X),
+                        (int)(monitor.PixelBounds.Y - iconParentBounds.Y),
                         (int)monitor.PixelBounds.Width,
                         (int)monitor.PixelBounds.Height);
                     _iconSurfaces.Add(iconSurface);
@@ -71,13 +110,22 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 var surface = new DesktopBoxForm(runtime, monitor);
                 try
                 {
-                    surface.PrepareIconLayerComposition();
-                    DesktopWindowTools.AttachAsDesktopChild(surface.Handle, parentHandle);
+                    if (_acrylicHost is null)
+                    {
+                        surface.PrepareIconLayerComposition();
+                    }
+                    surface.SetAcrylicBackground(_acrylicHost?.EffectsEnabled == true);
+                    if (_acrylicHost is not null)
+                    {
+                        surface.SetAcrylicFramePresenter((bitmap, origin, regions) =>
+                            _acrylicHost.PresentForeground(monitor.Id, bitmap, origin, regions));
+                    }
+                    surface.AttachToDesktop(boxParentHandle);
                     DesktopWindowTools.PositionAboveDesktop(
                         surface.Handle,
-                        host.DesktopListView,
-                        (int)(monitor.PixelBounds.X - parentBounds.X),
-                        (int)(monitor.PixelBounds.Y - parentBounds.Y),
+                        _boxSurfaceAnchor,
+                        (int)(monitor.PixelBounds.X - boxParentBounds.X),
+                        (int)(monitor.PixelBounds.Y - boxParentBounds.Y),
                         (int)monitor.PixelBounds.Width,
                         (int)monitor.PixelBounds.Height);
                     if (!surface.RefreshWorkspace() || !surface.IsLayerReady || !surface.ValidateWindowRegion())
@@ -92,7 +140,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     throw;
                 }
             }
-            ConfigureBoxIconLayerComposition();
+            if (_acrylicHost is null)
+            {
+                ConfigureBoxIconLayerComposition();
+            }
             // Keep Explorer's native desktop fully visible and interactive
             // while the replacement windows are prepared. Render the final
             // icon/box composite once, then show every prepared child in one
@@ -125,10 +176,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     private void ShowPreparedSurfaces()
     {
+        _acrylicHost?.ShowAtDesktop();
         foreach (var iconSurface in _iconSurfaces)
         {
             iconSurface.Show();
-            if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _host.DesktopListView) ||
+            if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _iconSurfaceAnchor) ||
                 !iconSurface.IsLayerReady)
             {
                 throw new InvalidOperationException(
@@ -139,7 +191,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         foreach (var surface in _surfaces)
         {
             surface.Show();
-            var shown = DesktopWindowTools.ShowAboveDesktop(surface.Handle, _host.DesktopListView);
+            var shown = DesktopWindowTools.ShowAboveDesktop(surface.Handle, _boxSurfaceAnchor);
             var regionUpdated = surface.UpdateInteractionRegion();
             var regionValid = surface.ValidateWindowRegion();
             if (!shown || !regionUpdated || !surface.IsLayerReady || !regionValid)
@@ -178,7 +230,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             // Explorer may raise its ListView after an unrelated shell change.
             // Reassert the icon layer first; box surfaces are restored below so
             // they remain the topmost interactive children.
-            if (!DesktopWindowTools.RestoreAboveDesktop(iconSurface.Handle, _host.DesktopListView))
+            if (!DesktopWindowTools.RestoreAboveDesktop(iconSurface.Handle, _iconSurfaceAnchor))
             {
                 DiagnosticLog.Error(
                     "The desktop icon surface could not be restored above Explorer.",
@@ -391,38 +443,22 @@ internal sealed class DesktopSurfaceManager : IDisposable
             return;
         }
 
-        foreach (var iconSurface in _iconSurfaces)
-        {
-            if (!visible)
-            {
-                iconSurface.Hide();
-                continue;
-            }
-
-            if (!iconSurface.RefreshWorkspace() || !iconSurface.IsLayerReady)
-            {
-                throw new InvalidOperationException(
-                    $"The desktop icon surface could not be prepared: {iconSurface.LayerDiagnostic}");
-            }
-            iconSurface.Show();
-            if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _host.DesktopListView))
-            {
-                iconSurface.Hide();
-                throw new InvalidOperationException("The desktop icon surface could not be shown.");
-            }
-        }
         _desktopIconsVisible = visible;
-        if (visible)
-        {
-            EnsureBoxesAboveDesktopIcons();
-        }
+        SetVisible(_visible);
     }
 
     internal void SetVisible(bool visible)
     {
+        _visible = visible;
+        var visibility = ResolveVisibility(visible, _desktopIconsVisible);
+        if (_acrylicHost is not null)
+        {
+            if (visibility.ShowBoxes) _acrylicHost.ShowAtDesktop();
+            else _acrylicHost.HideFromDesktop();
+        }
         foreach (var iconSurface in _iconSurfaces)
         {
-            if (visible && _desktopIconsVisible)
+            if (visibility.ShowIcons)
             {
                 if (!iconSurface.RefreshWorkspace() || !iconSurface.IsLayerReady)
                 {
@@ -430,7 +466,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
                         $"The desktop icon surface could not be prepared: {iconSurface.LayerDiagnostic}");
                 }
                 iconSurface.Show();
-                if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _host.DesktopListView))
+                if (!DesktopWindowTools.ShowAboveDesktop(iconSurface.Handle, _iconSurfaceAnchor))
                 {
                     iconSurface.Hide();
                     throw new InvalidOperationException("The desktop icon surface could not be shown.");
@@ -443,14 +479,14 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
         foreach (var surface in _surfaces)
         {
-            if (visible)
+            if (visibility.ShowBoxes)
             {
                 if (!surface.UpdateInteractionRegion() || !surface.IsLayerReady || !surface.ValidateWindowRegion())
                 {
                     throw new InvalidOperationException("The CrabDesk desktop surface region could not be verified before showing.");
                 }
                 surface.Show();
-                if (!DesktopWindowTools.ShowAboveDesktop(surface.Handle, _host.DesktopListView) ||
+                if (!DesktopWindowTools.ShowAboveDesktop(surface.Handle, _boxSurfaceAnchor) ||
                     !surface.IsLayerReady || !surface.ValidateWindowRegion())
                 {
                     surface.Hide();
@@ -462,7 +498,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
                 surface.Hide();
             }
         }
-        if (visible && _desktopIconsVisible)
+        if (visibility.ShowBoxes)
         {
             EnsureBoxesAboveDesktopIcons();
         }
@@ -475,10 +511,15 @@ internal sealed class DesktopSurfaceManager : IDisposable
     {
         foreach (var surface in _surfaces)
         {
-            if (!DesktopWindowTools.RestoreAboveDesktop(surface.Handle, _host.DesktopListView))
+            if (!DesktopWindowTools.RestoreAboveDesktop(surface.Handle, _boxSurfaceAnchor))
             {
                 throw new InvalidOperationException("The desktop box surface could not be restored above Explorer.");
             }
+        }
+
+        if (_acrylicHost is not null)
+        {
+            return;
         }
 
         foreach (var surface in _surfaces)
@@ -609,9 +650,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     internal void EnsureReady()
     {
+        _acrylicHost?.EnsureDesktopPlacement();
         foreach (var iconSurface in _iconSurfaces)
         {
-            if (!DesktopWindowTools.IsDesktopSurfaceReady(iconSurface.Handle, _host.DesktopListView) ||
+            if (!DesktopWindowTools.IsDesktopSurfaceReady(iconSurface.Handle, _iconSurfaceAnchor) ||
                 !iconSurface.IsLayerReady)
             {
                 throw new InvalidOperationException(
@@ -620,7 +662,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
         foreach (var surface in _surfaces)
         {
-            var ready = DesktopWindowTools.IsDesktopSurfaceReady(surface.Handle, _host.DesktopListView);
+            var ready = DesktopWindowTools.IsDesktopSurfaceReady(surface.Handle, _boxSurfaceAnchor);
             var regionValid = surface.ValidateWindowRegion();
             if (!ready || !surface.IsLayerReady || !regionValid)
             {
@@ -1262,6 +1304,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
     }
 
+    // Backdrop geometry is published only with its matching foreground frame.
     public void Dispose()
     {
         if (_desktopIconViewHidden)
@@ -1279,5 +1322,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
             iconSurface.Close();
         }
         _iconSurfaces.Clear();
+        _acrylicHost?.Dispose();
+        _acrylicHost = null;
     }
 }

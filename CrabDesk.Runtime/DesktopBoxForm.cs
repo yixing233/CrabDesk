@@ -192,6 +192,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private LayoutRect? _transformDirtyBounds;
     private string? _lastRegionDiagnostic;
     private bool _lastPresentSucceeded;
+    private bool _desktopAttached;
     private string _lastPresentDiagnostic = string.Empty;
     private string _lastLoggedPresentDiagnostic = string.Empty;
     private bool _presentingLayer;
@@ -576,6 +577,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     }
 
     internal string MonitorId => _monitor.Id;
+
+    internal void AttachToDesktop(IntPtr parentHandle)
+    {
+        // Handle creation can invalidate the form. Keep its first layered
+        // presentation in the final parent's composition tree: presenting as
+        // a top-level window before SetParent leaves an invisible child layer.
+        _desktopAttached = false;
+        DesktopWindowTools.AttachAsDesktopChild(Handle, parentHandle);
+        _desktopAttached = true;
+    }
 
     internal void PrepareIconLayerComposition() =>
         _isCompositedByIconSurface = true;
@@ -1350,6 +1361,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     /// </summary>
     private bool PresentLayer()
     {
+        if (!_desktopAttached)
+        {
+            return false;
+        }
         if (_presentingLayer)
         {
             return _lastPresentSucceeded;
@@ -1437,6 +1452,23 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
 
             var previousDiagnostic = _lastPresentDiagnostic;
+            if (_acrylicFramePresenter is not null)
+            {
+                // The native child supplies input only; foreground and blur are
+                // committed together by DesktopAcrylicHost.
+                EnsureHitMaskBitmap();
+                if (!_hitMaskPresented)
+                {
+                    using (var maskGraphics = Graphics.FromImage(_hitMaskBitmap!))
+                        maskGraphics.Clear(Color.FromArgb(1, Color.Black));
+                    _hitMaskPresented = LayeredWindowPresenter.TryPresent(Handle, _hitMaskBitmap!,
+                        PointToScreen(Point.Empty), out _lastPresentDiagnostic);
+                    if (!_hitMaskPresented) return _lastPresentSucceeded = false;
+                }
+                _acrylicFramePresenter(bitmap, PointToScreen(Point.Empty), GetAcrylicRegions().ToArray());
+                _lastPresentDiagnostic = "unified acrylic composition";
+                return _lastPresentSucceeded = true;
+            }
             _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
                 Handle,
                 bitmap,

@@ -134,6 +134,7 @@ public partial class App : Application
             }
             ActivateWindow();
         };
+        runtime.AiOrganizationRequested += (_, _) => OpenAiOrganizationWorkbench();
         runtime.DesktopConfirmationHandler = request =>
         {
             var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

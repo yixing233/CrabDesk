@@ -3226,14 +3226,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                     RequestHoverRender();
                 }
 
-                var screenPoint = PointToScreen(eventArgs.Location);
-                if (DesktopWindowTools.ShowDesktopContextMenu(
-                        _desktopListView,
-                        screenPoint.X,
-                        screenPoint.Y))
-                {
-                    _runtime.NotifyDesktopContextMenuOpened();
-                }
+                ShowDesktopBackgroundContextMenu(eventArgs.Location);
                 return;
             }
 
@@ -4426,6 +4419,88 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             _ = RenameItemAsync(selectedItems[0]);
         }
+    }
+
+    private void ShowDesktopBackgroundContextMenu(Point location)
+    {
+        var menu = new FluentContextMenuStrip
+        {
+            OpacityAnimationAllowed = false,
+            PreferredDpiScale = (float)_monitor.DpiScale
+        };
+        menu.Opening += (_, _) => _runtime.ApplyContextMenuTheme(menu);
+        menu.Closed += (_, _) =>
+        {
+            if (!IsDisposed && IsHandleCreated)
+            {
+                BeginInvoke((Action)(() => menu.Dispose()));
+            }
+            else
+            {
+                menu.Dispose();
+            }
+        };
+
+        var crabDesk = CreateDesktopBackgroundMenuItem("CrabDesk", LucideRuntimeIcon.AppWindow);
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "创建盒子",
+            LucideRuntimeIcon.SquarePlus,
+            (_, _) => TryAction(() => _runtime.AddBox())));
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "设置中心",
+            LucideRuntimeIcon.Cog,
+            (_, _) => TryAction(() => _runtime.RequestShowSettings("general"))));
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "规则整理",
+            LucideRuntimeIcon.ListFilter,
+            (_, _) => TryAction(() => _runtime.SmartOrganize())));
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "AI 整理",
+            LucideRuntimeIcon.Sparkles,
+            (_, _) => TryAction(_runtime.RequestAiOrganization)));
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "重新连接桌面",
+            LucideRuntimeIcon.RefreshCw,
+            (_, _) => TryAction(() => _ = _runtime.ReconnectDesktopAsync())));
+        crabDesk.DropDownItems.Add(new Forms.ToolStripSeparator());
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "退出 CrabDesk",
+            LucideRuntimeIcon.LogOut,
+            (_, _) => TryAction(_runtime.RequestExit)));
+
+        menu.Items.Add(crabDesk);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add(CreateDesktopBackgroundMenuItem(
+            "Windows 桌面菜单",
+            LucideRuntimeIcon.Menu,
+            (_, _) => ShowNativeDesktopContextMenu(location)));
+        menu.Show(this, location);
+    }
+
+    private void ShowNativeDesktopContextMenu(Point location)
+    {
+        var screenPoint = PointToScreen(location);
+        if (DesktopWindowTools.ShowDesktopContextMenu(
+                _desktopListView,
+                screenPoint.X,
+                screenPoint.Y))
+        {
+            _runtime.NotifyDesktopContextMenuOpened();
+        }
+    }
+
+    private static Forms.ToolStripMenuItem CreateDesktopBackgroundMenuItem(
+        string text,
+        LucideRuntimeIcon icon,
+        EventHandler? onClick = null)
+    {
+        var item = new FluentToolStripMenuItem(text);
+        LucideRuntimeIcons.SetMenuIcon(item, icon);
+        if (onClick is not null)
+        {
+            item.Click += onClick;
+        }
+        return item;
     }
 
     private void UpdateDropTargetRegistration()

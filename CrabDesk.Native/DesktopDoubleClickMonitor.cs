@@ -509,6 +509,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
 
     private bool IsDesktopSurfaceWindow(IntPtr window)
     {
+        if (DesktopAcrylicWindowTools.IsAcrylicSurface(window)) return true;
         if (window == DesktopListView ||
             IsChild(DesktopListView, window) ||
             IsChild(window, DesktopListView) ||

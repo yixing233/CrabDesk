@@ -173,6 +173,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public event EventHandler? Changed;
     public event EventHandler<ShowSettingsRequestedEventArgs>? ShowSettingsRequested;
+    public event EventHandler? AiOrganizationRequested;
     public Func<DesktopConfirmationRequest, Task<bool>>? DesktopConfirmationHandler { get; set; }
     public event EventHandler? ExitRequested;
 
@@ -2644,6 +2645,13 @@ public sealed class CrabDeskRuntime : IDisposable
         }
     }
 
+    public void SetAcrylicBoxes(bool enabled)
+    {
+        if (State.Settings.Appearance.UseAcrylicBoxes == enabled) return;
+        State.Settings.Appearance.UseAcrylicBoxes = enabled;
+        NotifyWorkspaceChanged(true);
+    }
+
     public void SetCornerRadius(double value)
     {
         State.Settings.Appearance.CornerRadius = Math.Clamp(value, 0, 20);
@@ -3737,6 +3745,7 @@ public sealed class CrabDeskRuntime : IDisposable
 
     public void RequestShowSettings(string? page = null) =>
         ShowSettingsRequested?.Invoke(this, new ShowSettingsRequestedEventArgs(page));
+    public void RequestAiOrganization() => AiOrganizationRequested?.Invoke(this, EventArgs.Empty);
     public void RequestExit() => ExitRequested?.Invoke(this, EventArgs.Empty);
 
     public void NotifyMinimizedToTray()
@@ -4193,7 +4202,15 @@ public sealed class CrabDeskRuntime : IDisposable
         {
             if (rebuild)
             {
-                _surfaceManager?.Refresh();
+                if (_surfaceManager is not null &&
+                    _surfaceManager.AcrylicRequested != State.Settings.Appearance.UseAcrylicBoxes)
+                {
+                    ActivateDesktopSurfaces("acrylic preference changed");
+                }
+                else
+                {
+                    _surfaceManager?.Refresh();
+                }
             }
             else
             {

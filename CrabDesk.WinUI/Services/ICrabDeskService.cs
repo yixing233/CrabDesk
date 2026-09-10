@@ -101,6 +101,7 @@ public interface ICrabDeskService
     void MoveOrganizationRule(Guid ruleId, int direction);
     IReadOnlyList<OrganizationRuleConflict> GetOrganizationRuleConflicts();
     void SetCornerRadius(double value);
+    void SetAcrylicBoxes(bool enabled);
     void SetShowBoxBorder(bool enabled);
     void SetShowResizeGrip(bool enabled);
     void SetShowBoxScrollBar(bool enabled);

@@ -136,6 +136,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public void MoveOrganizationRule(Guid ruleId, int direction) => _runtime.MoveOrganizationRule(ruleId, direction);
     public IReadOnlyList<OrganizationRuleConflict> GetOrganizationRuleConflicts() => _runtime.GetOrganizationRuleConflicts();
     public void SetCornerRadius(double value) => _runtime.SetCornerRadius(value);
+    public void SetAcrylicBoxes(bool enabled) => _runtime.SetAcrylicBoxes(enabled);
     public void SetShowBoxBorder(bool enabled) => _runtime.SetShowBoxBorder(enabled);
     public void SetShowResizeGrip(bool enabled) => _runtime.SetShowResizeGrip(enabled);
     public void SetShowBoxScrollBar(bool enabled) => _runtime.SetShowBoxScrollBar(enabled);

@@ -30,6 +30,9 @@ public partial class AppearanceViewModel : ObservableObject
     public string Background { get => CurrentBox.Appearance.Background; set { if (IsColor(value)) _service.SetBoxBackground(null, value); } }
     public string Accent { get => CurrentBox.Appearance.Accent; set { if (IsColor(value)) _service.SetBoxAccent(null, value); } }
     public double Opacity { get => CurrentBox.Appearance.Opacity * 100; set => _service.SetBoxOpacity(null, value / 100); }
+    public bool UseAcrylicBoxes { get => _service.State.Settings.Appearance.UseAcrylicBoxes; set => _service.SetAcrylicBoxes(value); }
+    public bool IsAcrylicSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+    public string OpacityLabel => UseAcrylicBoxes ? "染色强度" : "不透明度";
     public double CornerRadius { get => _service.State.Settings.Appearance.CornerRadius; set => _service.SetCornerRadius(value); }
     public bool ShowBorder { get => _service.State.Settings.Appearance.ShowBorder; set => _service.SetShowBoxBorder(value); }
     public bool ShowResizeGrip { get => _service.State.Settings.Appearance.ShowResizeGrip; set => _service.SetShowResizeGrip(value); }

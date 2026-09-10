@@ -586,6 +586,7 @@ public sealed class DesktopBehaviorSettings
 
 public sealed class GlobalAppearanceSettings
 {
+    public bool UseAcrylicBoxes { get; set; }
     public double CornerRadius { get; set; } = 8;
     public bool ShowBorder { get; set; } = true;
     public bool ShowResizeGrip { get; set; } = true;

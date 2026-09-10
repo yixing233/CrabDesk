@@ -160,9 +160,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return geometry;
         }
-
-        var offsetX = (float)(_movingBox.Bounds.X - _startBounds.X);
-        var offsetY = (float)(_movingBox.Bounds.Y - _startBounds.Y);
+        var offsetX = (float)_movingBox.Bounds.X - geometry.Bounds.X;
+        var offsetY = (float)_movingBox.Bounds.Y - geometry.Bounds.Y;
         if (Math.Abs(offsetX) < float.Epsilon && Math.Abs(offsetY) < float.Epsilon)
         {
             return geometry;
