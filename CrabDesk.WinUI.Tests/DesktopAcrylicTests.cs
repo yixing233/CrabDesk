@@ -364,6 +364,73 @@ public sealed class DesktopAcrylicTests
         if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
     }
 
+    [Fact]
+    public void OverlappingBoxBlursLowerTitleButKeepsItsOwnHeaderSharp()
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var runtime = (CrabDeskRuntime)RuntimeHelpers.GetUninitializedObject(typeof(CrabDeskRuntime));
+                var monitor = Monitor(0, 0, 1);
+                var state = new CrabDeskState();
+                state.Boxes.AddRange([
+                    new DesktopBox { Title = "LOWER BLUR THIS TEXT", MonitorId = monitor.Id, Bounds = new(30, 120, 320, 280) },
+                    new DesktopBox { Title = "UPPER KEEP SHARP", MonitorId = monitor.Id, Bounds = new(170, 60, 320, 280) }
+                ]);
+                Set(runtime, "<State>k__BackingField", state);
+                Set(runtime, "<Items>k__BackingField", Array.Empty<DesktopItemRef>());
+                Set(runtime, "<Monitors>k__BackingField", new[] { monitor });
+                using var form = new DesktopBoxForm(runtime, monitor);
+                using var parent = new System.Windows.Forms.Form();
+                form.AttachToDesktop(parent.Handle);
+                form.SetAcrylicBackground(true);
+                Bitmap? presented = null;
+                try
+                {
+                    form.SetAcrylicFramePresenter((bitmap, _, _) =>
+                    {
+                        presented?.Dispose();
+                        presented = (Bitmap)bitmap.Clone();
+                    });
+                    Assert.True(form.RefreshWorkspace(), form.LayerDiagnostic);
+                    Assert.NotNull(presented);
+                    using var reference = DesktopLayerBitmapFactory.Create(presented!.Width, presented.Height);
+                    using (var graphics = Graphics.FromImage(reference))
+                        typeof(DesktopBoxForm).GetMethod("PaintRegularSurface", Flags)!.Invoke(form, [graphics]);
+
+                    // Compare to the original sharp painter with the SAME tint,
+                    // text, geometry and input state, not a screenshot of another app.
+                    var coveredTitle = new Rectangle(178, 127, 80, 25);
+                    Assert.True(EdgeEnergy(presented, coveredTitle) < EdgeEnergy(reference, coveredTitle) * 0.5,
+                        "The lower title must lose its sharp edges under the upper box.");
+                    for (var y = 66; y < 96; y++)
+                        for (var x = 190; x < 460; x++)
+                            Assert.Equal(reference.GetPixel(x, y), presented.GetPixel(x, y));
+                }
+                finally { presented?.Dispose(); }
+            }
+            catch (Exception exception) { error = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)));
+        if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+    }
+
+    private static long EdgeEnergy(Bitmap bitmap, Rectangle region)
+    {
+        long energy = 0;
+        for (var y = region.Top; y < region.Bottom; y++)
+            for (var x = region.Left + 1; x < region.Right; x++)
+            {
+                var a = bitmap.GetPixel(x - 1, y);
+                var b = bitmap.GetPixel(x, y);
+                energy += Math.Abs(a.A - b.A) + Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
+            }
+        return energy;
+    }
     private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
     private static void Set(object instance, string name, object value) => instance.GetType().GetField(name, Flags)!.SetValue(instance, value);
     private static MonitorLayout Monitor(double x, double y, double scale) => new()

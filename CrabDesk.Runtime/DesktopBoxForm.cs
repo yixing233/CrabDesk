@@ -1424,6 +1424,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             using var bitmap = DesktopLayerBitmapFactory.Create(
                 ClientSize.Width,
                 ClientSize.Height);
+            if (_usesAcrylicBackground && _acrylicFramePresenter is not null)
+            {
+                PaintAcrylicFrame(bitmap);
+            }
+            else
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 graphics.Clear(Color.Transparent);

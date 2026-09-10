@@ -23,6 +23,7 @@ internal static class Program
         var desktopCycle = args.Contains("--desktop-cycle");
         var interaction = args.Contains("--interaction");
         var drag = args.Contains("--drag");
+        var overlap = args.Contains("--overlap");
         var previousCursor = Cursor.Position;
         var output = Path.Combine(Environment.GetEnvironmentVariable("PI_SCRATCH_DIR") ?? Path.GetTempPath(),
             "CrabDesk-AcrylicSmokeTest", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
@@ -38,7 +39,13 @@ internal static class Program
             if (interaction) Cursor.Position = new Point(550, 200);
             if (!DesktopAcrylicHost.IsSupported) throw new PlatformNotSupportedException("Windows 11 required.");
             using var source = new PatternSource();
-            if (!wallpaper) source.Show();
+            if (!wallpaper)
+            {
+                source.Show();
+                // Redirected/headless launch can suppress the first Show via
+                // STARTUPINFO. Make the synthetic comparison source visible.
+                ShowWindow(source.Handle, 4);
+            }
             if (wallpaper) { SetDesktopVisible(true); desktopShown = true; }
             var pixelBounds = fullMonitor ? Screen.PrimaryScreen!.Bounds : new Rectangle(570, 210, 800, 460);
             var workArea = fullMonitor ? Screen.PrimaryScreen!.WorkingArea : pixelBounds;
@@ -59,6 +66,15 @@ internal static class Program
             var a = new DesktopBox { Title = "Acrylic A", MonitorId = "smoke", ExpandOnHover = true, Bounds = new(610 - pixelBounds.X, 275 - pixelBounds.Y, 320, 300) };
             var b = new DesktopBox { Title = "Acrylic B", MonitorId = "smoke", ExpandOnHover = true, Bounds = new(990 - pixelBounds.X, 275 - pixelBounds.Y, 320, 300) };
             a.Appearance.Opacity = b.Appearance.Opacity = 0.5;
+            if (overlap)
+            {
+                if (wallpaper || interaction || drag || desktopCycle || args.Contains("--manager"))
+                    throw new ArgumentException("Run --overlap separately with the synthetic source.");
+                a.ExpandOnHover = b.ExpandOnHover = false;
+                a.Title = "LOWER - BLUR THIS TEXT";
+                b.Title = "UPPER - KEEP SHARP";
+                b.Bounds = new(735 - pixelBounds.X, 235 - pixelBounds.Y, 320, 300);
+            }
             state.Boxes.AddRange([a, b]);
             if (args.Contains("--manager"))
             {
@@ -129,6 +145,33 @@ internal static class Program
                 framePending = true;
                 try
                 {
+                    if (overlap)
+                    {
+                        if (clock.Elapsed.TotalSeconds < stage + 1) return;
+                        stage++;
+                        if (stage == 2)
+                        {
+                            await host.WaitForCommitAsync();
+                            DwmFlush();
+                            using var shot = new Bitmap(800, 460);
+                            using (var graphics = Graphics.FromImage(shot)) graphics.CopyFromScreen(570, 210, 0, 0, shot.Size);
+                            shot.Save(Path.Combine(output, "overlap.png"));
+                            // Measure the real two-box render path, not only the
+                            // filter; skip the first frame's allocations/JIT.
+                            boxes.UpdateInteractionRegion();
+                            var samples = new List<double>();
+                            for (var frame = 0; frame < 20; frame++)
+                            {
+                                var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                                if (!boxes.UpdateInteractionRegion()) throw new InvalidOperationException(boxes.LayerDiagnostic);
+                                samples.Add(elapsed.Elapsed.TotalMilliseconds);
+                            }
+                            samples.Sort();
+                            Console.WriteLine($"Two-box overlap frame: median={samples[10]:F2}ms p95={samples[18]:F2}ms");
+                        }
+                        if (stage == 3) Application.ExitThread();
+                        return;
+                    }
                     if (drag)
                     {
                         if (dragFrame == 0)
@@ -239,6 +282,8 @@ internal static class Program
         finally { Marshal.FinalReleaseComObject(shell); }
     }
 
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
     [DllImport("user32.dll")]

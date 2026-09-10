@@ -25,3 +25,16 @@ dotnet run --project tools/AcrylicSmokeTest/AcrylicSmokeTest.csproj -c Release -
 The program prints its evidence directory under `%TEMP%/CrabDesk-AcrylicSmokeTest`. It uses the production standalone foreground path and defers its first bitmap until desktop attachment. Its Windows compatibility manifest enables layered child windows. Inspect screenshots for live background blur, sharp titles, rounded edges, and correct expanded/collapsed geometry. The pointer classification should be true when the test boxes are unobscured. `--interaction` fails if the physical pointer cannot expand box B, if leaving does not collapse it, or if its hover timer remains active after collapse.
 
 The visual probe uses fixed screen coordinates near `(610,275)` and requires enough visible screen space. It does not provide automated image assertions or mixed-DPI hardware coverage. `--desktop-cycle` is intended for use with `--wallpaper`.
+
+## Inter-box blur experiment
+
+```powershell
+dotnet run --project tools/AcrylicSmokeTest/AcrylicSmokeTest.csproj -c Debug -- --overlap
+```
+
+Uses two overlapping synthetic boxes, without changing the user's desktop or
+settings. `overlap.png` should show a sharp upper title and a blurred covered
+portion of the lower title. Prints median/p95 of 20 warmed-up two-box render
+frames (CPU drawing/upload submission, not end-to-end display latency).
+Run separately from the other smoke modes. Temporarily displays a topmost
+pattern source; it closes automatically after three seconds.
