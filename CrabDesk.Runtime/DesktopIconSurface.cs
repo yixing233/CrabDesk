@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Globalization;
 using System.Collections.Specialized;
 using System.Drawing.Drawing2D;
@@ -3226,7 +3226,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                     RequestHoverRender();
                 }
 
-                ShowDesktopBackgroundContextMenu(eventArgs.Location);
+                ShowNativeDesktopContextMenu(eventArgs.Location);
                 return;
             }
 
