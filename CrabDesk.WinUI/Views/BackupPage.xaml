@@ -1,4 +1,4 @@
-<Page
+﻿<Page
     x:Class="CrabDesk.WinUI.Views.BackupPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -15,7 +15,56 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource SectionCardStyle}" Padding="16,0" Margin="0,0,0,20">
+        <!-- 酷呆桌面一键迁移专区 (醒目大卡片) -->
+        <Border Grid.Row="0" Style="{StaticResource SectionCardStyle}" Padding="20,16" Margin="0,0,0,16"
+                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}" BorderThickness="1">
+            <Grid ColumnSpacing="20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border Width="44" Height="44" CornerRadius="8"
+                        Background="{ThemeResource AccentFillColorTertiaryBrush}"
+                        VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="22" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="从酷呆桌面 (Coodesker) 迁移" FontSize="15" FontWeight="SemiBold" />
+                        <Border Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
+                                CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                            <TextBlock Text="覆盖导入" FontSize="11" Foreground="{ThemeResource SystemFillColorAttentionBrush}" />
+                        </Border>
+                    </StackPanel>
+                    <TextBlock Text="一键将本机酷呆桌面的全部盒子、坐标、图标收纳及分类规则完整迁移至 CrabDesk。"
+                               Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Button Style="{StaticResource AccentButtonStyle}"
+                            Command="{Binding MigrateFromLocalCoodeskerCommand}"
+                            Padding="16,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE896;" FontSize="13" />
+                            <TextBlock Text="一键从本机迁移" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{Binding ImportCoodeskerBackupCommand}"
+                            Padding="12,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8E5;" FontSize="13" />
+                            <TextBlock Text="导入 .backup 文件..." />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Style="{StaticResource SectionCardStyle}" Padding="16,0" Margin="0,0,0,20">
             <StackPanel>
                 <Border Style="{StaticResource SettingRowStyle}">
                     <Grid ColumnSpacing="16">
@@ -76,7 +125,7 @@
             </StackPanel>
         </Border>
 
-        <Grid Grid.Row="1" ColumnSpacing="12" Margin="0,0,0,8">
+        <Grid Grid.Row="2" ColumnSpacing="12" Margin="0,0,0,8">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <TextBlock Text="备份记录" Style="{StaticResource SectionTitleStyle}" VerticalAlignment="Center" Margin="0" />
             <CommandBar Grid.Column="1" DefaultLabelPosition="Collapsed" Background="Transparent" HorizontalAlignment="Right">
@@ -107,7 +156,7 @@
             </CommandBar>
         </Grid>
 
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <ListView ItemsSource="{Binding Backups}" SelectedItem="{Binding SelectedBackup, Mode=TwoWay}"
                       SelectionMode="Single" Visibility="{Binding HasBackups, Converter={StaticResource BooleanToVisibilityConverter}}"
                       HorizontalContentAlignment="Stretch"
