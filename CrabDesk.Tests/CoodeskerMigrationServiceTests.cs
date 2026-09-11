@@ -90,7 +90,7 @@ public class CoodeskerMigrationServiceTests
         {
             Id = "MONITOR_1",
             DeviceName = "Primary Display",
-            Bounds = new LayoutRect(0, 0, 1920, 1080),
+            Bounds = new LayoutRect(0, 0, 2560, 1440),
             WorkArea = new LayoutRect(0, 0, 1920, 1040),
             PixelBounds = new LayoutRect(0, 0, 1920, 1080),
             PixelWorkArea = new LayoutRect(0, 0, 1920, 1040),

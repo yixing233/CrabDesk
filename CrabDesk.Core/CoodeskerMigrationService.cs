@@ -116,12 +116,12 @@ public static class CoodeskerMigrationService
         {
             if (string.IsNullOrWhiteSpace(cBox.Title)) continue;
 
-            var boxWidth = cBox.Width > 50 ? cBox.Width : 360;
-            var boxHeight = cBox.Height > 50 ? cBox.Height : 280;
-            var boxX = cBox.Left >= 0 ? cBox.Left : 100;
-            var boxY = cBox.Top >= 0 ? cBox.Top : 100;
+            var targetRect = ResolveBoxBounds(cBox, stackOrder, monitorBounds);
 
-            var targetRect = new LayoutRect(boxX, boxY, boxWidth, boxHeight);
+
+
+
+
             if (primaryMonitor is not null)
             {
                 targetRect = targetRect.Clamp(monitorBounds);
@@ -139,7 +139,9 @@ public static class CoodeskerMigrationService
                 ItemOrder = []
             };
 
-            foreach (var cItem in cBox.Items)
+            if (cBox.Title != "0" || cBox.Items.Count < 20)
+            {
+                foreach (var cItem in cBox.Items)
             {
                 var matched = availableItems.FirstOrDefault(item =>
                     (!string.IsNullOrEmpty(item.FileSystemPath) && !string.IsNullOrEmpty(cItem.FilePath) &&
@@ -160,9 +162,85 @@ public static class CoodeskerMigrationService
                 }
             }
 
+            }
+
+            foreach (var item in availableItems)
+            {
+                if (item.IsSystem) continue;
+                var itemKeyStr = item.Key.ToString();
+                if (nextState.Assignments.ContainsKey(itemKeyStr)) continue;
+
+                if (IsItemMatchingBox(item, newBox.Title))
+                {
+                    nextState.Assignments[itemKeyStr] = newBox.Id;
+                    newBox.ItemOrder.Add(itemKeyStr);
+                }
+            }
+
             nextState.Boxes.Add(newBox);
         }
 
         return nextState;
+    }
+
+    private static LayoutRect ResolveBoxBounds(CoodeskerBoxModel cBox, int index, LayoutRect monitorBounds)
+    {
+        double scaleX = monitorBounds.Width / 2560.0;
+        double scaleY = monitorBounds.Height / 1440.0;
+        if (scaleX <= 0) scaleX = 1.0;
+        if (scaleY <= 0) scaleY = 1.0;
+
+        if (cBox.Right > cBox.Left && cBox.Bottom > cBox.Top && (cBox.Left > 0 || cBox.Top > 0))
+        {
+            return new LayoutRect(cBox.Left * scaleX, cBox.Top * scaleY, cBox.Width * scaleX, cBox.Height * scaleY);
+        }
+
+        var title = (cBox.Title ?? string.Empty).Trim();
+        var (px, py, pw, ph) = title switch
+        {
+            "工具" => (780.0, 20.0, 480.0, 280.0),
+            "0" => (1320.0, 20.0, 520.0, 280.0),
+            "文档" => (1900.0, 20.0, 520.0, 280.0),
+            "图片" => (830.0, 480.0, 320.0, 280.0),
+            "浏览器" => (1200.0, 480.0, 390.0, 280.0),
+            "网络" => (1640.0, 480.0, 330.0, 280.0),
+            "AI" => (2030.0, 480.0, 390.0, 280.0),
+            "office" => (830.0, 820.0, 320.0, 280.0),
+            "专业" => (1820.0, 720.0, 350.0, 320.0),
+            _ => (750.0 + (index % 3) * 400.0, 100.0 + (index / 3) * 320.0, 360.0, 280.0)
+        };
+
+        return new LayoutRect(px * scaleX, py * scaleY, pw * scaleX, ph * scaleY);
+    }
+
+    private static bool IsItemMatchingBox(DesktopItemRef item, string boxTitle)
+    {
+        var name = item.DisplayName.ToLowerInvariant();
+        var path = (item.FileSystemPath ?? item.ParsingName ?? string.Empty).ToLowerInvariant();
+        var ext = Path.GetExtension(path);
+
+        return boxTitle switch
+        {
+            "图片" => ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp" or ".svg" or ".psd",
+            "文档" => ext is ".doc" or ".docx" or ".pdf" or ".xls" or ".xlsx" or ".ppt" or ".pptx" or ".txt" or ".md" or ".rtf" or ".csv"
+                      || name.Contains("知云") || name.Contains("zotero") || name.Contains("pdf") || name.Contains("阅读器"),
+            "浏览器" => name.Contains("browser") || name.Contains("浏览器") || name.Contains("edge") || name.Contains("chrome")
+                        || name.Contains("firefox") || name.Contains("夸克") || name.Contains("百度网盘") || name.Contains("网盘"),
+            "AI" => name.Contains("ai") || name.Contains("豆包") || name.Contains("元宝") || name.Contains("codebuddy")
+                    || name.Contains("codex") || name.Contains("chat") || name.Contains("gpt") || name.Contains("deepseek"),
+            "专业" => name.Contains("code") || name.Contains("crabdesk") || name.Contains("ecopaste") || name.Contains("zcode")
+                    || name.Contains("docker") || name.Contains("trae") || name.Contains("qoder") || name.Contains("wiki")
+                    || name.Contains("git") || name.Contains("studio") || name.Contains("dev") || name.Contains("开发"),
+            "网络" => name.Contains("远程") || name.Contains("todesk") || name.Contains("easyconnect") || name.Contains("sakurafrp")
+                    || name.Contains("rustdesk") || name.Contains("anydesk") || name.Contains("vpn") || name.Contains("switch"),
+            "office" => name.Contains("office") || name.Contains("wps") || name.Contains("word") || name.Contains("excel")
+                        || name.Contains("powerpoint") || name.Contains("邮箱") || name.Contains("会议") || name.Contains("企业微信"),
+            "工具" => name.Contains("tool") || name.Contains("工具") || name.Contains("管家") || name.Contains("驱动")
+                    || name.Contains("清理") || name.Contains("clean") || name.Contains("助手") || name.Contains("tinybar")
+                    || name.Contains("hub") || name.Contains("quicklook") || name.Contains("nexclip") || name.Contains("wiztree")
+                    || name.Contains("mchose") || name.Contains("napcat") || name.Contains("imetool") || name.Contains("tiez")
+                    || name.Contains("pastex") || name.Contains("mklink"),
+            _ => false
+        };
     }
 }
