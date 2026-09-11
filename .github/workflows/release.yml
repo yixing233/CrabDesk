@@ -47,7 +47,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet restore CrabDesk.sln
-          dotnet test CrabDesk.sln -c Release --no-restore
+          dotnet test CrabDesk.sln -c Release --no-restore --blame-hang --blame-hang-timeout 60s --logger "console;verbosity=normal"
 
       - name: Publish win-x64
         shell: pwsh
