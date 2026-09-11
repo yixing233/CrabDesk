@@ -364,12 +364,18 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 acceptsDrop,
                 floatingCard: false,
                 folderTargetChanged: folderTargetChanged);
-            // A box body accepts the drag as a plain virtual assignment
-            // (Copy). Entering a folder item under the pointer turns it into
-            // a real filesystem move (Ctrl = copy), matching Explorer.
-            eventArgs.Effect = deskDropFolderTarget is not null
-                ? (IsControlPressed(eventArgs) ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.Move)
-                : acceptsDrop ? Forms.DragDropEffects.Copy : Forms.DragDropEffects.None;
+            if (deskDropFolderTarget is not null)
+            {
+                var sourcePaths = ExtractSourcePaths(eventArgs);
+                var isMove = ResolveFilesystemDropEffect(eventArgs, deskDropFolderTarget.FileSystemPath ?? string.Empty, sourcePaths);
+                eventArgs.Effect = isMove ? Forms.DragDropEffects.Move : Forms.DragDropEffects.Copy;
+            }
+            else
+            {
+                eventArgs.Effect = acceptsDrop
+                    ? (target.IsMappedFolder ? ToDragDropEffects(ResolveTransferEffect(eventArgs, target)) : Forms.DragDropEffects.Move)
+                    : Forms.DragDropEffects.None;
+            }
             return;
         }
 
@@ -381,7 +387,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var acceptsDesktopDrop = !targetGeometry.Box.IsMappedFolder &&
                                      targetGeometry.Box.MappedFolder?.IsReadOnly != true;
             eventArgs.Effect = acceptsDesktopDrop
-                ? Forms.DragDropEffects.Copy
+                ? Forms.DragDropEffects.Move
                 : Forms.DragDropEffects.None;
             return;
         }
@@ -417,9 +423,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 true,
                 floatingCard: false,
                 folderTargetChanged: mappedFolderTargetChanged);
-            eventArgs.Effect = IsControlPressed(eventArgs)
-                ? Forms.DragDropEffects.Copy
-                : Forms.DragDropEffects.Move;
+            var sourcePaths = ExtractSourcePaths(eventArgs);
+            var isMove = ResolveFilesystemDropEffect(eventArgs, mappedFolderTarget.FileSystemPath ?? string.Empty, sourcePaths);
+            eventArgs.Effect = isMove ? Forms.DragDropEffects.Move : Forms.DragDropEffects.Copy;
             return;
         }
         if (effect == BoxTransferEffect.VirtualMove && targetGeometry is not null &&
@@ -438,15 +444,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
         // A desktop file dropped into a normal box is a virtual assignment,
-        // not a filesystem move. Advertising Move makes Explorer dim the
-        // source icon as a cut operation until its delayed shell refresh.
-        // External folder imports default to Move, matching Explorer; the
-        // Ctrl key forces a Copy.
+        // displaying Move (no misleading plus sign).
+        // For mapped folders or external imports, effect follows BoxTransferPolicy
+        // with volume-aware default and modifier key overrides.
         eventArgs.Effect = desktopVirtualAssignment
-            ? Forms.DragDropEffects.Copy
-            : IsControlPressed(eventArgs)
-                ? Forms.DragDropEffects.Copy
-                : Forms.DragDropEffects.Move;
+            ? Forms.DragDropEffects.Move
+            : ToDragDropEffects(effect);
         UpdateOleDropPreview(
             targetGeometry!,
             point,
@@ -616,11 +619,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 $"target={mappedFolderTarget?.DisplayName ?? "(none)"} items={_items.Count}");
             if (mappedFolderTarget is not null)
             {
-                // A drop on a real folder item (inside any box, or a mapped
-                // box's subfolder) imports the payload into that folder:
-                // external FileDrop, or a CrabDesk desktop-icon drag.
-                // Default is Move; holding Ctrl forces a Copy.
-                var move = !IsControlPressed(eventArgs);
+                var sourcePaths = ExtractSourcePaths(eventArgs);
+                var move = ResolveFilesystemDropEffect(eventArgs, mappedFolderTarget.FileSystemPath ?? string.Empty, sourcePaths);
                 await ImportIntoTargetFolderAsync(box, mappedFolderTarget, eventArgs, move);
                 return;
             }
@@ -701,10 +701,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 try
                 {
+                    var isMove = transferEffect == BoxTransferEffect.MoveFiles;
                     var imported = await _runtime.ImportFilesToBoxAsync(
                         paths,
                         box.Box.Id,
-                        !IsControlPressed(eventArgs));
+                        isMove);
                     ShowImportFailures(imported);
                 }
                 catch (Exception exception)
@@ -739,10 +740,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             AssignDesktopItemsAtDrop(box, point, assignedKeys);
             if (external.Count > 0)
             {
+                var isMove = transferEffect == BoxTransferEffect.MoveFiles;
                 var imported = await _runtime.ImportFilesAsync(
                     external,
                     box.Box.Id,
-                    !IsControlPressed(eventArgs));
+                    isMove);
                 ShowImportFailures(imported);
             }
             // Assigned desktop icons are parked outside the visible work area by
@@ -764,10 +766,70 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
     }
 
+    private static bool IsShiftPressed(Forms.DragEventArgs eventArgs)
+    {
+        const int shiftKeyState = 4;
+        return (eventArgs.KeyState & shiftKeyState) != 0;
+    }
+
     private static bool IsControlPressed(Forms.DragEventArgs eventArgs)
     {
         const int controlKeyState = 8;
         return (eventArgs.KeyState & controlKeyState) != 0;
+    }
+
+    private IReadOnlyList<string> ExtractSourcePaths(Forms.DragEventArgs eventArgs)
+    {
+        if (eventArgs.Data?.GetDataPresent(Forms.DataFormats.FileDrop) == true &&
+            eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is string[] droppedPaths &&
+            droppedPaths.Length > 0)
+        {
+            return droppedPaths;
+        }
+
+        if (eventArgs.Data?.GetDataPresent(ItemKeysFormat) == true &&
+            eventArgs.Data.GetData(ItemKeysFormat) is IReadOnlyList<string> itemKeys &&
+            itemKeys.Count > 0)
+        {
+            return itemKeys
+                .Select(key => _runtime.FindItemByKey(key)?.FileSystemPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>()
+                .ToList();
+        }
+
+        if (eventArgs.Data?.GetDataPresent(DesktopIconSurface.DesktopIconDragSessionFormat) == true &&
+            eventArgs.Data.GetData(DesktopIconSurface.DesktopIconDragSessionFormat) is DesktopIconSurfaceDragSession desktopDrag &&
+            desktopDrag.ItemKeys.Count > 0)
+        {
+            return desktopDrag.ItemKeys
+                .Select(key => _runtime.FindItemByKey(key)?.FileSystemPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>()
+                .ToList();
+        }
+
+        return [];
+    }
+
+    private bool ResolveFilesystemDropEffect(
+        Forms.DragEventArgs eventArgs,
+        string targetDirectory,
+        IReadOnlyList<string>? sourcePaths)
+    {
+        var shiftPressed = IsShiftPressed(eventArgs);
+        var controlPressed = IsControlPressed(eventArgs);
+        var isSameVolume = sourcePaths is null || sourcePaths.Count == 0 ||
+                           BoxTransferPolicy.AreAllSameVolume(sourcePaths, targetDirectory);
+        var effect = BoxTransferPolicy.Resolve(
+            internalItems: false,
+            sourceMapped: false,
+            targetMapped: true,
+            shiftPressed: shiftPressed,
+            controlPressed: controlPressed,
+            sourceMappedReadOnly: false,
+            isSameVolume: isSameVolume);
+        return effect == BoxTransferEffect.MoveFiles;
     }
 
     private BoxTransferEffect ResolveTransferEffect(Forms.DragEventArgs eventArgs, DesktopBox target)
@@ -793,15 +855,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return BoxTransferEffect.VirtualMove;
         }
-        const int shiftKeyState = 4;
-        const int controlKeyState = 8;
+
+        var destinationDir = target.IsMappedFolder
+            ? target.MappedFolder?.Path ?? string.Empty
+            : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var sourcePaths = ExtractSourcePaths(eventArgs);
+        var isSameVolume = sourcePaths.Count == 0 || BoxTransferPolicy.AreAllSameVolume(sourcePaths, destinationDir);
+
         return BoxTransferPolicy.Resolve(
             internalItems,
             sourceMapped,
             target.IsMappedFolder,
-            (eventArgs.KeyState & shiftKeyState) != 0,
-            (eventArgs.KeyState & controlKeyState) != 0,
-            sourceMappedReadOnly);
+            IsShiftPressed(eventArgs),
+            IsControlPressed(eventArgs),
+            sourceMappedReadOnly,
+            isSameVolume);
     }
 
     private static Forms.DragDropEffects ToDragDropEffects(BoxTransferEffect effect) => effect switch

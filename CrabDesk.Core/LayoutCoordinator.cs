@@ -1,4 +1,4 @@
-namespace CrabDesk.Core;
+﻿namespace CrabDesk.Core;
 
 public enum BoxStackMove
 {
@@ -313,20 +313,46 @@ public static class LayoutCoordinator
 
 public static class BoxTransferPolicy
 {
+    public static bool IsSameVolume(string sourcePath, string destinationDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            return true;
+        }
+        try
+        {
+            var sourceRoot = Path.GetPathRoot(Path.GetFullPath(sourcePath));
+            var destRoot = Path.GetPathRoot(Path.GetFullPath(destinationDirectory));
+            return string.Equals(sourceRoot, destRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    public static bool AreAllSameVolume(IEnumerable<string> sourcePaths, string destinationDirectory)
+    {
+        if (sourcePaths is null || string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            return true;
+        }
+        return sourcePaths.All(path => IsSameVolume(path, destinationDirectory));
+    }
+
     public static BoxTransferEffect Resolve(
         bool internalItems,
         bool sourceMapped,
         bool targetMapped,
         bool shiftPressed,
         bool controlPressed,
-        bool sourceMappedReadOnly = false)
+        bool sourceMappedReadOnly = false,
+        bool isSameVolume = true)
     {
         if (internalItems && !sourceMapped && !targetMapped)
         {
             return BoxTransferEffect.VirtualMove;
         }
-        // A read-only mapping is a view of the folder, not a writable source.
-        // Even with Shift held, its files must remain in place.
         if (sourceMappedReadOnly)
         {
             return BoxTransferEffect.CopyFiles;
@@ -335,7 +361,11 @@ public static class BoxTransferPolicy
         {
             return BoxTransferEffect.CopyFiles;
         }
-        return shiftPressed ? BoxTransferEffect.MoveFiles : BoxTransferEffect.CopyFiles;
+        if (shiftPressed)
+        {
+            return BoxTransferEffect.MoveFiles;
+        }
+        return isSameVolume ? BoxTransferEffect.MoveFiles : BoxTransferEffect.CopyFiles;
     }
 }
 

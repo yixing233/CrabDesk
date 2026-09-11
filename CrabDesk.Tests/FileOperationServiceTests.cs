@@ -1,4 +1,4 @@
-using CrabDesk.Core;
+﻿using CrabDesk.Core;
 using CrabDesk.Native;
 
 namespace CrabDesk.Tests;
@@ -41,20 +41,23 @@ public sealed class FileOperationServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true, false, false, false, false, BoxTransferEffect.VirtualMove)]
-    [InlineData(true, false, false, true, false, BoxTransferEffect.VirtualMove)]
-    [InlineData(false, false, false, false, false, BoxTransferEffect.CopyFiles)]
-    [InlineData(false, false, false, true, false, BoxTransferEffect.MoveFiles)]
-    [InlineData(false, false, true, true, true, BoxTransferEffect.CopyFiles)]
-    [InlineData(true, true, false, false, false, BoxTransferEffect.CopyFiles)]
-    [InlineData(true, true, false, true, false, BoxTransferEffect.MoveFiles)]
-    [InlineData(true, false, true, true, false, BoxTransferEffect.MoveFiles)]
+    [InlineData(true, false, false, false, false, true, BoxTransferEffect.VirtualMove)]
+    [InlineData(true, false, false, true, false, true, BoxTransferEffect.VirtualMove)]
+    [InlineData(false, false, false, false, false, true, BoxTransferEffect.MoveFiles)]
+    [InlineData(false, false, false, false, false, false, BoxTransferEffect.CopyFiles)]
+    [InlineData(false, false, false, true, false, false, BoxTransferEffect.MoveFiles)]
+    [InlineData(false, false, true, true, true, true, BoxTransferEffect.CopyFiles)]
+    [InlineData(true, true, false, false, false, true, BoxTransferEffect.MoveFiles)]
+    [InlineData(true, true, false, false, false, false, BoxTransferEffect.CopyFiles)]
+    [InlineData(true, true, false, true, false, false, BoxTransferEffect.MoveFiles)]
+    [InlineData(true, false, true, true, false, true, BoxTransferEffect.MoveFiles)]
     public void BoxTransferPolicyResolvesVirtualCopyAndMoveSemantics(
         bool internalItems,
         bool sourceMapped,
         bool targetMapped,
         bool shift,
         bool control,
+        bool isSameVolume,
         BoxTransferEffect expected)
     {
         Assert.Equal(expected, BoxTransferPolicy.Resolve(
@@ -62,7 +65,22 @@ public sealed class FileOperationServiceTests : IDisposable
             sourceMapped,
             targetMapped,
             shift,
-            control));
+            control,
+            sourceMappedReadOnly: false,
+            isSameVolume: isSameVolume));
+    }
+
+    [Fact]
+    public void SameVolumeHelperDetectsDriveRootsAccurately()
+    {
+        Assert.True(BoxTransferPolicy.IsSameVolume(@"C:\Users\foo\file.txt", @"C:\Users\foo\Desktop"));
+        Assert.False(BoxTransferPolicy.IsSameVolume(@"D:\Projects\data.csv", @"C:\Users\foo\Desktop"));
+        Assert.True(BoxTransferPolicy.AreAllSameVolume(
+            new[] { @"C:\a.txt", @"C:\b.txt" },
+            @"C:\Users\Desktop"));
+        Assert.False(BoxTransferPolicy.AreAllSameVolume(
+            new[] { @"C:\a.txt", @"D:\b.txt" },
+            @"C:\Users\Desktop"));
     }
 
     [Theory]

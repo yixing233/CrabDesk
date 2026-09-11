@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Globalization;
 using System.Collections.Specialized;
 using System.Drawing.Drawing2D;
@@ -3632,16 +3632,27 @@ internal sealed class DesktopIconSurface : Forms.Form
                 $"External drag entered count={paths.Length} recycle={overRecycleBin}");
         }
         RequestDragRender();
-        // External folder drags default to a filesystem move (matching
-        // Explorer); holding Ctrl forces a copy. The recycle bin always
-        // advertises Move so a drop there deletes the sources.
+        // External folder drags follow Windows Explorer: same volume defaults
+        // to Move, cross volume (e.g. USB/D: to C:) defaults to Copy.
+        // Ctrl forces copy; Shift forces move. Recycle bin always uses Move.
         var controlPressed = (eventArgs.KeyState & 8) != 0;
-        var preferredEffect = controlPressed
-            ? Forms.DragDropEffects.Copy
-            : Forms.DragDropEffects.Move;
-        var fallbackEffect = controlPressed
+        var shiftPressed = (eventArgs.KeyState & 4) != 0;
+        var desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var isSameVolume = BoxTransferPolicy.AreAllSameVolume(paths, desktopDir);
+        var transferEffect = BoxTransferPolicy.Resolve(
+            internalItems: false,
+            sourceMapped: false,
+            targetMapped: false,
+            shiftPressed: shiftPressed,
+            controlPressed: controlPressed,
+            sourceMappedReadOnly: false,
+            isSameVolume: isSameVolume);
+        var preferredEffect = transferEffect == BoxTransferEffect.MoveFiles
             ? Forms.DragDropEffects.Move
             : Forms.DragDropEffects.Copy;
+        var fallbackEffect = preferredEffect == Forms.DragDropEffects.Move
+            ? Forms.DragDropEffects.Copy
+            : Forms.DragDropEffects.Move;
         eventArgs.Effect = overRecycleBin
             ? (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
                 ? Forms.DragDropEffects.Move
@@ -3754,10 +3765,26 @@ internal sealed class DesktopIconSurface : Forms.Form
                 {
                     _overRecycleBin = false;
                     RequestDragRender();
+                    var folderPath = folderTarget.Item.FileSystemPath;
+                    var shiftPressed = (eventArgs.KeyState & 4) != 0;
+                    var controlPressed = (eventArgs.KeyState & 8) != 0;
+                    var paths = desktopDrag.ItemKeys
+                        .Select(key => _runtime.FindItemByKey(key)?.FileSystemPath)
+                        .Where(p => !string.IsNullOrWhiteSpace(p))
+                        .Cast<string>()
+                        .ToList();
+                    var isSameVolume = string.IsNullOrWhiteSpace(folderPath) ||
+                                       BoxTransferPolicy.AreAllSameVolume(paths, folderPath);
+                    var move = (controlPressed, shiftPressed) switch
+                    {
+                        (true, false) => false,
+                        (false, true) => true,
+                        _ => isSameVolume
+                    };
                     await CompleteDesktopFolderDropAsync(
                         desktopDrag,
                         folderTarget.Item,
-                        move: (eventArgs.KeyState & 8) == 0);
+                        move: move);
                 }
                 else if (_overRecycleBin && IsOverRecycleBin(dropPoint))
                 {
