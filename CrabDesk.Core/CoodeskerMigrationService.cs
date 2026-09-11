@@ -14,6 +14,21 @@ public sealed class CoodeskerItemModel
     public int Position { get; set; }
 }
 
+public sealed class CoodeskerTabModel
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "新标签";
+
+    [JsonPropertyName("name")]
+    public string Name { set => Title = value; }
+
+    [JsonPropertyName("items")]
+    public List<CoodeskerItemModel> Items { get; set; } = [];
+}
+
 public sealed class CoodeskerBoxModel
 {
     public string Title { get; set; } = string.Empty;
@@ -49,6 +64,8 @@ public sealed class CoodeskerBoxModel
     public int MinState { set => IsCollapsed = (value == 1); }
 
     public string Directory { get; set; } = string.Empty;
+    public List<CoodeskerTabModel> Tabs { get; set; } = [];
+    public List<CoodeskerBoxModel> SubBoxes { get; set; } = [];
     public List<CoodeskerItemModel> Items { get; set; } = [];
 
     [JsonIgnore]
@@ -138,6 +155,59 @@ public static class CoodeskerMigrationService
                 ExpandOnHover = cBox.IsCollapsed,
                 ItemOrder = []
             };
+
+            var tabModels = new List<CoodeskerTabModel>();
+            if (cBox.Tabs.Count > 0)
+            {
+                tabModels.AddRange(cBox.Tabs);
+            }
+            else if (cBox.SubBoxes.Count > 0)
+            {
+                foreach (var sb in cBox.SubBoxes)
+                {
+                    tabModels.Add(new CoodeskerTabModel
+                    {
+                        Title = string.IsNullOrWhiteSpace(sb.Title) ? "新标签" : sb.Title,
+                        Items = sb.Items
+                    });
+                }
+            }
+            else if (cBox.Title is "图片" or "组合盒子")
+            {
+                tabModels.Add(new CoodeskerTabModel { Title = "全部" });
+                tabModels.Add(new CoodeskerTabModel { Title = "新标签" });
+            }
+
+            foreach (var tm in tabModels)
+            {
+                var dTab = new DesktopBoxTab
+                {
+                    Id = Guid.NewGuid(),
+                    Title = tm.Title
+                };
+                newBox.ManualTabs.Add(dTab);
+
+                foreach (var tabItem in tm.Items)
+                {
+                    var matched = availableItems.FirstOrDefault(item =>
+                        (!string.IsNullOrEmpty(item.FileSystemPath) && !string.IsNullOrEmpty(tabItem.FilePath) &&
+                         string.Equals(item.FileSystemPath, tabItem.FilePath, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrEmpty(item.DisplayName) && !string.IsNullOrEmpty(tabItem.Name) &&
+                         string.Equals(item.DisplayName, tabItem.Name, StringComparison.OrdinalIgnoreCase)));
+
+                    if (matched is not null)
+                    {
+                        var itemKeyStr = matched.Key.ToString();
+                        newBox.ItemTabAssignments[itemKeyStr] = dTab.Id;
+                        if (!nextState.Assignments.ContainsKey(itemKeyStr))
+                        {
+                            nextState.Assignments[itemKeyStr] = newBox.Id;
+                            newBox.ItemOrder.Add(itemKeyStr);
+                        }
+                    }
+                }
+            }
+
 
             if (cBox.Title != "0" || cBox.Items.Count < 20)
             {

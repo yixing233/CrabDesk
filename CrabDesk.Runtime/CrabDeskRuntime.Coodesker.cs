@@ -286,7 +286,24 @@ public sealed partial class CrabDeskRuntime
             CloseHandle(hProcess);
         }
 
-        return results.Values.Where(b => b.Right > b.Left || b.Items.Count > 0).ToList();
+        foreach (var box in results.Values)
+        {
+            if ((box.Title is "图片" or "组合盒子" || box.CategoryId == 1005) && box.Tabs.Count == 0)
+            {
+                box.Tabs.Add(new CoodeskerTabModel
+                {
+                    Title = "全部",
+                    Items = box.Items.ToList()
+                });
+                box.Tabs.Add(new CoodeskerTabModel
+                {
+                    Title = "新标签",
+                    Items = []
+                });
+            }
+        }
+
+        return results.Values.ToList();
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]
