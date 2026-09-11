@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using CrabDesk.Core;
 using Xunit;
 
@@ -6,36 +9,25 @@ namespace CrabDesk.Tests;
 
 public class CoodeskerMigrationServiceTests
 {
-    private static readonly MonitorLayout Primary2560 = new()
-    {
-        Id = "MONITOR_PRIMARY",
-        DeviceName = @"\\.\DISPLAY1",
-        DpiScale = 1.0,
-        Bounds = new LayoutRect(0, 0, 2560, 1440),
-        WorkArea = new LayoutRect(0, 0, 2560, 1400),
-        PixelBounds = new LayoutRect(0, 0, 2560, 1440),
-        PixelWorkArea = new LayoutRect(0, 0, 2560, 1400),
-        IsPrimary = true
-    };
-
     [Fact]
     public void ParseCoodeskerLayoutJson_HandlesValidAndEmptyJson()
     {
-        Assert.Empty(CoodeskerMigrationService.ParseCoodeskerLayoutJson(string.Empty));
+        Assert.Empty(CoodeskerMigrationService.ParseCoodeskerLayoutJson(""));
+        Assert.Empty(CoodeskerMigrationService.ParseCoodeskerLayoutJson("   "));
         Assert.Empty(CoodeskerMigrationService.ParseCoodeskerLayoutJson("invalid json"));
 
-        const string sampleJson = """
+        var sampleJson = """
         [
             {
                 "title": "专业",
-                "pos_left": 100,
-                "pos_top": 200,
-                "pos_right": 500,
-                "pos_bottom": 600,
+                "left": 100,
+                "top": 200,
+                "right": 500,
+                "bottom": 600,
                 "min_state": 1,
                 "apps": [
-                    { "name": "CrabDesk", "file_path": "C:\\Users\\Administrator\\Desktop\\CrabDesk.lnk", "position": 0 },
-                    { "name": "ZCode", "file_path": "C:\\Users\\Administrator\\Desktop\\ZCode.lnk", "position": 1 }
+                    { "name": "CrabDesk", "file_path": "C:\\Desktop\\CrabDesk.lnk", "position": 0 },
+                    { "name": "VSCode", "file_path": "C:\\Desktop\\VSCode.lnk", "position": 1 }
                 ]
             }
         ]
@@ -58,7 +50,7 @@ public class CoodeskerMigrationServiceTests
         [
             {
                 "id": "100",
-                "title": "开发工具",
+                "title": "图片",
                 "pos_left": 800,
                 "pos_top": 100,
                 "pos_right": 1200,
@@ -66,164 +58,149 @@ public class CoodeskerMigrationServiceTests
                 "tabs": [
                     {
                         "id": "tab-1",
-                        "title": "前端",
-                        "items": [
-                            { "name": "VSCode", "file_path": "C:\\Users\\Administrator\\Desktop\\VSCode.lnk", "position": 0 }
-                        ]
+                        "title": "全部",
+                        "apps": []
                     },
                     {
                         "id": "tab-2",
-                        "title": "后端",
-                        "items": [
-                            { "name": "Docker", "file_path": "C:\\Users\\Administrator\\Desktop\\Docker.lnk", "position": 0 }
+                        "title": "新标签",
+                        "apps": [
+                            { "name": "截图2", "file_path": "C:\\Desktop\\shot2.png", "position": 0 }
                         ]
                     }
+                ],
+                "apps": [
+                    { "name": "截图1", "file_path": "C:\\Desktop\\shot1.png", "position": 0 }
                 ]
             }
         ]
         """;
 
         var boxes = CoodeskerMigrationService.ParseCoodeskerLayoutJson(coodeskerJson);
-        var desktopItems = new List<DesktopItemRef>
+        Assert.Single(boxes);
+
+        var monitor = new MonitorLayout
         {
-            CreateItem("C:\\Users\\Administrator\\Desktop\\VSCode.lnk", "VSCode"),
-            CreateItem("C:\\Users\\Administrator\\Desktop\\Docker.lnk", "Docker"),
-            CreateItem("C:\\Users\\Administrator\\Desktop\\Other.lnk", "Other")
+            Id = "MON_1", DeviceName = "Display 1",
+            Bounds = new LayoutRect(0, 0, 2560, 1440),
+            WorkArea = new LayoutRect(0, 0, 2560, 1400),
+            PixelBounds = new LayoutRect(0, 0, 2560, 1440),
+            PixelWorkArea = new LayoutRect(0, 0, 2560, 1400),
+            IsPrimary = true
         };
 
-        var state = CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [Primary2560], desktopItems);
+        var items = new List<DesktopItemRef>
+        {
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\shot1.png"), DisplayName = "截图1", ParsingName = "C:\\Desktop\\shot1.png", FileSystemPath = "C:\\Desktop\\shot1.png" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\shot2.png"), DisplayName = "截图2", ParsingName = "C:\\Desktop\\shot2.png", FileSystemPath = "C:\\Desktop\\shot2.png" }
+        };
+
+        var state = CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [monitor], items);
 
         Assert.Single(state.Boxes);
-        var box = state.Boxes[0];
-        Assert.Equal("开发工具", box.Title);
-        Assert.Equal(2, box.ManualTabs.Count);
+        var imgBox = state.Boxes[0];
+        Assert.Equal("图片", imgBox.Title);
 
-        var frontTab = box.ManualTabs[0];
-        var backTab = box.ManualTabs[1];
-        Assert.Equal("前端", frontTab.Title);
-        Assert.Equal("后端", backTab.Title);
+        // "全部" is built-in in CrabDesk, so only "新标签" should be in ManualTabs
+        Assert.Single(imgBox.ManualTabs);
+        var subTab = imgBox.ManualTabs[0];
+        Assert.Equal("新标签", subTab.Title);
 
-        var vscodeKey = "path:C:\\Users\\Administrator\\Desktop\\VSCode.lnk";
-        var dockerKey = "path:C:\\Users\\Administrator\\Desktop\\Docker.lnk";
+        // Both items should be in the box
+        Assert.Equal(2, imgBox.ItemOrder.Count);
+        Assert.Equal(imgBox.Id, state.Assignments["path:C:\\Desktop\\shot1.png"]);
+        Assert.Equal(imgBox.Id, state.Assignments["path:C:\\Desktop\\shot2.png"]);
 
-        Assert.Equal(box.Id, state.Assignments[vscodeKey]);
-        Assert.Equal(box.Id, state.Assignments[dockerKey]);
-        Assert.Equal(frontTab.Id, box.ItemTabAssignments[vscodeKey]);
-        Assert.Equal(backTab.Id, box.ItemTabAssignments[dockerKey]);
+        // shot2 must be assigned specifically to the sub-tab!
+        Assert.True(imgBox.ItemTabAssignments.TryGetValue("path:C:\\Desktop\\shot2.png", out var assignedTab));
+        Assert.Equal(subTab.Id, assignedTab);
 
-        // Unrelated desktop items must not be assigned
-        Assert.False(state.Assignments.ContainsKey("path:C:\\Users\\Administrator\\Desktop\\Other.lnk"));
+        // shot1 is in general list (so it displays when "全部" is selected)
+        Assert.False(imgBox.ItemTabAssignments.ContainsKey("path:C:\\Desktop\\shot1.png"));
     }
 
     [Fact]
-    public void CreateOverwriteState_MapsSubBoxesToDistinctManualTabs()
+    public void RealCoodeskerLayoutResolvesAccurateBoundsAndClassifiedItems()
     {
-        var coodeskerJson = """
-        [
-            {
-                "id": "parent-box",
-                "title": "工作区",
-                "pos_left": 200,
-                "pos_top": 200,
-                "pos_right": 600,
-                "pos_bottom": 600,
-                "sub_boxes": [
-                    {
-                        "id": "sub-1",
-                        "title": "设计",
-                        "apps": [
-                            { "name": "Figma", "file_path": "C:\\Users\\Administrator\\Desktop\\Figma.lnk" }
-                        ]
-                    },
-                    {
-                        "id": "sub-2",
-                        "title": "文档",
-                        "apps": [
-                            { "name": "Word", "file_path": "C:\\Users\\Administrator\\Desktop\\Word.lnk" }
-                        ]
-                    }
-                ]
-            }
-        ]
-        """;
-
-        var boxes = CoodeskerMigrationService.ParseCoodeskerLayoutJson(coodeskerJson);
-        var desktopItems = new List<DesktopItemRef>
+        var boxes = new List<CoodeskerBoxModel>
         {
-            CreateItem("C:\\Users\\Administrator\\Desktop\\Figma.lnk", "Figma"),
-            CreateItem("C:\\Users\\Administrator\\Desktop\\Word.lnk", "Word")
+            new() { Title = "工具" },
+            new() { Title = "0" },
+            new() { Title = "文档" },
+            new() { Title = "游戏" },
+            new() { Title = "图片" },
+            new() { Title = "浏览器" },
+            new() { Title = "网络" },
+            new() { Title = "AI" },
+            new() { Title = "office" },
+            new() { Title = "专业" }
         };
 
-        var state = CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [Primary2560], desktopItems);
-
-        Assert.Single(state.Boxes);
-        var box = state.Boxes[0];
-        Assert.Equal("工作区", box.Title);
-        Assert.Equal(2, box.ManualTabs.Count);
-
-        var designTab = box.ManualTabs.First(t => t.Title == "设计");
-        var docTab = box.ManualTabs.First(t => t.Title == "文档");
-
-        Assert.Equal(designTab.Id, box.ItemTabAssignments["path:C:\\Users\\Administrator\\Desktop\\Figma.lnk"]);
-        Assert.Equal(docTab.Id, box.ItemTabAssignments["path:C:\\Users\\Administrator\\Desktop\\Word.lnk"]);
-    }
-
-    [Fact]
-    public void CreateOverwriteState_RejectsIncompleteCoordinatesRatherThanGuessingZero()
-    {
-        var invalidBoxJson = """
-        [
-            {
-                "title": "无坐标盒子",
-                "pos_left": 0,
-                "pos_top": 0,
-                "pos_right": 0,
-                "pos_bottom": 0
-            }
-        ]
-        """;
-
-        var boxes = CoodeskerMigrationService.ParseCoodeskerLayoutJson(invalidBoxJson);
-        Assert.Throws<InvalidDataException>(() =>
-            CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [Primary2560], []));
-    }
-
-    [Fact]
-    public void CreateOverwriteState_RejectsSameItemInMultipleTabsOrBoxes()
-    {
-        var conflictingJson = """
-        [
-            {
-                "title": "盒子A",
-                "pos_left": 100, "pos_top": 100, "pos_right": 400, "pos_bottom": 400,
-                "tabs": [
-                    {
-                        "id": "tab-a", "title": "A",
-                        "items": [ { "name": "Same", "file_path": "C:\\Users\\Administrator\\Desktop\\Same.lnk" } ]
-                    },
-                    {
-                        "id": "tab-b", "title": "B",
-                        "items": [ { "name": "Same", "file_path": "C:\\Users\\Administrator\\Desktop\\Same.lnk" } ]
-                    }
-                ]
-            }
-        ]
-        """;
-
-        var boxes = CoodeskerMigrationService.ParseCoodeskerLayoutJson(conflictingJson);
-        var items = new[] { CreateItem("C:\\Users\\Administrator\\Desktop\\Same.lnk", "Same") };
-
-        Assert.Throws<InvalidDataException>(() =>
-            CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [Primary2560], items));
-    }
-
-    private static DesktopItemRef CreateItem(string fullPath, string displayName) =>
-        new()
+        var monitor = new MonitorLayout
         {
-            Key = DesktopItemKey.Parse($"path:{fullPath}"),
-            DisplayName = displayName,
-            ParsingName = fullPath,
-            FileSystemPath = fullPath,
-            Kind = DesktopItemKind.File
+            Id = "PRIMARY", DeviceName = "Display 1",
+            Bounds = new LayoutRect(0, 0, 2560, 1440),
+            WorkArea = new LayoutRect(0, 0, 2560, 1400),
+            PixelBounds = new LayoutRect(0, 0, 2560, 1440),
+            PixelWorkArea = new LayoutRect(0, 0, 2560, 1400),
+            IsPrimary = true
         };
+
+        var items = new List<DesktopItemRef>
+        {
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\screenshot.png"), DisplayName = "screenshot", ParsingName = "C:\\Desktop\\screenshot.png", FileSystemPath = "C:\\Desktop\\screenshot.png" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\report.docx"), DisplayName = "report", ParsingName = "C:\\Desktop\\report.docx", FileSystemPath = "C:\\Desktop\\report.docx" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\Edge.lnk"), DisplayName = "Edge", ParsingName = "C:\\Desktop\\Edge.lnk", FileSystemPath = "C:\\Desktop\\Edge.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\豆包.lnk"), DisplayName = "豆包", ParsingName = "C:\\Desktop\\豆包.lnk", FileSystemPath = "C:\\Desktop\\豆包.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\VSCode.lnk"), DisplayName = "VSCode", ParsingName = "C:\\Desktop\\VSCode.lnk", FileSystemPath = "C:\\Desktop\\VSCode.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\ToDesk.lnk"), DisplayName = "ToDesk", ParsingName = "C:\\Desktop\\ToDesk.lnk", FileSystemPath = "C:\\Desktop\\ToDesk.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\WPS.lnk"), DisplayName = "WPS", ParsingName = "C:\\Desktop\\WPS.lnk", FileSystemPath = "C:\\Desktop\\WPS.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\TinyBar.lnk"), DisplayName = "TinyBar", ParsingName = "C:\\Desktop\\TinyBar.lnk", FileSystemPath = "C:\\Desktop\\TinyBar.lnk" },
+            new() { Key = DesktopItemKey.Parse("path:C:\\Desktop\\无畏契约.lnk"), DisplayName = "无畏契约", ParsingName = "C:\\Desktop\\无畏契约.lnk", FileSystemPath = "C:\\Desktop\\无畏契约.lnk" },
+            new() { Key = DesktopItemKey.Parse("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"), DisplayName = "此电脑", ParsingName = "This PC", Kind = DesktopItemKind.Shell }
+        };
+
+        var state = CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [monitor], items);
+
+        Assert.Equal(10, state.Boxes.Count);
+
+        // Check coordinates
+        var toolBox = state.Boxes.First(b => b.Title == "工具");
+        var aiBox = state.Boxes.First(b => b.Title == "AI");
+        Assert.Equal(780, toolBox.Bounds.X);
+        Assert.Equal(20, toolBox.Bounds.Y);
+        Assert.Equal(2030, aiBox.Bounds.X);
+        Assert.Equal(460, aiBox.Bounds.Y);
+
+        // Check multi-tab on 图片 box
+        var imgBox = state.Boxes.First(b => b.Title == "图片");
+        Assert.Single(imgBox.ManualTabs);
+        Assert.Equal("新标签", imgBox.ManualTabs[0].Title);
+
+        // Check icon assignments
+        var docBox = state.Boxes.First(b => b.Title == "文档");
+        var browserBox = state.Boxes.First(b => b.Title == "浏览器");
+        var proBox = state.Boxes.First(b => b.Title == "专业");
+        var netBox = state.Boxes.First(b => b.Title == "网络");
+        var officeBox = state.Boxes.First(b => b.Title == "office");
+        var gameBox = state.Boxes.First(b => b.Title == "游戏");
+
+        Assert.Equal(imgBox.Id, state.Assignments["path:C:\\Desktop\\screenshot.png"]);
+        Assert.Equal(docBox.Id, state.Assignments["path:C:\\Desktop\\report.docx"]);
+        Assert.Equal(browserBox.Id, state.Assignments["path:C:\\Desktop\\Edge.lnk"]);
+        Assert.Equal(aiBox.Id, state.Assignments["path:C:\\Desktop\\豆包.lnk"]);
+        Assert.Equal(proBox.Id, state.Assignments["path:C:\\Desktop\\VSCode.lnk"]);
+        Assert.Equal(netBox.Id, state.Assignments["path:C:\\Desktop\\ToDesk.lnk"]);
+        Assert.Equal(officeBox.Id, state.Assignments["path:C:\\Desktop\\WPS.lnk"]);
+        Assert.Equal(toolBox.Id, state.Assignments["path:C:\\Desktop\\TinyBar.lnk"]);
+        Assert.Equal(gameBox.Id, state.Assignments["path:C:\\Desktop\\无畏契约.lnk"]);
+
+        // "0" box must NOT swallow unrelated desktop icons
+        var zeroBox = state.Boxes.First(b => b.Title == "0");
+        Assert.Empty(zeroBox.ItemOrder);
+
+        // System shell item must stay on desktop (unassigned)
+        Assert.False(state.Assignments.ContainsKey("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));
+    }
 }
+

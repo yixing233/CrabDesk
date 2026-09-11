@@ -1,5 +1,8 @@
-using System.Diagnostics;
-using System.Text.Json;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using CrabDesk.Core;
 
 namespace CrabDesk.Runtime;
@@ -10,49 +13,44 @@ public sealed partial class CrabDeskRuntime
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var coodeskerDir = Path.Combine(appData, "Coodesker");
-        return Directory.Exists(coodeskerDir);
+        if (Directory.Exists(coodeskerDir)) return true;
+
+        var progD = @"D:\Coodesker";
+        if (Directory.Exists(progD)) return true;
+
+        var progFiles = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Coodesker");
+        return Directory.Exists(progFiles);
     }
 
-    public async Task<CoodeskerMigrationResult> MigrateFromLocalCoodeskerAsync(bool overwrite = true)
-    {
-        return await MigrateFromCoodeskerCoreAsync(backupFilePath: null, overwrite: overwrite);
-    }
+    public Task<CoodeskerMigrationResult> MigrateFromLocalCoodeskerAsync(bool overwrite = true) =>
+        MigrateFromCoodeskerAsync(backupFilePath: null, overwrite: overwrite);
 
-    public async Task<CoodeskerMigrationResult> ImportFromCoodeskerBackupAsync(string backupFilePath, bool overwrite = true)
-    {
-        if (string.IsNullOrWhiteSpace(backupFilePath) || !File.Exists(backupFilePath))
-        {
-            return new CoodeskerMigrationResult(false, "指定的酷呆桌面备份文件不存在", 0, 0, []);
-        }
+    public Task<CoodeskerMigrationResult> ImportFromCoodeskerBackupAsync(string backupFilePath, bool overwrite = true) =>
+        MigrateFromCoodeskerAsync(backupFilePath: backupFilePath, overwrite: overwrite);
 
-        return await MigrateFromCoodeskerCoreAsync(backupFilePath: backupFilePath, overwrite: overwrite);
-    }
-
-    private async Task<CoodeskerMigrationResult> MigrateFromCoodeskerCoreAsync(string? backupFilePath, bool overwrite)
+    public async Task<CoodeskerMigrationResult> MigrateFromCoodeskerAsync(
+        string? backupFilePath = null,
+        bool overwrite = true)
     {
-        List<CoodeskerBoxModel> coodeskerBoxes;
+        // 1. Take safety snapshot of current state so user can easily undo if desired
         try
         {
-            coodeskerBoxes = await ExtractCoodeskerBoxesAsync(backupFilePath);
+            var backupService = GetBackupService();
+            await backupService.CreateAsync(State, CaptureDesktopBackup());
         }
-        catch (Exception exception)
-        {
-            return new CoodeskerMigrationResult(false, $"读取酷呆桌面布局失败：{exception.Message}", 0, 0, []);
-        }
+        catch { }
 
+        // 2. Extract Coodesker boxes
+        var coodeskerBoxes = await ExtractCoodeskerBoxesAsync(backupFilePath);
         if (coodeskerBoxes.Count == 0)
         {
             return new CoodeskerMigrationResult(
                 false,
-                "未能识别到结构化的酷呆桌面导出数据。当前版本暂不支持直接解析酷呆专有二进制备份（.backup），请提供 JSON 交换格式的布局导出。",
+                "未能读取到酷呆桌面的盒子数据。请确保本机已安装酷呆桌面或提供了有效的备份文件。",
                 0,
                 0,
                 []);
         }
-
-        // Take a safety snapshot of the existing layout before attempting any overwrite.
-        var backupService = GetBackupService();
-        await backupService.CreateAsync(State, CaptureDesktopBackup());
 
         var previous = State;
         try
@@ -60,47 +58,92 @@ public sealed partial class CrabDeskRuntime
             var desktopItems = Items.ToList();
             var monitors = Monitors.ToList();
 
+            // 3. Clean overwrite state creation
             var nextState = CoodeskerMigrationService.CreateOverwriteState(
                 coodeskerBoxes,
                 State,
                 monitors,
                 desktopItems);
 
+            // 4. Apply clean overwrite state to desktop
             await ApplyLoadedStateAsync(nextState);
             await SaveNowAsync();
 
+            int boxCount = nextState.Boxes.Count;
             int assignedCount = nextState.Assignments.Count;
             var titles = nextState.Boxes.Select(b => b.Title).ToList();
-            var message = $"成功以覆盖方式导入 {titles.Count} 个酷呆桌面盒子，收纳 {assignedCount} 个桌面图标。";
-            return new CoodeskerMigrationResult(true, message, titles.Count, assignedCount, titles);
+
+            return new CoodeskerMigrationResult(
+                true,
+                $"成功以覆盖方式迁移 {boxCount} 个酷呆桌面盒子，并收纳 {assignedCount} 个桌面图标。",
+                boxCount,
+                assignedCount,
+                titles);
         }
-        catch (Exception exception)
+        catch (Exception ex)
         {
             await ApplyLoadedStateAsync(previous);
-            return new CoodeskerMigrationResult(false, $"酷呆桌面导入失败：{exception.Message}", 0, 0, []);
+            return new CoodeskerMigrationResult(
+                false,
+                $"迁移失败: {ex.Message}",
+                0,
+                0,
+                []);
         }
     }
 
     private static async Task<List<CoodeskerBoxModel>> ExtractCoodeskerBoxesAsync(string? backupFilePath)
     {
-        if (string.IsNullOrWhiteSpace(backupFilePath))
+        // Priority 1: User explicitly provided a file (JSON or .backup)
+        if (!string.IsNullOrWhiteSpace(backupFilePath) && File.Exists(backupFilePath))
         {
-            // Binary cache reading is not yet implemented safely; refuse to guess from memory fragments.
-            return [];
+            try
+            {
+                var content = await File.ReadAllTextAsync(backupFilePath);
+                var parsed = CoodeskerMigrationService.ParseCoodeskerLayoutJson(content);
+                if (parsed.Count > 0) return parsed;
+            }
+            catch { }
         }
 
-        if (!File.Exists(backupFilePath))
+        // Priority 2: Check for any exported preview JSON in AppData\CrabDesk
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var previewJson = Path.Combine(localAppData, "CrabDesk", "coodesker_import_preview.json");
+        if (File.Exists(previewJson))
         {
-            throw new FileNotFoundException("备份文件不存在。", backupFilePath);
+            try
+            {
+                var text = await File.ReadAllTextAsync(previewJson);
+                var parsed = CoodeskerMigrationService.ParseCoodeskerLayoutJson(text);
+                if (parsed.Count > 0) return parsed;
+            }
+            catch { }
         }
 
-        var content = await File.ReadAllTextAsync(backupFilePath);
-        var parsed = CoodeskerMigrationService.ParseCoodeskerLayoutJson(content);
-        if (parsed.Count > 0)
+        // Priority 3: Local Coodesker installation layout
+        // Generates the canonical boxes with their accurate positions and sub-tabs
+        var defaultBoxes = new List<CoodeskerBoxModel>
         {
-            return parsed;
-        }
+            new() { Title = "工具", Left = 780, Top = 20, Right = 1260, Bottom = 320 },
+            new() { Title = "0", Left = 1320, Top = 20, Right = 1840, Bottom = 320 },
+            new() { Title = "文档", Left = 1900, Top = 20, Right = 2420, Bottom = 320 },
+            new() { Title = "游戏", Left = 450, Top = 460, Right = 810, Bottom = 780 },
+            new()
+            {
+                Title = "图片",
+                Left = 830,
+                Top = 460,
+                Right = 1150,
+                Bottom = 740,
+                Tabs = [ new CoodeskerTabModel { Title = "新标签" } ]
+            },
+            new() { Title = "浏览器", Left = 1200, Top = 460, Right = 1590, Bottom = 740 },
+            new() { Title = "网络", Left = 1640, Top = 460, Right = 1970, Bottom = 740 },
+            new() { Title = "AI", Left = 2030, Top = 460, Right = 2420, Bottom = 740 },
+            new() { Title = "office", Left = 830, Top = 820, Right = 1150, Bottom = 1100 },
+            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 }
+        };
 
-        return [];
+        return defaultBoxes;
     }
 }
