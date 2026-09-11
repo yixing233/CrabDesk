@@ -149,6 +149,14 @@ public static class CoodeskerMigrationService
             var root = doc.RootElement;
             if (root.ValueKind == JsonValueKind.Object)
             {
+                if (root.TryGetProperty("fence", out var fenceArr) && fenceArr.ValueKind == JsonValueKind.Array && fenceArr.GetArrayLength() > 0)
+                {
+                    if (fenceArr[0].TryGetProperty("folders", out var foldersArr) && foldersArr.ValueKind == JsonValueKind.Array)
+                    {
+                        var nativeBoxes = ParseCoodeskerNativeFolders(foldersArr);
+                        if (nativeBoxes.Count > 0) return nativeBoxes;
+                    }
+                }
                 foreach (var propName in new[] { "boxes", "boxs", "containers", "data" })
                 {
                     if (root.TryGetProperty(propName, out var arr) && arr.ValueKind == JsonValueKind.Array)
@@ -163,6 +171,86 @@ public static class CoodeskerMigrationService
 
         return [];
     }
+
+    private static List<CoodeskerBoxModel> ParseCoodeskerNativeFolders(JsonElement foldersArr)
+    {
+        var result = new List<CoodeskerBoxModel>();
+        foreach (var folder in foldersArr.EnumerateArray())
+        {
+            if (!folder.TryGetProperty("category", out var cat)) continue;
+            var title = cat.TryGetProperty("name", out var nProp) ? nProp.GetString() : string.Empty;
+            if (string.IsNullOrWhiteSpace(title)) continue;
+
+            double left = cat.TryGetProperty("pos_left", out var lProp) ? lProp.GetDouble() : 0;
+            double top = cat.TryGetProperty("pos_top", out var tProp) ? tProp.GetDouble() : 0;
+            double right = cat.TryGetProperty("pos_right", out var rProp) ? rProp.GetDouble() : 0;
+            double bottom = cat.TryGetProperty("pos_bottom", out var bProp) ? bProp.GetDouble() : 0;
+
+            var box = new CoodeskerBoxModel
+            {
+                Title = title.Trim(),
+                Left = left,
+                Top = top,
+                Right = right,
+                Bottom = bottom,
+                IsCollapsed = true
+            };
+
+            if (cat.TryGetProperty("apps", out var appsProp) && appsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var app in appsProp.EnumerateArray())
+                {
+                    var aName = app.TryGetProperty("name", out var anProp) ? anProp.GetString() : string.Empty;
+                    var aPath = app.TryGetProperty("file_path", out var apProp) ? apProp.GetString() : string.Empty;
+                    int aPos = app.TryGetProperty("position", out var posProp) ? posProp.GetInt32() : 0;
+                    box.Items.Add(new CoodeskerItemModel
+                    {
+                        Name = aName ?? string.Empty,
+                        FilePath = aPath ?? string.Empty,
+                        Position = aPos
+                    });
+                }
+            }
+
+            if (folder.TryGetProperty("folders", out var subFolders) && subFolders.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var sub in subFolders.EnumerateArray())
+                {
+                    if (!sub.TryGetProperty("category", out var subCat)) continue;
+                    var subTitle = subCat.TryGetProperty("name", out var snProp) ? snProp.GetString() : string.Empty;
+                    if (string.IsNullOrWhiteSpace(subTitle)) continue;
+
+                    var tab = new CoodeskerTabModel
+                    {
+                        Title = subTitle.Trim()
+                    };
+
+                    if (subCat.TryGetProperty("apps", out var subApps) && subApps.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var sapp in subApps.EnumerateArray())
+                        {
+                            var sName = sapp.TryGetProperty("name", out var sanProp) ? sanProp.GetString() : string.Empty;
+                            var sPath = sapp.TryGetProperty("file_path", out var sapProp) ? sapProp.GetString() : string.Empty;
+                            int sPos = sapp.TryGetProperty("position", out var sposProp) ? sposProp.GetInt32() : 0;
+                            tab.Items.Add(new CoodeskerItemModel
+                            {
+                                Name = sName ?? string.Empty,
+                                FilePath = sPath ?? string.Empty,
+                                Position = sPos
+                            });
+                        }
+                    }
+
+                    box.Tabs.Add(tab);
+                }
+            }
+
+            result.Add(box);
+        }
+
+        return result;
+    }
+
 
     public static CrabDeskState CreateOverwriteState(
         IReadOnlyList<CoodeskerBoxModel> coodeskerBoxes,
