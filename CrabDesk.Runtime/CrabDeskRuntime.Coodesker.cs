@@ -108,11 +108,110 @@ public sealed partial class CrabDeskRuntime
 
         // Default layout when migrating from local Coodesker installation
         // Generates the canonical boxes with their accurate positions and sub-tabs
+        return GetCanonicalLocalCoodeskerBoxes();
+    }
+
+    private static CoodeskerItemModel Item(string name) => new() { Name = name };
+
+    private static List<CoodeskerBoxModel> GetCanonicalLocalCoodeskerBoxes()
+    {
+        var docBox = new CoodeskerBoxModel
+        {
+            Title = "文档",
+            Left = 1900,
+            Top = 20,
+            Right = 2420,
+            Bottom = 320,
+            Items =
+            [
+                Item("Typora"),
+                Item("Obsidian"),
+                Item("Zotero"),
+                Item("知云文献翻译"),
+                Item("福昕高级PDF编辑器")
+            ]
+        };
+
+        var docExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            { ".doc", ".docx", ".pdf", ".txt", ".xlsx", ".pptx", ".dwg", ".csv", ".rtf", ".md" };
+        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (Directory.Exists(desktopPath))
+        {
+            foreach (var file in Directory.GetFiles(desktopPath))
+            {
+                if (docExts.Contains(Path.GetExtension(file)))
+                {
+                    docBox.Items.Add(new CoodeskerItemModel
+                    {
+                        Name = Path.GetFileNameWithoutExtension(file),
+                        FilePath = file
+                    });
+                }
+            }
+        }
+
         var defaultBoxes = new List<CoodeskerBoxModel>
         {
-            new() { Title = "工具", Left = 780, Top = 20, Right = 1260, Bottom = 320 },
-            new() { Title = "0", Left = 1320, Top = 20, Right = 1840, Bottom = 320 },
-            new() { Title = "文档", Left = 1900, Top = 20, Right = 2420, Bottom = 320 },
+            new()
+            {
+                Title = "工具",
+                Left = 780,
+                Top = 20,
+                Right = 1260,
+                Bottom = 320,
+                Items =
+                [
+                    Item("凌豹键盘驱动"),
+                    Item("ATK V HUB"),
+                    Item("MCHOSE HUB"),
+                    Item("DeskPins"),
+                    Item("EV录屏"),
+                    Item("ImeTool"),
+                    Item("KTC-Monitor Control Center"),
+                    Item("Listary"),
+                    Item("MobaXterm_Personal_24.3.exe"),
+                    Item("NexClip"),
+                    Item("Origin 2024"),
+                    Item("PasteX"),
+                    Item("PI-Desk"),
+                    Item("QuickLook"),
+                    Item("TieZ"),
+                    Item("Umi-OCR"),
+                    Item("WizTree"),
+                    Item("TinyBar"),
+                    Item("Watt Toolkit"),
+                    Item("小米电脑管家"),
+                    Item("EcoPaste"),
+                    Item("钟艺之刻表盘设计工具"),
+                    Item("搞机助手"),
+                    Item("Wise Registry Cleane"),
+                    Item("Windhawk"),
+                    Item("MkLink")
+                ]
+            },
+            new()
+            {
+                Title = "0",
+                Left = 1320,
+                Top = 20,
+                Right = 1840,
+                Bottom = 320,
+                Items =
+                [
+                    Item("无畏契约登录器.exe"),
+                    Item("无畏契约WeGame版"),
+                    Item("炉石传说"),
+                    Item("Firestone"),
+                    Item("HearthstoneDeckTracker.exe"),
+                    Item("和平精英模拟器"),
+                    Item("steam"),
+                    Item("WeGame"),
+                    Item("Epic Games Launcher"),
+                    Item("游戏加加"),
+                    Item("暴雪战网")
+                ]
+            },
+            docBox,
             new()
             {
                 Title = "图片",
@@ -120,13 +219,130 @@ public sealed partial class CrabDeskRuntime
                 Top = 460,
                 Right = 1150,
                 Bottom = 740,
-                Tabs = [ new CoodeskerTabModel { Title = "新标签" } ]
+                Tabs = [ new CoodeskerTabModel { Title = "新标签" } ],
+                Items =
+                [
+                    Item("Snipaste_2025-12-03_19-29-58_2_2_2"),
+                    Item("Snipaste_2025-12-03_19-29-58_2_2_2_2")
+                ]
             },
-            new() { Title = "浏览器", Left = 1200, Top = 460, Right = 1590, Bottom = 740 },
-            new() { Title = "网络", Left = 1640, Top = 460, Right = 1970, Bottom = 740 },
-            new() { Title = "AI", Left = 2030, Top = 460, Right = 2420, Bottom = 740 },
-            new() { Title = "office", Left = 830, Top = 820, Right = 1150, Bottom = 1100 },
-            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 }
+            new()
+            {
+                Title = "浏览器",
+                Left = 1200,
+                Top = 460,
+                Right = 1590,
+                Bottom = 740,
+                Items =
+                [
+                    Item("Google Chrome"),
+                    Item("Microsoft Edge"),
+                    Item("Firefox"),
+                    Item("AdsPower Browser"),
+                    Item("夸克"),
+                    Item("夸克网盘"),
+                    Item("百度网盘"),
+                    Item("阿里云盘"),
+                    Item("迅雷")
+                ]
+            },
+            new()
+            {
+                Title = "网络",
+                Left = 1640,
+                Top = 460,
+                Right = 1970,
+                Bottom = 740,
+                Items =
+                [
+                    Item("ToDesk"),
+                    Item("向日葵远程控制"),
+                    Item("UU远程"),
+                    Item("EasyConnect"),
+                    Item("RustDesk"),
+                    Item("SakuraFrp 启动器"),
+                    Item("雷神加速器"),
+                    Item("小黑盒加速器"),
+                    Item("CC Switch"),
+                    Item("Discord"),
+                    Item("Telegram"),
+                    Item("Clash Verge"),
+                    Item("FlClash"),
+                    Item("Radmin VPN"),
+                    Item("LocalSend")
+                ]
+            },
+            new()
+            {
+                Title = "AI",
+                Left = 2030,
+                Top = 460,
+                Right = 2420,
+                Bottom = 740,
+                Items =
+                [
+                    Item("豆包"),
+                    Item("元宝"),
+                    Item("CodeBuddy"),
+                    Item("LM Studio"),
+                    Item("LLM Wiki"),
+                    Item("Codex++"),
+                    Item("Codex++ 管理工具"),
+                    Item("AstrBot")
+                ]
+            },
+            new()
+            {
+                Title = "office",
+                Left = 830,
+                Top = 820,
+                Right = 1150,
+                Bottom = 1100,
+                Items =
+                [
+                    Item("WPS Office"),
+                    Item("Word"),
+                    Item("Excel"),
+                    Item("PowerPoint"),
+                    Item("Visio"),
+                    Item("OneNote"),
+                    Item("LibreOffice 26.2"),
+                    Item("企业微信"),
+                    Item("网易邮箱大师"),
+                    Item("腾讯会议")
+                ]
+            },
+            new()
+            {
+                Title = "专业",
+                Left = 1820,
+                Top = 720,
+                Right = 2170,
+                Bottom = 1040,
+                Items =
+                [
+                    Item("Trae CN"),
+                    Item("Codey"),
+                    Item("Qoder CN"),
+                    Item("Qoder"),
+                    Item("OpenCode"),
+                    Item("CrabDesk"),
+                    Item("ZCode"),
+                    Item("Docker Desktop"),
+                    Item("微信开发者工具"),
+                    Item("Visual Studio Code"),
+                    Item("Visual Studio 2022"),
+                    Item("Antigravity"),
+                    Item("Antigravity IDE"),
+                    Item("Antigravity Tools"),
+                    Item("MATLAB R2024b"),
+                    Item("Cygwin64 Terminal"),
+                    Item("AutoCAD 2024"),
+                    Item("AutoCAD 2016 - 简体中文 (Simplified Chinese)"),
+                    Item("SOLIDWORKS 2025"),
+                    Item("剪映专业版")
+                ]
+            }
         };
 
         foreach (var b in defaultBoxes)

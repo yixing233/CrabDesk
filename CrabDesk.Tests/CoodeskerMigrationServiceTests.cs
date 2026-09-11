@@ -124,15 +124,15 @@ public class CoodeskerMigrationServiceTests
     {
         var boxes = new List<CoodeskerBoxModel>
         {
-            new() { Title = "工具" },
-            new() { Title = "0" },
-            new() { Title = "文档" },
-            new() { Title = "图片" },
-            new() { Title = "浏览器" },
-            new() { Title = "网络" },
-            new() { Title = "AI" },
-            new() { Title = "office" },
-            new() { Title = "专业" }
+            new() { Title = "工具", Left = 780, Top = 20, Right = 1260, Bottom = 320, Items = [ new() { Name = "TinyBar", FilePath = "C:\\Desktop\\TinyBar.lnk" } ] },
+            new() { Title = "0", Left = 1320, Top = 20, Right = 1840, Bottom = 320, Items = [ new() { Name = "无畏契约", FilePath = "C:\\Desktop\\无畏契约.lnk" } ] },
+            new() { Title = "文档", Left = 1900, Top = 20, Right = 2420, Bottom = 320, Items = [ new() { Name = "report", FilePath = "C:\\Desktop\\report.docx" } ] },
+            new() { Title = "图片", Left = 830, Top = 460, Right = 1150, Bottom = 740, Tabs = [ new() { Title = "新标签" } ], Items = [ new() { Name = "screenshot", FilePath = "C:\\Desktop\\screenshot.png" } ] },
+            new() { Title = "浏览器", Left = 1200, Top = 460, Right = 1590, Bottom = 740, Items = [ new() { Name = "Edge", FilePath = "C:\\Desktop\\Edge.lnk" } ] },
+            new() { Title = "网络", Left = 1640, Top = 460, Right = 1970, Bottom = 740, Items = [ new() { Name = "ToDesk", FilePath = "C:\\Desktop\\ToDesk.lnk" } ] },
+            new() { Title = "AI", Left = 2030, Top = 460, Right = 2420, Bottom = 740, Items = [ new() { Name = "豆包", FilePath = "C:\\Desktop\\豆包.lnk" } ] },
+            new() { Title = "office", Left = 830, Top = 820, Right = 1150, Bottom = 1100, Items = [ new() { Name = "WPS", FilePath = "C:\\Desktop\\WPS.lnk" } ] },
+            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040, Items = [ new() { Name = "VSCode", FilePath = "C:\\Desktop\\VSCode.lnk" } ] }
         };
 
         var monitor = new MonitorLayout

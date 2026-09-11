@@ -251,20 +251,6 @@ public static class CoodeskerMigrationService
                 AssignItem(item, targetTabId);
             }
 
-            // Auto-classify matching desktop items for category boxes
-            foreach (var dItem in items)
-            {
-                if (dItem.IsSystem) continue; // Keep "This PC", "Recycle Bin" on desktop
-                var key = dItem.Key.ToString();
-                if (next.Assignments.ContainsKey(key)) continue;
-
-                if (IsItemMatchingBox(dItem, box.Title))
-                {
-                    next.Assignments[key] = box.Id;
-                    box.ItemOrder.Add(key);
-                }
-            }
-
             void AssignItem(CoodeskerItemModel sourceItem, Guid? tabId)
             {
                 var matched = !string.IsNullOrWhiteSpace(sourceItem.FilePath)
@@ -302,22 +288,11 @@ public static class CoodeskerMigrationService
             return new LayoutRect(cBox.Left * scaleX, cBox.Top * scaleY, cBox.Width * scaleX, cBox.Height * scaleY);
         }
 
-        var title = cBox.Title.Trim();
-        var (px, py, pw, ph) = title switch
-        {
-            "工具" => (780.0, 20.0, 480.0, 300.0),
-            "0" => (1320.0, 20.0, 520.0, 300.0),
-            "文档" => (1900.0, 20.0, 520.0, 300.0),
-            "图片" => (830.0, 460.0, 320.0, 280.0),
-            "浏览器" => (1200.0, 460.0, 390.0, 280.0),
-            "网络" => (1640.0, 460.0, 330.0, 280.0),
-            "AI" => (2030.0, 460.0, 390.0, 280.0),
-            "office" => (830.0, 820.0, 320.0, 280.0),
-            "专业" => (1820.0, 720.0, 350.0, 320.0),
-            _ => (100.0 + (index % 3) * 400.0, 100.0 + (index / 3) * 320.0, 360.0, 280.0)
-        };
-
-        return new LayoutRect(px * scaleX, py * scaleY, pw * scaleX, ph * scaleY);
+        var w = cBox.Width > 50 ? cBox.Width : 360.0;
+        var h = cBox.Height > 50 ? cBox.Height : 280.0;
+        var x = cBox.Left > 0 ? cBox.Left : (100.0 + (index % 3) * 400.0);
+        var y = cBox.Top > 0 ? cBox.Top : (100.0 + (index / 3) * 320.0);
+        return new LayoutRect(x * scaleX, y * scaleY, w * scaleX, h * scaleY);
     }
 
     private static IReadOnlyList<CoodeskerTabModel> GetTabs(CoodeskerBoxModel source)
@@ -341,53 +316,8 @@ public static class CoodeskerMigrationService
                 });
             }
         }
-        else if (source.Title is "图片")
-        {
-            result.Add(new CoodeskerTabModel { Title = "新标签" });
-        }
 
         return result;
-    }
-
-    private static bool IsItemMatchingBox(DesktopItemRef item, string boxTitle)
-    {
-        var name = item.DisplayName.ToLowerInvariant();
-        var path = (item.FileSystemPath ?? item.ParsingName ?? string.Empty).ToLowerInvariant();
-        var ext = Path.GetExtension(path);
-
-        return boxTitle switch
-        {
-            "图片" => ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp" or ".svg" or ".psd",
-            "文档" => ext is ".doc" or ".docx" or ".pdf" or ".xls" or ".xlsx" or ".ppt" or ".pptx" or ".txt" or ".md" or ".rtf" or ".csv" or ".dwg"
-                      || name.Contains("知云") || name.Contains("zotero") || name.Contains("pdf") || name.Contains("阅读器") || name.Contains("typora") || name.Contains("obsidian"),
-            "0" => name.Contains("无畏契约") || name.Contains("炉石传说") || name.Contains("和平精英") || name.Contains("steam")
-                      || name.Contains("wegame") || name.Contains("epic") || name.Contains("游戏") || name.Contains("加加")
-                      || name.Contains("战网") || name.Contains("battle.net") || name.Contains("暴雪")
-                      || name.Contains("firestone") || name.Contains("hearthstone"),
-            "浏览器" => name.Contains("browser") || name.Contains("浏览器") || name.Contains("firefox") || name.Contains("edge")
-                        || name.Contains("chrome") || name.Contains("夸克") || name.Contains("百度网盘") || name.Contains("阿里云盘") || name.Contains("迅雷"),
-            "AI" => name.Contains("ai") || name.Contains("豆包") || name.Contains("元宝") || name.Contains("codebuddy")
-                    || name.Contains("codex") || name.Contains("chat") || name.Contains("gpt") || name.Contains("deepseek")
-                    || name.Contains("lm studio") || name.Contains("llm wiki") || name.Contains("astrbot"),
-            "专业" => name.Contains("code") || name.Contains("crabdesk") || name.Contains("zcode") || name.Contains("docker")
-                    || name.Contains("trae") || name.Contains("qoder") || name.Contains("antigravity") || name.Contains("微信开发者工具")
-                    || name.Contains("visual studio") || name.Contains("git") || name.Contains("dev") || name.Contains("开发")
-                    || name.Contains("matlab") || name.Contains("cygwin") || name.Contains("autocad") || name.Contains("solidworks") || name.Contains("剪映"),
-            "网络" => name.Contains("远程") || name.Contains("uu远程") || name.Contains("todesk") || name.Contains("easyconnect")
-                    || name.Contains("sakurafrp") || name.Contains("rustdesk") || name.Contains("anydesk") || name.Contains("cc switch")
-                    || name.Contains("discord") || name.Contains("telegram") || name.Contains("雷神加速器") || name.Contains("小黑盒")
-                    || name.Contains("clash") || name.Contains("radmin") || name.Contains("localsend"),
-            "office" => name.Contains("office") || name.Contains("wps") || name.Contains("visio") || name.Contains("word")
-                        || name.Contains("excel") || name.Contains("powerpoint") || name.Contains("邮箱") || name.Contains("会议") || name.Contains("企业微信") || name.Contains("onenote"),
-            "工具" => name.Contains("tool") || name.Contains("工具") || name.Contains("管家") || name.Contains("驱动") || name.Contains("凌豹")
-                    || name.Contains("atk") || name.Contains("cockpit") || name.Contains("deskpins") || name.Contains("ev录屏")
-                    || name.Contains("everywhere") || name.Contains("imetool") || name.Contains("ktc") || name.Contains("listary")
-                    || name.Contains("mobaxterm") || name.Contains("nexclip") || name.Contains("pastex") || name.Contains("pi-desk")
-                    || name.Contains("quicklook") || name.Contains("tiez") || name.Contains("umi-ocr") || name.Contains("wiztree")
-                    || name.Contains("tinybar") || name.Contains("origin") || name.Contains("mchose") || name.Contains("搞机")
-                    || name.Contains("wise") || name.Contains("windhawk") || name.Contains("mklink"),
-            _ => false
-        };
     }
 
     private static string NormalizePath(string? path)
