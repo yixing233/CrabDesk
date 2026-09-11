@@ -15,9 +15,58 @@ internal static class Program
     private static T Get<T>(object target, string name) => (T)target.GetType().GetField(name, Hidden)!.GetValue(target)!;
     private static void Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Hidden)!.Invoke(target, args);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LoadLibrary(string path);
+
+    private delegate void FnCipherCtor(IntPtr cipher);
+    private delegate void FnCipherSetKey(IntPtr cipher, [MarshalAs(UnmanagedType.LPStr)] string tag, ulong len);
+    private delegate void FnCipherDecrypt(IntPtr cipher, IntPtr inBytes, IntPtr outBytes, uint len);
+    private delegate void FnCipherSetLen(IntPtr cipher, uint len);
+
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--decrypt-coodesker"))
+        {
+            var dllPath = @"D:\Coodesker\Native-x64.dll";
+            var hModule = LoadLibrary(dllPath);
+            Console.WriteLine($"Loaded Native-x64.dll at 0x{hModule:X}");
+
+            var fnCtor = Marshal.GetDelegateForFunctionPointer<FnCipherCtor>(hModule + 0x001AFD20);
+            var fnSetKey = Marshal.GetDelegateForFunctionPointer<FnCipherSetKey>(hModule + 0x001B0850);
+            var fnSetLen = Marshal.GetDelegateForFunctionPointer<FnCipherSetLen>(hModule + 0x001B0840);
+            var fnDecrypt = Marshal.GetDelegateForFunctionPointer<FnCipherDecrypt>(hModule + 0x001B0610);
+
+            var cipher = Marshal.AllocHGlobal(512);
+            for (int i = 0; i < 512; i++) Marshal.WriteByte(cipher, i, 0);
+
+            Console.WriteLine("Calling ctor...");
+            fnCtor(cipher);
+            Console.WriteLine("Calling setKey...");
+            fnSetKey(cipher, "FindWindow", 10);
+
+            var cachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Coodesker\cache\desk.cache");
+            var encBytes = File.ReadAllBytes(cachePath);
+            Console.WriteLine("Calling setLen...");
+            fnSetLen(cipher, (uint)encBytes.Length);
+
+            Console.WriteLine("Calling decrypt...");
+            var pIn = Marshal.AllocHGlobal(encBytes.Length);
+            var pOut = Marshal.AllocHGlobal(encBytes.Length);
+            Marshal.Copy(encBytes, 0, pIn, encBytes.Length);
+
+            fnDecrypt(cipher, pIn, pOut, (uint)encBytes.Length);
+
+            var decBytes = new byte[encBytes.Length];
+            Marshal.Copy(pOut, decBytes, 0, encBytes.Length);
+            var text = System.Text.Encoding.UTF8.GetString(decBytes);
+            Console.WriteLine($"Decrypted length: {text.Length}");
+            Console.WriteLine("Prefix: " + text.Substring(0, Math.Min(500, text.Length)));
+            File.WriteAllBytes(Path.Combine(Path.GetTempPath(), "coodesker_raw_decrypted.bin"), decBytes);
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "coodesker_raw_decrypted.json"), text);
+            return 0;
+        }
+
         var wallpaper = args.Contains("--wallpaper");
         var fullMonitor = args.Contains("--full-monitor");
         var desktopCycle = args.Contains("--desktop-cycle");

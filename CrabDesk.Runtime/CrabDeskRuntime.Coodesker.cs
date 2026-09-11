@@ -106,7 +106,7 @@ public sealed partial class CrabDeskRuntime
 
         // Priority 2: From local machine Coodesker cache
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var cachePath = Path.Combine(appData, @"Coodeskercachedesk.cache");
+        var cachePath = Path.Combine(appData, "Coodesker", "cache", "desk.cache");
         if (File.Exists(cachePath))
         {
             var decrypted = DecryptCoodeskerCache(cachePath);
@@ -196,10 +196,10 @@ public sealed partial class CrabDeskRuntime
     {
         var candidates = new[]
         {
-            @"D:CoodeskerNative-x64.dll",
-            @"D:Program FilesCoodeskerNative-x64.dll",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"CoodeskerNative-x64.dll"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"CoodeskerNative-x64.dll")
+            Path.Combine(@"D:\Coodesker", "Native-x64.dll"),
+            Path.Combine(@"D:\Program Files\Coodesker", "Native-x64.dll"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Coodesker", "Native-x64.dll"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Coodesker", "Native-x64.dll")
         };
         return candidates.FirstOrDefault(File.Exists);
     }
