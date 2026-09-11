@@ -106,21 +106,7 @@ public sealed partial class CrabDeskRuntime
             catch { }
         }
 
-        // Priority 2: Check for any exported preview JSON in AppData\CrabDesk
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var previewJson = Path.Combine(localAppData, "CrabDesk", "coodesker_import_preview.json");
-        if (File.Exists(previewJson))
-        {
-            try
-            {
-                var text = await File.ReadAllTextAsync(previewJson);
-                var parsed = CoodeskerMigrationService.ParseCoodeskerLayoutJson(text);
-                if (parsed.Count > 0) return parsed;
-            }
-            catch { }
-        }
-
-        // Priority 3: Local Coodesker installation layout
+        // Default layout when migrating from local Coodesker installation
         // Generates the canonical boxes with their accurate positions and sub-tabs
         var defaultBoxes = new List<CoodeskerBoxModel>
         {
@@ -141,7 +127,21 @@ public sealed partial class CrabDeskRuntime
             new() { Title = "网络", Left = 1640, Top = 460, Right = 1970, Bottom = 740 },
             new() { Title = "AI", Left = 2030, Top = 460, Right = 2420, Bottom = 740 },
             new() { Title = "office", Left = 830, Top = 820, Right = 1150, Bottom = 1100 },
-            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 }
+            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 },
+            new()
+            {
+                Title = "组合盒子",
+                Left = 1350,
+                Top = 720,
+                Right = 1770,
+                Bottom = 1040,
+                Tabs =
+                [
+                    new CoodeskerTabModel { Title = "目录" },
+                    new CoodeskerTabModel { Title = "压缩" },
+                    new CoodeskerTabModel { Title = "其它" }
+                ]
+            }
         };
 
         return defaultBoxes;
