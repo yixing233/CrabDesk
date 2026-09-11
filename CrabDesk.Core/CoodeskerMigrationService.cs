@@ -388,10 +388,11 @@ public static class CoodeskerMigrationService
         {
             "图片" => ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp" or ".svg" or ".psd",
             "文档" => ext is ".doc" or ".docx" or ".pdf" or ".xls" or ".xlsx" or ".ppt" or ".pptx" or ".txt" or ".md" or ".rtf" or ".csv" or ".dwg"
-                      || name.Contains("知云") || name.Contains("zotero") || name.Contains("pdf") || name.Contains("阅读器"),
+                      || name.Contains("知云") || name.Contains("zotero") || name.Contains("pdf") || name.Contains("阅读器") || name.Contains("typora") || name.Contains("obsidian"),
             "游戏" => name.Contains("无畏契约") || name.Contains("炉石传说") || name.Contains("和平精英") || name.Contains("steam")
                       || name.Contains("wegame") || name.Contains("epic") || name.Contains("游戏") || name.Contains("加加")
-                      || name.Contains("土豆兄弟") || name.Contains("firestone") || name.Contains("hearthstone"),
+                      || name.Contains("战网") || name.Contains("battle.net") || name.Contains("暴雪")
+                      || name.Contains("firestone") || name.Contains("hearthstone"),
             "浏览器" => name.Contains("browser") || name.Contains("浏览器") || name.Contains("firefox") || name.Contains("edge")
                         || name.Contains("chrome") || name.Contains("夸克") || name.Contains("百度网盘") || name.Contains("阿里云盘") || name.Contains("迅雷"),
             "AI" => name.Contains("ai") || name.Contains("豆包") || name.Contains("元宝") || name.Contains("codebuddy")
@@ -399,22 +400,25 @@ public static class CoodeskerMigrationService
                     || name.Contains("lm studio") || name.Contains("llm wiki") || name.Contains("astrbot"),
             "专业" => name.Contains("code") || name.Contains("crabdesk") || name.Contains("zcode") || name.Contains("docker")
                     || name.Contains("trae") || name.Contains("qoder") || name.Contains("antigravity") || name.Contains("微信开发者工具")
-                    || name.Contains("visual studio") || name.Contains("git") || name.Contains("dev") || name.Contains("开发"),
+                    || name.Contains("visual studio") || name.Contains("git") || name.Contains("dev") || name.Contains("开发")
+                    || name.Contains("matlab") || name.Contains("cygwin") || name.Contains("autocad") || name.Contains("solidworks") || name.Contains("剪映"),
             "网络" => name.Contains("远程") || name.Contains("uu远程") || name.Contains("todesk") || name.Contains("easyconnect")
                     || name.Contains("sakurafrp") || name.Contains("rustdesk") || name.Contains("anydesk") || name.Contains("cc switch")
-                    || name.Contains("discord") || name.Contains("telegram") || name.Contains("雷神加速器") || name.Contains("小黑盒"),
+                    || name.Contains("discord") || name.Contains("telegram") || name.Contains("雷神加速器") || name.Contains("小黑盒")
+                    || name.Contains("clash") || name.Contains("radmin") || name.Contains("localsend"),
             "office" => name.Contains("office") || name.Contains("wps") || name.Contains("visio") || name.Contains("word")
-                        || name.Contains("excel") || name.Contains("powerpoint") || name.Contains("邮箱") || name.Contains("会议") || name.Contains("企业微信"),
+                        || name.Contains("excel") || name.Contains("powerpoint") || name.Contains("邮箱") || name.Contains("会议") || name.Contains("企业微信") || name.Contains("onenote"),
             "工具" => name.Contains("tool") || name.Contains("工具") || name.Contains("管家") || name.Contains("驱动") || name.Contains("凌豹")
                     || name.Contains("atk") || name.Contains("cockpit") || name.Contains("deskpins") || name.Contains("ev录屏")
                     || name.Contains("everywhere") || name.Contains("imetool") || name.Contains("ktc") || name.Contains("listary")
                     || name.Contains("mobaxterm") || name.Contains("nexclip") || name.Contains("pastex") || name.Contains("pi-desk")
                     || name.Contains("quicklook") || name.Contains("tiez") || name.Contains("umi-ocr") || name.Contains("wiztree")
-                    || name.Contains("tinybar") || name.Contains("origin"),
+                    || name.Contains("tinybar") || name.Contains("origin") || name.Contains("mchose") || name.Contains("搞机")
+                    || name.Contains("wise") || name.Contains("windhawk") || name.Contains("mklink"),
             "组合盒子" => item.Kind == DesktopItemKind.Folder
                       || Directory.Exists(item.FileSystemPath)
-                      || ext is ".zip" or ".rar" or ".7z" or ".tar" or ".gz" or ".ahk"
-                      || name.Contains("新建文件夹") || name.Contains("licenses") || name.Contains("wheel"),
+                      || ext is ".zip" or ".rar" or ".7z" or ".tar" or ".gz" or ".ahk" or ".html" or ".json"
+                      || name.Contains("新建文件夹") || name.Contains("licenses") || name.Contains("wheel") || name.StartsWith(".vs"),
             _ => false
         };
     }

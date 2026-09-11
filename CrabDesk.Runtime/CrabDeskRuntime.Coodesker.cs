@@ -144,6 +144,11 @@ public sealed partial class CrabDeskRuntime
             }
         };
 
+        foreach (var b in defaultBoxes)
+        {
+            b.IsCollapsed = true;
+        }
+
         return defaultBoxes;
     }
 }
