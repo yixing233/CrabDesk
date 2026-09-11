@@ -17,7 +17,7 @@
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>20260911.01</Version>
+    <Version>20260911.02</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
