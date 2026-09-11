@@ -1057,6 +1057,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
+        if (_movingBox is not null &&
+            string.Equals(_boxAlignmentMonitorId, monitorId ?? _monitor.Id, StringComparison.OrdinalIgnoreCase) &&
+            GetBoxAlignmentGuideBounds() is { } guideBounds)
+        {
+            bounds = bounds is { } existing ? RectangleF.Union(existing, guideBounds) : guideBounds;
+        }
         if (_dropPreview is { } preview &&
             ShouldRenderDropPreviewSeparately(
                 preview.BoxId,
@@ -1352,6 +1358,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     includeItemHoverFeedback: false);
             }
         }
+        DrawBoxAlignmentGuides(graphics, monitorId);
     }
 
     /// <summary>
@@ -1453,6 +1460,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 {
                     DrawBox(graphics, box, clipBounds);
                 }
+                DrawBoxAlignmentGuides(graphics, _monitor.Id);
                 graphics.ResetTransform();
             }
 

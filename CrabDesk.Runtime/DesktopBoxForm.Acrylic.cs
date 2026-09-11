@@ -78,6 +78,11 @@ internal sealed partial class DesktopBoxForm
             }
             behind.Add(box.Bounds);
         }
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.ScaleTransform((float)_scale, (float)_scale);
+            DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        }
     }
     internal static double ResolveBoxTintOpacity(double opacity, bool acrylic) =>
         Math.Clamp(opacity, 0.35, 1) * (acrylic ? 0.72 : 1);

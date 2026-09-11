@@ -1245,6 +1245,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool allowMonitorTransfer)
     {
         CancelPendingDragRender();
+        ClearBoxAlignmentGuides();
         if (_movingBox is not null || _resizingBox is not null)
         {
             _dynamicVisualVersion++;
@@ -1266,14 +1267,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             var cursor = Forms.Cursor.Position;
             var beforeMonitorId = movingBox.MonitorId;
+            var targetMonitor = _runtime.Monitors.FirstOrDefault(candidate =>
+                candidate.PixelBounds.Contains(cursor.X, cursor.Y));
+            var targetScale = Math.Max(targetMonitor?.DpiScale ?? _scale, 0.01d);
             var moved = LayoutCoordinator.TryMoveBoxToMonitor(
                 movingBox,
                 _runtime.Monitors,
                 cursor.X,
                 cursor.Y,
-                grabOffsetX,
-                grabOffsetY,
-                LayoutGrid.DefaultStep);
+                grabOffsetX * _scale / targetScale,
+                grabOffsetY * _scale / targetScale,
+                gridStep: 0);
             monitorChanged |= moved;
             if (moved)
             {
@@ -1283,7 +1287,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         if (movingBox is not null)
         {
-            SnapBoxPositionForCommit(movingBox);
+            ClampBoxPositionForCommit(movingBox);
         }
 
         UpdateWindowRegion();
@@ -1323,6 +1327,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             if (target is null)
             {
+                if (SetBoxAlignmentGuides([], null)) RequestDragRender();
                 _iconLayerRenderRequest?.Invoke();
                 return;
             }
@@ -1340,10 +1345,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     cursor.Y,
                     grabOffsetX,
                     grabOffsetY,
-                    LayoutGrid.DefaultStep);
+                    gridStep: 0);
                 _monitorTransferSeen |= moved;
                 if (moved)
                 {
+                    ApplyBoxDragPosition(box, box.Bounds, target);
                     MarkMonitorTransferRefreshPending(previousMonitorId);
                 }
                 _iconLayerRenderRequest?.Invoke();
@@ -1353,13 +1359,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var localCursorX = (cursor.X - target.PixelBounds.X) / targetScale;
             var localCursorY = (cursor.Y - target.PixelBounds.Y) / targetScale;
             var transferredBounds = new LayoutRect(
-                SnapDipToPixel(localCursorX - grabOffsetX),
-                SnapDipToPixel(localCursorY - grabOffsetY),
+                SnapDipToMonitorPixel(localCursorX - grabOffsetX, targetScale),
+                SnapDipToMonitorPixel(localCursorY - grabOffsetY, targetScale),
                 _startBounds.Width,
                 _startBounds.Height).Clamp(
                     new LayoutRect(0, 0, target.WorkArea.Width, target.WorkArea.Height),
                     GetMinimumBoxWidth(box));
-            ApplyBoxTransform(box, transferredBounds);
+            ApplyBoxDragPosition(box, transferredBounds, target);
             _iconLayerRenderRequest?.Invoke();
             return;
         }
@@ -1374,10 +1380,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 cursor.Y,
                 (_pressPoint.X - _startBounds.X) * _scale / Math.Max(target.DpiScale, 0.01),
                 (_pressPoint.Y - _startBounds.Y) * _scale / Math.Max(target.DpiScale, 0.01),
-                LayoutGrid.DefaultStep);
+                gridStep: 0);
             _monitorTransferSeen |= moved;
             if (moved)
             {
+                ApplyBoxDragPosition(box, box.Bounds, target);
                 MarkMonitorTransferRefreshPending(previousMonitorId);
             }
             _iconLayerRenderRequest?.Invoke();
@@ -1390,41 +1397,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _startBounds.Height).Clamp(
                 new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height),
                 GetMinimumBoxWidth(box));
-        nextBounds = DesktopBoxAlignmentEngine.Align(
-            nextBounds,
-            GetBoxAlignmentPeerBounds(box),
-            new LayoutRect(0, 0, _monitor.WorkArea.Width, _monitor.WorkArea.Height));
-        ApplyBoxTransform(box, nextBounds);
+        ApplyBoxDragPosition(box, nextBounds, _monitor);
     }
 
-    private IEnumerable<LayoutRect> GetBoxAlignmentPeerBounds(DesktopBox box) =>
-        _runtime.State.Boxes
-            .Where(candidate =>
-                candidate.Id != box.Id &&
-                string.Equals(candidate.MonitorId, box.MonitorId, StringComparison.OrdinalIgnoreCase))
-            .Select(candidate => candidate.Bounds);
-
-    private void SnapBoxPositionForCommit(DesktopBox box)
+    private void ClampBoxPositionForCommit(DesktopBox box)
     {
         var monitor = _runtime.Monitors.FirstOrDefault(candidate =>
                 string.Equals(candidate.Id, box.MonitorId, StringComparison.OrdinalIgnoreCase))
             ?? _monitor;
-        var scale = Math.Max(monitor.DpiScale, 0.01d);
-        var snappedBounds = new LayoutRect(
-            SnapDipToMonitorPixel(LayoutGrid.Snap(box.Bounds.X), scale),
-            SnapDipToMonitorPixel(LayoutGrid.Snap(box.Bounds.Y), scale),
-            box.Bounds.Width,
-            box.Bounds.Height).Clamp(
+        // Commit exactly the last free/aligned position. Never introduce a
+        // grid step or search for a new snap target when the pointer is released.
+        box.Bounds = box.Bounds.Clamp(
             new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height),
             GetMinimumBoxWidth(box));
-        // Grid rounding is only a baseline. Re-apply box alignment after it
-        // so releasing a drag cannot undo an edge or center-line alignment by
-        // a few DIPs. Use the target monitor's peers because the box may have
-        // crossed monitors during the drag.
-        box.Bounds = DesktopBoxAlignmentEngine.Align(
-            snappedBounds,
-            GetBoxAlignmentPeerBounds(box),
-            new LayoutRect(0, 0, monitor.WorkArea.Width, monitor.WorkArea.Height));
     }
 
     private static double SnapDipToMonitorPixel(double value, double scale) =>

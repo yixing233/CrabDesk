@@ -41,6 +41,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             DrawBox(graphics, box, clipBounds);
         }
+        DrawBoxAlignmentGuides(graphics, _monitor.Id);
         graphics.ResetTransform();
     }
 
