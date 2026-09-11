@@ -67,6 +67,9 @@ public sealed class CrabDeskService : ICrabDeskService
     public Task ExportBackupAsync(string path) => _runtime.ExportBackupAsync(path);
     public Task RestoreBackupAsync(string path) => _runtime.RestoreBackupAsync(path);
     public Task DeleteBackupAsync(string path) => _runtime.DeleteBackupAsync(path);
+    public bool IsLocalCoodeskerInstalled() => _runtime.IsLocalCoodeskerInstalled();
+    public Task<CoodeskerMigrationResult> MigrateFromLocalCoodeskerAsync(bool overwrite = true) => _runtime.MigrateFromLocalCoodeskerAsync(overwrite);
+    public Task<CoodeskerMigrationResult> ImportFromCoodeskerBackupAsync(string backupFilePath, bool overwrite = true) => _runtime.ImportFromCoodeskerBackupAsync(backupFilePath, overwrite);
     public void SetBackupDirectory(string path) => _runtime.SetBackupDirectory(path);
     public void SetDailyBackup(bool enabled) => _runtime.SetDailyBackup(enabled);
     public void SetBackupIntervalHours(int hours) => _runtime.SetBackupIntervalHours(hours);

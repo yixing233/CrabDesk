@@ -112,6 +112,71 @@ public partial class BackupViewModel : ObservableObject
         });
     }
 
+    [RelayCommand]
+    private async Task MigrateFromLocalCoodeskerAsync()
+    {
+        if (!_service.IsLocalCoodeskerInstalled())
+        {
+            await _dialogs.ShowMessageAsync("未检测到酷呆桌面", "未能检测到本机安装的酷呆桌面配置目录。如已有备份文件，请使用“导入酷呆备份文件”功能。");
+            return;
+        }
+
+        if (!await _dialogs.ConfirmAsync(
+            "一键从酷呆桌面覆盖迁移",
+            "此操作将读取本机酷呆桌面的盒子和图标布局，并【完全覆盖】当前 CrabDesk 的桌面盒子布局。\n\n迁移前会自动为当前 CrabDesk 状态创建一份安全备份，以便随时恢复。确定开始迁移吗？",
+            "覆盖迁移"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var result = await _service.MigrateFromLocalCoodeskerAsync(overwrite: true);
+            if (result.Success)
+            {
+                Status = result.Message;
+                await _dialogs.ShowMessageAsync("迁移成功", result.Message);
+            }
+            else
+            {
+                Status = $"迁移未完成: {result.Message}";
+                await _dialogs.ShowMessageAsync("迁移失败", result.Message);
+            }
+            await RefreshAsync();
+        });
+    }
+
+    [RelayCommand]
+    private async Task ImportCoodeskerBackupAsync()
+    {
+        var path = await _pickers.PickOpenFileAsync(".backup", ".json", ".cache");
+        if (path is null) return;
+
+        if (!await _dialogs.ConfirmAsync(
+            "导入酷呆桌面备份",
+            "所选酷呆桌面备份文件将【完全覆盖】当前 CrabDesk 的桌面盒子布局。\n\n导入前会自动创建当前状态的安全备份。确定继续吗？",
+            "覆盖导入"))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            var result = await _service.ImportFromCoodeskerBackupAsync(path, overwrite: true);
+            if (result.Success)
+            {
+                Status = result.Message;
+                await _dialogs.ShowMessageAsync("导入成功", result.Message);
+            }
+            else
+            {
+                Status = $"导入未完成: {result.Message}";
+                await _dialogs.ShowMessageAsync("导入失败", result.Message);
+            }
+            await RefreshAsync();
+        });
+    }
+
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private async Task PreviewAsync()
     {

@@ -19,7 +19,7 @@ public sealed record DesktopConfirmationRequest(
     string Message,
     string PrimaryText);
 
-public sealed class CrabDeskRuntime : IDisposable
+public sealed partial class CrabDeskRuntime : IDisposable
 {
     private static readonly TimeSpan DesktopViewRefreshInterval = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan DesktopViewRefreshWindow = TimeSpan.FromSeconds(8);

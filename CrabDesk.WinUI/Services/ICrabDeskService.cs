@@ -53,6 +53,9 @@ public interface ICrabDeskService
     Task ExportBackupAsync(string path);
     Task RestoreBackupAsync(string path);
     Task DeleteBackupAsync(string path);
+    bool IsLocalCoodeskerInstalled();
+    Task<CoodeskerMigrationResult> MigrateFromLocalCoodeskerAsync(bool overwrite = true);
+    Task<CoodeskerMigrationResult> ImportFromCoodeskerBackupAsync(string backupFilePath, bool overwrite = true);
     void SetBackupDirectory(string path);
     void SetDailyBackup(bool enabled);
     void SetBackupIntervalHours(int hours);

@@ -7,7 +7,7 @@ public interface IFilePickerService
 {
     void RegisterWindow(Window window);
     Task<string?> PickFolderAsync();
-    Task<string?> PickOpenFileAsync(string extension);
+    Task<string?> PickOpenFileAsync(params string[] extensions);
     Task<string?> PickSaveFileAsync(string suggestedName, string extension);
 }
 
@@ -26,10 +26,20 @@ public sealed class FilePickerService : IFilePickerService
         return (await picker.PickSingleFolderAsync())?.Path;
     }
 
-    public async Task<string?> PickOpenFileAsync(string extension)
+    public async Task<string?> PickOpenFileAsync(params string[] extensions)
     {
         var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
-        picker.FileTypeFilter.Add(NormalizeExtension(extension));
+        if (extensions is not null && extensions.Length > 0)
+        {
+            foreach (var ext in extensions)
+            {
+                picker.FileTypeFilter.Add(NormalizeExtension(ext));
+            }
+        }
+        else
+        {
+            picker.FileTypeFilter.Add("*");
+        }
         Initialize(picker);
         return (await picker.PickSingleFileAsync())?.Path;
     }

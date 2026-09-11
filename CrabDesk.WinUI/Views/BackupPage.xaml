@@ -84,6 +84,20 @@
                 <AppBarButton Label="导出布局" Command="{Binding ExportCommand}" ToolTipService.ToolTip="导出布局"><AppBarButton.Icon><lucide:LucideIcon Icon="Upload" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="导入布局" Command="{Binding ImportCommand}" ToolTipService.ToolTip="导入布局"><AppBarButton.Icon><lucide:LucideIcon Icon="Download" /></AppBarButton.Icon></AppBarButton>
                 <AppBarSeparator />
+                <AppBarButton Label="酷呆迁移" ToolTipService.ToolTip="从酷呆桌面 (Coodesker) 迁移布局">
+                    <AppBarButton.Icon><lucide:LucideIcon Icon="FolderSync" /></AppBarButton.Icon>
+                    <AppBarButton.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="一键从本机酷呆桌面覆盖迁移" Command="{Binding MigrateFromLocalCoodeskerCommand}">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem Text="导入酷呆桌面备份文件 (.backup)..." Command="{Binding ImportCoodeskerBackupCommand}">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8E5;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </AppBarButton.Flyout>
+                </AppBarButton>
+                <AppBarSeparator />
                 <AppBarButton Label="预览" Command="{Binding PreviewCommand}" ToolTipService.ToolTip="预览所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="Eye" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="恢复" Command="{Binding RestoreCommand}" ToolTipService.ToolTip="恢复所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="RotateCcw" /></AppBarButton.Icon></AppBarButton>
                 <AppBarButton Label="删除" Command="{Binding DeleteCommand}" ToolTipService.ToolTip="删除所选备份"><AppBarButton.Icon><lucide:LucideIcon Icon="Trash2" /></AppBarButton.Icon></AppBarButton>
