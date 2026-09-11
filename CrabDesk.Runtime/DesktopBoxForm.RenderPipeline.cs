@@ -34,6 +34,29 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         RequestLayerRender();
     }
 
+    private bool QueueVisualFrame()
+    {
+        if (_acrylicFramePresenter is null || IsTransformActive || _dragStarted || _selectionBox is not null)
+            return false;
+        if (_visualFramePending) return true;
+        _visualFramePending = true;
+        _visualFrameTimer.Start();
+        return true;
+    }
+
+    private void FlushQueuedVisualFrame()
+    {
+        _visualFrameTimer.Stop();
+        if (!_visualFramePending) return;
+        _visualFramePending = false;
+        if (!_resourcesDisposed && !IsDisposed) PresentLayer();
+    }
+
+    private void CancelQueuedVisualFrame()
+    {
+        _visualFramePending = false;
+        _visualFrameTimer.Stop();
+    }
     private void RequestLayerRender()
     {
         if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
@@ -41,7 +64,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        PresentLayer();
+        if (!QueueVisualFrame()) PresentLayer();
     }
 
     private void RequestVisualLayerRender()
@@ -60,7 +83,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return;
         }
 
-        PresentLayer();
+        if (!QueueVisualFrame()) PresentLayer();
     }
 
     private void RequestItemHoverVisualUpdate()
