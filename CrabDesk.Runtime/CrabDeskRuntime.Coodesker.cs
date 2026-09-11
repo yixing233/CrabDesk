@@ -113,7 +113,6 @@ public sealed partial class CrabDeskRuntime
             new() { Title = "工具", Left = 780, Top = 20, Right = 1260, Bottom = 320 },
             new() { Title = "0", Left = 1320, Top = 20, Right = 1840, Bottom = 320 },
             new() { Title = "文档", Left = 1900, Top = 20, Right = 2420, Bottom = 320 },
-            new() { Title = "游戏", Left = 450, Top = 460, Right = 810, Bottom = 780 },
             new()
             {
                 Title = "图片",
@@ -127,21 +126,7 @@ public sealed partial class CrabDeskRuntime
             new() { Title = "网络", Left = 1640, Top = 460, Right = 1970, Bottom = 740 },
             new() { Title = "AI", Left = 2030, Top = 460, Right = 2420, Bottom = 740 },
             new() { Title = "office", Left = 830, Top = 820, Right = 1150, Bottom = 1100 },
-            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 },
-            new()
-            {
-                Title = "组合盒子",
-                Left = 1350,
-                Top = 720,
-                Right = 1770,
-                Bottom = 1040,
-                Tabs =
-                [
-                    new CoodeskerTabModel { Title = "目录" },
-                    new CoodeskerTabModel { Title = "压缩" },
-                    new CoodeskerTabModel { Title = "其它" }
-                ]
-            }
+            new() { Title = "专业", Left = 1820, Top = 720, Right = 2170, Bottom = 1040 }
         };
 
         foreach (var b in defaultBoxes)

@@ -127,7 +127,6 @@ public class CoodeskerMigrationServiceTests
             new() { Title = "工具" },
             new() { Title = "0" },
             new() { Title = "文档" },
-            new() { Title = "游戏" },
             new() { Title = "图片" },
             new() { Title = "浏览器" },
             new() { Title = "网络" },
@@ -162,7 +161,7 @@ public class CoodeskerMigrationServiceTests
 
         var state = CoodeskerMigrationService.CreateOverwriteState(boxes, new CrabDeskState(), [monitor], items);
 
-        Assert.Equal(10, state.Boxes.Count);
+        Assert.Equal(9, state.Boxes.Count);
 
         // Check coordinates
         var toolBox = state.Boxes.First(b => b.Title == "工具");
@@ -183,7 +182,7 @@ public class CoodeskerMigrationServiceTests
         var proBox = state.Boxes.First(b => b.Title == "专业");
         var netBox = state.Boxes.First(b => b.Title == "网络");
         var officeBox = state.Boxes.First(b => b.Title == "office");
-        var gameBox = state.Boxes.First(b => b.Title == "游戏");
+        var zeroBox = state.Boxes.First(b => b.Title == "0");
 
         Assert.Equal(imgBox.Id, state.Assignments["path:C:\\Desktop\\screenshot.png"]);
         Assert.Equal(docBox.Id, state.Assignments["path:C:\\Desktop\\report.docx"]);
@@ -193,11 +192,10 @@ public class CoodeskerMigrationServiceTests
         Assert.Equal(netBox.Id, state.Assignments["path:C:\\Desktop\\ToDesk.lnk"]);
         Assert.Equal(officeBox.Id, state.Assignments["path:C:\\Desktop\\WPS.lnk"]);
         Assert.Equal(toolBox.Id, state.Assignments["path:C:\\Desktop\\TinyBar.lnk"]);
-        Assert.Equal(gameBox.Id, state.Assignments["path:C:\\Desktop\\无畏契约.lnk"]);
 
-        // "0" box must NOT swallow unrelated desktop icons
-        var zeroBox = state.Boxes.First(b => b.Title == "0");
-        Assert.Empty(zeroBox.ItemOrder);
+        // Games are assigned into "0" box!
+        Assert.Equal(zeroBox.Id, state.Assignments["path:C:\\Desktop\\无畏契约.lnk"]);
+        Assert.Contains("path:C:\\Desktop\\无畏契约.lnk", zeroBox.ItemOrder);
 
         // System shell item must stay on desktop (unassigned)
         Assert.False(state.Assignments.ContainsKey("shell:::{20D04FE0-3AEA-1069-A2D8-08002B30309D}"));

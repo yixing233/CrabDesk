@@ -251,38 +251,17 @@ public static class CoodeskerMigrationService
                 AssignItem(item, targetTabId);
             }
 
-            // Auto-classify matching desktop items for category boxes (excluding "0")
-            if (box.Title != "0")
+            // Auto-classify matching desktop items for category boxes
+            foreach (var dItem in items)
             {
-                foreach (var dItem in items)
+                if (dItem.IsSystem) continue; // Keep "This PC", "Recycle Bin" on desktop
+                var key = dItem.Key.ToString();
+                if (next.Assignments.ContainsKey(key)) continue;
+
+                if (IsItemMatchingBox(dItem, box.Title))
                 {
-                    if (dItem.IsSystem) continue; // Keep "This PC", "Recycle Bin" on desktop
-                    var key = dItem.Key.ToString();
-                    if (next.Assignments.ContainsKey(key)) continue;
-
-                    if (IsItemMatchingBox(dItem, box.Title))
-                    {
-                        next.Assignments[key] = box.Id;
-                        box.ItemOrder.Add(key);
-
-                        if (box.Title == "组合盒子" && box.ManualTabs.Count > 0)
-                        {
-                            var ext = Path.GetExtension(dItem.FileSystemPath ?? string.Empty).ToLowerInvariant();
-                            var isFolder = dItem.Kind == DesktopItemKind.Folder || Directory.Exists(dItem.FileSystemPath);
-                            var isArchive = ext is ".zip" or ".rar" or ".7z" or ".tar" or ".gz";
-
-                            var targetTab = isFolder
-                                ? box.ManualTabs.FirstOrDefault(t => t.Title == "目录")
-                                : isArchive
-                                    ? box.ManualTabs.FirstOrDefault(t => t.Title == "压缩")
-                                    : box.ManualTabs.FirstOrDefault(t => t.Title == "其它");
-
-                            if (targetTab is not null)
-                            {
-                                box.ItemTabAssignments[key] = targetTab.Id;
-                            }
-                        }
-                    }
+                    next.Assignments[key] = box.Id;
+                    box.ItemOrder.Add(key);
                 }
             }
 
@@ -329,14 +308,12 @@ public static class CoodeskerMigrationService
             "工具" => (780.0, 20.0, 480.0, 300.0),
             "0" => (1320.0, 20.0, 520.0, 300.0),
             "文档" => (1900.0, 20.0, 520.0, 300.0),
-            "游戏" => (450.0, 460.0, 360.0, 320.0),
             "图片" => (830.0, 460.0, 320.0, 280.0),
             "浏览器" => (1200.0, 460.0, 390.0, 280.0),
             "网络" => (1640.0, 460.0, 330.0, 280.0),
             "AI" => (2030.0, 460.0, 390.0, 280.0),
             "office" => (830.0, 820.0, 320.0, 280.0),
             "专业" => (1820.0, 720.0, 350.0, 320.0),
-            "组合盒子" => (1350.0, 720.0, 420.0, 320.0),
             _ => (100.0 + (index % 3) * 400.0, 100.0 + (index / 3) * 320.0, 360.0, 280.0)
         };
 
@@ -364,12 +341,6 @@ public static class CoodeskerMigrationService
                 });
             }
         }
-        else if (source.Title is "组合盒子")
-        {
-            result.Add(new CoodeskerTabModel { Title = "目录" });
-            result.Add(new CoodeskerTabModel { Title = "压缩" });
-            result.Add(new CoodeskerTabModel { Title = "其它" });
-        }
         else if (source.Title is "图片")
         {
             result.Add(new CoodeskerTabModel { Title = "新标签" });
@@ -389,7 +360,7 @@ public static class CoodeskerMigrationService
             "图片" => ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".ico" or ".webp" or ".svg" or ".psd",
             "文档" => ext is ".doc" or ".docx" or ".pdf" or ".xls" or ".xlsx" or ".ppt" or ".pptx" or ".txt" or ".md" or ".rtf" or ".csv" or ".dwg"
                       || name.Contains("知云") || name.Contains("zotero") || name.Contains("pdf") || name.Contains("阅读器") || name.Contains("typora") || name.Contains("obsidian"),
-            "游戏" => name.Contains("无畏契约") || name.Contains("炉石传说") || name.Contains("和平精英") || name.Contains("steam")
+            "0" => name.Contains("无畏契约") || name.Contains("炉石传说") || name.Contains("和平精英") || name.Contains("steam")
                       || name.Contains("wegame") || name.Contains("epic") || name.Contains("游戏") || name.Contains("加加")
                       || name.Contains("战网") || name.Contains("battle.net") || name.Contains("暴雪")
                       || name.Contains("firestone") || name.Contains("hearthstone"),
@@ -415,10 +386,6 @@ public static class CoodeskerMigrationService
                     || name.Contains("quicklook") || name.Contains("tiez") || name.Contains("umi-ocr") || name.Contains("wiztree")
                     || name.Contains("tinybar") || name.Contains("origin") || name.Contains("mchose") || name.Contains("搞机")
                     || name.Contains("wise") || name.Contains("windhawk") || name.Contains("mklink"),
-            "组合盒子" => item.Kind == DesktopItemKind.Folder
-                      || Directory.Exists(item.FileSystemPath)
-                      || ext is ".zip" or ".rar" or ".7z" or ".tar" or ".gz" or ".ahk" or ".html" or ".json"
-                      || name.Contains("新建文件夹") || name.Contains("licenses") || name.Contains("wheel") || name.StartsWith(".vs"),
             _ => false
         };
     }
