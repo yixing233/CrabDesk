@@ -121,13 +121,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private readonly Dictionary<(Guid BoxId, string ItemKey), RectangleF> _expandedItemHitBounds = [];
     private bool _geometryDirty = true;
     private IReadOnlyList<LayoutRect> _lastWindowRegionRectangles = [];
-    private IReadOnlyList<LayoutRect> _appliedWindowRegionRectangles = [];
-    private IntPtr _appliedWindowRegionHandle;
-    private double _appliedWindowRegionCornerRadius;
     private readonly DesktopAnimationFrameClock _animationFrameClock;
     private readonly Forms.Timer _hoverTimer;
-    private readonly Forms.Timer _visualFrameTimer;
-    private bool _visualFramePending;
     private readonly Forms.Timer _dragRenderTimer;
     private readonly Forms.Timer _scrollHoverResumeTimer;
     private ItemViewKey? _scrollAnimationKey;
@@ -238,8 +233,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _animationFrameClock.Frame += OnAnimationFrame;
         _hoverTimer = new Forms.Timer { Interval = 1 };
         _hoverTimer.Tick += OnHoverTimer;
-        _visualFrameTimer = new Forms.Timer { Interval = DesktopAnimationFrameClock.IntervalMilliseconds };
-        _visualFrameTimer.Tick += (_, _) => FlushQueuedVisualFrame();
         _scrollHoverResumeTimer = new Forms.Timer { Interval = ScrollHoverResumeDelayMilliseconds };
         _scrollHoverResumeTimer.Tick += OnScrollHoverResumeTimerTick;
         _dragRenderTimer = new Forms.Timer { Interval = DragRenderCoalesceMilliseconds };
@@ -591,8 +584,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // presentation in the final parent's composition tree: presenting as
         // a top-level window before SetParent leaves an invisible child layer.
         _desktopAttached = false;
-        _appliedWindowRegionHandle = IntPtr.Zero;
-        _appliedWindowRegionRectangles = [];
         DesktopWindowTools.AttachAsDesktopChild(Handle, parentHandle);
         _desktopAttached = true;
     }
@@ -1377,7 +1368,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     /// </summary>
     private bool PresentLayer()
     {
-        CancelQueuedVisualFrame();
         if (!_desktopAttached)
         {
             return false;
@@ -1573,8 +1563,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _animationFrameClock.Dispose();
             _hoverTimer.Stop();
             _hoverTimer.Dispose();
-            _visualFrameTimer.Stop();
-            _visualFrameTimer.Dispose();
             _scrollHoverResumeTimer.Stop();
             _scrollHoverResumeTimer.Dispose();
             CancelPendingDragRender();
@@ -1921,14 +1909,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             GetInteractionBoxHeight(box))).ToArray();
         _lastWindowRegionRectangles = currentRectangles;
 
-        var cornerRadius = (float)_runtime.State.Settings.Appearance.CornerRadius;
-        if (IsHandleCreated && _appliedWindowRegionHandle == Handle &&
-            _appliedWindowRegionCornerRadius == cornerRadius &&
-            RegionRectanglesEqual(_appliedWindowRegionRectangles, currentRectangles))
-        {
-            return true;
-        }
-
         // Desktop child windows are composed as siblings beneath
         // SHELLDLL_DefView. A transparent full-monitor layered child can
         // still occlude the full-monitor icon child below it on some Explorer
@@ -1952,10 +1932,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return false;
         }
 
-        _appliedWindowRegionHandle = Handle;
-        _appliedWindowRegionRectangles = currentRectangles.ToArray();
-        _appliedWindowRegionCornerRadius = cornerRadius;
-
         var diagnostic = $"{desktopBoxes.Length}:{_runtime.AreDesktopItemsHidden}";
         if (!string.Equals(diagnostic, _lastRegionDiagnostic, StringComparison.Ordinal))
         {
@@ -1964,13 +1940,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 $"Surface region monitor={_monitor.Id} boxes={desktopBoxes.Length} hidden={_runtime.AreDesktopItemsHidden}");
         }
         return true;
-    }
-
-    private static bool RegionRectanglesEqual(IReadOnlyList<LayoutRect> left, IReadOnlyList<LayoutRect> right)
-    {
-        if (left.Count != right.Count) return false;
-        return left.OrderBy(rect => rect.X).ThenBy(rect => rect.Y).ThenBy(rect => rect.Width).ThenBy(rect => rect.Height)
-            .SequenceEqual(right.OrderBy(rect => rect.X).ThenBy(rect => rect.Y).ThenBy(rect => rect.Width).ThenBy(rect => rect.Height));
     }
 
     private void HandleRegionFailure(string diagnostic)
