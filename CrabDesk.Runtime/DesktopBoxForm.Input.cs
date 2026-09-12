@@ -353,23 +353,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _dragCancelled = false;
         _showVirtualDesktopDropCursor = !sourceMapped;
         _runtime.SetVirtualBoxDesktopDropEnabled(!sourceMapped);
-        // Publish the initial ghost before OLE starts dispatching DragOver.
-        // Otherwise the source icon remains painted in place for the first
-        // drag frames and the preview appears to jump when entering a box.
-        _iconDragStateForward?.Invoke(_pressPoint, null, itemKeys, _dragIconGrabOffset);
-        RequestDragRender();
         var shouldReleaseToDesktop = false;
         var dragEffect = Forms.DragDropEffects.None;
         try
         {
             try
             {
-                // Virtual box-to-desktop drops carry private metadata, for
-                // which Explorer does not reliably render IDragSourceHelper's
-                // image. The desktop surface owns that preview instead. Keep
-                // the shell image for mapped-folder file drags only.
-                using var dragImage = sourceMapped ? CreateDragImage(selected, _pressedItem) : null;
-                if (dragImage is not null)
+                // Own one pointer image for the entire drag, including when
+                // hovering the source box, other boxes, Explorer or no target.
+                using var dragImage = CreateDragImage(selected, _pressedItem);
+                using var pointerPreview = dragImage is null ? null : ItemDragPointerPreview.TryCreate(
+                    this, dragImage.Bitmap, dragImage.CursorOffset);
+                _iconDragStateForward?.Invoke(_pressPoint, null, itemKeys, _dragIconGrabOffset);
+                RequestDragRender();
+                // Keep the shell fallback only if our layered preview failed.
+                if (pointerPreview is null && sourceMapped && dragImage is not null)
                 {
                     DesktopDragImageHelper.TryInitialize(
                         data as IDataObject,

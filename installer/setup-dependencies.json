@@ -5,7 +5,7 @@
     "sha256": "8bd710afa5de396c9eb2a3b68d00279b7b9aca372a2443e9acd4f48ffdef3f2d"
   },
   "windowsAppRuntime": {
-    "version": "1.8.260710003",
+    "version": "8000.921.1539.0",
     "packageName": "Microsoft.WindowsAppRuntime.1.8",
     "url": "https://download.microsoft.com/download/712421b4-6f72-47fc-acb8-2ebf030b2260/WindowsAppRuntimeInstall-x64.exe",
     "sha256": "b8cda840267ab72797f654f801f9a064ab6d9e508cedee3df79f772f104db6d6"

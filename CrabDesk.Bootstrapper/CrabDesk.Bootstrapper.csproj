@@ -9,7 +9,7 @@
     <StripSymbols>true</StripSymbols>
     <ApplicationIcon>Assets\CrabDesk.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version Condition="'$(Version)' == ''">20260901.01</Version>
+    <Version Condition="'$(Version)' == ''">20260913.01</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <DependencyHashPlaceholder Condition="'$(DependencyHashPlaceholder)' == ''">0000000000000000000000000000000000000000000000000000000000000000</DependencyHashPlaceholder>
     <PayloadSha256 Condition="'$(PayloadSha256)' == ''">$(DependencyHashPlaceholder)</PayloadSha256>
@@ -18,7 +18,7 @@
     <DotNetDesktopMinimumVersion Condition="'$(DotNetDesktopMinimumVersion)' == ''">8.0.30</DotNetDesktopMinimumVersion>
     <WindowsAppRuntimeInstallerUrl Condition="'$(WindowsAppRuntimeInstallerUrl)' == ''">https://aka.ms/windowsappsdk/1.8/1.8.260710003/windowsappruntimeinstall-x64.exe</WindowsAppRuntimeInstallerUrl>
     <WindowsAppRuntimeInstallerSha256 Condition="'$(WindowsAppRuntimeInstallerSha256)' == ''">$(DependencyHashPlaceholder)</WindowsAppRuntimeInstallerSha256>
-    <WindowsAppRuntimeMinimumVersion Condition="'$(WindowsAppRuntimeMinimumVersion)' == ''">1.8.260710003</WindowsAppRuntimeMinimumVersion>
+    <WindowsAppRuntimeMinimumVersion Condition="'$(WindowsAppRuntimeMinimumVersion)' == ''">8000.921.1539.0</WindowsAppRuntimeMinimumVersion>
     <VisualCppInstallerUrl Condition="'$(VisualCppInstallerUrl)' == ''">https://aka.ms/vs/18/release/14.50.35719/VC_redist.x64.exe</VisualCppInstallerUrl>
     <VisualCppInstallerSha256 Condition="'$(VisualCppInstallerSha256)' == ''">$(DependencyHashPlaceholder)</VisualCppInstallerSha256>
     <VisualCppMinimumVersion Condition="'$(VisualCppMinimumVersion)' == ''">14.50.35719</VisualCppMinimumVersion>

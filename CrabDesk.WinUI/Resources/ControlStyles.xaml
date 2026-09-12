@@ -19,7 +19,10 @@
         <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
     </Style>
     <Style TargetType="ToggleSwitch">
+        <Setter Property="Width" Value="56" />
         <Setter Property="MinWidth" Value="0" />
+        <Setter Property="OnContent" Value="" />
+        <Setter Property="OffContent" Value="" />
     </Style>
     <Style x:Key="ParameterSliderStyle" TargetType="Slider">
         <Setter Property="HorizontalAlignment" Value="Stretch" />

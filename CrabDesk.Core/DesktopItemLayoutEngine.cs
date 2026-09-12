@@ -46,16 +46,22 @@ public static class DesktopItemLayoutEngine
     private static double GetAdaptiveGridCellWidth(double bodyWidth, double minimumCellWidth)
     {
         var columns = GetGridColumnCount(bodyWidth, minimumCellWidth);
-        return bodyWidth > 0 ? bodyWidth / columns : minimumCellWidth;
+        // Distribute small remainders, but do not stretch a sparse row into
+        // oversized selection cards when zooming drops the column count.
+        const double maximumExtraWidth = 16;
+        return bodyWidth > 0
+            ? Math.Min(bodyWidth / columns, minimumCellWidth + maximumExtraWidth)
+            : minimumCellWidth;
     }
 
-    // Box icon zoom only changes the box IconSize. Scale the configured
-    // global icon spacing with that size so the box grid follows its icons
-    // instead of staying pinned to the global default spacing.
+    // Spacing includes an icon plus fixed text/padding. Zoom only the icon
+    // portion: scaling the entire cell also magnifies blank space and makes
+    // large icons occupy unnecessarily tall/wide cells. Keep 42-DIP defaults
+    // and the user's extra spacing unchanged.
     public static double ScaleIconSpacing(double spacing, double iconSize)
     {
         const double anchorIconSize = 42;
-        return spacing * (Math.Clamp(iconSize, 24, 96) / anchorIconSize);
+        return spacing + Math.Clamp(iconSize, 24, 96) - anchorIconSize;
     }
 
     public static double GetMinimumBoxWidth(

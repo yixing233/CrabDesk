@@ -335,6 +335,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         UpdateHoverState(point, updateItemHover: false);
         EnsureGeometry();
         var targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        if (targetGeometry is not null && !targetGeometry.Box.IsMappedFolder && GetManualBoxTabAtPoint(targetGeometry, point) is not null)
+        {
+            // A drag over a child tab is an explicit tab-selection gesture.
+            if (TrySelectBoxTab(targetGeometry, point))
+            {
+                EnsureGeometry();
+                targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+            }
+        }
         if (targetGeometry is null)
         {
             ClearDropPreview();
@@ -881,6 +890,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnGiveFeedback(object? sender, Forms.GiveFeedbackEventArgs eventArgs)
     {
+        ItemDragPointerPreview.UpdateActiveAtCursor();
         if (!_showVirtualDesktopDropCursor ||
             eventArgs.Effect != Forms.DragDropEffects.None ||
             IsPointerOverAnyBox(Forms.Cursor.Position))

@@ -326,7 +326,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         // handled by the application's single-instance command channel.
         try
         {
-            _desktopContextMenu.SetEnabled(false, string.Empty);
+            _desktopContextMenu.SetEnabled(
+                true,
+                Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "CrabDesk.WinUI.exe"));
         }
         catch
         {

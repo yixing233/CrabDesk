@@ -6,7 +6,7 @@ using Forms = System.Windows.Forms;
 namespace CrabDesk.Runtime;
 
 /// <summary>
-/// A small, click-through layered child used for the mutable part of a desktop
+/// A small, click-through layered popup used for the mutable part of a desktop
 /// drag. Keeping it separate from the monitor-sized desktop layer prevents a
 /// pointer move from uploading an entire monitor bitmap.
 /// </summary>
@@ -16,6 +16,11 @@ internal sealed class DesktopDragOverlay : Forms.Form
     private const int WmMouseActivate = 0x0021;
     private const int WsClipSiblings = 0x04000000;
     private const int WsExLayered = 0x00080000;
+    private const int WsExTransparent = 0x00000020;
+    private const int WsExTopmost = 0x00000008;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExNoActivate = 0x08000000;
+    private const int WsPopup = unchecked((int)0x80000000);
     // Keep the child bitmap and its native layered surface stable while a
     // selection rectangle grows by a pixel at a time. The content is still
     // positioned at its exact DIP coordinates inside this padded surface.
@@ -23,14 +28,17 @@ internal sealed class DesktopDragOverlay : Forms.Form
     private static readonly IntPtr HtTransparent = new(-1);
     private static readonly IntPtr MaNoActivate = new(3);
     private Bitmap? _bitmap;
+    private readonly Forms.Control _host;
 
-    internal DesktopDragOverlay()
+    internal DesktopDragOverlay(Forms.Control host)
     {
+        _host = host ?? throw new ArgumentNullException(nameof(host));
         FormBorderStyle = Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = Forms.FormStartPosition.Manual;
         AutoScaleMode = Forms.AutoScaleMode.None;
-        TopLevel = false;
+        TopLevel = true;
+        TopMost = true;
         DoubleBuffered = true;
         SetStyle(
             Forms.ControlStyles.AllPaintingInWmPaint |
@@ -47,7 +55,10 @@ internal sealed class DesktopDragOverlay : Forms.Form
         {
             var parameters = base.CreateParams;
             parameters.Style &= ~WsClipSiblings;
-            parameters.ExStyle |= WsExLayered;
+            parameters.Style |= WsPopup;
+            // Layered-window transparency passes OLE hit testing through even
+            // to Explorer windows on another thread (HTTRANSPARENT alone cannot).
+            parameters.ExStyle |= WsExLayered | WsExTransparent | WsExTopmost | WsExToolWindow | WsExNoActivate;
             return parameters;
         }
     }
@@ -79,12 +90,13 @@ internal sealed class DesktopDragOverlay : Forms.Form
         RectangleF requestedBounds,
         double scale,
         Action<Graphics, RectangleF> draw,
-        out string diagnostic)
+        out string diagnostic,
+        bool screenCoordinates = false)
     {
         diagnostic = string.Empty;
-        if (IsDisposed || Parent is null || requestedBounds.Width <= 0 || requestedBounds.Height <= 0)
+        if (IsDisposed || !_host.IsHandleCreated || requestedBounds.Width <= 0 || requestedBounds.Height <= 0)
         {
-            diagnostic = "The drag overlay has no valid parent or bounds.";
+            diagnostic = "The drag overlay has no valid host or bounds.";
             return false;
         }
 
@@ -105,13 +117,16 @@ internal sealed class DesktopDragOverlay : Forms.Form
             (float)(width / effectiveScale),
             (float)(height / effectiveScale));
 
+        var screenPoint = screenCoordinates
+            ? new Point(left, top)
+            : _host.PointToScreen(new Point(left, top));
         EnsureBitmap(width, height);
         // UpdateLayeredWindow moves and replaces the pixels atomically. Moving
         // a visible child with SetBounds first briefly shows its previous frame
         // at the new location, which is visible as a drag twitch.
         if (!Visible && (Left != left || Top != top || Width != width || Height != height))
         {
-            SetBounds(left, top, width, height);
+            SetBounds(screenPoint.X, screenPoint.Y, width, height);
         }
 
         using (var graphics = Graphics.FromImage(_bitmap!))
@@ -126,7 +141,7 @@ internal sealed class DesktopDragOverlay : Forms.Form
         var presented = LayeredWindowPresenter.TryPresent(
             Handle,
             _bitmap!,
-            Parent.PointToScreen(new Point(left, top)),
+            screenPoint,
             out diagnostic);
         if (presented && !Visible)
         {

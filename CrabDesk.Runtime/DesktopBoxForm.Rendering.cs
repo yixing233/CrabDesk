@@ -418,7 +418,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (_editingBox?.Id != geometry.Box.Id)
         {
             var titleBounds = CalculateTitleTextBounds(geometry.Header, centered: true);
-            graphics.DrawString(geometry.Box.Title, titleFont, titleBrush,
+            var displayedTitle = geometry.ActiveManualTabId is { } activeTabId
+                ? geometry.Box.ManualTabs.FirstOrDefault(tab => tab.Id == activeTabId)?.Title
+                : null;
+            graphics.DrawString(
+                string.IsNullOrWhiteSpace(displayedTitle) ? geometry.Box.Title : displayedTitle,
+                titleFont, titleBrush,
                 titleBounds,
                 titleFormat);
         }

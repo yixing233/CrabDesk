@@ -32,8 +32,11 @@ foreach ($name in @("dotNetDesktopRuntime", "windowsAppRuntime", "visualCppRunti
     }
 }
 
-if ([string]$dependencies.windowsAppRuntime.version -ne $WindowsAppRuntimeVersion) {
-    throw "Windows App Runtime manifest version $($dependencies.windowsAppRuntime.version) does not match project package version $WindowsAppRuntimeVersion."
+if ($WindowsAppRuntimeVersion -notmatch '^1\.8\.') {
+    throw "Unsupported Windows App Runtime package version: $WindowsAppRuntimeVersion."
+}
+if ([string]$dependencies.windowsAppRuntime.version -notmatch '^8000\.\d+\.\d+\.0$') {
+    throw 'Windows App Runtime manifest must contain the MSIX runtime version.'
 }
 if ([string]$dependencies.windowsAppRuntime.packageName -ne "Microsoft.WindowsAppRuntime.1.8") {
     throw "Windows App Runtime package detection name is invalid."

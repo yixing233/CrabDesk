@@ -47,7 +47,7 @@ public static class DesktopScrollBarLayoutEngine
             trackHeight);
         var contentHeight = viewport.Height + maxScroll;
         var proportionalThumbHeight = track.Height * viewport.Height / contentHeight;
-        var minimumHeight = Math.Clamp(minimumThumbHeight, 8, track.Height);
+        var minimumHeight = Math.Min(track.Height, Math.Max(1, minimumThumbHeight));
         var thumbHeight = Math.Clamp(proportionalThumbHeight, minimumHeight, track.Height);
         var scrollOffset = Math.Clamp(requestedScroll, 0, maxScroll);
         var travel = track.Height - thumbHeight;

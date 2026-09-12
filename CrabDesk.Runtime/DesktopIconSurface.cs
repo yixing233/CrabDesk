@@ -216,8 +216,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         DragOver += OnDragOver;
         DragLeave += OnDragLeave;
         DragDrop += OnDragDrop;
-        _dragOverlay = new DesktopDragOverlay();
-        Controls.Add(_dragOverlay);
+        _dragOverlay = new DesktopDragOverlay(this);
         _hoverOverlay = new DesktopHoverOverlay();
         Controls.Add(_hoverOverlay);
         _hoverReconcileTimer = new Forms.Timer { Interval = HoverReconcileDelayMilliseconds };
@@ -2093,13 +2092,13 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             DrawDesktopFolderDropHighlight(graphics);
         }
-        DrawBoxItemDragGhost(graphics);
         if (!AreBoxVisualsInParent &&
             (_dragStarted || _boxDropItemKeys.Count > 0 ||
              _boxTransformActive?.Invoke() == true))
         {
             _dragBoxRenderer?.Invoke(graphics, clipBounds);
         }
+        DrawBoxItemDragGhost(graphics);
         // Ghost cards float above the box visuals so the dragged item stays
         // visible while the pointer is over a box (the box forwards its drag
         // state to this surface, which owns all dynamic rendering).
@@ -2932,6 +2931,11 @@ internal sealed class DesktopIconSurface : Forms.Form
     // ghost. The moving overlay contains only their icons and labels.
     private void DrawFloatingDragPreview(Graphics graphics)
     {
+        if (ItemDragPointerPreview.IsActive)
+        {
+            return;
+        }
+
         var anchor = _items.FirstOrDefault(item =>
             string.Equals(item.Item.Key.ToString(), _dragAnchorKey, StringComparison.OrdinalIgnoreCase));
         if (anchor is null)
@@ -2988,7 +2992,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void DrawBoxItemDragGhost(Graphics graphics)
     {
-        if (_boxDropItemKeys.Count == 0 || _boxDragPointer is not { } pointer)
+        if (ItemDragPointerPreview.IsActive || _boxDropItemKeys.Count == 0 || _boxDragPointer is not { } pointer)
         {
             return;
         }
@@ -3796,12 +3800,7 @@ internal sealed class DesktopIconSurface : Forms.Form
                 }
                 else
                 {
-                    var paths = desktopDrag.ItemKeys
-                        .Select(key => _runtime.FindItemByKey(key)?.FileSystemPath)
-                        .Where(path => !string.IsNullOrWhiteSpace(path))
-                        .Cast<string>()
-                        .ToArray();
-                    if (PlaceExistingDesktopPathsAtPoint(paths, dropPoint))
+                    if (PlaceDesktopSelectionAcrossMonitors(desktopDrag, dropPoint))
                     {
                         desktopDrag.HandledByDesktop = true;
                     }
@@ -4111,15 +4110,18 @@ internal sealed class DesktopIconSurface : Forms.Form
             return;
         }
 
-        var layout = result.Placements.ToDictionary(
-            entry => entry.Key,
-            entry => new DesktopIconLayoutSnapshot
+        // Updating this monitor must not discard placements on other monitors.
+        var layout = new Dictionary<string, DesktopIconLayoutSnapshot>(
+            _runtime.State.DesktopIconLayout, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, cell) in result.Placements)
+        {
+            layout[key] = new DesktopIconLayoutSnapshot
             {
                 MonitorId = _monitor.Id,
-                Column = entry.Value.Column,
-                Row = entry.Value.Row
-            },
-            StringComparer.OrdinalIgnoreCase);
+                Column = cell.Column,
+                Row = cell.Row
+            };
+        }
         // Commit persistence without a second full workspace refresh. The
         // caller presents the settled desktop exactly once after ending the
         // drag, while retaining the icon bitmap cache.
@@ -4546,13 +4548,12 @@ internal sealed class DesktopIconSurface : Forms.Form
             .Select(item => item.Item)
             .ToArray();
         if (selectedItems.Length == 0 ||
-            selectedItems.Length != _dragItemKeys.Count ||
-            selectedItems.Any(item => string.IsNullOrWhiteSpace(item.FileSystemPath)))
+            selectedItems.Length != _dragItemKeys.Count)
         {
             return false;
         }
 
-        var paths = selectedItems.Select(item => item.FileSystemPath!).ToArray();
+        var allFileSystemItems = selectedItems.All(item => !string.IsNullOrWhiteSpace(item.FileSystemPath));
         var data = new Forms.DataObject();
         var dragSession = new DesktopIconSurfaceDragSession(this, _dragItemKeys.ToArray());
         data.SetData(DesktopIconDragSessionFormat, false, dragSession);
@@ -4560,9 +4561,14 @@ internal sealed class DesktopIconSurface : Forms.Form
         // so every drop target resolves the complete group even if the
         // session object is not reachable through the data formats.
         data.SetData(DesktopBoxForm.ItemKeysFormat, _dragItemKeys.ToArray());
-        var collection = new StringCollection();
-        collection.AddRange(paths);
-        data.SetFileDropList(collection);
+        // Shell/system icons still participate in private cross-monitor drops.
+        // Never expose a partial FileDrop list for a mixed selection.
+        if (allFileSystemItems)
+        {
+            var collection = new StringCollection();
+            collection.AddRange(selectedItems.Select(item => item.FileSystemPath!).ToArray());
+            data.SetFileDropList(collection);
+        }
 
         var completedEffect = Forms.DragDropEffects.None;
         _desktopOleDragActive = true;
@@ -4574,7 +4580,12 @@ internal sealed class DesktopIconSurface : Forms.Form
             // CrabDesk's private drop targets use the accompanying session to
             // perform virtual placement and assignment without moving files.
             Forms.Cursor.Current = Forms.Cursors.Default;
-            completedEffect = DoDragDrop(data, ExternalFileDropEffects);
+            using var pointerImage = CreateDesktopPointerImage(out var grabOffset);
+            using var pointerPreview = pointerImage is null ? null : ItemDragPointerPreview.TryCreate(
+                this, pointerImage, grabOffset);
+            RequestDragRender();
+            completedEffect = DoDragDrop(data, allFileSystemItems
+                ? ExternalFileDropEffects : Forms.DragDropEffects.Move);
         }
         catch (Exception exception)
         {
@@ -4597,6 +4608,84 @@ internal sealed class DesktopIconSurface : Forms.Form
             }
         }
 
+        return true;
+    }
+
+    private Bitmap? CreateDesktopPointerImage(out Point grabOffset)
+    {
+        grabOffset = Point.Empty;
+        var anchor = _items.FirstOrDefault(item => item.Key == _dragAnchorKey);
+        if (anchor is null) return null;
+        var anchorIcon = GetIconBounds(anchor.Bounds);
+        var origin = new PointF(
+            _dragPointer.X - _dragIconGrabOffset.X - anchorIcon.X + anchor.Bounds.X,
+            _dragPointer.Y - _dragIconGrabOffset.Y - anchorIcon.Y + anchor.Bounds.Y);
+        RectangleF? bounds = null;
+        foreach (var item in _items.Where(item => _dragItemKeys.Contains(item.Key)))
+        {
+            var cell = new RectangleF(origin.X + item.Bounds.X - anchor.Bounds.X,
+                origin.Y + item.Bounds.Y - anchor.Bounds.Y, item.Bounds.Width,
+                item.Bounds.Height + Math.Max(48f, _verticalSpacing * 3f));
+            bounds = UnionVisualBounds(bounds, RectangleF.Inflate(cell, 12, 12));
+        }
+        if (bounds is not { } area) return null;
+        var left = (int)Math.Floor(area.Left * _scale);
+        var top = (int)Math.Floor(area.Top * _scale);
+        var bitmap = DesktopLayerBitmapFactory.Create(
+            Math.Max(1, (int)Math.Ceiling(area.Right * _scale) - left),
+            Math.Max(1, (int)Math.Ceiling(area.Bottom * _scale) - top));
+        try
+        {
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.Clear(Color.Transparent);
+            using var transform = new Matrix((float)_scale, 0, 0, (float)_scale, -left, -top);
+            graphics.Transform = transform;
+            DrawFloatingDragPreview(graphics);
+            grabOffset = new Point((int)Math.Round(_dragPointer.X * _scale) - left,
+                (int)Math.Round(_dragPointer.Y * _scale) - top);
+            return bitmap;
+        }
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
+    }
+
+    private bool PlaceDesktopSelectionAcrossMonitors(
+        DesktopIconSurfaceDragSession session, PointF point)
+    {
+        if (_runtime.IsDesktopAutoArrangeEnabled) return false;
+        var source = session.Source;
+        var keys = session.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var incoming = source._items.Where(item => keys.Contains(item.Key))
+            .Select(item => new DesktopIconGridItem(item.Key,
+                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row))).ToArray();
+        if (incoming.Length != keys.Count || source._dragAnchorKey is not { } anchorKey) return false;
+        // The image retains source physical size while crossing monitors.
+        // Convert its center offset to target DIPs, not source-local DIPs.
+        var center = new PointF(
+            point.X + (float)((source._iconSize / 2 - source._dragIconGrabOffset.X) * source._scale / _scale),
+            point.Y + (float)((source._iconSize / 2 - source._dragIconGrabOffset.Y) * source._scale / _scale));
+        if (GetCellAtPoint(center) is not { } target) return false;
+        var grid = CreateCurrentGrid();
+        var result = DesktopCrossMonitorDragLayout.Calculate(
+            _items.Select(item => new DesktopIconGridItem(item.Key,
+                new DesktopIconGridCell(item.Cell.Column, item.Cell.Row))),
+            incoming, anchorKey, new DesktopIconGridCell(target.Column, target.Row),
+            grid.ColumnCount, grid.RowCount);
+        if (!result.IsValid || result.DraggedPlacements.Count != keys.Count) return false;
+        var layout = new Dictionary<string, DesktopIconLayoutSnapshot>(
+            _runtime.State.DesktopIconLayout, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, cell) in result.Placements)
+        {
+            layout[key] = new DesktopIconLayoutSnapshot
+            {
+                MonitorId = _monitor.Id, Column = cell.Column, Row = cell.Row
+            };
+        }
+        _runtime.SetDesktopIconLayout(layout, refreshWorkspace: false);
+        _runtime.RefreshDesktopItemsChanged(session.ItemKeys);
         return true;
     }
 
@@ -5129,7 +5218,7 @@ internal sealed class DesktopIconSurface : Forms.Form
     // whole monitor layer.
     private void DrawExternalDragPreview(Graphics graphics)
     {
-        if (_externalDragPaths is not { Length: > 0 } paths)
+        if (ItemDragPointerPreview.IsActive || _externalDragPaths is not { Length: > 0 } paths)
         {
             return;
         }
