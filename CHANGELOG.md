@@ -51,4 +51,5 @@
 - 已重新生成框架依赖的 CrabDesk 核心安装载荷：`artifacts/installer/CrabDesk-Payload-x64.exe`。
 - 已重新生成在线安装包：`artifacts/release/CrabDesk-Setup-x64.exe`。
 - 安装包 SHA-256：`b9f9cfcf9dfd2c22c166007772cad3cb2e82758a95a3399db10f7a796ba3475a`。
+- Release 同时提供 `CrabDesk-Payload-x64.exe` 与 `CrabDesk-Setup-x64.exe`。
 - Release 构建保留现有 `MVVMTK0045` 警告，未引入新的编译错误。
