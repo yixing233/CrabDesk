@@ -135,6 +135,7 @@ public sealed class OrganizationPreviewSection
 public partial class OrganizationViewModel : ObservableObject
 {
     private readonly ICrabDeskService _service;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private readonly IDialogService _dialogs;
 
     [ObservableProperty] private OrganizationRuleListItem? _selectedRule;
@@ -178,7 +179,8 @@ public partial class OrganizationViewModel : ObservableObject
     {
         _service = service;
         _dialogs = dialogs;
-        _service.Changed += (_, _) => Refresh();
+        _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
+        _service.Changed += (_, _) => ViewModelDispatch.Run(_dispatcherQueue, Refresh);
         Refresh();
     }
 

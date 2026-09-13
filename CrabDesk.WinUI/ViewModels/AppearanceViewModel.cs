@@ -18,9 +18,12 @@ public partial class AppearanceViewModel : ObservableObject
         FontFamilies = fontCatalog.FontFamilies is { Count: > 0 } families
             ? families
             : ["Segoe UI"];
-        _service.Changed += (_, _) => Refresh();
+        _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
+        _service.Changed += (_, _) => ViewModelDispatch.Run(_dispatcherQueue, Refresh);
         Refresh();
     }
+
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
 
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();

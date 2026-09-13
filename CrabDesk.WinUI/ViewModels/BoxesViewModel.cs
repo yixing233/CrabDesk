@@ -28,9 +28,12 @@ public partial class BoxesViewModel : ObservableObject
         _dialogs = dialogs;
         _pickers = pickers;
         _notifications = notifications;
-        _service.Changed += (_, _) => Refresh();
+        _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
+        _service.Changed += (_, _) => ViewModelDispatch.Run(_dispatcherQueue, Refresh);
         Refresh();
     }
+
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
 
     public ObservableCollection<DesktopBox> Boxes { get; } = [];
     public bool HasSelection => SelectedBox is not null;

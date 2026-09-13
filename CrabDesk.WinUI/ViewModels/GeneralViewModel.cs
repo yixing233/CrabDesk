@@ -19,8 +19,11 @@ public partial class GeneralViewModel : ObservableObject
         _service = service;
         _themeService = themeService;
         _backdrops = backdrops;
+        _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
         _service.Changed += OnServiceChanged;
     }
+
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
 
     public string ConnectionStatus => _service.DesktopConnected ? "桌面已连接" : "桌面未连接";
     public string PauseButtonText => _service.IsPaused ? "恢复接管" : "暂停接管";
@@ -123,6 +126,6 @@ public partial class GeneralViewModel : ObservableObject
 
     private void OnServiceChanged(object? sender, EventArgs eventArgs)
     {
-        OnPropertyChanged(string.Empty);
+        ViewModelDispatch.Run(_dispatcherQueue, () => OnPropertyChanged(string.Empty));
     }
 }

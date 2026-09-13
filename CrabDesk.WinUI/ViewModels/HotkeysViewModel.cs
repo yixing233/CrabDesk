@@ -13,8 +13,12 @@ public partial class HotkeysViewModel : ObservableObject
     public HotkeysViewModel(ICrabDeskService service)
     {
         _service = service;
-        _service.Changed += (_, _) => OnPropertyChanged(string.Empty);
+        _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
+        _service.Changed += (_, _) => ViewModelDispatch.Run(
+            _dispatcherQueue, () => OnPropertyChanged(string.Empty));
     }
+
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
 
     public IReadOnlyList<OptionItem<HotkeyModifiers>> ModifierOptions { get; } =
     [
