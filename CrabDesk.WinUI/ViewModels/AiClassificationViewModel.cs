@@ -544,6 +544,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         }
         catch (Exception exception)
         {
+            AppDiagnostic.Error("AI classification preview failed", exception);
             Status = AiOperationMessages.ToUserMessage(exception);
             _notifications.Show(Status, InfoBarSeverity.Error, TimeSpan.FromSeconds(8));
             FinishLiveMessage(Status, isError: true);
