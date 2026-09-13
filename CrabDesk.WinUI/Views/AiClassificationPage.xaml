@@ -181,212 +181,132 @@
                 </Grid>
             </Border>
 
-            <TabView Grid.Column="1"
-                     SelectedIndex="{Binding SelectedInspectorTabIndex, Mode=TwoWay}"
-                     IsAddTabButtonVisible="False"
-                     TabWidthMode="SizeToContent"
-                     HorizontalContentAlignment="Stretch"
-                     VerticalContentAlignment="Stretch">
-                <TabViewItem Header="流程" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  HorizontalContentAlignment="Stretch">
-                        <Border Style="{StaticResource SectionCardStyle}"
-                                Padding="14"
-                                Margin="0,8,4,0">
-                            <StackPanel Spacing="10">
-                                <TextBlock Text="整理流程" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Status}"
-                                           Style="{StaticResource SecondaryBodyStyle}"
-                                           MinHeight="34" />
-                                <ProgressBar IsIndeterminate="{Binding IsProgressIndeterminate}"
-                                             Maximum="100"
-                                             Value="{Binding ProgressValue}"
-                                             Visibility="{Binding HasProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                <Button Command="{Binding ClassifyCommand}"
-                                        Style="{StaticResource AccentButtonStyle}"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Center">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <lucide:LucideIcon Icon="Sparkles" FontSize="16" />
-                                        <TextBlock Text="开始 AI 分类" />
-                                    </StackPanel>
-                                </Button>
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Command="{Binding ApplyCommand}"
-                                            IsEnabled="{Binding CanApplyPreview}"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="5">
-                                            <lucide:LucideIcon Icon="Check" FontSize="15" />
-                                            <TextBlock Text="确认应用" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Grid.Column="1"
-                                            Command="{Binding CancelCommand}"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="5">
-                                            <lucide:LucideIcon Icon="Square" FontSize="15" />
-                                            <TextBlock Text="终止" />
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
+            <Border Grid.Column="1"
+                    Style="{StaticResource SectionCardStyle}"
+                    Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <Grid Margin="14,12,14,10" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                            <Border Width="30" Height="30" CornerRadius="15" Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                <lucide:LucideIcon Icon="Sparkles" FontSize="16" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Spacing="1">
+                                <TextBlock Text="CrabDesk AI" FontWeight="SemiBold" />
+                                <TextBlock Text="桌面分类助手" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
                             </StackPanel>
-                        </Border>
-                    </ScrollViewer>
-                </TabViewItem>
+                        </StackPanel>
+                        <Button x:Name="SettingsButton"
+                                Grid.Column="1"
+                                Click="SettingsButton_OnClick"
+                                Padding="8"
+                                MinHeight="32"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                ToolTipService.ToolTip="AI 设置"
+                                AutomationProperties.Name="打开 AI 设置">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <lucide:LucideIcon Icon="Settings" FontSize="16" />
+                                <TextBlock Text="设置" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
 
-                <TabViewItem Header="AI 活动" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  HorizontalContentAlignment="Stretch">
-                        <Border Style="{StaticResource SectionCardStyle}"
-                                Padding="14"
-                                Margin="0,8,4,0">
-                            <StackPanel Spacing="12">
-                                <TextBlock Text="{Binding Status}"
-                                           Style="{StaticResource SecondaryBodyStyle}"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding TransportStatusText}"
-                                           Style="{StaticResource SecondaryBodyStyle}"
-                                           FontSize="12"
-                                           TextTrimming="CharacterEllipsis"
-                                           Visibility="{Binding TransportStatusText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
-                                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="12"
-                                        Padding="14">
-                                    <StackPanel Spacing="12">
-                                        <!-- Header Title & Assistant Info -->
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                                <Border Width="30"
-                                                        Height="30"
-                                                        CornerRadius="15"
-                                                        Background="{ThemeResource AccentFillColorDefaultBrush}">
-                                                    <lucide:LucideIcon Icon="Sparkles"
-                                                                      FontSize="16"
-                                                                      Foreground="White"
-                                                                      HorizontalAlignment="Center"
-                                                                      VerticalAlignment="Center" />
+                    <!-- Conversation Flow -->
+                    <ListView x:Name="ConversationList"
+                              Grid.Row="1"
+                              ItemsSource="{Binding Conversation}"
+                              SelectionMode="None"
+                              Padding="8,2,8,4">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="IsTabStop" Value="False" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <!-- System message -->
+                                    <StackPanel Spacing="2"
+                                                HorizontalAlignment="Center"
+                                                Visibility="{Binding IsSystem, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock Text="{Binding Text}"
+                                                   Style="{StaticResource SecondaryBodyStyle}"
+                                                   FontSize="12"
+                                                   TextAlignment="Center"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding TimeText}"
+                                                   Style="{StaticResource SecondaryBodyStyle}"
+                                                   FontSize="10"
+                                                   HorizontalAlignment="Center" />
+                                    </StackPanel>
+
+                                    <!-- User message -->
+                                    <StackPanel Orientation="Horizontal"
+                                                HorizontalAlignment="Right"
+                                                Visibility="{Binding IsUser, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <Border MaxWidth="330"
+                                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                CornerRadius="10"
+                                                Padding="10,6">
+                                            <TextBlock Text="{Binding Text}"
+                                                       Foreground="White"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                        </Border>
+                                    </StackPanel>
+
+                                    <!-- Assistant message -->
+                                    <Border MaxWidth="380"
+                                            HorizontalAlignment="Left"
+                                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="10"
+                                            Padding="10"
+                                            Visibility="{Binding IsAssistant, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <StackPanel Spacing="7">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <Border Width="22" Height="22" CornerRadius="11" Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                                    <lucide:LucideIcon Icon="Sparkles" FontSize="12" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
-                                                <StackPanel Spacing="1">
-                                                    <TextBlock Text="CrabDesk AI" FontWeight="SemiBold" />
-                                                    <TextBlock Text="桌面分类助手" Style="{StaticResource SecondaryBodyStyle}" />
-                                                </StackPanel>
+                                                <TextBlock Text="CrabDesk AI" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding TimeText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="10" VerticalAlignment="Center" />
+                                                <ProgressRing Width="12" Height="12" IsActive="{Binding IsRunning}"
+                                                              Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <lucide:LucideIcon Icon="CircleAlert" FontSize="13" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                                   Visibility="{Binding IsError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                             </StackPanel>
-                                        </Grid>
 
-                                        <!-- Metrics Capsule Bar -->
-                                        <Grid ColumnSpacing="6" RowSpacing="6">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="4,6">
-                                                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Clock" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="总耗时" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding TotalDurationText}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border Grid.Column="1"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="4,6">
-                                                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Timer" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="首字耗时" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding FirstTokenLatencyText}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border Grid.Column="2"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="4,6">
-                                                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Cpu" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="输入 Token" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding InputTokenText}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border Grid.Column="3"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="4,6">
-                                                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Cpu" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="输出 Token" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding OutputTokenText}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
-                                                </StackPanel>
-                                            </Border>
-                                            <Border Grid.Column="4"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6"
-                                                    Padding="4,6">
-                                                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Coins" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="总 Token" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding TotalTokenText}" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
-                                                </StackPanel>
-                                            </Border>
-                                        </Grid>
+                                            <TextBlock Text="{Binding Text}" FontSize="13" TextWrapping="Wrap" />
 
-                                        <!-- Tool Calls Timeline -->
-                                        <Expander HorizontalAlignment="Stretch"
-                                                  HorizontalContentAlignment="Stretch"
-                                                  Visibility="{Binding HasToolCalls, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <Expander.Header>
-                                                <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
-                                                    <lucide:LucideIcon Icon="Wrench" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                    <TextBlock Text="{Binding ToolCallsHeaderText}" FontWeight="SemiBold" />
-                                                    <ProgressRing Width="14"
-                                                                  Height="14"
-                                                                  IsActive="{Binding IsWebSearchActive}"
-                                                                  Visibility="{Binding IsWebSearchActive, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                </StackPanel>
-                                            </Expander.Header>
-                                            <ItemsControl ItemsSource="{Binding ToolCalls}" Margin="0,8,0,0">
+                                            <TextBlock Text="{Binding TransportText}"
+                                                       Style="{StaticResource SecondaryBodyStyle}"
+                                                       FontSize="11"
+                                                       TextWrapping="Wrap"
+                                                       Visibility="{Binding TransportText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
+
+                                            <!-- Tool calls -->
+                                            <ItemsControl ItemsSource="{Binding ToolCalls}"
+                                                          Visibility="{Binding HasToolCalls, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <Grid ColumnSpacing="8"
-                                                              Margin="0,0,0,6"
-                                                              Padding="8"
+                                                        <Grid ColumnSpacing="8" Margin="0,0,0,4" Padding="7"
                                                               Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                                               BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                                               BorderThickness="1"
@@ -396,413 +316,288 @@
                                                                 <ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
-                                                            <lucide:LucideIcon Icon="{Binding Icon}"
-                                                                               FontSize="14"
-                                                                               VerticalAlignment="Center"
+                                                            <lucide:LucideIcon Icon="{Binding Icon}" FontSize="13" VerticalAlignment="Center"
                                                                                Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                                                             <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
-                                                                <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                                <TextBlock Text="{Binding Detail}"
-                                                                           FontSize="11"
-                                                                           TextTrimming="CharacterEllipsis"
-                                                                           Style="{StaticResource SecondaryBodyStyle}" />
+                                                                <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Detail}" FontSize="10" TextTrimming="CharacterEllipsis" Style="{StaticResource SecondaryBodyStyle}" />
                                                             </StackPanel>
-                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                                <ProgressRing Width="12"
-                                                                              Height="12"
-                                                                              IsActive="{Binding IsRunning}"
+                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                                <ProgressRing Width="11" Height="11" IsActive="{Binding IsRunning}"
                                                                               Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                <TextBlock Text="{Binding TimeText}" FontSize="11" Style="{StaticResource SecondaryBodyStyle}" VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding TimeText}" FontSize="10" Style="{StaticResource SecondaryBodyStyle}" VerticalAlignment="Center" />
                                                             </StackPanel>
                                                         </Grid>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>
                                             </ItemsControl>
-                                        </Expander>
 
-                                        <!-- Thinking Process Expander -->
-                                        <Expander IsExpanded="{Binding IsThinkingExpanded, Mode=TwoWay}"
-                                                  HorizontalAlignment="Stretch"
-                                                  HorizontalContentAlignment="Stretch">
-                                            <Expander.Header>
-                                                <Grid ColumnSpacing="8" HorizontalAlignment="Stretch">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Brain" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                        <TextBlock Text="{Binding ThinkingHeaderText}" FontWeight="SemiBold" />
-                                                        <ProgressRing Width="14"
-                                                                      Height="14"
-                                                                      IsActive="{Binding IsBusy}"
-                                                                      Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                        <TextBlock Text="{Binding ReasoningStatsText}"
-                                                                   Style="{StaticResource SecondaryBodyStyle}"
-                                                                   FontSize="12"
-                                                                   VerticalAlignment="Center"
-                                                                   Visibility="{Binding ReasoningStatsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
-                                                    </StackPanel>
-                                                    <Button Grid.Column="1"
-                                                            Command="{Binding CopyReasoningCommand}"
-                                                            Padding="6,2"
-                                                            MinHeight="26"
-                                                            Height="26"
-                                                            Background="Transparent"
-                                                            BorderBrush="Transparent"
-                                                            BorderThickness="0"
-                                                            ToolTipService.ToolTip="复制思考过程"
-                                                            AutomationProperties.Name="复制思考过程">
-                                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                                            <lucide:LucideIcon Icon="Copy" FontSize="12" />
-                                                            <TextBlock Text="复制" FontSize="12" />
+                                            <!-- Thinking -->
+                                            <Expander IsExpanded="{Binding IsThinkingExpanded, Mode=TwoWay}"
+                                                      HorizontalAlignment="Stretch"
+                                                      HorizontalContentAlignment="Stretch"
+                                                      Visibility="{Binding ThinkingText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}">
+                                                <Expander.Header>
+                                                    <Grid ColumnSpacing="8" HorizontalAlignment="Stretch">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                            <lucide:LucideIcon Icon="Brain" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                                            <TextBlock Text="思考过程" FontSize="12" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding ThinkingStatsText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="10"
+                                                                       VerticalAlignment="Center"
+                                                                       Visibility="{Binding ThinkingStatsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
                                                         </StackPanel>
-                                                    </Button>
-                                                </Grid>
-                                            </Expander.Header>
-                                            <Border Margin="0,8,0,0"
-                                                    Padding="8"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="8">
-                                                <TextBox x:Name="ReasoningTextBox"
-                                                         Text="{Binding ReasoningOutput}"
-                                                         IsReadOnly="True"
-                                                         AcceptsReturn="True"
-                                                         TextWrapping="NoWrap"
-                                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                                         FontFamily="Consolas"
-                                                         FontSize="12"
-                                                         MinHeight="88"
-                                                         MaxHeight="220"
-                                                         Background="Transparent"
-                                                         BorderThickness="0"
-                                                         TextChanged="StreamingTextBox_OnTextChanged" />
-                                            </Border>
-                                        </Expander>
-
-                                        <!-- Classification Results Section -->
-                                        <StackPanel Spacing="8">
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Spacing="2" VerticalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                        <lucide:LucideIcon Icon="Sparkles" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                        <TextBlock Text="分类结果" FontWeight="SemiBold" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding ResultSummaryText}" Style="{StaticResource SecondaryBodyStyle}" />
-                                                </StackPanel>
-
-                                                <!-- View Mode Switcher -->
-                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                    <Button Command="{Binding ShowCardViewCommand}"
-                                                            Padding="6,2"
-                                                            MinHeight="26"
-                                                            Height="26"
-                                                            ToolTipService.ToolTip="看板卡片视图"
-                                                            AutomationProperties.Name="看板卡片视图">
-                                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                                            <lucide:LucideIcon Icon="LayoutGrid" FontSize="12" />
-                                                            <TextBlock Text="看板" FontSize="12" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                    <Button Command="{Binding ShowJsonViewCommand}"
-                                                            Padding="6,2"
-                                                            MinHeight="26"
-                                                            Height="26"
-                                                            ToolTipService.ToolTip="原始 JSON 代码视图"
-                                                            AutomationProperties.Name="原始 JSON 视图">
-                                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                                            <lucide:LucideIcon Icon="Code" FontSize="12" />
-                                                            <TextBlock Text="JSON" FontSize="12" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                </StackPanel>
-                                            </Grid>
-
-                                            <!-- View 1: Grouped Card View -->
-                                            <StackPanel Visibility="{Binding IsJsonViewMode, Converter={StaticResource BooleanNegationToVisibilityConverter}}"
-                                                        Spacing="8">
-                                                <ItemsRepeater ItemsSource="{Binding ResultGroups}">
-                                                    <ItemsRepeater.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border Margin="0,0,0,8"
-                                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                                    BorderThickness="1"
-                                                                    CornerRadius="8"
-                                                                    Padding="10">
-                                                                <StackPanel Spacing="8">
-                                                                    <Grid ColumnSpacing="6">
-                                                                        <Grid.ColumnDefinitions>
-                                                                            <ColumnDefinition Width="*" />
-                                                                            <ColumnDefinition Width="Auto" />
-                                                                        </Grid.ColumnDefinitions>
-                                                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                                            <lucide:LucideIcon Icon="FolderOpen" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                                            <TextBlock Text="{Binding CategoryName}" FontWeight="SemiBold" FontSize="13" />
-                                                                        </StackPanel>
-                                                                        <Border Grid.Column="1"
-                                                                                Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                                                                CornerRadius="10"
-                                                                                Padding="7,2">
-                                                                            <StackPanel Orientation="Horizontal" Spacing="3">
-                                                                                <TextBlock Text="{Binding ItemCount}" FontSize="11" FontWeight="SemiBold" Foreground="White" />
-                                                                                <TextBlock Text="项" FontSize="11" Foreground="White" />
-                                                                            </StackPanel>
-                                                                        </Border>
-                                                                    </Grid>
-                                                                    <ItemsRepeater ItemsSource="{Binding Items}">
-                                                                        <ItemsRepeater.Layout>
-                                                                            <lucide:TagWrapLayout />
-                                                                        </ItemsRepeater.Layout>
-                                                                        <ItemsRepeater.ItemTemplate>
-                                                                            <DataTemplate>
-                                                                                <Border Margin="0,2,6,4"
-                                                                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                                                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                                                                        BorderThickness="1"
-                                                                                        CornerRadius="6"
-                                                                                        Padding="6,4">
-                                                                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                                                        <lucide:LucideIcon Icon="File"
-                                                                                                           FontSize="13"
-                                                                                                           Visibility="{Binding HasIcon, Converter={StaticResource BooleanNegationToVisibilityConverter}}" />
-                                                                                        <Image Source="{Binding Icon}"
-                                                                                               Width="16"
-                                                                                               Height="16"
-                                                                                               Stretch="Uniform"
-                                                                                               Visibility="{Binding HasIcon, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                                        <TextBlock Text="{Binding DisplayName}"
-                                                                                                   FontSize="12"
-                                                                                                   TextTrimming="CharacterEllipsis"
-                                                                                                   MaxWidth="160" />
-                                                                                    </StackPanel>
-                                                                                </Border>
-                                                                            </DataTemplate>
-                                                                        </ItemsRepeater.ItemTemplate>
-                                                                    </ItemsRepeater>
-                                                                </StackPanel>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsRepeater.ItemTemplate>
-                                                </ItemsRepeater>
-
-                                                <!-- Empty / Waiting Placeholder for Card View -->
-                                                <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                        <Button Grid.Column="1"
+                                                                Command="{Binding DataContext.CopyMessageThinkingCommand, ElementName=RootPage}"
+                                                                CommandParameter="{Binding}"
+                                                                Padding="5,2" MinHeight="24" Height="24"
+                                                                Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
+                                                                ToolTipService.ToolTip="复制思考过程" AutomationProperties.Name="复制思考过程">
+                                                            <lucide:LucideIcon Icon="Copy" FontSize="11" />
+                                                        </Button>
+                                                    </Grid>
+                                                </Expander.Header>
+                                                <Border Margin="0,6,0,0" Padding="7"
+                                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                                         BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                        BorderThickness="1"
-                                                        CornerRadius="8"
-                                                        Padding="16"
-                                                        HorizontalAlignment="Stretch"
-                                                        Visibility="{Binding HasResultGroups, Converter={StaticResource BooleanNegationToVisibilityConverter}}">
-                                                    <StackPanel HorizontalAlignment="Center" Spacing="6">
-                                                        <lucide:LucideIcon Icon="Inbox" FontSize="24" HorizontalAlignment="Center" Foreground="{ThemeResource SecondaryTextBrush}" />
-                                                        <TextBlock Text="{Binding StructuredOutput}"
-                                                                   Style="{StaticResource SecondaryBodyStyle}"
-                                                                   TextAlignment="Center" />
-                                                    </StackPanel>
-                                                </Border>
-                                            </StackPanel>
-
-                                            <!-- View 2: JSON Code View -->
-                                            <StackPanel Visibility="{Binding IsJsonViewMode, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        Spacing="6">
-                                                <Grid ColumnSpacing="8">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                                        <TextBlock Text="原始 JSON 响应" Style="{StaticResource SecondaryBodyStyle}" />
-                                                        <TextBlock Text="{Binding StreamingParsedText}"
-                                                                   FontSize="11"
-                                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}"
-                                                                   VerticalAlignment="Center"
-                                                                   Visibility="{Binding StreamingParsedText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
-                                                    </StackPanel>
-                                                    <Button Grid.Column="1"
-                                                            Command="{Binding CopyStructuredOutputCommand}"
-                                                            Padding="6,2"
-                                                            MinHeight="26"
-                                                            Height="26"
-                                                            ToolTipService.ToolTip="复制 JSON 内容"
-                                                            AutomationProperties.Name="复制 JSON 内容">
-                                                        <StackPanel Orientation="Horizontal" Spacing="4">
-                                                            <lucide:LucideIcon Icon="Copy" FontSize="12" />
-                                                            <TextBlock Text="复制 JSON" FontSize="12" />
-                                                        </StackPanel>
-                                                    </Button>
-                                                </Grid>
-                                                <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-                                                        BorderThickness="1"
-                                                        CornerRadius="8"
-                                                        Padding="8">
-                                                    <TextBox x:Name="StructuredOutputTextBox"
-                                                             Text="{Binding StructuredOutput}"
+                                                        BorderThickness="1" CornerRadius="8">
+                                                    <TextBox Text="{Binding ThinkingText}"
                                                              IsReadOnly="True"
                                                              AcceptsReturn="True"
                                                              TextWrapping="NoWrap"
                                                              ScrollViewer.HorizontalScrollBarVisibility="Auto"
                                                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                                                              FontFamily="Consolas"
-                                                             FontSize="12"
-                                                             MinHeight="136"
-                                                             MaxHeight="360"
+                                                             FontSize="11"
+                                                             MinHeight="60"
+                                                             MaxHeight="200"
                                                              Background="Transparent"
                                                              BorderThickness="0"
-                                                             TextChanged="StreamingTextBox_OnTextChanged" />
+                                                             TextChanged="MessageTextBox_OnTextChanged" />
                                                 </Border>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </Border>
-                    </ScrollViewer>
-                </TabViewItem>
+                                            </Expander>
 
-                <TabViewItem Header="分类设置" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  HorizontalContentAlignment="Stretch">
-                        <Border Style="{StaticResource SectionCardStyle}"
-                                Padding="14"
-                                Margin="0,8,4,0">
-                            <StackPanel Spacing="10">
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="分类标签" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <Button Grid.Column="1"
-                                            Command="{Binding AddCategoryTagsCommand}"
-                                            ToolTipService.ToolTip="添加分类标签"
-                                            AutomationProperties.Name="添加分类标签">
-                                        <StackPanel Orientation="Horizontal" Spacing="5">
-                                            <lucide:LucideIcon Icon="Plus" FontSize="15" />
-                                            <TextBlock Text="添加" />
+                                            <TextBlock Text="{Binding ParsedText}"
+                                                       FontSize="11"
+                                                       Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                                                       Visibility="{Binding ParsedText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
+
+                                            <TextBlock Text="{Binding MetricsText}"
+                                                       Style="{StaticResource SecondaryBodyStyle}"
+                                                       FontSize="10"
+                                                       TextWrapping="Wrap"
+                                                       Visibility="{Binding MetricsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
+
+                                            <!-- Result JSON -->
+                                            <Expander HorizontalAlignment="Stretch"
+                                                      HorizontalContentAlignment="Stretch"
+                                                      Visibility="{Binding ResultJsonText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}">
+                                                <Expander.Header>
+                                                    <Grid ColumnSpacing="8" HorizontalAlignment="Stretch">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <lucide:LucideIcon Icon="Braces" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                                            <TextBlock Text="分类结果 JSON" FontSize="12" FontWeight="SemiBold" />
+                                                        </StackPanel>
+                                                        <Button Grid.Column="1"
+                                                                Command="{Binding DataContext.CopyMessageResultJsonCommand, ElementName=RootPage}"
+                                                                CommandParameter="{Binding}"
+                                                                Padding="5,2" MinHeight="24" Height="24"
+                                                                Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
+                                                                ToolTipService.ToolTip="复制 JSON" AutomationProperties.Name="复制分类结果 JSON">
+                                                            <lucide:LucideIcon Icon="Copy" FontSize="11" />
+                                                        </Button>
+                                                    </Grid>
+                                                </Expander.Header>
+                                                <Border Margin="0,6,0,0" Padding="7"
+                                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                        BorderThickness="1" CornerRadius="8">
+                                                    <TextBox Text="{Binding ResultJsonText}"
+                                                             IsReadOnly="True"
+                                                             AcceptsReturn="True"
+                                                             TextWrapping="NoWrap"
+                                                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                             FontFamily="Consolas"
+                                                             FontSize="11"
+                                                             MinHeight="60"
+                                                             MaxHeight="240"
+                                                             Background="Transparent"
+                                                             BorderThickness="0"
+                                                             TextChanged="MessageTextBox_OnTextChanged" />
+                                                </Border>
+                                            </Expander>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+
+                    <!-- Pinned preview result -->
+                    <Border Grid.Row="2"
+                            Margin="12,4,12,6"
+                            Padding="12"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12"
+                            Visibility="{Binding HasPreview, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel Spacing="8">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <lucide:LucideIcon Icon="Sparkles" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                        <TextBlock Text="分类结果" FontWeight="SemiBold" FontSize="13" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding ResultSummaryText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Button Command="{Binding ShowCardViewCommand}" Padding="6,2" MinHeight="26" Height="26"
+                                            ToolTipService.ToolTip="看板卡片视图" AutomationProperties.Name="看板卡片视图">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <lucide:LucideIcon Icon="LayoutGrid" FontSize="12" />
+                                            <TextBlock Text="看板" FontSize="12" />
                                         </StackPanel>
                                     </Button>
-                                </Grid>
-                                <ItemsRepeater ItemsSource="{Binding CategoryTags}"
-                                               HorizontalAlignment="Stretch">
+                                    <Button Command="{Binding ShowJsonViewCommand}" Padding="6,2" MinHeight="26" Height="26"
+                                            ToolTipService.ToolTip="原始 JSON 视图" AutomationProperties.Name="JSON 视图">
+                                        <StackPanel Orientation="Horizontal" Spacing="4">
+                                            <lucide:LucideIcon Icon="Code" FontSize="12" />
+                                            <TextBlock Text="JSON" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Command="{Binding CopyStructuredOutputCommand}" Padding="6,2" MinHeight="26" Height="26"
+                                            ToolTipService.ToolTip="复制 JSON 内容" AutomationProperties.Name="复制 JSON 内容">
+                                        <lucide:LucideIcon Icon="Copy" FontSize="12" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel Visibility="{Binding IsJsonViewMode, Converter={StaticResource BooleanNegationToVisibilityConverter}}" Spacing="6">
+                                <ItemsRepeater ItemsSource="{Binding ResultGroups}" MaxHeight="220">
                                     <ItemsRepeater.Layout>
-                                        <lucide:TagWrapLayout />
+                                        <StackLayout Spacing="6" />
                                     </ItemsRepeater.Layout>
                                     <ItemsRepeater.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Height="32"
-                                                    Padding="10,0,4,0"
-                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                    BorderBrush="{ThemeResource ControlStrokeColorSecondaryBrush}"
+                                            <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                                     BorderThickness="1"
-                                                    CornerRadius="16">
-                                                <StackPanel Orientation="Horizontal" Spacing="4">
-                                                    <TextBlock Text="{Binding}"
-                                                               FontSize="13"
-                                                               VerticalAlignment="Center" />
-                                                    <Button Width="24"
-                                                            Height="24"
-                                                            MinWidth="24"
-                                                            MinHeight="24"
-                                                            Padding="0"
-                                                            Background="Transparent"
-                                                            BorderBrush="Transparent"
-                                                            BorderThickness="0"
-                                                            CornerRadius="12"
-                                                            Command="{Binding DataContext.RemoveCategoryTagCommand, ElementName=RootPage}"
-                                                            CommandParameter="{Binding}"
-                                                            ToolTipService.ToolTip="移除此标签"
-                                                            AutomationProperties.Name="移除分类标签">
-                                                        <lucide:LucideIcon Icon="X" FontSize="13" />
-                                                    </Button>
+                                                    CornerRadius="8"
+                                                    Padding="9">
+                                                <StackPanel Spacing="5">
+                                                    <TextBlock Text="{Binding CategoryName}" FontSize="12" FontWeight="SemiBold" />
+                                                    <ItemsRepeater ItemsSource="{Binding Items}">
+                                                        <ItemsRepeater.Layout>
+                                                            <StackLayout Orientation="Horizontal" Spacing="6" />
+                                                        </ItemsRepeater.Layout>
+                                                        <ItemsRepeater.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Border Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                                        BorderThickness="1"
+                                                                        CornerRadius="6"
+                                                                        Padding="6,4">
+                                                                    <TextBlock Text="{Binding DisplayName}" FontSize="11" TextTrimming="CharacterEllipsis" MaxWidth="140" />
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsRepeater.ItemTemplate>
+                                                    </ItemsRepeater>
                                                 </StackPanel>
                                             </Border>
                                         </DataTemplate>
                                     </ItemsRepeater.ItemTemplate>
                                 </ItemsRepeater>
-                                <TextBox Header="自定义提示词"
-                                         Text="{Binding CustomPrompt, Mode=TwoWay}"
-                                         AcceptsReturn="True"
-                                         TextWrapping="Wrap"
-                                         MinHeight="120" />
+                                <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Padding="12"
+                                        HorizontalAlignment="Stretch"
+                                        Visibility="{Binding HasResultGroups, Converter={StaticResource BooleanNegationToVisibilityConverter}}">
+                                    <TextBlock Text="{Binding StructuredOutput}" Style="{StaticResource SecondaryBodyStyle}" TextAlignment="Center" TextWrapping="Wrap" />
+                                </Border>
                             </StackPanel>
-                        </Border>
-                    </ScrollViewer>
-                </TabViewItem>
 
-                <TabViewItem Header="模型设置" IsClosable="False">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  HorizontalContentAlignment="Stretch">
-                        <Border Style="{StaticResource SectionCardStyle}"
-                                Padding="14"
-                                Margin="0,8,4,0">
-                            <StackPanel Spacing="10">
-                                <TextBox Header="接口地址"
-                                         PlaceholderText="https://api.example.com/v1"
-                                         Text="{Binding BaseUrl, Mode=TwoWay}" />
-                                <PasswordBox x:Name="ApiKeyBox"
-                                             Header="API Key"
-                                             PlaceholderText="本地模型可留空"
-                                             PasswordChanged="ApiKeyBox_OnPasswordChanged" />
-                                <ComboBox Header="模型"
-                                          IsEditable="True"
-                                          ItemsSource="{Binding Models}"
-                                          SelectedItem="{Binding Model, Mode=OneWay}"
-                                          Text="{Binding Model, Mode=TwoWay}"
-                                          MaxDropDownHeight="200"
-                                          PlaceholderText="选择或输入模型名称" />
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button Content="获取模型"
-                                            Command="{Binding LoadModelsCommand}"
-                                            HorizontalAlignment="Stretch" />
-                                    <Button Grid.Column="1"
-                                            Command="{Binding TestConnectivityCommand}"
-                                            HorizontalAlignment="Stretch">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <ProgressRing Width="14"
-                                                          Height="14"
-                                                          IsActive="{Binding IsConnectivityTestInProgress}"
-                                                          Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <TextBlock Text="{Binding ConnectivityTestButtonText}" />
-                                        </StackPanel>
-                                    </Button>
-                                </Grid>
-                                <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
-                                         IsClosable="False"
-                                         Severity="{Binding ConnectivityTestSeverity}"
-                                         Title="{Binding ConnectivityTestTitle}"
-                                         Message="{Binding ConnectivityTestMessage}" />
-                                <ToggleSwitch Header="联网辅助识别（Tavily）"
-                                              IsOn="{Binding WebSearchEnabled, Mode=TwoWay}" />
-                                <PasswordBox x:Name="WebSearchApiKeyBox"
-                                             Header="Tavily API Key"
-                                             PlaceholderText="tvly-…"
-                                             IsEnabled="{Binding WebSearchEnabled}"
-                                             PasswordChanged="WebSearchApiKeyBox_OnPasswordChanged" />
-                                <InfoBar IsOpen="{Binding WebSearchEnabled}"
-                                         IsClosable="False"
-                                         Severity="Informational"
-                                         Title="联网识别范围"
-                                         Message="仅发送最多 8 个待确认图标的名称，不发送路径、图片或文件内容。" />
+                            <StackPanel Visibility="{Binding IsJsonViewMode, Converter={StaticResource BooleanToVisibilityConverter}}" Spacing="6">
+                                <TextBox Text="{Binding StructuredOutput}"
+                                         IsReadOnly="True"
+                                         AcceptsReturn="True"
+                                         TextWrapping="NoWrap"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                         FontFamily="Consolas"
+                                         FontSize="11"
+                                         MinHeight="80"
+                                         MaxHeight="220"
+                                         Background="Transparent"
+                                         BorderThickness="0" />
                             </StackPanel>
-                        </Border>
-                    </ScrollViewer>
-                </TabViewItem>
-            </TabView>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Composer -->
+                    <Border Grid.Row="3"
+                            Padding="12,10,12,12"
+                            BorderThickness="0,1,0,0"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                        <StackPanel Spacing="8">
+                            <ProgressBar IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                         Maximum="100"
+                                         Value="{Binding ProgressValue}"
+                                         Visibility="{Binding HasProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <TextBlock Text="{Binding Status}"
+                                       Style="{StaticResource SecondaryBodyStyle}"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button Command="{Binding ClassifyCommand}"
+                                        Style="{StaticResource AccentButtonStyle}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <lucide:LucideIcon Icon="Sparkles" FontSize="15" />
+                                        <TextBlock Text="开始 AI 分类" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="1"
+                                        Command="{Binding ApplyCommand}"
+                                        IsEnabled="{Binding CanApplyPreview}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                        <lucide:LucideIcon Icon="Check" FontSize="14" />
+                                        <TextBlock Text="确认应用" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="2"
+                                        Command="{Binding CancelCommand}"
+                                        ToolTipService.ToolTip="终止本次 AI 分类"
+                                        AutomationProperties.Name="终止 AI 分类">
+                                    <lucide:LucideIcon Icon="Square" FontSize="14" />
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
         </Grid>
 
     </Grid>

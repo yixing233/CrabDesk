@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using CrabDesk.WinUI.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -16,31 +17,36 @@ public sealed partial class AiClassificationPage : Page
     {
         InitializeComponent();
         DataContext = viewModel;
-        ApiKeyBox.Password = viewModel.ApiKey;
-        WebSearchApiKeyBox.Password = viewModel.WebSearchApiKey;
+        viewModel.Conversation.CollectionChanged += OnConversationChanged;
     }
 
-    private void ApiKeyBox_OnPasswordChanged(object sender, RoutedEventArgs eventArgs)
+    private void OnConversationChanged(object? sender, NotifyCollectionChangedEventArgs eventArgs)
     {
-        if (DataContext is AiClassificationViewModel viewModel && sender is PasswordBox passwordBox)
+        var items = ViewModel.Conversation;
+        if (eventArgs.Action == NotifyCollectionChangedAction.Add && items.Count > 0)
         {
-            viewModel.ApiKey = passwordBox.Password;
+            ConversationList.ScrollIntoView(items[^1]);
         }
     }
 
-    private void WebSearchApiKeyBox_OnPasswordChanged(object sender, RoutedEventArgs eventArgs)
+    private async void SettingsButton_OnClick(object sender, RoutedEventArgs eventArgs)
     {
-        if (DataContext is AiClassificationViewModel viewModel && sender is PasswordBox passwordBox)
+        var dialog = new ContentDialog
         {
-            viewModel.WebSearchApiKey = passwordBox.Password;
-        }
+            Title = "AI 设置",
+            Content = new AiSettingsPanel(ViewModel),
+            CloseButtonText = "完成",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot
+        };
+        await dialog.ShowAsync();
     }
 
-    private void StreamingTextBox_OnTextChanged(object sender, TextChangedEventArgs eventArgs)
+    private void MessageTextBox_OnTextChanged(object sender, TextChangedEventArgs eventArgs)
     {
-        // Keep the newest streamed tokens in view while a classification runs;
-        // once idle the user may be reading or copying an earlier section.
-        if (sender is not TextBox textBox || DataContext is not AiClassificationViewModel viewModel || !viewModel.IsBusy)
+        // Keep the newest streamed tokens in view for the message that is still
+        // streaming; finished turns stay put so the user can read or copy them.
+        if (sender is not TextBox textBox || textBox.DataContext is not AiConversationMessageViewModel message || !message.IsRunning)
         {
             return;
         }

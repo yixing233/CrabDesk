@@ -12,7 +12,8 @@ namespace CrabDesk.WinUI.ViewModels;
 
 public partial class AiClassificationViewModel : ObservableObject, IDisposable
 {
-    private const int MaxLogEntries = 160;
+    // Conversation flow cap: keeps the ListView bounded for long sessions.
+    private const int MaxConversationMessages = 200;
     // The activity tab renders these strings in WinUI text controls. Keep the
     // visible transcript bounded and update it at a human-readable cadence so
     // a verbose model response cannot monopolize the UI thread.
@@ -53,16 +54,13 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private int _completedItems;
     private int _totalItems;
     private bool _isProgressIndeterminate;
-    private string _reasoningOutput = "尚未开始 AI 分类。";
     private string _structuredOutput = "尚未生成分类结果。";
-    private bool _isThinkingExpanded;
     private bool _isJsonViewMode;
     private TimeSpan _totalDuration;
     private TimeSpan? _firstTokenLatency;
     private int? _inputTokens;
     private int? _outputTokens;
     private int? _totalTokens;
-    private int _selectedInspectorTabIndex;
     private bool _hasPreview;
     private bool _disposed;
     private long _reasoningCharacters;
@@ -115,50 +113,9 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> CategoryTags { get; } = [];
     public ObservableCollection<AiWorkbenchItemViewModel> WorkspaceItems { get; } = [];
     public ObservableCollection<AiClassificationGroupViewModel> ResultGroups { get; } = [];
-    public ObservableCollection<AiToolCallViewModel> ToolCalls { get; } = [];
-    public ObservableCollection<string> ActivityLog { get; } = [];
+    public ObservableCollection<AiConversationMessageViewModel> Conversation { get; } = [];
 
-    public bool HasToolCalls => ToolCalls.Count > 0;
-
-    public string TransportStatusText
-    {
-        get => _transportStatusText;
-        private set => SetProperty(ref _transportStatusText, value);
-    }
-
-    private string _transportStatusText = string.Empty;
-
-    public string ReasoningStatsText
-    {
-        get => _reasoningStatsText;
-        private set => SetProperty(ref _reasoningStatsText, value);
-    }
-
-    private string _reasoningStatsText = string.Empty;
-
-    public string StreamingParsedText
-    {
-        get => _streamingParsedText;
-        private set => SetProperty(ref _streamingParsedText, value);
-    }
-
-    private string _streamingParsedText = string.Empty;
-
-    public bool IsWebSearchActive
-    {
-        get => _isWebSearchActive;
-        private set
-        {
-            if (SetProperty(ref _isWebSearchActive, value))
-            {
-                OnPropertyChanged(nameof(ToolCallsHeaderText));
-            }
-        }
-    }
-
-    private bool _isWebSearchActive;
-
-    public string ToolCallsHeaderText => IsWebSearchActive ? "工具调用 · 检索中…" : "工具调用";
+    private AiConversationMessageViewModel? _liveMessage;
 
     public bool IsBusy
     {
@@ -168,7 +125,6 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isBusy, value))
             {
                 OnPropertyChanged(nameof(CanApplyPreview));
-                OnPropertyChanged(nameof(ThinkingHeaderText));
                 RefreshAiCommandState();
             }
         }
@@ -198,28 +154,10 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isProgressIndeterminate, value);
     }
 
-    public string ReasoningOutput
-    {
-        get => _reasoningOutput;
-        private set => SetProperty(ref _reasoningOutput, value);
-    }
-
     public string StructuredOutput
     {
         get => _structuredOutput;
         private set => SetProperty(ref _structuredOutput, value);
-    }
-
-    public bool IsThinkingExpanded
-    {
-        get => _isThinkingExpanded;
-        set => SetProperty(ref _isThinkingExpanded, value);
-    }
-
-    public int SelectedInspectorTabIndex
-    {
-        get => _selectedInspectorTabIndex;
-        set => SetProperty(ref _selectedInspectorTabIndex, value);
     }
 
     public bool HasPreview
@@ -244,12 +182,6 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public bool CanApplyPreview => !IsBusy && HasPreview && EffectiveAssignmentCount > 0;
     public bool HasProgress => TotalItems > 0;
     public double ProgressValue => TotalItems == 0 ? 0 : Math.Clamp((double)CompletedItems / TotalItems * 100, 0, 100);
-    public string ThinkingHeaderText => IsBusy ? "正在思考…" : "思考过程";
-    public string TotalDurationText => FormatDuration(_totalDuration);
-    public string FirstTokenLatencyText => _firstTokenLatency is { } value ? FormatDuration(value) : "—";
-    public string InputTokenText => FormatTokens(_inputTokens);
-    public string OutputTokenText => FormatTokens(_outputTokens);
-    public string TotalTokenText => FormatTokens(_totalTokens);
     public bool HasResultGroups => ResultGroups.Count > 0;
     public string ResultSummaryText => !HasPreview
         ? "尚未生成分类结果"
@@ -403,16 +335,16 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private void ShowJsonView() => IsJsonViewMode = true;
 
     [RelayCommand]
-    private async Task CopyReasoningAsync()
+    private async Task CopyMessageThinkingAsync(AiConversationMessageViewModel? message)
     {
-        if (string.IsNullOrWhiteSpace(ReasoningOutput))
+        if (message is null || string.IsNullOrWhiteSpace(message.ThinkingText))
         {
             return;
         }
 
         try
         {
-            await _clipboard.SetTextAsync(ReasoningOutput);
+            await _clipboard.SetTextAsync(message.ThinkingText);
             _notifications.Show("思考过程已复制到剪贴板", InfoBarSeverity.Success, TimeSpan.FromSeconds(3));
         }
         catch (Exception exception)
@@ -432,6 +364,25 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         try
         {
             await _clipboard.SetTextAsync(StructuredOutput);
+            _notifications.Show("分类结果已复制到剪贴板", InfoBarSeverity.Success, TimeSpan.FromSeconds(3));
+        }
+        catch (Exception exception)
+        {
+            AppDiagnostic.Error("Failed to copy structured output", exception);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyMessageResultJsonAsync(AiConversationMessageViewModel? message)
+    {
+        if (message is null || string.IsNullOrWhiteSpace(message.ResultJsonText))
+        {
+            return;
+        }
+
+        try
+        {
+            await _clipboard.SetTextAsync(message.ResultJsonText);
             _notifications.Show("分类结果已复制到剪贴板", InfoBarSeverity.Success, TimeSpan.FromSeconds(3));
         }
         catch (Exception exception)
@@ -519,7 +470,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             IsBusy = true;
             SaveSettings();
             ClearPreviewState();
-            ResetActivity("正在准备 AI 分类…");
+            StartRunConversation(SelectedItemCount);
             _operationStopwatch.Restart();
             runCancellation = new CancellationTokenSource();
             _runCancellation = runCancellation;
@@ -543,6 +494,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             if (runCancellation.IsCancellationRequested)
             {
                 Status = "AI 整理已取消。";
+                FinishLiveMessage(Status, isError: false);
                 return;
             }
 
@@ -552,18 +504,18 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             Status = preview.Assignments.Count == 0
                 ? "AI 未能确定分类，请为待确认项目选择标签后应用。"
                 : $"已生成预览：{preview.Assignments.Count}/{preview.Requested} 项获得 AI 分类。";
-            AppendLog(Status);
+            FinishLiveMessage(Status, isError: false);
         }
         catch (OperationCanceledException) when (runCancellation?.IsCancellationRequested == true)
         {
             Status = "AI 整理已取消。";
-            AppendLog(Status);
+            FinishLiveMessage(Status, isError: false);
         }
         catch (Exception exception)
         {
             Status = AiOperationMessages.ToUserMessage(exception);
             _notifications.Show(Status, InfoBarSeverity.Error, TimeSpan.FromSeconds(8));
-            AppendLog(Status);
+            FinishLiveMessage(Status, isError: true);
         }
         finally
         {
@@ -571,7 +523,6 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             UpdateTotalDuration();
             _operationStopwatch.Stop();
             FlushModelStream();
-            IsThinkingExpanded = false;
             if (runCancellation is not null && ReferenceEquals(_runCancellation, runCancellation))
             {
                 _runCancellation = null;
@@ -596,6 +547,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             var result = await _service.ApplyAiClassificationPreviewAsync(preview);
             Status = DescribeApplyResult(result);
             _notifications.Show(Status, InfoBarSeverity.Success);
+            AppendConversationMessage(AiConversationRole.Assistant, Status);
             ReloadWorkspaceCore(clearPreview: true);
         }
         catch (Exception exception)
@@ -618,7 +570,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         }
 
         Status = "正在终止 AI 整理…";
-        AppendLog("已请求终止 AI 整理");
+        AppendConversationMessage(AiConversationRole.System, "已请求终止 AI 整理");
         _runCancellation?.Cancel();
         _service.CancelAiOrganization();
     }
@@ -737,11 +689,10 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         if (clearPreview)
         {
             ClearPreviewState();
-            ResetActivity(
-                WorkspaceItems.Count == 0
-                    ? "没有可整理的桌面图标。"
-                    : $"已载入 {WorkspaceItems.Count} 个桌面图标，默认全部选中。",
-                activateActivityTab: false);
+            Status = WorkspaceItems.Count == 0
+                ? "没有可整理的桌面图标。"
+                : $"已载入 {WorkspaceItems.Count} 个桌面图标，默认全部选中。";
+            AppendConversationMessage(AiConversationRole.System, Status);
         }
 
         NotifyWorkbenchStateChanged();
@@ -885,33 +836,54 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         NotifyWorkbenchStateChanged();
     }
 
-    private void ResetActivity(string initialStatus, bool activateActivityTab = true)
+    private void ResetRunState()
     {
-        if (activateActivityTab)
-        {
-            SelectedInspectorTabIndex = 1;
-        }
         _streamAccumulator.Clear();
-        ReasoningOutput = "正在等待模型思考…";
         StructuredOutput = "正在等待分类结果…";
-        IsThinkingExpanded = true;
         ResetUsageMetrics();
-        ToolCalls.Clear();
         _activeWebSearchIndex = -1;
         _reasoningCharacters = 0;
         _contentCharacters = 0;
-        TransportStatusText = string.Empty;
-        ReasoningStatsText = string.Empty;
-        StreamingParsedText = string.Empty;
-        IsWebSearchActive = false;
-        OnPropertyChanged(nameof(HasToolCalls));
-        OnPropertyChanged(nameof(ToolCallsHeaderText));
-        ActivityLog.Clear();
         CompletedItems = 0;
         TotalItems = 0;
         IsProgressIndeterminate = true;
-        Status = initialStatus;
-        AppendLog(initialStatus);
+    }
+
+    private void StartRunConversation(int itemCount)
+    {
+        AppendConversationMessage(AiConversationRole.User, $"开始 AI 分类（{itemCount} 项）");
+        var live = new AiConversationMessageViewModel(AiConversationRole.Assistant, "正在准备 AI 分类…")
+        {
+            IsRunning = true,
+            IsThinkingExpanded = true
+        };
+        Conversation.Add(live);
+        _liveMessage = live;
+        ResetRunState();
+        Status = "正在准备 AI 分类…";
+    }
+
+    private void FinishLiveMessage(string text, bool isError)
+    {
+        if (_liveMessage is not { } message)
+        {
+            return;
+        }
+
+        message.Text = text;
+        message.IsError = isError;
+        message.IsRunning = false;
+        message.IsWebSearchActive = false;
+        _liveMessage = null;
+    }
+
+    private void AppendConversationMessage(AiConversationRole role, string text)
+    {
+        Conversation.Add(new AiConversationMessageViewModel(role, text));
+        if (Conversation.Count > MaxConversationMessages)
+        {
+            Conversation.RemoveAt(0);
+        }
     }
 
     private void UpdateProgress(AiClassificationProgress progress)
@@ -920,7 +892,10 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         TotalItems = progress.TotalItems;
         IsProgressIndeterminate = progress.IsIndeterminate;
         Status = progress.Message;
-        AppendLog(progress.Message, progress.CompletedItems, progress.TotalItems);
+        if (_liveMessage is { } live)
+        {
+            live.Text = progress.Message;
+        }
         OnPropertyChanged(nameof(HasProgress));
         OnPropertyChanged(nameof(ProgressValue));
     }
@@ -945,22 +920,26 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private void AppendTransportProgress(AiClassificationTransportProgress progress)
     {
-        TransportStatusText = $"第 {progress.Attempt}/{progress.TotalAttempts} 次模型请求 · " +
-                              (progress.IsStreaming ? "流式" : "非流式") +
-                              (progress.IsCompatibilityFallback ? " · 兼容模式回退" : string.Empty);
-        if (progress.IsCompatibilityFallback)
+        var text = $"第 {progress.Attempt}/{progress.TotalAttempts} 次模型请求 · " +
+                   (progress.IsStreaming ? "流式" : "非流式") +
+                   (progress.IsCompatibilityFallback ? " · 兼容模式回退" : string.Empty);
+        if (_liveMessage is { } live)
         {
-            AppendLog(TransportStatusText);
+            live.TransportText = text;
         }
     }
 
     private void AppendWebSearchProgress(AiWebSearchProgress progress)
     {
+        if (_liveMessage is not { } live)
+        {
+            return;
+        }
         switch (progress.Phase)
         {
             case AiWebSearchPhase.Started:
-                _activeWebSearchIndex = ToolCalls.Count;
-                ToolCalls.Add(new AiToolCallViewModel
+                _activeWebSearchIndex = live.ToolCalls.Count;
+                live.ToolCalls.Add(new AiToolCallViewModel
                 {
                     Icon = "Globe",
                     Title = $"联网检索 {progress.CandidateCount} 个待确认项目",
@@ -968,11 +947,11 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                     TimeText = DateTime.Now.ToString("HH:mm:ss"),
                     IsRunning = true
                 });
-                IsWebSearchActive = true;
+                live.IsWebSearchActive = true;
                 break;
             case AiWebSearchPhase.Completed:
-                IsWebSearchActive = false;
-                CompleteToolCall(_activeWebSearchIndex,
+                live.IsWebSearchActive = false;
+                CompleteToolCall(live, _activeWebSearchIndex,
                     progress.EvidenceCount > 0
                         ? $"返回 {progress.EvidenceCount} 条辅助证据，已用于二次分类" +
                           (string.IsNullOrWhiteSpace(progress.Message) ? string.Empty : $" · 耗时 {progress.Message}")
@@ -980,22 +959,21 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                     isError: false);
                 break;
             case AiWebSearchPhase.Failed:
-                IsWebSearchActive = false;
-                CompleteToolCall(_activeWebSearchIndex,
+                live.IsWebSearchActive = false;
+                CompleteToolCall(live, _activeWebSearchIndex,
                     "联网检索失败，已跳过辅助识别",
                     isError: true);
                 break;
         }
-        OnPropertyChanged(nameof(HasToolCalls));
     }
 
-    private void CompleteToolCall(int index, string detail, bool isError)
+    private void CompleteToolCall(AiConversationMessageViewModel message, int index, string detail, bool isError)
     {
-        if (index < 0 || index >= ToolCalls.Count)
+        if (index < 0 || index >= message.ToolCalls.Count)
         {
             return;
         }
-        var entry = ToolCalls[index];
+        var entry = message.ToolCalls[index];
         entry.Detail = detail;
         entry.IsError = isError;
         entry.IsRunning = false;
@@ -1008,21 +986,28 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(snapshot.Reasoning))
+        var reasoning = snapshot.Reasoning ?? string.Empty;
+        var structured = snapshot.StructuredOutput ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(structured))
         {
-            ReasoningOutput = snapshot.Reasoning;
+            StructuredOutput = structured;
         }
-        ReasoningStatsText = _reasoningCharacters > 0
+
+        if (_liveMessage is not { } live)
+        {
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(reasoning))
+        {
+            live.ThinkingText = reasoning;
+        }
+        live.ThinkingStatsText = _reasoningCharacters > 0
             ? $"已思考 {Interlocked.Read(ref _reasoningCharacters):N0} 字" +
               (_contentCharacters > 0 ? $" · 输出 {Interlocked.Read(ref _contentCharacters):N0} 字" : string.Empty)
             : string.Empty;
-
-        if (!string.IsNullOrWhiteSpace(snapshot.StructuredOutput))
-        {
-            StructuredOutput = snapshot.StructuredOutput;
-        }
-        var receivedItems = CountOccurrences(snapshot.StructuredOutput, "\"id\"");
-        StreamingParsedText = receivedItems > 0 ? $"已识别 {receivedItems} 项" : string.Empty;
+        var receivedItems = CountOccurrences(structured, "\"id\"");
+        live.ParsedText = receivedItems > 0 ? $"已识别 {receivedItems} 项" : string.Empty;
+        live.ResultJsonText = structured;
     }
 
     private static int CountOccurrences(string source, string value)
@@ -1043,7 +1028,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         _inputTokens = usage.InputTokens;
         _outputTokens = usage.OutputTokens;
         _totalTokens = usage.TotalTokens;
-        NotifyUsageMetricsChanged();
+        UpdateLiveMetrics();
     }
 
     private void ResetUsageMetrics()
@@ -1054,7 +1039,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         _inputTokens = null;
         _outputTokens = null;
         _totalTokens = null;
-        NotifyUsageMetricsChanged();
+        UpdateLiveMetrics();
     }
 
     private void UpdateTotalDuration()
@@ -1065,35 +1050,28 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         }
 
         _totalDuration = _operationStopwatch.Elapsed;
-        OnPropertyChanged(nameof(TotalDurationText));
+        UpdateLiveMetrics();
     }
 
-    private void NotifyUsageMetricsChanged()
+    private void UpdateLiveMetrics()
     {
-        OnPropertyChanged(nameof(TotalDurationText));
-        OnPropertyChanged(nameof(FirstTokenLatencyText));
-        OnPropertyChanged(nameof(InputTokenText));
-        OnPropertyChanged(nameof(OutputTokenText));
-        OnPropertyChanged(nameof(TotalTokenText));
+        if (_liveMessage is not { } live)
+        {
+            return;
+        }
+
+        var metrics = $"总耗时 {FormatDuration(_totalDuration)} · 首字 {FormatDurationOrDash(_firstTokenLatency)}" +
+                      $" · 输入 {FormatTokens(_inputTokens)} · 输出 {FormatTokens(_outputTokens)} · 总计 {FormatTokens(_totalTokens)}";
+        live.MetricsText = metrics;
     }
+
+    private static string FormatDurationOrDash(TimeSpan? value) => value is { } v ? FormatDuration(v) : "—";
 
     private static string FormatDuration(TimeSpan value) => value.TotalMinutes >= 1
         ? $"{(int)value.TotalMinutes} 分 {value.Seconds:D2} 秒"
         : $"{value.TotalSeconds:F1} 秒";
 
     private static string FormatTokens(int? value) => value?.ToString("N0") ?? "—";
-
-    private void AppendLog(string message, int completedItems = -1, int totalItems = 0)
-    {
-        var progress = totalItems > 0 && completedItems >= 0
-            ? $"（{completedItems}/{totalItems}）"
-            : string.Empty;
-        ActivityLog.Add($"{DateTime.Now:HH:mm:ss}  {message}{progress}");
-        if (ActivityLog.Count > MaxLogEntries)
-        {
-            ActivityLog.RemoveAt(0);
-        }
-    }
 
     private bool CanRunAiOperation() => !IsBusy && !_service.IsAiOrganizationRunning;
     private bool CanModifyWorkspace() => !IsBusy && !_service.IsAiOrganizationRunning;

@@ -20,10 +20,10 @@ public sealed class AiClassificationPageLayoutTests
             .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding WorkspaceItems}");
         Assert.Equal("ScrollViewer", workspaceRepeater.Parent?.Name.LocalName);
 
-        var activity = document
-            .Descendants(Presentation + "TabViewItem")
-            .Single(element => (string?)element.Attribute("Header") == "AI 活动");
-        Assert.Contains(activity.Ancestors(Presentation + "TabView"),
+        var conversation = document
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
+        Assert.Contains(conversation.Ancestors(Presentation + "Border"),
             element => (string?)element.Attribute("Grid.Column") == "1");
     }
 
@@ -45,34 +45,55 @@ public sealed class AiClassificationPageLayoutTests
             document.Descendants(Presentation + "TextBlock"),
             element => (string?)element.Attribute("Text") == "AI 整理工作台");
 
-        var activity = document
-            .Descendants(Presentation + "TabViewItem")
-            .Single(element => (string?)element.Attribute("Header") == "AI 活动");
-        Assert.Contains(activity.Ancestors(Presentation + "TabView"),
+        var conversation = document
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
+        Assert.Contains(conversation.Ancestors(Presentation + "Border"),
             element => (string?)element.Attribute("Grid.Column") == "1");
     }
 
     [Fact]
-    public void InspectorUsesFourHorizontalTabs()
+    public void RightPaneIsAConversationFlowWithSettingsInsteadOfTabs()
     {
         var document = LoadAiClassificationPage();
         var inspector = document
-            .Descendants(Presentation + "TabView")
-            .Single(element => (string?)element.Attribute("Grid.Column") == "1");
+            .Descendants(Presentation + "Border")
+            .Single(element => (string?)element.Attribute("Grid.Column") == "1" &&
+                element.Descendants(Presentation + "ListView").Any());
 
-        Assert.Equal(
-            ["流程", "AI 活动", "分类设置", "模型设置"],
-            inspector.Elements(Presentation + "TabViewItem")
-                .Select(element => (string?)element.Attribute("Header")));
+        // The old four-tab inspector is replaced by a single conversation flow.
+        Assert.Empty(document.Descendants(Presentation + "TabViewItem"));
 
-        var activity = inspector.Elements(Presentation + "TabViewItem")
-            .Single(element => (string?)element.Attribute("Header") == "AI 活动");
-        var expanders = activity.Descendants(Presentation + "Expander").ToArray();
-        Assert.Equal(2, expanders.Length);
-        Assert.Contains(expanders, element =>
-            (string?)element.Attribute("Visibility") == "{Binding HasToolCalls, Converter={StaticResource BooleanToVisibilityConverter}}");
-        Assert.Contains(expanders, element =>
-            (string?)element.Attribute("IsExpanded") == "{Binding IsThinkingExpanded, Mode=TwoWay}");
+        var conversation = inspector
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
+        Assert.Equal("None", (string?)conversation.Attribute("SelectionMode"));
+
+        var settingsButton = inspector
+            .Descendants(Presentation + "Button")
+            .Single(element => (string?)element.Attribute("Click") == "SettingsButton_OnClick");
+        Assert.Equal("打开 AI 设置", (string?)settingsButton.Attribute("AutomationProperties.Name"));
+    }
+
+    [Fact]
+    public void AssistantMessagesCarryThinkingAndToolCallAttachments()
+    {
+        var document = LoadAiClassificationPage();
+        var conversation = document
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
+        var template = conversation.Descendants(Presentation + "DataTemplate").First();
+
+        var thinking = template
+            .Descendants(Presentation + "Expander")
+            .Single(element => (string?)element.Attribute("IsExpanded") == "{Binding IsThinkingExpanded, Mode=TwoWay}");
+        Assert.NotNull(thinking.Descendants(Presentation + "TextBox")
+            .Single(element => (string?)element.Attribute("Text") == "{Binding ThinkingText}"));
+
+        var toolCalls = template
+            .Descendants(Presentation + "ItemsControl")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding ToolCalls}");
+        Assert.NotNull(toolCalls);
     }
 
     [Fact]
@@ -96,25 +117,14 @@ public sealed class AiClassificationPageLayoutTests
     }
 
     [Fact]
-    public void AiActivityTabUsesOneAssistantMessageWithCollapsibleThinking()
+    public void ConversationMessagesNeverUseManualTabNavigation()
     {
         var document = LoadAiClassificationPage();
         var activity = document
-            .Descendants(Presentation + "TabViewItem")
-            .Single(element => (string?)element.Attribute("Header") == "AI 活动");
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
 
-        Assert.Empty(activity.Descendants(Presentation + "ListView"));
-        var thinking = activity
-            .Descendants(Presentation + "Expander")
-            .Single(element => (string?)element.Attribute("IsExpanded") == "{Binding IsThinkingExpanded, Mode=TwoWay}");
-        Assert.Equal("{Binding IsThinkingExpanded, Mode=TwoWay}", (string?)thinking.Attribute("IsExpanded"));
-        var outputPanels = activity
-            .Descendants(Presentation + "TextBox")
-            .Where(element => (string?)element.Attribute("Text") is "{Binding ReasoningOutput}" or "{Binding StructuredOutput}")
-            .ToArray();
-
-        Assert.Equal(2, outputPanels.Length);
-        Assert.Contains(outputPanels, panel => panel.Ancestors(Presentation + "Expander").Any());
+        Assert.Empty(activity.Descendants(Presentation + "TabViewItem"));
     }
 
     [Fact]
@@ -123,7 +133,7 @@ public sealed class AiClassificationPageLayoutTests
         var document = LoadAiClassificationPage();
         var outputPanels = document
             .Descendants(Presentation + "TextBox")
-            .Where(element => (string?)element.Attribute("Text") is "{Binding ReasoningOutput}" or "{Binding StructuredOutput}")
+            .Where(element => (string?)element.Attribute("Text") is "{Binding ThinkingText}" or "{Binding ResultJsonText}")
             .ToArray();
 
         Assert.Equal(2, outputPanels.Length);
@@ -139,17 +149,16 @@ public sealed class AiClassificationPageLayoutTests
     public void AiActivityMessageShowsFiveUsageMetrics()
     {
         var document = LoadAiClassificationPage();
-        var activity = document
-            .Descendants(Presentation + "TabViewItem")
-            .Single(element => (string?)element.Attribute("Header") == "AI 活动");
-        var metricBindings = activity
+        var conversation = document
+            .Descendants(Presentation + "ListView")
+            .Single(element => (string?)element.Attribute("ItemsSource") == "{Binding Conversation}");
+        var metricBindings = conversation
             .Descendants(Presentation + "TextBlock")
             .Select(element => (string?)element.Attribute("Text"))
-            .Where(value => value is "{Binding TotalDurationText}" or "{Binding FirstTokenLatencyText}" or
-                "{Binding InputTokenText}" or "{Binding OutputTokenText}" or "{Binding TotalTokenText}")
+            .Where(value => value == "{Binding MetricsText}")
             .ToArray();
 
-        Assert.Equal(5, metricBindings.Length);
+        Assert.Single(metricBindings);
     }
 
     private static XDocument LoadAiClassificationPage()

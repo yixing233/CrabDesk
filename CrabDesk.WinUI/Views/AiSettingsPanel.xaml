@@ -1,0 +1,166 @@
+<UserControl
+    x:Class="CrabDesk.WinUI.Views.AiSettingsPanel"
+    x:Name="RootPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch"
+                  MaxHeight="560">
+        <StackPanel Spacing="12" Margin="0,4,0,0">
+
+            <!-- 模型接口 -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="14">
+                <StackPanel Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <lucide:LucideIcon Icon="Cpu" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <TextBlock Text="模型接口" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <TextBox Header="接口地址"
+                             PlaceholderText="https://api.example.com/v1"
+                             Text="{Binding BaseUrl, Mode=TwoWay}" />
+                    <PasswordBox x:Name="ApiKeyBox"
+                                 Header="API Key"
+                                 PlaceholderText="本地模型可留空"
+                                 PasswordChanged="ApiKeyBox_OnPasswordChanged" />
+                    <ComboBox Header="模型"
+                              IsEditable="True"
+                              ItemsSource="{Binding Models}"
+                              SelectedItem="{Binding Model, Mode=OneWay}"
+                              Text="{Binding Model, Mode=TwoWay}"
+                              MaxDropDownHeight="200"
+                              HorizontalAlignment="Stretch"
+                              PlaceholderText="选择或输入模型名称" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button Content="获取模型"
+                                Command="{Binding LoadModelsCommand}"
+                                HorizontalAlignment="Stretch" />
+                        <Button Grid.Column="1"
+                                Command="{Binding TestConnectivityCommand}"
+                                HorizontalAlignment="Stretch">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <ProgressRing Width="14"
+                                              Height="14"
+                                              IsActive="{Binding IsConnectivityTestInProgress}"
+                                              Visibility="{Binding IsConnectivityTestInProgress, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <TextBlock Text="{Binding ConnectivityTestButtonText}" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
+                             IsClosable="False"
+                             Severity="{Binding ConnectivityTestSeverity}"
+                             Title="{Binding ConnectivityTestTitle}"
+                             Message="{Binding ConnectivityTestMessage}" />
+                </StackPanel>
+            </Border>
+
+            <!-- 联网辅助识别 -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="14">
+                <StackPanel Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <lucide:LucideIcon Icon="Globe" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <TextBlock Text="联网辅助识别" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <ToggleSwitch Header="启用 Tavily 联网检索"
+                                  IsOn="{Binding WebSearchEnabled, Mode=TwoWay}" />
+                    <PasswordBox x:Name="WebSearchApiKeyBox"
+                                 Header="Tavily API Key"
+                                 PlaceholderText="tvly-…"
+                                 IsEnabled="{Binding WebSearchEnabled}"
+                                 PasswordChanged="WebSearchApiKeyBox_OnPasswordChanged" />
+                    <InfoBar IsOpen="{Binding WebSearchEnabled}"
+                             IsClosable="False"
+                             Severity="Informational"
+                             Title="联网识别范围"
+                             Message="仅发送最多 8 个待确认图标的名称，不发送路径、图片或文件内容。" />
+                </StackPanel>
+            </Border>
+
+            <!-- 分类设置 -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <lucide:LucideIcon Icon="Tags" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                            <TextBlock Text="分类设置" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="1"
+                                Command="{Binding AddCategoryTagsCommand}"
+                                ToolTipService.ToolTip="添加分类标签"
+                                AutomationProperties.Name="添加分类标签">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <lucide:LucideIcon Icon="Plus" FontSize="15" />
+                                <TextBlock Text="添加" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                    <ItemsRepeater ItemsSource="{Binding CategoryTags}"
+                                   HorizontalAlignment="Stretch">
+                        <ItemsRepeater.Layout>
+                            <lucide:TagWrapLayout />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate>
+                                <Border Height="32"
+                                        Padding="10,0,4,0"
+                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorSecondaryBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="16">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding}"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
+                                        <Button Width="24"
+                                                Height="24"
+                                                MinWidth="24"
+                                                MinHeight="24"
+                                                Padding="0"
+                                                Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                BorderThickness="0"
+                                                CornerRadius="12"
+                                                Command="{Binding DataContext.RemoveCategoryTagCommand, ElementName=RootPanel}"
+                                                CommandParameter="{Binding}"
+                                                ToolTipService.ToolTip="移除此标签"
+                                                AutomationProperties.Name="移除分类标签">
+                                            <lucide:LucideIcon Icon="X" FontSize="13" />
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                    <TextBox Header="自定义提示词"
+                             Text="{Binding CustomPrompt, Mode=TwoWay}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="96" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

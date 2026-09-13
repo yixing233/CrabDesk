@@ -495,11 +495,7 @@ public sealed class ViewModelTests
             Mock.Of<IDialogService>());
         viewModel.WorkspaceItems[1].IsSelected = false;
 
-        Assert.Equal(0, viewModel.SelectedInspectorTabIndex);
-
         await viewModel.ClassifyCommand.ExecuteAsync(null);
-
-        Assert.Equal(1, viewModel.SelectedInspectorTabIndex);
 
         service.Verify(item => item.PreviewAiClassificationAsync(
             7,
@@ -652,7 +648,7 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public async Task AiClassificationViewModelCopiesReasoningAndStructuredOutputToClipboard()
+    public async Task AiClassificationViewModelCopiesStructuredOutputToClipboard()
     {
         var clipboard = new Mock<IClipboardService>();
         var notifications = new Mock<IInfoBarService>();
@@ -661,10 +657,6 @@ public sealed class ViewModelTests
             notifications.Object,
             Mock.Of<IDialogService>(),
             clipboard: clipboard.Object);
-
-        await viewModel.CopyReasoningCommand.ExecuteAsync(null);
-        clipboard.Verify(c => c.SetTextAsync("尚未开始 AI 分类。"), Times.Once);
-        notifications.Verify(n => n.Show("思考过程已复制到剪贴板", InfoBarSeverity.Success, It.IsAny<TimeSpan?>()), Times.Once);
 
         await viewModel.CopyStructuredOutputCommand.ExecuteAsync(null);
         clipboard.Verify(c => c.SetTextAsync("尚未生成分类结果。"), Times.Once);
