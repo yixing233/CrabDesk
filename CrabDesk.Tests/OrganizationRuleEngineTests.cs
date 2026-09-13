@@ -153,7 +153,7 @@ public sealed class OrganizationRuleEngineTests
     }
 
     [Fact]
-    public void BuiltInFallbackOnlyHandlesItemsNotMatchedByEarlierRules()
+    public void UnmatchedItemsStayOnDesktopAfterFallbackRuleRemoval()
     {
         var state = JsonLayoutStore.CreateDefaultState();
         foreach (var rule in state.OrganizationRules)
@@ -170,9 +170,8 @@ public sealed class OrganizationRuleEngineTests
             Item("Projects", DesktopItemKind.Folder)
         ]);
 
-        Assert.Equal(3, decisions.Count);
+        Assert.Equal(2, decisions.Count);
         Assert.Equal("文档", decisions.Single(decision => decision.ItemName == "report.pdf").RuleTitle);
-        Assert.Equal("其它", decisions.Single(decision => decision.ItemName == "tool.exe").RuleTitle);
         Assert.Equal("目录", decisions.Single(decision => decision.ItemName == "Projects").RuleTitle);
         Assert.Empty(_engine.FindConflicts(state));
     }
@@ -186,8 +185,8 @@ public sealed class OrganizationRuleEngineTests
         var moved = OrganizationRuleOrdering.Move(rules, directory.Id, 1);
 
         Assert.True(moved);
-        Assert.Equal(["文档", "目录", "图片", "压缩", "其它"], rules.Select(rule => rule.Title));
-        Assert.Equal([10, 20, 30, 40, 50], rules.Select(rule => rule.Priority));
+        Assert.Equal(["文档", "目录", "图片", "压缩"], rules.Select(rule => rule.Title));
+        Assert.Equal([10, 20, 30, 40], rules.Select(rule => rule.Priority));
     }
 
     [Fact]

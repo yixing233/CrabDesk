@@ -109,11 +109,10 @@ public sealed class PersistenceTests : IDisposable
             .OrderBy(rule => rule.Priority)
             .ToArray();
 
-        Assert.Equal(5, rules.Length);
-        Assert.Equal(["目录", "文档", "图片", "压缩", "其它"], rules.Select(rule => rule.Title));
-        Assert.Equal(5, rules.Select(rule => rule.BuiltInId).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(4, rules.Length);
+        Assert.Equal(["目录", "文档", "图片", "压缩"], rules.Select(rule => rule.Title));
+        Assert.Equal(4, rules.Select(rule => rule.BuiltInId).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.All(rules, rule => Assert.False(string.IsNullOrWhiteSpace(rule.BuiltInId)));
-        Assert.Equal(BuiltInOrganizationRules.OtherId, rules[^1].BuiltInId);
         Assert.Equal([".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"],
             rules.Single(rule => rule.BuiltInId == BuiltInOrganizationRules.ArchivesId).Extensions);
     }
@@ -149,8 +148,8 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(7, custom.Priority);
         Assert.Equal("Report-*", custom.NamePattern);
         Assert.Equal([".custom"], custom.Extensions);
-        Assert.Equal(5, second.OrganizationRules.Count(rule => !string.IsNullOrWhiteSpace(rule.BuiltInId)));
-        Assert.Equal(5, second.OrganizationRules.Select(rule => rule.BuiltInId)
+        Assert.Equal(4, second.OrganizationRules.Count(rule => !string.IsNullOrWhiteSpace(rule.BuiltInId)));
+        Assert.Equal(4, second.OrganizationRules.Select(rule => rule.BuiltInId)
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count());
@@ -246,7 +245,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(5, loaded.OrganizationRules.Count);
+        Assert.Equal(4, loaded.OrganizationRules.Count);
         var documents = Assert.Single(loaded.OrganizationRules.Where(rule =>
             rule.BuiltInId == BuiltInOrganizationRules.DocumentsId));
         Assert.Equal(ruleId, documents.Id);
@@ -534,7 +533,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
         Assert.Empty(loaded.Boxes);
-        Assert.Equal(5, loaded.OrganizationRules.Count);
+        Assert.Equal(4, loaded.OrganizationRules.Count);
         Assert.All(loaded.OrganizationRules, rule => Assert.False(string.IsNullOrWhiteSpace(rule.BuiltInId)));
     }
 

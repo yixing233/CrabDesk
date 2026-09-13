@@ -24,11 +24,7 @@ public static class BuiltInOrganizationRules
         new(ImagesId, "图片", 30, [DesktopItemKind.File],
             [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".svg", ".ico"]),
         new(ArchivesId, "压缩", 40, [DesktopItemKind.File],
-            [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"]),
-        new(OtherId, "其它", 50,
-            [DesktopItemKind.File, DesktopItemKind.Folder, DesktopItemKind.Shortcut, DesktopItemKind.Shell],
-            [],
-            true)
+            [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"])
     ];
 
     public static List<OrganizationRule> CreateDefaults() =>
@@ -37,6 +33,10 @@ public static class BuiltInOrganizationRules
     public static void EnsureRules(CrabDeskState state, bool adoptLegacyDefaults = false)
     {
         state.OrganizationRules ??= [];
+        // The catch-all "其它" rule is no longer a default: unmatched items stay
+        // on the desktop instead of being swept into a box. Purge any rule left
+        // over from earlier defaults so existing installs migrate too.
+        state.OrganizationRules.RemoveAll(IsFallback);
         var nextPriority = state.OrganizationRules.Count == 0
             ? 10
             : state.OrganizationRules.Max(rule => rule.Priority) + 10;
