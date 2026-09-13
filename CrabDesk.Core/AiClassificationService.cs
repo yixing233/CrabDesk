@@ -15,6 +15,7 @@ public sealed class AiClassificationService : IDisposable
     public const int MaxLabelsPerRequest = 32;
     public const int MaxItemNameLength = 240;
     private const int MaxModelMessageLength = 1024 * 1024;
+    private const int MaxTokensBaseCap = 4096;
     private const int MaxTokensHardCap = 16384;
     private const int MaxTokenBudgetAttempts = 3;
     private static readonly ClassificationTransportProfile[] DefaultTransportProfiles =
@@ -202,7 +203,10 @@ public sealed class AiClassificationService : IDisposable
         };
         var profiles = GetCandidateProfiles(GetCapabilityCacheKey(settings));
         ClassificationResponse? classificationResponse = null;
-        var baseMaxTokens = Math.Clamp(256 + (items.Count * 48), 512, MaxTokensHardCap);
+        // Base budget caps at 4096 because many OpenAI-compatible endpoints reject
+        // larger max_tokens outright; only an observed length truncation escalates
+        // beyond it through the retry below.
+        var baseMaxTokens = Math.Clamp(256 + (items.Count * 48), 512, MaxTokensBaseCap);
         var maxTokens = baseMaxTokens;
         for (var attempt = 1; ; attempt++)
         {
