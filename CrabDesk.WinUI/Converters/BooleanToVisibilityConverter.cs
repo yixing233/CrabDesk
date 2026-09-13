@@ -39,24 +39,3 @@ public sealed class StringNotEmptyToVisibilityConverter : IValueConverter
         value is Visibility.Visible;
 }
 
-using Microsoft.UI.Xaml.Media;
-
-/// <summary>True renders the accent fill (active view toggle); false the quiet fill.</summary>
-public sealed class BoolToViewToggleBrushConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, string language)
-    {
-        var application = Microsoft.UI.Xaml.Application.Current;
-        var active = application?.Resources["AccentFillColorDefaultBrush"] as Brush;
-        var quiet = application?.Resources["ControlFillColorSecondaryBrush"] as Brush;
-        var isActive = value is true;
-        if (parameter as string == "invert")
-        {
-            isActive = !isActive;
-        }
-        return isActive ? active ?? quiet : quiet;
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
-        throw new NotSupportedException();
-}
