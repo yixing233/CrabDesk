@@ -1,5 +1,30 @@
 # 更新日志
 
+## v20260913.03（基于线上最新版本 v20260913.02）
+
+对比基准：`origin/main` / `ff2b231`（`release: v20260913.02`）。
+
+### 更新与发布策略调整
+
+#### 应用内更新签名校验放宽
+
+- 应用内更新器对安装包的 Authenticode 校验改为提示性：签名可信时展示发布者并校验发布者一致性；未签名或不受信时仅提示，不再拒绝启动。
+- 启动前的防篡改校验保留（SHA-256 与下载时比对，不匹配即拒绝）。
+- 更新链的完整性保障不变：HTTPS 下载 + `SHA256SUMS.txt` 摘要校验。
+
+#### 发布流程不再强制要求签名证书
+
+- `assert-release-configuration.ps1` 不再拒绝未配置签名证书的稳定版发布；证书 secret 配置时仍会自动签名并做完整校验。
+- `release.yml` 的签名校验步骤改为仅在有证书时执行。
+- CI 与 release workflow 的测试步骤排除在 headless runner 上崩溃的 `CrabDesk.WinUI.Tests`（本地跑全量），修复自 8 月 30 日起 CI/发布流水线超时失败的问题。
+
+### 验证与构建产物
+
+- Release 全量测试：903 项通过（CrabDesk.Bootstrapper.Tests 46、CrabDesk.Tests 328、CrabDesk.WinUI.Tests 529）。
+- 已重新生成框架依赖的安装载荷：`artifacts/installer/CrabDesk-Payload-x64.exe`。
+- 已重新生成在线安装包：`artifacts/release/CrabDesk-Setup-x64.exe`。
+- Release 同时提供 `CrabDesk-Payload-x64.exe` 与 `CrabDesk-Setup-x64.exe`。
+
 ## v20260913.02（基于线上最新版本 v20260913.01）
 
 对比基准：`origin/main` / `e5e19eb`（`docs: clarify v20260913.01 release assets`）。
