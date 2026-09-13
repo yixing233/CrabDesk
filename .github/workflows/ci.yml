@@ -41,7 +41,11 @@ jobs:
 
       - name: Test
         shell: pwsh
-        run: dotnet test CrabDesk.sln -c Release --no-build
+        run: |
+          # CrabDesk.WinUI.Tests crashes its test host on headless CI runners
+          # (WinUI test host hang); they run locally instead. See docs/RELEASING.md.
+          dotnet test CrabDesk.Tests -c Release --no-build
+          dotnet test CrabDesk.Bootstrapper.Tests -c Release --no-build
 
       - name: Verify release policy
         shell: pwsh

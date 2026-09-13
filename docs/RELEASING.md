@@ -27,9 +27,13 @@
 | 格式 | 类型 | 标记 |
 |---|---|---|
 | `YYYYMMDD.NN`（如 `20260913.01`） | 日常快速发布 | GitHub Release 标记为 **prerelease** |
-| `X.Y.Z`（如 `1.0.0`，可带 `-预发布后缀`） | 稳定版 | 标记为正式 release，**强制要求签名证书** |
+| `X.Y.Z`（如 `1.0.0`，可带 `-预发布后缀`） | 稳定版 | 标记为正式 release |
 
 - 同一天发多版递增 `.NN`（`20260913.01` → `20260913.02`）。
+- **签名是可选的**：项目当前没有代码签名证书，安装包以未签名状态发布；应用内
+  更新链依赖 HTTPS + `SHA256SUMS.txt` 校验完整性，签名只作提示不拦截。若未来
+  配置了 `SIGNING_CERTIFICATE_BASE64` / `SIGNING_CERTIFICATE_PASSWORD` secret，
+  workflow 会自动签名并做完整签名校验。
 - 版本号需要**手动同步到两处**，发布提交里都要改：
   - `CrabDesk.WinUI/CrabDesk.WinUI.csproj` 的 `<Version>`
   - `CrabDesk.Bootstrapper/CrabDesk.Bootstrapper.csproj` 的 `<Version>`
@@ -58,13 +62,14 @@ git push origin v20260913.01
 
 `release.yml` 会依次执行：
 
-1. 校验 tag 格式与发布配置（stable 版无签名证书会直接失败）
-2. `dotnet restore` + `dotnet test` 全量测试
+1. 校验 tag 格式与发布配置
+2. `dotnet restore` + `dotnet test`（CrabDesk.Tests 与 CrabDesk.Bootstrapper.Tests；
+   WinUI 测试因 CI headless 崩溃不在 CI 运行，本地发布前自行跑全量）
 3. `build/publish.ps1` 发布 framework-dependent 的 WinUI（win-x64）
-4. 签名应用 exe（仅当配置了 `SIGNING_CERTIFICATE_BASE64` / `SIGNING_CERTIFICATE_PASSWORD` secret）
+4. 签名应用 exe（仅当配置了签名证书 secret）
 5. `build/build-installer.ps1`（Inno Setup）生成 `CrabDesk-Payload-x64.exe` 并签名
 6. `build/publish-bootstrapper.ps1` 生成 `CrabDesk-Setup-x64.exe` 并签名
-7. 仅 stable：校验 Authenticode 签名、时间戳、证书一致性
+7. 仅当配置了证书：校验 Authenticode 签名、时间戳、证书一致性
 8. 生成 `SHA256SUMS.txt`，创建 GitHub Release，上传 **Setup + SHA256SUMS**，
    发布说明取 `docs/releases/v<版本>.md`（不存在则自动生成）
 
@@ -86,25 +91,26 @@ gh release upload v20260913.01 artifacts/installer/CrabDesk-Payload-x64.exe
 
 ## 4. 已知问题与绕行方案
 
-### ⚠ `CrabDesk.WinUI.Tests` 在 CI 上挂起
+### ⚠ `CrabDesk.WinUI.Tests` 在 CI 上挂起（已从 CI 排除）
 
 自 2026-08-30 起，`CrabDesk.WinUI.Tests` 的 test host 在 GitHub Actions runner 上
-崩溃或挂起（无桌面环境，60 秒无活动触发 blame hang dump），导致 `release.yml`
-在测试阶段失败或跑满 25 分钟超时。**`v20260826.01` 之后再没有一次正式 workflow
-成功发布过。**
+崩溃或挂起（无桌面环境，60 秒无活动触发 blame hang dump）。CI 与 release
+workflow 的测试步骤已改为只跑 `CrabDesk.Tests` 和 `CrabDesk.Bootstrapper.Tests`；
+**发布前应在本地跑全量** `dotnet test CrabDesk.sln -c Release`（WinUI 测试本地正常）。
+待定位根因（疑似需要桌面会话的用例）后恢复 CI 全量并删除本节。
 
-绕行方案（当前实际使用的发布路径）：
+### 应用内更新的签名策略
 
-1. 本地确认全量测试通过。
-2. 推 tag 后手动触发 recovery workflow（不跑测试，从 tag 构建）：
-   `Actions → Publish prerelease recovery → Run workflow`，输入 `YYYYMMDD.NN`
-   格式的版本号。它会构建 Setup + SHA256SUMS，以 **draft → 发布** 的方式更新
-   对应 release。
-3. 手动补传 `CrabDesk-Payload-x64.exe`（recovery 同样不上传它）。
-4. 照常做第 3 步的发布后校验。
+发布包当前未签名。应用内更新器对安装包的 Authenticode 校验是**提示性**的：
+签名可信时展示发布者并校验发布者一致性；不可信或未签名时仅提示，不拦截启动
+（`CrabDeskRuntime.cs` 中 `DownloadUpdateAsync` / `LaunchUpdateInstaller`）。
+拦截发生在 `SHA-256` 与 `SHA256SUMS.txt` 不匹配或下载后文件被改动时。
 
-> 根因修复前，每发一版都要走这条路。修复方向：定位 WinUI 测试在 headless
-> runner 上挂起的用例，或将其标记为需要桌面环境并从 CI 集合中排除。
+> 注意过渡期：`v20260913.02` 及更早版本的应用内更新器仍保留旧行为——对
+> **非 prerelease** 的 release 强制验签。因此在存量用户升级到 `v20260913.03`
+> （首个带宽松校验的版本）之前，发布仍应使用日期格式（自动标为 prerelease）；
+> 之后如需发正式版（`X.Y.Z` 或修改 `release.yml` 的 prerelease 判定），存量
+> 用户的应用内更新才不会因强制验签失败。
 
 ### ⚠ `Directory.Build.props` 里的 AssemblyVersion 未随版本更新
 
@@ -116,10 +122,9 @@ gh release upload v20260913.01 artifacts/installer/CrabDesk-Payload-x64.exe
 
 ## 5. 稳定版（X.Y.Z）补充说明
 
-- `assert-release-configuration.ps1` 会拒绝没有签名证书的 stable 发布，
-  证书通过仓库 secrets 提供，签名的 exe 必须带可信时间戳且为同一发布者证书。
 - 稳定版的发布说明固定文件名 `docs/releases/vX.Y.Z.md`（`v1.0.0` 有特殊约定）。
-- 稳定版会走完整签名校验闭环；prerelease 只签名、不校验。
+- 配置了签名证书时，稳定版会走完整签名校验闭环；未配置时与 prerelease 相同，
+  依赖 `SHA256SUMS.txt` 校验。
 
 ## 6. 发布失败的恢复
 

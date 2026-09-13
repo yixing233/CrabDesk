@@ -27,7 +27,9 @@ function Assert-Fails([scriptblock]$Action, [string]$ExpectedMessage) {
 
 & $policy -Version "1.0.0-beta.1" -CertificateBase64 "" -CertificatePassword ""
 & $policy -Version "1.0.0" -CertificateBase64 "test-certificate" -CertificatePassword "test-password"
-Assert-Fails { & $policy -Version "1.0.0" -CertificateBase64 "" -CertificatePassword "" } "Stable releases require"
+# Signing is optional: unsigned stable releases are allowed and rely on the
+# SHA-256SUMS digest in the in-app update chain.
+& $policy -Version "1.0.0" -CertificateBase64 "" -CertificatePassword ""
 Assert-Fails { & $policy -Version "release-one" -CertificateBase64 "test" -CertificatePassword "test" } "Invalid release version"
 Assert-Fails { & $releaseValidator -Owner "invalid/owner" -Repository "repo" } "unsupported characters"
 Assert-Fails { & $releaseValidator -Owner "owner" -Repository "repo" -Tag "invalid" } "Release tag is invalid"
@@ -87,4 +89,4 @@ if ($createReleaseBlock.IndexOf("CrabDesk-Payload-x64.exe", [System.StringCompar
     throw "The embedded payload must not be uploaded as a separate GitHub Release asset."
 }
 
-Write-Host "Stable signing gate, single embedded-payload setup, dependency resolver and release-validator policy passed."
+Write-Host "Optional signing, single embedded-payload setup, dependency resolver and release-validator policy passed."

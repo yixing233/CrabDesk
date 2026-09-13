@@ -89,7 +89,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private DateTimeOffset _lastMappedHealthCheckAt;
     private string? _verifiedUpdateInstallerPath;
     private string? _verifiedUpdateSha256;
-    private bool _verifiedUpdateIsPrerelease;
     private string _desktopSortSignature = string.Empty;
     private string _desktopSystemIconVisibilitySignature = string.Empty;
     private DesktopIconSortState _desktopSortState;
@@ -2491,19 +2490,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
             }
 
             progress?.Report(new UpdateDownloadProgress("正在验证安装包签名"));
+            // Signature is informational: releases ship unsigned, so the update
+            // chain relies on HTTPS plus the SHA-256SUMS digest. When a trusted
+            // signature is present it still guards against publisher swaps.
             var signature = AuthenticodeVerifier.Verify(downloaded.InstallerPath);
-            if (!update.IsPrerelease && !signature.IsTrusted)
-            {
-                File.Delete(downloaded.InstallerPath);
-                return downloaded with
-                {
-                    Success = false,
-                    IsPrerelease = false,
-                    Message = $"稳定版安装包签名验证失败：{signature.Message}"
-                };
-            }
-            if (!update.IsPrerelease &&
-                signature.IsTrusted &&
+            if (signature.IsTrusted &&
                 Environment.ProcessPath is { } currentExecutable)
             {
                 var currentSignature = AuthenticodeVerifier.Verify(currentExecutable);
@@ -2524,7 +2515,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
             _verifiedUpdateInstallerPath = Path.GetFullPath(downloaded.InstallerPath);
             _verifiedUpdateSha256 = downloaded.Sha256;
-            _verifiedUpdateIsPrerelease = update.IsPrerelease;
             return downloaded with
             {
                 SignatureTrusted = signature.IsTrusted,
@@ -2569,14 +2559,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
                     Convert.FromHexString(actualHash)))
             {
                 throw new InvalidDataException("安装包在下载后发生变化，已阻止启动。");
-            }
-        }
-        if (!_verifiedUpdateIsPrerelease)
-        {
-            var signature = AuthenticodeVerifier.Verify(fullPath);
-            if (!signature.IsTrusted)
-            {
-                throw new InvalidDataException($"安装包签名再次验证失败：{signature.Message}");
             }
         }
 
