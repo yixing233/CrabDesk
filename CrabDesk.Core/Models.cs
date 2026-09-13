@@ -383,7 +383,15 @@ public sealed class AiClassificationRequestException : Exception
         StatusCode = statusCode;
     }
 
+    public AiClassificationRequestException(string technicalMessage, bool lengthTruncated)
+        : this(technicalMessage)
+    {
+        LengthTruncated = lengthTruncated;
+    }
+
     public int? StatusCode { get; }
+
+    public bool LengthTruncated { get; }
 }
 
 public sealed class AiWebSearchRequestException : Exception

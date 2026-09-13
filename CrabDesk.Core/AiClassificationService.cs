@@ -15,6 +15,8 @@ public sealed class AiClassificationService : IDisposable
     public const int MaxLabelsPerRequest = 32;
     public const int MaxItemNameLength = 240;
     private const int MaxModelMessageLength = 1024 * 1024;
+    private const int MaxTokensHardCap = 16384;
+    private const int MaxTokenBudgetAttempts = 3;
     private static readonly ClassificationTransportProfile[] DefaultTransportProfiles =
     [
         new(true, StructuredOutputMode.JsonSchema, true),
@@ -42,7 +44,7 @@ public sealed class AiClassificationService : IDisposable
         StructuredOutputMode OutputMode,
         bool IncludeUsage);
 
-    private sealed record StreamingDelta(string Content, string Reasoning, TokenUsage? Usage)
+    private sealed record StreamingDelta(string Content, string Reasoning, TokenUsage? Usage, string? FinishReason = null)
     {
         public static StreamingDelta Empty { get; } = new(string.Empty, string.Empty, null);
     }
@@ -200,34 +202,32 @@ public sealed class AiClassificationService : IDisposable
         };
         var profiles = GetCandidateProfiles(GetCapabilityCacheKey(settings));
         ClassificationResponse? classificationResponse = null;
-        for (var index = 0; index < profiles.Length; index++)
+        var baseMaxTokens = Math.Clamp(256 + (items.Count * 48), 512, MaxTokensHardCap);
+        var maxTokens = baseMaxTokens;
+        for (var attempt = 1; ; attempt++)
         {
-            var profile = profiles[index];
-            transportProgress?.Report(new AiClassificationTransportProgress(
-                index + 1,
-                profiles.Length,
-                index > 0,
-                profile.Streaming));
             try
             {
-                classificationResponse = await RequestClassificationContentAsync(
+                classificationResponse = await RequestWithTransportProfilesAsync(
                         settings,
                         systemPrompt,
                         userContent,
-                        items.Count,
                         strictResponseFormat,
-                        profile,
+                        profiles,
+                        maxTokens,
+                        transportProgress,
                         modelOutput,
                         modelStream,
                         cancellationToken)
                     .ConfigureAwait(false);
-                _transportProfileCache[GetCapabilityCacheKey(settings)] = profile;
                 break;
             }
             catch (AiClassificationRequestException error) when (
-                index < profiles.Length - 1 && IsCompatibilityRejection(error))
+                error.LengthTruncated && attempt < MaxTokenBudgetAttempts)
             {
-                // 仅在接口明确拒绝输出能力时切换到下一个安全配置；不读取或暴露服务端正文。
+                // 长文件名 + 思考类模型可能耗尽 max_tokens（finish_reason=length），
+                // 自动加大额度重试同一组传输配置。
+                maxTokens = Math.Min(maxTokens * 4, MaxTokensHardCap);
             }
         }
         if (classificationResponse is null)
@@ -254,13 +254,58 @@ public sealed class AiClassificationService : IDisposable
         return assignments;
     }
 
+    private async Task<ClassificationResponse?> RequestWithTransportProfilesAsync(
+        AiClassificationSettings settings,
+        string systemPrompt,
+        string userContent,
+        object strictResponseFormat,
+        ClassificationTransportProfile[] profiles,
+        int maxTokens,
+        IProgress<AiClassificationTransportProgress>? transportProgress,
+        IProgress<string>? modelOutput,
+        IProgress<AiClassificationModelStreamUpdate>? modelStream,
+        CancellationToken cancellationToken)
+    {
+        for (var index = 0; index < profiles.Length; index++)
+        {
+            var profile = profiles[index];
+            transportProgress?.Report(new AiClassificationTransportProgress(
+                index + 1,
+                profiles.Length,
+                index > 0,
+                profile.Streaming));
+            try
+            {
+                var response = await RequestClassificationContentAsync(
+                        settings,
+                        systemPrompt,
+                        userContent,
+                        strictResponseFormat,
+                        profile,
+                        maxTokens,
+                        modelOutput,
+                        modelStream,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                _transportProfileCache[GetCapabilityCacheKey(settings)] = profile;
+                return response;
+            }
+            catch (AiClassificationRequestException error) when (
+                index < profiles.Length - 1 && IsCompatibilityRejection(error))
+            {
+                // 仅在接口明确拒绝输出能力时切换到下一个安全配置；不读取或暴露服务端正文。
+            }
+        }
+        return null;
+    }
+
     private async Task<ClassificationResponse> RequestClassificationContentAsync(
         AiClassificationSettings settings,
         string systemPrompt,
         string userContent,
-        int itemCount,
         object strictResponseFormat,
         ClassificationTransportProfile profile,
+        int maxTokens,
         IProgress<string>? modelOutput,
         IProgress<AiClassificationModelStreamUpdate>? modelStream,
         CancellationToken cancellationToken)
@@ -272,7 +317,11 @@ public sealed class AiClassificationService : IDisposable
         {
             model = settings.Model.Trim(),
             temperature = 0,
-            max_tokens = Math.Clamp(64 + (itemCount * 16), 128, 2048),
+            max_tokens = maxTokens,
+            // DeepSeek V4+ 默认开启思考模式且 reasoning 计入 max_tokens，思考耗尽额度
+            // 会以 finish_reason=length 结束并返回空 content。分类任务不需要长推理，
+            // 仅对 DeepSeek 端点显式关闭，避免其他 OpenAI 兼容服务拒绝未知参数。
+            thinking = IsDeepSeekEndpoint(settings) ? new { type = "disabled" } : null,
             stream = profile.Streaming,
             stream_options = profile.Streaming && profile.IncludeUsage
                 ? new { include_usage = true }
@@ -333,6 +382,22 @@ public sealed class AiClassificationService : IDisposable
     private static bool IsCompatibilityRejection(AiClassificationRequestException error) =>
         error.StatusCode is 400 or 406 or 415 or 422 or 501;
 
+    private static bool IsDeepSeekEndpoint(AiClassificationSettings settings) =>
+        Uri.TryCreate(settings.BaseUrl?.Trim(), UriKind.Absolute, out var baseUri) &&
+        baseUri.Host.Contains("deepseek", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLengthFinishReason(JsonElement root)
+    {
+        if (!TryGetArray(root, "choices", out var choices) ||
+            choices.GetArrayLength() == 0 ||
+            !choices[0].TryGetProperty("finish_reason", out var finishReason) ||
+            finishReason.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+        return string.Equals(finishReason.GetString(), "length", StringComparison.Ordinal);
+    }
+
     private static async Task<ClassificationResponse> ReadClassificationContentAsync(
         HttpResponseMessage response,
         Stopwatch requestStopwatch,
@@ -349,6 +414,12 @@ public sealed class AiClassificationService : IDisposable
             using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             var content = ReadMessageContent(document.RootElement);
+            if (IsLengthFinishReason(document.RootElement))
+            {
+                throw new AiClassificationRequestException(
+                    "AI endpoint response was truncated by max_tokens (finish_reason=length).",
+                    lengthTruncated: true);
+            }
             var jsonBuffer = new StringBuilder(content.Length);
             AppendModelContent(jsonBuffer, content, modelOutput, modelStream);
             return new ClassificationResponse(
@@ -360,6 +431,7 @@ public sealed class AiClassificationService : IDisposable
         var buffer = new StringBuilder();
         TimeSpan? firstTokenLatency = null;
         TokenUsage? tokenUsage = null;
+        string? finishReason = null;
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
         {
@@ -382,13 +454,24 @@ public sealed class AiClassificationService : IDisposable
                 firstTokenLatency = requestStopwatch.Elapsed;
             }
             tokenUsage ??= delta.Usage;
+            finishReason = delta.FinishReason ?? finishReason;
             AppendModelReasoning(delta.Reasoning, modelStream);
             AppendModelContent(buffer, delta.Content, modelOutput, modelStream);
         }
 
         if (buffer.Length == 0)
         {
-            throw new AiClassificationRequestException("AI endpoint returned an empty streaming response.");
+            throw new AiClassificationRequestException(
+                string.Equals(finishReason, "length", StringComparison.Ordinal)
+                    ? "AI endpoint stopped with finish_reason=length before any content arrived (max_tokens exhausted)."
+                    : "AI endpoint returned an empty streaming response.",
+                lengthTruncated: string.Equals(finishReason, "length", StringComparison.Ordinal));
+        }
+        if (string.Equals(finishReason, "length", StringComparison.Ordinal))
+        {
+            throw new AiClassificationRequestException(
+                "AI endpoint response was truncated by max_tokens (finish_reason=length).",
+                lengthTruncated: true);
         }
         return new ClassificationResponse(
             buffer.ToString(),
@@ -410,15 +493,25 @@ public sealed class AiClassificationService : IDisposable
                 throw new AiClassificationRequestException("AI endpoint returned an invalid streaming response.");
             }
             var usage = ReadUsage(root);
-            if (!TryGetArray(root, "choices", out var choices) || choices.GetArrayLength() == 0 ||
-                !choices[0].TryGetProperty("delta", out var delta))
+            string? finishReason = null;
+            if (TryGetArray(root, "choices", out var choices) && choices.GetArrayLength() > 0)
             {
-                return new StreamingDelta(string.Empty, string.Empty, usage);
+                if (choices[0].TryGetProperty("finish_reason", out var finishReasonElement) &&
+                    finishReasonElement.ValueKind == JsonValueKind.String)
+                {
+                    finishReason = finishReasonElement.GetString();
+                }
+                if (!choices[0].TryGetProperty("delta", out var delta))
+                {
+                    return new StreamingDelta(string.Empty, string.Empty, usage, finishReason);
+                }
+                return new StreamingDelta(
+                    ReadOptionalContentValue(delta, "content"),
+                    ReadOptionalContentValue(delta, "reasoning_content", "reasoning"),
+                    usage,
+                    finishReason);
             }
-            return new StreamingDelta(
-                ReadOptionalContentValue(delta, "content"),
-                ReadOptionalContentValue(delta, "reasoning_content", "reasoning"),
-                usage);
+            return new StreamingDelta(string.Empty, string.Empty, usage, finishReason);
         }
         catch (JsonException exception)
         {

@@ -489,6 +489,94 @@ public sealed class AiClassificationServiceTests
         Assert.Equal("单次 AI 分类最多支持 100 个图标。", error.Message);
     }
 
+    [Fact]
+    public async Task DisablesThinkingOnlyForDeepSeekEndpoints()
+    {
+        var requestBodies = new List<(string Host, string Body)>();
+        using var client = new HttpClient(new StubHandler(async request =>
+        {
+            requestBodies.Add((request.RequestUri!.Host, await request.Content!.ReadAsStringAsync()));
+            return ChatCompletionResponse("""{"items":[{"id":"0","label":"工作"}]}""");
+        }));
+        using var service = new AiClassificationService(client);
+        var items = new[] { new AiClassificationInput("path:item", "文档") };
+
+        await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://api.deepseek.com/v1", Model = "deepseek-v4-pro" },
+            items,
+            ["工作"]);
+        await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://models.example/v1", Model = "model-a" },
+            items,
+            ["工作"]);
+
+        Assert.Equal(2, requestBodies.Count);
+        using var deepSeekRequest = JsonDocument.Parse(requestBodies[0].Body);
+        Assert.Equal("disabled", deepSeekRequest.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+        using var otherRequest = JsonDocument.Parse(requestBodies[1].Body);
+        Assert.False(otherRequest.RootElement.TryGetProperty("thinking", out _));
+    }
+
+    [Fact]
+    public async Task RetriesWithLargerTokenBudgetWhenStreamIsTruncatedByLength()
+    {
+        var requestBodies = new List<string>();
+        const string modelJson = """{"items":[{"id":"0","label":"工作"}]}""";
+        var truncatedStream = string.Concat(
+            "data: ", JsonSerializer.Serialize(new { choices = new[] { new { delta = new { reasoning_content = "thinking..." }, finish_reason = (string?)null } } }), "\n\n",
+            "data: ", JsonSerializer.Serialize(new { choices = new[] { new { delta = new { }, finish_reason = "length" } } }), "\n\n",
+            "data: [DONE]\n\n");
+        using var client = new HttpClient(new StubHandler(async request =>
+        {
+            requestBodies.Add(await request.Content!.ReadAsStringAsync());
+            return requestBodies.Count == 1
+                ? SseResponse(truncatedStream)
+                : SseJsonResponse(modelJson);
+        }));
+        using var service = new AiClassificationService(client);
+
+        var result = await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://api.deepseek.com/v1", Model = "deepseek-v4-pro" },
+            [new AiClassificationInput("path:item", "文档")],
+            ["工作"]);
+
+        Assert.Single(result);
+        Assert.Equal("工作", result[0].Label);
+        Assert.Equal(2, requestBodies.Count);
+        using var firstRequest = JsonDocument.Parse(requestBodies[0]);
+        using var secondRequest = JsonDocument.Parse(requestBodies[1]);
+        var firstMaxTokens = firstRequest.RootElement.GetProperty("max_tokens").GetInt32();
+        Assert.Equal(firstMaxTokens * 4, secondRequest.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task RetriesWithLargerTokenBudgetWhenNonStreamingResponseIsTruncatedByLength()
+    {
+        var requestBodies = new List<string>();
+        using var client = new HttpClient(new StubHandler(async request =>
+        {
+            requestBodies.Add(await request.Content!.ReadAsStringAsync());
+            if (requestBodies.Count == 1)
+            {
+                return JsonResponse("""{"choices":[{"message":{"content":""},"finish_reason":"length"}]}""");
+            }
+            return ChatCompletionResponse("""{"items":[{"id":"0","label":"工作"}]}""");
+        }));
+        using var service = new AiClassificationService(client);
+
+        var result = await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://models.example/v1", Model = "model-a" },
+            [new AiClassificationInput("path:item", "文档")],
+            ["工作"]);
+
+        Assert.Single(result);
+        Assert.Equal(2, requestBodies.Count);
+        using var firstRequest = JsonDocument.Parse(requestBodies[0]);
+        using var secondRequest = JsonDocument.Parse(requestBodies[1]);
+        Assert.True(secondRequest.RootElement.GetProperty("max_tokens").GetInt32() >
+                    firstRequest.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json")
