@@ -65,6 +65,9 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private int _selectedInspectorTabIndex;
     private bool _hasPreview;
     private bool _disposed;
+    private long _reasoningCharacters;
+    private long _contentCharacters;
+    private int _activeWebSearchIndex = -1;
 
     public AiClassificationViewModel(
         ICrabDeskService service,
@@ -112,7 +115,50 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> CategoryTags { get; } = [];
     public ObservableCollection<AiWorkbenchItemViewModel> WorkspaceItems { get; } = [];
     public ObservableCollection<AiClassificationGroupViewModel> ResultGroups { get; } = [];
+    public ObservableCollection<AiToolCallViewModel> ToolCalls { get; } = [];
     public ObservableCollection<string> ActivityLog { get; } = [];
+
+    public bool HasToolCalls => ToolCalls.Count > 0;
+
+    public string TransportStatusText
+    {
+        get => _transportStatusText;
+        private set => SetProperty(ref _transportStatusText, value);
+    }
+
+    private string _transportStatusText = string.Empty;
+
+    public string ReasoningStatsText
+    {
+        get => _reasoningStatsText;
+        private set => SetProperty(ref _reasoningStatsText, value);
+    }
+
+    private string _reasoningStatsText = string.Empty;
+
+    public string StreamingParsedText
+    {
+        get => _streamingParsedText;
+        private set => SetProperty(ref _streamingParsedText, value);
+    }
+
+    private string _streamingParsedText = string.Empty;
+
+    public bool IsWebSearchActive
+    {
+        get => _isWebSearchActive;
+        private set
+        {
+            if (SetProperty(ref _isWebSearchActive, value))
+            {
+                OnPropertyChanged(nameof(ToolCallsHeaderText));
+            }
+        }
+    }
+
+    private bool _isWebSearchActive;
+
+    public string ToolCallsHeaderText => IsWebSearchActive ? "工具调用 · 检索中…" : "工具调用";
 
     public bool IsBusy
     {
@@ -481,6 +527,8 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             var progress = new Progress<AiClassificationProgress>(UpdateProgress);
             var modelStream = new DirectProgress<AiClassificationModelStreamUpdate>(AppendModelStream);
             var usage = new Progress<AiClassificationUsageProgress>(UpdateUsage);
+            var transport = new Progress<AiClassificationTransportProgress>(AppendTransportProgress);
+            var webSearch = new Progress<AiWebSearchProgress>(AppendWebSearchProgress);
             var preview = await _service.PreviewAiClassificationAsync(
                 _workspaceRevision,
                 selectedKeys,
@@ -488,7 +536,9 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                 runCancellation.Token,
                 modelOutput: null,
                 modelStream: modelStream,
-                usageProgress: usage);
+                usageProgress: usage,
+                transportProgress: transport,
+                webSearchProgress: webSearch);
             FlushModelStream();
             if (runCancellation.IsCancellationRequested)
             {
@@ -846,6 +896,16 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         StructuredOutput = "正在等待分类结果…";
         IsThinkingExpanded = true;
         ResetUsageMetrics();
+        ToolCalls.Clear();
+        _activeWebSearchIndex = -1;
+        _reasoningCharacters = 0;
+        _contentCharacters = 0;
+        TransportStatusText = string.Empty;
+        ReasoningStatsText = string.Empty;
+        StreamingParsedText = string.Empty;
+        IsWebSearchActive = false;
+        OnPropertyChanged(nameof(HasToolCalls));
+        OnPropertyChanged(nameof(ToolCallsHeaderText));
         ActivityLog.Clear();
         CompletedItems = 0;
         TotalItems = 0;
@@ -867,11 +927,78 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private void AppendModelStream(AiClassificationModelStreamUpdate update)
     {
+        var characters = (long)update.Text.Length;
+        if (update.Kind == AiClassificationModelStreamKind.Reasoning)
+        {
+            Interlocked.Add(ref _reasoningCharacters, characters);
+        }
+        else
+        {
+            Interlocked.Add(ref _contentCharacters, characters);
+        }
         _streamAccumulator.Append(update);
         if (_streamFlushTimer is null)
         {
             FlushModelStream();
         }
+    }
+
+    private void AppendTransportProgress(AiClassificationTransportProgress progress)
+    {
+        TransportStatusText = $"第 {progress.Attempt}/{progress.TotalAttempts} 次模型请求 · " +
+                              (progress.IsStreaming ? "流式" : "非流式") +
+                              (progress.IsCompatibilityFallback ? " · 兼容模式回退" : string.Empty);
+        if (progress.IsCompatibilityFallback)
+        {
+            AppendLog(TransportStatusText);
+        }
+    }
+
+    private void AppendWebSearchProgress(AiWebSearchProgress progress)
+    {
+        switch (progress.Phase)
+        {
+            case AiWebSearchPhase.Started:
+                _activeWebSearchIndex = ToolCalls.Count;
+                ToolCalls.Add(new AiToolCallViewModel
+                {
+                    Icon = "Globe",
+                    Title = $"联网检索 {progress.CandidateCount} 个待确认项目",
+                    Detail = "Tavily 搜索中…",
+                    TimeText = DateTime.Now.ToString("HH:mm:ss"),
+                    IsRunning = true
+                });
+                IsWebSearchActive = true;
+                break;
+            case AiWebSearchPhase.Completed:
+                IsWebSearchActive = false;
+                CompleteToolCall(_activeWebSearchIndex,
+                    progress.EvidenceCount > 0
+                        ? $"返回 {progress.EvidenceCount} 条辅助证据，已用于二次分类" +
+                          (string.IsNullOrWhiteSpace(progress.Message) ? string.Empty : $" · 耗时 {progress.Message}")
+                        : "没有检索到辅助证据",
+                    isError: false);
+                break;
+            case AiWebSearchPhase.Failed:
+                IsWebSearchActive = false;
+                CompleteToolCall(_activeWebSearchIndex,
+                    "联网检索失败，已跳过辅助识别",
+                    isError: true);
+                break;
+        }
+        OnPropertyChanged(nameof(HasToolCalls));
+    }
+
+    private void CompleteToolCall(int index, string detail, bool isError)
+    {
+        if (index < 0 || index >= ToolCalls.Count)
+        {
+            return;
+        }
+        var entry = ToolCalls[index];
+        entry.Detail = detail;
+        entry.IsError = isError;
+        entry.IsRunning = false;
     }
 
     private void FlushModelStream()
@@ -885,11 +1012,29 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         {
             ReasoningOutput = snapshot.Reasoning;
         }
+        ReasoningStatsText = _reasoningCharacters > 0
+            ? $"已思考 {Interlocked.Read(ref _reasoningCharacters):N0} 字" +
+              (_contentCharacters > 0 ? $" · 输出 {Interlocked.Read(ref _contentCharacters):N0} 字" : string.Empty)
+            : string.Empty;
 
         if (!string.IsNullOrWhiteSpace(snapshot.StructuredOutput))
         {
             StructuredOutput = snapshot.StructuredOutput;
         }
+        var receivedItems = CountOccurrences(snapshot.StructuredOutput, "\"id\"");
+        StreamingParsedText = receivedItems > 0 ? $"已识别 {receivedItems} 项" : string.Empty;
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        for (var index = source.IndexOf(value, StringComparison.Ordinal);
+             index >= 0;
+             index = source.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+        return count;
     }
 
     private void UpdateUsage(AiClassificationUsageProgress usage)

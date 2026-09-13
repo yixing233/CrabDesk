@@ -2997,7 +2997,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null)
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null)
     {
         var workspace = GetAiClassificationWorkspace();
         return await PreviewAiClassificationAsync(
@@ -3007,7 +3009,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 cancellationToken,
                 modelOutput,
                 modelStream,
-                usageProgress)
+                usageProgress,
+                transportProgress,
+                webSearchProgress)
             .ConfigureAwait(false);
     }
 
@@ -3018,7 +3022,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
         await RunAiOrganizationAsync(async operationToken =>
         {
             if (expectedWorkspaceRevision != _workspaceRevision)
@@ -3091,13 +3097,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
                     totalBatches,
                     true,
                     "正在请求 AI 分类"));
-                IProgress<AiClassificationTransportProgress>? transportProgress = progress is null
+                IProgress<AiClassificationTransportProgress>? transportProgressRelay = transportProgress is null
                     ? null
                     : new Progress<AiClassificationTransportProgress>(transport =>
                     {
                         DiagnosticLog.Info(
                             $"AI classification transport attempt={transport.Attempt}/{transport.TotalAttempts} " +
                             $"fallback={transport.IsCompatibilityFallback} streaming={transport.IsStreaming}");
+                        transportProgress.Report(transport);
                         if (!transport.IsCompatibilityFallback)
                         {
                             return;
@@ -3143,7 +3150,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                         labels,
                     operationToken,
                     modelOutput,
-                    transportProgress,
+                    transportProgressRelay,
                     streamProgress,
                     usageAccumulator).ConfigureAwait(false);
                 }
@@ -3173,6 +3180,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
                         totalBatches,
                         true,
                         "正在联网辅助识别待确认项目"));
+                    webSearchProgress?.Report(new AiWebSearchProgress(
+                        AiWebSearchPhase.Started,
+                        webSearchCandidates.Count,
+                        0));
+                    var webSearchStopwatch = Stopwatch.StartNew();
                     try
                     {
                         var evidenceItems = await _tavilySearchService.SearchAsync(
@@ -3180,6 +3192,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
                                 webSearchCandidates,
                                 operationToken)
                             .ConfigureAwait(false);
+                        webSearchProgress?.Report(new AiWebSearchProgress(
+                            AiWebSearchPhase.Completed,
+                            webSearchCandidates.Count,
+                            evidenceItems.Count,
+                            Message: $"{webSearchStopwatch.Elapsed.TotalSeconds:0.0}s"));
                         if (evidenceItems.Count > 0)
                         {
                             var supplementalAssignments = await _aiClassificationService.ClassifyAsync(
@@ -3188,7 +3205,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                                     labels,
                                     operationToken,
                                     modelOutput,
-                                    transportProgress,
+                                    transportProgressRelay,
                                     streamProgress,
                                     usageAccumulator)
                                 .ConfigureAwait(false);
@@ -3204,6 +3221,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
                         DiagnosticLog.Error(
                             $"AI web search failed provider=Tavily candidates={webSearchCandidates.Count}",
                             exception);
+                        webSearchProgress?.Report(new AiWebSearchProgress(
+                            AiWebSearchPhase.Failed,
+                            webSearchCandidates.Count,
+                            0,
+                            Message: exception.TechnicalMessage));
                         progress?.Report(new AiClassificationProgress(
                             completedItems,
                             candidates.Length,

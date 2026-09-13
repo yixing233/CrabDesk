@@ -485,7 +485,9 @@ public sealed class ViewModelTests
                 It.IsAny<CancellationToken>(),
                 It.IsAny<IProgress<string>>(),
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
-                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+                It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+                It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+                It.IsAny<IProgress<AiWebSearchProgress>>()))
             .ReturnsAsync(new AiClassificationPreview(7, 1, [], []) { RequestedItemKeys = ["one"] });
         var viewModel = new AiClassificationViewModel(
             service.Object,
@@ -506,7 +508,9 @@ public sealed class ViewModelTests
             It.IsAny<CancellationToken>(),
             It.IsAny<IProgress<string>>(),
             It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
-            It.IsAny<IProgress<AiClassificationUsageProgress>>()), Times.Once);
+            It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+            It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+            It.IsAny<IProgress<AiWebSearchProgress>>()), Times.Once);
     }
 
     [Fact]
@@ -547,7 +551,9 @@ public sealed class ViewModelTests
                 It.IsAny<CancellationToken>(),
                 It.IsAny<IProgress<string>>(),
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
-                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+                It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+                It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+                It.IsAny<IProgress<AiWebSearchProgress>>()))
             .ReturnsAsync(new AiClassificationPreview(
                 7,
                 2,
@@ -596,7 +602,9 @@ public sealed class ViewModelTests
                 It.IsAny<CancellationToken>(),
                 It.IsAny<IProgress<string>>(),
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
-                It.IsAny<IProgress<AiClassificationUsageProgress>>()))
+                It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+                It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+                It.IsAny<IProgress<AiWebSearchProgress>>()))
             .ReturnsAsync(new AiClassificationPreview(
                 7,
                 3,

@@ -252,6 +252,11 @@
                                 <TextBlock Text="{Binding Status}"
                                            Style="{StaticResource SecondaryBodyStyle}"
                                            TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding TransportStatusText}"
+                                           Style="{StaticResource SecondaryBodyStyle}"
+                                           FontSize="12"
+                                           TextTrimming="CharacterEllipsis"
+                                           Visibility="{Binding TransportStatusText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
                                 <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                         BorderThickness="1"
@@ -362,6 +367,59 @@
                                             </Border>
                                         </Grid>
 
+                                        <!-- Tool Calls Timeline -->
+                                        <Expander HorizontalAlignment="Stretch"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  Visibility="{Binding HasToolCalls, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                                    <lucide:LucideIcon Icon="Wrench" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                                    <TextBlock Text="{Binding ToolCallsHeaderText}" FontWeight="SemiBold" />
+                                                    <ProgressRing Width="14"
+                                                                  Height="14"
+                                                                  IsActive="{Binding IsWebSearchActive}"
+                                                                  Visibility="{Binding IsWebSearchActive, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <ItemsControl ItemsSource="{Binding ToolCalls}" Margin="0,8,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnSpacing="8"
+                                                              Margin="0,0,0,6"
+                                                              Padding="8"
+                                                              Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                              BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                              BorderThickness="1"
+                                                              CornerRadius="8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="Auto" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <lucide:LucideIcon Icon="{Binding Icon}"
+                                                                               FontSize="14"
+                                                                               VerticalAlignment="Center"
+                                                                               Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                                            <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Detail}"
+                                                                           FontSize="11"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           Style="{StaticResource SecondaryBodyStyle}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                <ProgressRing Width="12"
+                                                                              Height="12"
+                                                                              IsActive="{Binding IsRunning}"
+                                                                              Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                <TextBlock Text="{Binding TimeText}" FontSize="11" Style="{StaticResource SecondaryBodyStyle}" VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Expander>
+
                                         <!-- Thinking Process Expander -->
                                         <Expander IsExpanded="{Binding IsThinkingExpanded, Mode=TwoWay}"
                                                   HorizontalAlignment="Stretch"
@@ -375,6 +433,15 @@
                                                     <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                                                         <lucide:LucideIcon Icon="Brain" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                                                         <TextBlock Text="{Binding ThinkingHeaderText}" FontWeight="SemiBold" />
+                                                        <ProgressRing Width="14"
+                                                                      Height="14"
+                                                                      IsActive="{Binding IsBusy}"
+                                                                      Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                        <TextBlock Text="{Binding ReasoningStatsText}"
+                                                                   Style="{StaticResource SecondaryBodyStyle}"
+                                                                   FontSize="12"
+                                                                   VerticalAlignment="Center"
+                                                                   Visibility="{Binding ReasoningStatsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
                                                     </StackPanel>
                                                     <Button Grid.Column="1"
                                                             Command="{Binding CopyReasoningCommand}"
@@ -399,7 +466,8 @@
                                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="8">
-                                                <TextBox Text="{Binding ReasoningOutput}"
+                                                <TextBox x:Name="ReasoningTextBox"
+                                                         Text="{Binding ReasoningOutput}"
                                                          IsReadOnly="True"
                                                          AcceptsReturn="True"
                                                          TextWrapping="NoWrap"
@@ -410,7 +478,8 @@
                                                          MinHeight="88"
                                                          MaxHeight="220"
                                                          Background="Transparent"
-                                                         BorderThickness="0" />
+                                                         BorderThickness="0"
+                                                         TextChanged="StreamingTextBox_OnTextChanged" />
                                             </Border>
                                         </Expander>
 
@@ -549,7 +618,14 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="原始 JSON 响应" Style="{StaticResource SecondaryBodyStyle}" VerticalAlignment="Center" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                        <TextBlock Text="原始 JSON 响应" Style="{StaticResource SecondaryBodyStyle}" />
+                                                        <TextBlock Text="{Binding StreamingParsedText}"
+                                                                   FontSize="11"
+                                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                                                                   VerticalAlignment="Center"
+                                                                   Visibility="{Binding StreamingParsedText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
+                                                    </StackPanel>
                                                     <Button Grid.Column="1"
                                                             Command="{Binding CopyStructuredOutputCommand}"
                                                             Padding="6,2"
@@ -568,7 +644,8 @@
                                                         BorderThickness="1"
                                                         CornerRadius="8"
                                                         Padding="8">
-                                                    <TextBox Text="{Binding StructuredOutput}"
+                                                    <TextBox x:Name="StructuredOutputTextBox"
+                                                             Text="{Binding StructuredOutput}"
                                                              IsReadOnly="True"
                                                              AcceptsReturn="True"
                                                              TextWrapping="NoWrap"
@@ -579,7 +656,8 @@
                                                              MinHeight="136"
                                                              MaxHeight="360"
                                                              Background="Transparent"
-                                                             BorderThickness="0" />
+                                                             BorderThickness="0"
+                                                             TextChanged="StreamingTextBox_OnTextChanged" />
                                                 </Border>
                                             </StackPanel>
                                         </StackPanel>

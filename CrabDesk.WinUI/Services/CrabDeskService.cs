@@ -105,8 +105,11 @@ public sealed class CrabDeskService : ICrabDeskService
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
-        _runtime.PreviewAiClassificationAsync(progress, cancellationToken, modelOutput, modelStream, usageProgress);
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
+        _runtime.PreviewAiClassificationAsync(
+            progress, cancellationToken, modelOutput, modelStream, usageProgress, transportProgress, webSearchProgress);
     public Task<AiClassificationPreview> PreviewAiClassificationAsync(
         long expectedWorkspaceRevision,
         IReadOnlyCollection<string> selectedItemKeys,
@@ -114,7 +117,9 @@ public sealed class CrabDeskService : ICrabDeskService
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null) =>
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
         _runtime.PreviewAiClassificationAsync(
             expectedWorkspaceRevision,
             selectedItemKeys,
@@ -122,7 +127,9 @@ public sealed class CrabDeskService : ICrabDeskService
             cancellationToken,
             modelOutput,
             modelStream,
-            usageProgress);
+            usageProgress,
+            transportProgress,
+            webSearchProgress);
     public Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default) =>

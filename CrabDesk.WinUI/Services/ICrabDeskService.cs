@@ -80,7 +80,9 @@ public interface ICrabDeskService
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null);
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null);
     Task<AiClassificationPreview> PreviewAiClassificationAsync(
         long expectedWorkspaceRevision,
         IReadOnlyCollection<string> selectedItemKeys,
@@ -88,7 +90,9 @@ public interface ICrabDeskService
         CancellationToken cancellationToken = default,
         IProgress<string>? modelOutput = null,
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
-        IProgress<AiClassificationUsageProgress>? usageProgress = null);
+        IProgress<AiClassificationUsageProgress>? usageProgress = null,
+        IProgress<AiClassificationTransportProgress>? transportProgress = null,
+        IProgress<AiWebSearchProgress>? webSearchProgress = null);
     Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default);

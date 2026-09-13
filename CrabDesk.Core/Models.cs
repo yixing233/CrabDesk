@@ -328,6 +328,20 @@ public sealed record AiClassificationTransportProgress(
     bool IsCompatibilityFallback,
     bool IsStreaming);
 
+/// <summary>Phase of the optional web-search tool call, surfaced to the activity UI.</summary>
+public enum AiWebSearchPhase
+{
+    Started,
+    Completed,
+    Failed
+}
+
+public sealed record AiWebSearchProgress(
+    AiWebSearchPhase Phase,
+    int CandidateCount,
+    int EvidenceCount,
+    string? Message = null);
+
 /// <summary>
 /// Provider-reported telemetry for one successful classification request.
 /// Token counts are nullable because streamed OpenAI-compatible responses do

@@ -67,7 +67,12 @@ public sealed class AiClassificationPageLayoutTests
 
         var activity = inspector.Elements(Presentation + "TabViewItem")
             .Single(element => (string?)element.Attribute("Header") == "AI 活动");
-        Assert.Single(activity.Descendants(Presentation + "Expander"));
+        var expanders = activity.Descendants(Presentation + "Expander").ToArray();
+        Assert.Equal(2, expanders.Length);
+        Assert.Contains(expanders, element =>
+            (string?)element.Attribute("Visibility") == "{Binding HasToolCalls, Converter={StaticResource BooleanToVisibilityConverter}}");
+        Assert.Contains(expanders, element =>
+            (string?)element.Attribute("IsExpanded") == "{Binding IsThinkingExpanded, Mode=TwoWay}");
     }
 
     [Fact]
@@ -99,7 +104,9 @@ public sealed class AiClassificationPageLayoutTests
             .Single(element => (string?)element.Attribute("Header") == "AI 活动");
 
         Assert.Empty(activity.Descendants(Presentation + "ListView"));
-        var thinking = activity.Descendants(Presentation + "Expander").Single();
+        var thinking = activity
+            .Descendants(Presentation + "Expander")
+            .Single(element => (string?)element.Attribute("IsExpanded") == "{Binding IsThinkingExpanded, Mode=TwoWay}");
         Assert.Equal("{Binding IsThinkingExpanded, Mode=TwoWay}", (string?)thinking.Attribute("IsExpanded"));
         var outputPanels = activity
             .Descendants(Presentation + "TextBox")

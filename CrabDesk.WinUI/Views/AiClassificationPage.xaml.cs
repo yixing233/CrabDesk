@@ -35,4 +35,16 @@ public sealed partial class AiClassificationPage : Page
             viewModel.WebSearchApiKey = passwordBox.Password;
         }
     }
+
+    private void StreamingTextBox_OnTextChanged(object sender, TextChangedEventArgs eventArgs)
+    {
+        // Keep the newest streamed tokens in view while a classification runs;
+        // once idle the user may be reading or copying an earlier section.
+        if (sender is not TextBox textBox || DataContext is not AiClassificationViewModel viewModel || !viewModel.IsBusy)
+        {
+            return;
+        }
+
+        textBox.Select(textBox.Text.Length, 0);
+    }
 }

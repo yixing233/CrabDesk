@@ -15,6 +15,7 @@
             <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:BooleanNegationConverter x:Key="BooleanNegationConverter" />
             <converters:BooleanNegationToVisibilityConverter x:Key="BooleanNegationToVisibilityConverter" />
+            <converters:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibilityConverter" />
             <converters:HexColorConverter x:Key="HexColorConverter" />
             <converters:HexBrushConverter x:Key="HexBrushConverter" />
             <converters:EnumDisplayConverter x:Key="EnumDisplayConverter" />
