@@ -46,6 +46,10 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     private bool _isConnectivityTestInProgress;
     private bool _hasConnectivityTestResult;
     private InfoBarSeverity _connectivityTestSeverity = InfoBarSeverity.Informational;
+    private bool _hasModelsNotice;
+    private InfoBarSeverity _modelsNoticeSeverity = InfoBarSeverity.Informational;
+    private string _modelsNoticeTitle = string.Empty;
+    private string _modelsNoticeMessage = string.Empty;
     private string _connectivityTestTitle = string.Empty;
     private string _connectivityTestMessage = string.Empty;
 
@@ -209,6 +213,30 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     {
         get => _hasConnectivityTestResult;
         private set => SetProperty(ref _hasConnectivityTestResult, value);
+    }
+
+    public bool HasModelsNotice
+    {
+        get => _hasModelsNotice;
+        private set => SetProperty(ref _hasModelsNotice, value);
+    }
+
+    public InfoBarSeverity ModelsNoticeSeverity
+    {
+        get => _modelsNoticeSeverity;
+        private set => SetProperty(ref _modelsNoticeSeverity, value);
+    }
+
+    public string ModelsNoticeTitle
+    {
+        get => _modelsNoticeTitle;
+        private set => SetProperty(ref _modelsNoticeTitle, value);
+    }
+
+    public string ModelsNoticeMessage
+    {
+        get => _modelsNoticeMessage;
+        private set => SetProperty(ref _modelsNoticeMessage, value);
     }
 
     public InfoBarSeverity ConnectivityTestSeverity
@@ -439,12 +467,15 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             }
 
             Status = $"已获取 {Models.Count} 个模型";
-            _notifications.Show(Status, InfoBarSeverity.Success);
+            SetModelsNotice(
+                InfoBarSeverity.Success,
+                "模型列表已更新",
+                $"已获取 {Models.Count} 个模型，可在下拉框中选择。");
         }
         catch (Exception exception)
         {
             Status = AiOperationMessages.ToUserMessage(exception);
-            _notifications.Show(Status, InfoBarSeverity.Error, TimeSpan.FromSeconds(6));
+            SetModelsNotice(InfoBarSeverity.Error, "获取模型失败", Status);
         }
         finally
         {
@@ -1203,6 +1234,14 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(HasResultGroups));
         OnPropertyChanged(nameof(ResultSummaryText));
+    }
+
+    private void SetModelsNotice(InfoBarSeverity severity, string title, string message)
+    {
+        ModelsNoticeSeverity = severity;
+        ModelsNoticeTitle = title;
+        ModelsNoticeMessage = message;
+        HasModelsNotice = true;
     }
 
     private void SetConnectivityTestResult(InfoBarSeverity severity, string title, string message)

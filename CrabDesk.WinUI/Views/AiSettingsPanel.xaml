@@ -58,6 +58,11 @@
                             </StackPanel>
                         </Button>
                     </Grid>
+                    <InfoBar IsOpen="{Binding HasModelsNotice}"
+                             IsClosable="False"
+                             Severity="{Binding ModelsNoticeSeverity}"
+                             Title="{Binding ModelsNoticeTitle}"
+                             Message="{Binding ModelsNoticeMessage}" />
                     <InfoBar IsOpen="{Binding HasConnectivityTestResult}"
                              IsClosable="False"
                              Severity="{Binding ConnectivityTestSeverity}"

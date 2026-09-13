@@ -16,6 +16,11 @@ if (-not $output.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnore
 Remove-Item -LiteralPath $output -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 
+# Incremental XAML compilation can leave the published .pri/.xbf state missing
+# window resources (ms-appx:///MainWindow.xaml 0x802B000A) after local file
+# switches, so always start the WinUI intermediate state from scratch.
+Remove-Item (Join-Path $root "CrabDesk.WinUI\obj") -Recurse -Force -ErrorAction SilentlyContinue
+
 $buildProperties = @()
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
     $buildProperties += "-p:Version=$Version"
