@@ -204,10 +204,11 @@ public sealed class AiClassificationService : IDisposable
         var profiles = GetCandidateProfiles(GetCapabilityCacheKey(settings));
         ClassificationResponse? classificationResponse = null;
         // Base budget caps at 4096 because many OpenAI-compatible endpoints reject
-        // larger max_tokens outright; only an observed length truncation escalates
-        // beyond it through the retry below.
+        // larger max_tokens outright; only an observed truncation escalates beyond
+        // it through the retry below.
         var baseMaxTokens = Math.Clamp(256 + (items.Count * 48), 512, MaxTokensBaseCap);
         var maxTokens = baseMaxTokens;
+        JsonDocument? classificationDocument = null;
         for (var attempt = 1; ; attempt++)
         {
             try
@@ -224,6 +225,11 @@ public sealed class AiClassificationService : IDisposable
                         modelStream,
                         cancellationToken)
                     .ConfigureAwait(false);
+                if (classificationResponse is null)
+                {
+                    throw new AiClassificationRequestException("AI endpoint returned no classification content.");
+                }
+                classificationDocument = JsonDocument.Parse(ExtractJsonObject(classificationResponse.Content));
                 break;
             }
             catch (AiClassificationRequestException error) when (
@@ -233,13 +239,25 @@ public sealed class AiClassificationService : IDisposable
                 // 自动加大额度重试同一组传输配置。
                 maxTokens = Math.Min(maxTokens * 4, MaxTokensHardCap);
             }
+            catch (InvalidDataException) when (
+                classificationResponse is { } incompleteResponse &&
+                LooksTruncated(incompleteResponse.Content) &&
+                attempt < MaxTokenBudgetAttempts)
+            {
+                // 部分服务商提前结束流却不返回 finish_reason=length，内容在 JSON
+                // 中途被切断时同样按截断处理，加大额度重试。
+                maxTokens = Math.Min(maxTokens * 4, MaxTokensHardCap);
+            }
+            catch (InvalidDataException) when (
+                classificationResponse is { } cutResponse && LooksTruncated(cutResponse.Content))
+            {
+                throw new AiClassificationRequestException(
+                    "AI response JSON was truncated before it completed.",
+                    lengthTruncated: true);
+            }
         }
-        if (classificationResponse is null)
-        {
-            throw new AiClassificationRequestException("AI endpoint returned no classification content.");
-        }
-        usageProgress?.Report(classificationResponse.Usage);
-        using var classification = JsonDocument.Parse(ExtractJsonObject(classificationResponse.Content));
+        usageProgress?.Report(classificationResponse!.Usage);
+        using var classification = classificationDocument!;
         var labelLookup = normalizedLabels.ToDictionary(label => label, StringComparer.OrdinalIgnoreCase);
         var assignments = new List<AiClassificationAssignment>();
         var seenIds = new HashSet<int>();
@@ -317,26 +335,31 @@ public sealed class AiClassificationService : IDisposable
         object responseFormat = profile.OutputMode == StructuredOutputMode.JsonSchema
             ? strictResponseFormat
             : new { type = "json_object" };
-        var payload = JsonSerializer.Serialize(new
+        // 混合推理模型（DeepSeek V4+ 等）默认开启思考且 reasoning 计入 max_tokens，
+        // 思考耗尽额度会截断正文。分类任务不需要长推理，对已知服务商按其私有参数
+        // 显式关闭（顶层参数，各家键名不同），未识别的服务商不带参数以免被拒绝。
+        var payloadMap = new Dictionary<string, object?>
         {
-            model = settings.Model.Trim(),
-            temperature = 0,
-            max_tokens = maxTokens,
-            // DeepSeek V4+ 默认开启思考模式且 reasoning 计入 max_tokens，思考耗尽额度
-            // 会以 finish_reason=length 结束并返回空 content。分类任务不需要长推理，
-            // 仅对 DeepSeek 端点显式关闭，避免其他 OpenAI 兼容服务拒绝未知参数。
-            thinking = IsDeepSeekEndpoint(settings) ? new { type = "disabled" } : null,
-            stream = profile.Streaming,
-            stream_options = profile.Streaming && profile.IncludeUsage
-                ? new { include_usage = true }
-                : null,
-            response_format = responseFormat,
-            messages = new object[]
+            ["model"] = settings.Model.Trim(),
+            ["temperature"] = 0,
+            ["max_tokens"] = maxTokens,
+            ["stream"] = profile.Streaming,
+            ["response_format"] = responseFormat,
+            ["messages"] = new object[]
             {
                 new { role = "system", content = systemPrompt },
                 new { role = "user", content = userContent }
             }
-        }, OmitNullJsonOptions);
+        };
+        if (profile.Streaming && profile.IncludeUsage)
+        {
+            payloadMap["stream_options"] = new { include_usage = true };
+        }
+        if (GetThinkingDisableParameter(settings) is { } thinkingDisable)
+        {
+            payloadMap[thinkingDisable.Key] = thinkingDisable.Value;
+        }
+        var payload = JsonSerializer.Serialize(payloadMap, OmitNullJsonOptions);
 
         using var request = CreateRequest(HttpMethod.Post, settings, "chat/completions");
         if (profile.Streaming)
@@ -386,9 +409,61 @@ public sealed class AiClassificationService : IDisposable
     private static bool IsCompatibilityRejection(AiClassificationRequestException error) =>
         error.StatusCode is 400 or 406 or 415 or 422 or 501;
 
-    private static bool IsDeepSeekEndpoint(AiClassificationSettings settings) =>
-        Uri.TryCreate(settings.BaseUrl?.Trim(), UriKind.Absolute, out var baseUri) &&
-        baseUri.Host.Contains("deepseek", StringComparison.OrdinalIgnoreCase);
+    private static (string Key, object Value)? GetThinkingDisableParameter(AiClassificationSettings settings)
+    {
+        var host = Uri.TryCreate(settings.BaseUrl?.Trim(), UriKind.Absolute, out var baseUri)
+            ? baseUri.Host.ToLowerInvariant()
+            : string.Empty;
+        if (host.Contains("deepseek", StringComparison.Ordinal))
+        {
+            return ("thinking", new { type = "disabled" });
+        }
+        if (host.Contains("siliconflow", StringComparison.Ordinal))
+        {
+            return ("enable_thinking", false);
+        }
+        return null;
+    }
+
+    /// <summary>Detects JSON cut off mid-object or mid-string without a length marker.</summary>
+    private static bool LooksTruncated(string content)
+    {
+        var inString = false;
+        var escaped = false;
+        var depth = 0;
+        foreach (var character in content)
+        {
+            if (inString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (character == '\\')
+                {
+                    escaped = true;
+                }
+                else if (character == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+            if (character == '"')
+            {
+                inString = true;
+            }
+            else if (character is '{' or '[')
+            {
+                depth++;
+            }
+            else if (character is '}' or ']')
+            {
+                depth--;
+            }
+        }
+        return depth > 0 || inString;
+    }
 
     private static bool IsLengthFinishReason(JsonElement root)
     {

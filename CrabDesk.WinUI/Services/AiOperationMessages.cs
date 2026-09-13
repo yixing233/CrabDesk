@@ -12,6 +12,7 @@ internal static class AiOperationMessages
         AiClassificationRequestException { StatusCode: { } statusCode } =>
             $"AI 服务请求失败（HTTP {statusCode}），请检查接口配置后重试。",
         AiClassificationRequestException => AiClassificationRequestException.SafeMessage,
+        InvalidDataException error => error.Message,
         InvalidOperationException { Message: "AI 整理正在运行，请等待当前操作完成。" } =>
             "AI 整理正在运行，请等待当前操作完成。",
         InvalidOperationException { Message: "桌面状态已变化，请重新预览 AI 整理结果。" } =>

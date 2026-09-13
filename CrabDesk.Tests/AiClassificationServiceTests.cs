@@ -490,7 +490,7 @@ public sealed class AiClassificationServiceTests
     }
 
     [Fact]
-    public async Task DisablesThinkingOnlyForDeepSeekEndpoints()
+    public async Task DisablesThinkingPerProvider()
     {
         var requestBodies = new List<(string Host, string Body)>();
         using var client = new HttpClient(new StubHandler(async request =>
@@ -506,15 +506,51 @@ public sealed class AiClassificationServiceTests
             items,
             ["工作"]);
         await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://api.siliconflow.cn/v1", Model = "deepseek-ai/DeepSeek-V4-Flash" },
+            items,
+            ["工作"]);
+        await service.ClassifyAsync(
             new AiClassificationSettings { BaseUrl = "https://models.example/v1", Model = "model-a" },
             items,
             ["工作"]);
 
-        Assert.Equal(2, requestBodies.Count);
+        Assert.Equal(3, requestBodies.Count);
         using var deepSeekRequest = JsonDocument.Parse(requestBodies[0].Body);
         Assert.Equal("disabled", deepSeekRequest.RootElement.GetProperty("thinking").GetProperty("type").GetString());
-        using var otherRequest = JsonDocument.Parse(requestBodies[1].Body);
+        using var siliconFlowRequest = JsonDocument.Parse(requestBodies[1].Body);
+        Assert.False(siliconFlowRequest.RootElement.GetProperty("enable_thinking").GetBoolean());
+        using var otherRequest = JsonDocument.Parse(requestBodies[2].Body);
         Assert.False(otherRequest.RootElement.TryGetProperty("thinking", out _));
+        Assert.False(otherRequest.RootElement.TryGetProperty("enable_thinking", out _));
+    }
+
+    [Fact]
+    public async Task RetriesWithLargerTokenBudgetWhenJsonEndsTruncatedWithoutLengthMarker()
+    {
+        var requestBodies = new List<string>();
+        const string truncatedJson = """{"items":[{"id":"0","label":"工作"},{"id":"1","lab""";
+        using var client = new HttpClient(new StubHandler(async request =>
+        {
+            requestBodies.Add(await request.Content!.ReadAsStringAsync());
+            return requestBodies.Count == 1
+                ? SseJsonResponse(truncatedJson)
+                : SseJsonResponse("""{"items":[{"id":"0","label":"工作"}]}""");
+        }));
+        using var service = new AiClassificationService(client);
+
+        var result = await service.ClassifyAsync(
+            new AiClassificationSettings { BaseUrl = "https://api.siliconflow.cn/v1", Model = "deepseek-ai/DeepSeek-V4-Flash" },
+            [new AiClassificationInput("path:item", "文档")],
+            ["工作"]);
+
+        Assert.Single(result);
+        Assert.Equal("工作", result[0].Label);
+        Assert.Equal(2, requestBodies.Count);
+        using var firstRequest = JsonDocument.Parse(requestBodies[0]);
+        using var secondRequest = JsonDocument.Parse(requestBodies[1]);
+        Assert.Equal(
+            firstRequest.RootElement.GetProperty("max_tokens").GetInt32() * 4,
+            secondRequest.RootElement.GetProperty("max_tokens").GetInt32());
     }
 
     [Fact]
