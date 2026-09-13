@@ -48,6 +48,13 @@ internal sealed class RuntimeTimer : IDisposable
             _repeating ? _interval : Timeout.InfiniteTimeSpan);
     }
 
+    /// <summary>Starts a one-shot tick with an interval chosen at schedule time.</summary>
+    internal void Start(TimeSpan oneShotInterval)
+    {
+        Stop();
+        _timer = new Timer(_ => Tick(), null, oneShotInterval, Timeout.InfiniteTimeSpan);
+    }
+
     internal void Stop() => Interlocked.Exchange(ref _timer, null)?.Dispose();
 
     public void Dispose() => Stop();

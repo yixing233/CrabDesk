@@ -50,6 +50,18 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private readonly IUpdateService _updateService = new GitHubUpdateService();
     private readonly ShellIconProvider _iconProvider = new();
     private readonly RuntimeTimer _hostTimer;
+    private static readonly TimeSpan[] TakeoverRetryDelays =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(15),
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(120)
+    ];
+    private readonly RuntimeTimer _takeoverRetryTimer;
+    private bool _pausedByTakeoverFailure;
+    private int _takeoverRetryAttempt;
     private readonly RuntimeTimer _uiHeartbeatTimer;
     private readonly RuntimeTimer _saveTimer;
     private readonly RuntimeTimer _desktopZoomTimer;
@@ -128,6 +140,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
             OnUiHeartbeat,
             "ui heartbeat",
             latency => _lastUiHeartbeatLatency = latency);
+        _takeoverRetryTimer = new RuntimeTimer(
+            TimeSpan.FromSeconds(2),
+            false,
+            beginInvoke,
+            OnTakeoverRetryTick,
+            "takeover retry");
         _saveTimer = new RuntimeTimer(
             TimeSpan.FromMilliseconds(350),
             false,
@@ -2274,6 +2292,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.TakeOverDesktop = !paused;
         if (paused)
         {
+            // 用户主动暂停：接管失败不再自动重试。
+            _pausedByTakeoverFailure = false;
+            StopTakeoverRetryTimer();
             AreDesktopItemsHidden = false;
             RestoreAssignedItemVisibility(true);
             if (_desktopInputMonitor is not null)
@@ -3805,6 +3826,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         _desktopViewRefreshTimer.Dispose();
         _desktopMenuRefreshTimer.Dispose();
         _uiHeartbeatTimer.Dispose();
+        _takeoverRetryTimer.Dispose();
         DiagnosticLog.Info("Runtime disposal completed");
     }
 
@@ -3848,6 +3870,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
             {
                 throw new InvalidOperationException("No CrabDesk desktop surface was created.");
             }
+            _pausedByTakeoverFailure = false;
+            _takeoverRetryAttempt = 0;
+            StopTakeoverRetryTimer();
             return true;
         }
         catch (Exception exception)
@@ -3866,8 +3891,53 @@ public sealed partial class CrabDeskRuntime : IDisposable
             AreDesktopItemsHidden = false;
             RestoreAssignedItemVisibility(true);
             EnsureDesktopInput($"takeover rollback ({context})");
+            // 第三方桌面软件（画报、桌面助手等）可能短暂抢占桌面宿主后恢复；
+            // 按退避计划自动重试接管，避免停留在「桌面未连接」等手动恢复。
+            _pausedByTakeoverFailure = true;
+            ScheduleTakeoverRetry(context);
             return false;
         }
+    }
+
+    private void ScheduleTakeoverRetry(string context)
+    {
+        if (_takeoverRetryAttempt >= TakeoverRetryDelays.Length)
+        {
+            DiagnosticLog.Info(
+                $"Takeover auto-retry exhausted attempts={_takeoverRetryAttempt} context={context}");
+            return;
+        }
+        var delay = TakeoverRetryDelays[_takeoverRetryAttempt];
+        _takeoverRetryAttempt++;
+        DiagnosticLog.Info(
+            $"Takeover auto-retry scheduled delayMs={delay.TotalMilliseconds} attempt={_takeoverRetryAttempt} context={context}");
+        _takeoverRetryTimer.Start(delay);
+    }
+
+    private void OnTakeoverRetryTick()
+    {
+        RetryTakeoverAfterFailure($"auto retry {_takeoverRetryAttempt}");
+    }
+
+    private bool RetryTakeoverAfterFailure(string context)
+    {
+        if (!_pausedByTakeoverFailure || !State.Settings.TakeOverDesktop)
+        {
+            return false;
+        }
+        IsPaused = false;
+        AreDesktopItemsHidden = false;
+        if (ActivateDesktopSurfaces(context))
+        {
+            DiagnosticLog.Info($"Desktop takeover auto-recovered context={context}");
+            return true;
+        }
+        return false;
+    }
+
+    private void StopTakeoverRetryTimer()
+    {
+        _takeoverRetryTimer.Stop();
     }
 
     private bool TryRebuildDesktopSurfaces()
@@ -4367,6 +4437,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
             if (!IsPaused)
             {
                 ActivateDesktopSurfaces("host refresh");
+            }
+            else if (hostChanged)
+            {
+                // 宿主刚从第三方抢占中恢复：立即重试接管，不等退避计时器。
+                RetryTakeoverAfterFailure("host refresh recovery");
             }
             Changed?.Invoke(this, EventArgs.Empty);
         }
