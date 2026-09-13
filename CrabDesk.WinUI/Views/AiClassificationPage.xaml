@@ -357,8 +357,8 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                            <lucide:LucideIcon Icon="Brain" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                            <TextBlock Text="思考过程" FontSize="12" FontWeight="SemiBold" />
+                                                            <lucide:LucideIcon Icon="Brain" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                            <TextBlock Text="思考过程" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                             <TextBlock Text="{Binding ThinkingStatsText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="10"
                                                                        VerticalAlignment="Center"
                                                                        Visibility="{Binding ThinkingStatsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
@@ -417,8 +417,8 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <lucide:LucideIcon Icon="Braces" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                                            <TextBlock Text="分类结果 JSON" FontSize="12" FontWeight="SemiBold" />
+                                                            <lucide:LucideIcon Icon="Braces" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                            <TextBlock Text="分类结果 JSON" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                         </StackPanel>
                                                         <Button Grid.Column="1"
                                                                 Command="{Binding DataContext.CopyMessageResultJsonCommand, ElementName=RootPage}"
@@ -472,9 +472,9 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="2">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <lucide:LucideIcon Icon="Sparkles" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                                        <TextBlock Text="分类结果" FontWeight="SemiBold" FontSize="13" />
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <lucide:LucideIcon Icon="Sparkles" FontSize="14" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                        <TextBlock Text="分类结果" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
                                     </StackPanel>
                                     <TextBlock Text="{Binding ResultSummaryText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="11" />
                                 </StackPanel>
