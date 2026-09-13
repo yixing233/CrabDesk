@@ -465,6 +465,7 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                     <Button Command="{Binding ShowCardViewCommand}" Padding="6,2" MinHeight="26" Height="26"
+                                            Background="{Binding IsJsonViewMode, Converter={StaticResource BoolToViewToggleBrushConverter}, ConverterParameter=invert}"
                                             ToolTipService.ToolTip="看板卡片视图" AutomationProperties.Name="看板卡片视图">
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <lucide:LucideIcon Icon="LayoutGrid" FontSize="12" />
@@ -472,6 +473,7 @@
                                         </StackPanel>
                                     </Button>
                                     <Button Command="{Binding ShowJsonViewCommand}" Padding="6,2" MinHeight="26" Height="26"
+                                            Background="{Binding IsJsonViewMode, Converter={StaticResource BoolToViewToggleBrushConverter}}"
                                             ToolTipService.ToolTip="原始 JSON 视图" AutomationProperties.Name="JSON 视图">
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <lucide:LucideIcon Icon="Code" FontSize="12" />
