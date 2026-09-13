@@ -332,6 +332,11 @@ public sealed class JsonLayoutStore : ILayoutStore
             BuiltInOrganizationRules.EnsureRules(state, adoptLegacyDefaults: true);
         }
 
+        // The catch-all "其它" default was removed from BuiltInOrganizationRules.
+        // Purge leftovers on every load: EnsureRules above only runs as a one-time
+        // schema migration, so existing installs would keep the rule otherwise.
+        state.OrganizationRules?.RemoveAll(BuiltInOrganizationRules.IsFallback);
+
         if (state.Boxes.Count == 0)
         {
             state.Boxes.AddRange(CreateDefaultState().Boxes);
