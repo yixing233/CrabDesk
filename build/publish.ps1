@@ -13,13 +13,18 @@ if (-not $output.StartsWith($artifacts, [System.StringComparison]::OrdinalIgnore
     throw "Publish paths must stay inside the repository artifacts directory."
 }
 
+# Publishing over a running instance leaves the output in a mixed state:
+# locked exe/dll survive the cleanup and the .pri copy is skipped, which makes
+# the next launch fail with "Cannot locate resource ms-appx:///MainWindow.xaml".
+$runningInstances = Get-Process "CrabDesk.WinUI" -ErrorAction SilentlyContinue
+if ($runningInstances) {
+    Write-Host "Stopping running CrabDesk.WinUI instances before publishing."
+    $runningInstances | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
+
 Remove-Item -LiteralPath $output -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-
-# Incremental XAML compilation can leave the published .pri/.xbf state missing
-# window resources (ms-appx:///MainWindow.xaml 0x802B000A) after local file
-# switches, so always start the WinUI intermediate state from scratch.
-Remove-Item (Join-Path $root "CrabDesk.WinUI\obj") -Recurse -Force -ErrorAction SilentlyContinue
 
 $buildProperties = @()
 if (-not [string]::IsNullOrWhiteSpace($Version)) {
@@ -39,6 +44,11 @@ dotnet publish (Join-Path $root "CrabDesk.WinUI\CrabDesk.WinUI.csproj") `
     -o $output @buildProperties
 if ($LASTEXITCODE -ne 0) {
     throw "CrabDesk.WinUI publish failed with exit code $LASTEXITCODE."
+}
+
+$pri = Join-Path $output "CrabDesk.WinUI.pri"
+if (-not (Test-Path -LiteralPath $pri)) {
+    throw "Published output is missing CrabDesk.WinUI.pri; the app would fail at startup with 'Cannot locate resource ms-appx:///MainWindow.xaml'."
 }
 
 Get-ChildItem -LiteralPath $output -Filter "*.pdb" | Remove-Item -Force
