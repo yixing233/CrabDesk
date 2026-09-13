@@ -648,6 +648,21 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void AiClassificationViewToggleSwitchesBothWays()
+    {
+        var viewModel = new AiClassificationViewModel(
+            CreateService(CreateState()).Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        Assert.False(viewModel.IsJsonViewMode);
+        viewModel.ShowJsonViewCommand.Execute(null);
+        Assert.True(viewModel.IsJsonViewMode);
+        viewModel.ShowCardViewCommand.Execute(null);
+        Assert.False(viewModel.IsJsonViewMode);
+    }
+
+    [Fact]
     public async Task AiClassificationViewModelCopiesStructuredOutputToClipboard()
     {
         var clipboard = new Mock<IClipboardService>();

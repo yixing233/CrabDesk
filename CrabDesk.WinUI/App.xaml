@@ -17,6 +17,7 @@
             <converters:BooleanNegationToVisibilityConverter x:Key="BooleanNegationToVisibilityConverter" />
             <converters:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibilityConverter" />
             <converters:ViewToggleBrushConverter x:Key="BoolToViewToggleBrushConverter" />
+            <converters:ViewToggleForegroundConverter x:Key="ViewToggleForegroundConverter" />
             <converters:HexColorConverter x:Key="HexColorConverter" />
             <converters:HexBrushConverter x:Key="HexBrushConverter" />
             <converters:EnumDisplayConverter x:Key="EnumDisplayConverter" />
