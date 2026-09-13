@@ -77,12 +77,14 @@
                         <lucide:LucideIcon Icon="Globe" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                         <TextBlock Text="联网辅助识别" FontWeight="SemiBold" />
                     </StackPanel>
-                    <ToggleSwitch Header="启用 Tavily 联网检索"
-                                  IsOn="{Binding WebSearchEnabled, Mode=TwoWay}"
-                                  HorizontalAlignment="Stretch"
-                                  HorizontalContentAlignment="Left"
-                                  OnContent=""
-                                  OffContent="" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="启用 Tavily 联网检索" Style="{StaticResource SecondaryBodyStyle}" />
+                        <ToggleSwitch IsOn="{Binding WebSearchEnabled, Mode=TwoWay}"
+                                      HorizontalAlignment="Left"
+                                      Margin="0,-2,0,0"
+                                      OnContent=""
+                                      OffContent="" />
+                    </StackPanel>
                     <PasswordBox x:Name="WebSearchApiKeyBox"
                                  Header="Tavily API Key"
                                  PlaceholderText="tvly-…"
