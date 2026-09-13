@@ -37,7 +37,23 @@ public partial class App : Application
         ConfigureServices(services);
         _services = services.BuildServiceProvider();
         AppDiagnostic.Info($"WinUI startup pid={Environment.ProcessId}");
-        UnhandledException += (_, args) => AppDiagnostic.Error("WinUI UnhandledException", args.Exception);
+        UnhandledException += (_, args) =>
+        {
+            // Full ToString: XamlParseException keeps the failing element and
+            // inner exception only in ToString(), Message alone is too vague.
+            AppDiagnostic.Error($"WinUI UnhandledException hresult=0x{args.Exception.HResult:X8} message={args.Message}", args.Exception);
+            try
+            {
+                if (App.Current.Resources.Count > 0)
+                {
+                    AppDiagnostic.Info($"Resource dump on crash keys={string.Join(",", App.Current.Resources.Keys.Cast<object>().Take(40))}");
+                }
+            }
+            catch
+            {
+                // Diagnostics only.
+            }
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             if (args.ExceptionObject is Exception exception)
