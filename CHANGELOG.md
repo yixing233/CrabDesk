@@ -1,5 +1,32 @@
 # 更新日志
 
+## v20260913.04（基于线上最新版本 v20260913.03）
+
+对比基准：`origin/main` / `6f12098`（`release: v20260913.03`）。
+
+### 问题修复
+
+#### AI 分类对思考类模型必现失败（#2）
+
+- DeepSeek 端点默认附带 `thinking: disabled`：分类任务不需要长推理，避免 DeepSeek V4+ 默认思考模式把 `max_tokens` 额度耗光后以 `finish_reason=length` 返回空内容。仅对 BaseUrl 含 `deepseek` 的端点附加该参数，不影响其他 OpenAI 兼容服务。
+- 单次分类的 max_tokens 预算从 `Clamp(64+16n, 128, 2048)` 提高到 `Clamp(256+48n, 512, 16384)`，长文件名大批量分类不再被默认额度截断。
+- 新增截断自动重试：检测 `finish_reason=length`（流式与非流式响应均支持），自动以 4 倍额度重试，最多 3 档（上限 16384）。
+- AI 操作失败提示透出具体原因：截断、HTTP 状态码分别有明确文案，不再一律显示「请检查配置」。
+
+#### 桌面接管失败后自动重连（#3）
+
+- 第三方桌面软件（360 画报、桌面助手等）短暂抢占桌面宿主后，接管失败不再停留在「桌面未连接」等待手动恢复。
+- 失败后按 2s/5s/15s/30s/60s/120s 退避计划自动重试接管；宿主 refresh 事件显示宿主已恢复时立即重试，不等计时器。
+- 用户主动暂停接管时取消自动重试，用户意图优先。
+- 重试派发接入 UI 线程 watchdog（`takeover retry` 计时器），保持卡顿可诊断。
+
+### 验证与构建产物
+
+- Release 全量测试：906 项通过（CrabDesk.Bootstrapper.Tests 46、CrabDesk.Tests 331、CrabDesk.WinUI.Tests 529）。
+- 已重新生成框架依赖的安装载荷：`artifacts/installer/CrabDesk-Payload-x64.exe`。
+- 已重新生成在线安装包：`artifacts/release/CrabDesk-Setup-x64.exe`。
+- Release 同时提供 `CrabDesk-Payload-x64.exe` 与 `CrabDesk-Setup-x64.exe`。
+
 ## v20260913.03（基于线上最新版本 v20260913.02）
 
 对比基准：`origin/main` / `ff2b231`（`release: v20260913.02`）。
