@@ -1093,12 +1093,25 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var metrics = $"总耗时 {FormatDuration(_totalDuration)} · 首字 {FormatDurationOrDash(_firstTokenLatency)}" +
-                      $" · 输入 {FormatTokens(_inputTokens)} · 输出 {FormatTokens(_outputTokens)} · 总计 {FormatTokens(_totalTokens)}";
-        live.MetricsText = metrics;
+        var parts = new List<string> { $"总耗时 {FormatDuration(_totalDuration)}" };
+        if (_firstTokenLatency is { } firstToken)
+        {
+            parts.Add($"首字 {FormatDuration(firstToken)}");
+        }
+        if (_inputTokens is { } input)
+        {
+            parts.Add($"输入 {FormatTokens(input)}");
+        }
+        if (_outputTokens is { } output)
+        {
+            parts.Add($"输出 {FormatTokens(output)}");
+        }
+        if (_totalTokens is { } total)
+        {
+            parts.Add($"总计 {FormatTokens(total)}");
+        }
+        live.MetricsText = string.Join(" · ", parts);
     }
-
-    private static string FormatDurationOrDash(TimeSpan? value) => value is { } v ? FormatDuration(v) : "—";
 
     private static string FormatDuration(TimeSpan value) => value.TotalMinutes >= 1
         ? $"{(int)value.TotalMinutes} 分 {value.Seconds:D2} 秒"

@@ -280,18 +280,31 @@
                                             CornerRadius="10"
                                             Padding="10"
                                             Visibility="{Binding IsAssistant, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <StackPanel Spacing="7">
-                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                <Border Width="22" Height="22" CornerRadius="11" Background="{ThemeResource AccentFillColorDefaultBrush}">
-                                                    <lucide:LucideIcon Icon="Sparkles" FontSize="12" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
-                                                <TextBlock Text="CrabDesk AI" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding TimeText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="10" VerticalAlignment="Center" />
-                                                <ProgressRing Width="12" Height="12" IsActive="{Binding IsRunning}"
-                                                              Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <lucide:LucideIcon Icon="CircleAlert" FontSize="13" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                                                   Visibility="{Binding IsError, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            </StackPanel>
+                                        <StackPanel Spacing="6">
+                                            <Grid ColumnSpacing="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <Border Width="22" Height="22" CornerRadius="11" Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                                        <lucide:LucideIcon Icon="Sparkles" FontSize="12" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <TextBlock Text="CrabDesk AI" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding TimeText}"
+                                                           Style="{StaticResource SecondaryBodyStyle}"
+                                                           FontSize="10"
+                                                           VerticalAlignment="Center" />
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                    <lucide:LucideIcon Icon="CircleAlert" FontSize="13" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                                       Visibility="{Binding IsError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                    <ProgressRing Width="12" Height="12" IsActive="{Binding IsRunning}"
+                                                                  Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                </StackPanel>
+                                            </Grid>
 
                                             <TextBlock Text="{Binding Text}" FontSize="13" TextWrapping="Wrap" />
 
@@ -383,12 +396,14 @@
                                             <TextBlock Text="{Binding ParsedText}"
                                                        FontSize="11"
                                                        Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                                                       Margin="0,-2,0,0"
                                                        Visibility="{Binding ParsedText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
 
                                             <TextBlock Text="{Binding MetricsText}"
                                                        Style="{StaticResource SecondaryBodyStyle}"
                                                        FontSize="10"
                                                        TextWrapping="Wrap"
+                                                       Margin="0,-2,0,0"
                                                        Visibility="{Binding MetricsText, Converter={StaticResource StringNotEmptyToVisibilityConverter}}" />
 
                                             <!-- Result JSON -->
