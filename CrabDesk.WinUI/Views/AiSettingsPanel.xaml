@@ -8,6 +8,7 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   HorizontalContentAlignment="Stretch"
+                  MinWidth="480"
                   MaxHeight="560">
         <StackPanel Spacing="12" Margin="0,4,0,0">
 
@@ -77,7 +78,11 @@
                         <TextBlock Text="联网辅助识别" FontWeight="SemiBold" />
                     </StackPanel>
                     <ToggleSwitch Header="启用 Tavily 联网检索"
-                                  IsOn="{Binding WebSearchEnabled, Mode=TwoWay}" />
+                                  IsOn="{Binding WebSearchEnabled, Mode=TwoWay}"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Left"
+                                  OnContent=""
+                                  OffContent="" />
                     <PasswordBox x:Name="WebSearchApiKeyBox"
                                  Header="Tavily API Key"
                                  PlaceholderText="tvly-…"

@@ -39,6 +39,7 @@ public sealed partial class AiClassificationPage : Page
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot
         };
+        dialog.Resources["ContentDialogMaxWidth"] = 720d;
         await dialog.ShowAsync();
     }
 
