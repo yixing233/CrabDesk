@@ -94,7 +94,7 @@ internal static class Program
                 var exitCode = RunInstaller(
                     dependencyPath,
                     dependency.SilentArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries),
-                    elevate: true);
+                    elevate: dependency.Kind != SetupDependencyKind.WindowsAppRuntime);
                 if (!SetupPolicy.IsSuccessfulInstallerExitCode(exitCode))
                 {
                     throw new InvalidOperationException(
@@ -219,7 +219,7 @@ internal static class Program
                 RequiredUri(metadata, "WindowsAppRuntimeInstallerUrl"),
                 GetRequiredMetadata(metadata, "WindowsAppRuntimeInstallerSha256"),
                 "windowsappruntimeinstall-x64.exe",
-                "--quiet",
+                "--quiet --force",
                 MinimumVersion: windowsAppRuntimeVersion,
                 RequiredPackageName: "Microsoft.WindowsAppRuntime.1.8")
         ];

@@ -12,7 +12,7 @@ internal static class DependencyDetector
         SetupDependencyKind.VisualCppRuntime =>
             IsVisualCppRuntimeInstalled(dependency.MinimumVersion ?? new Version(14, 0)),
         SetupDependencyKind.WindowsAppRuntime =>
-            IsWindowsAppRuntimeInstalled(dependency.RequiredPackageName, dependency.MinimumVersion),
+            WindowsAppRuntimeDetector.Detect(dependency).IsInstalled,
         _ => false
     };
 
@@ -135,49 +135,6 @@ internal static class DependencyDetector
         return minimumVersion is null || version >= minimumVersion;
     }
 
-    private static bool IsWindowsAppRuntimeInstalled(string packageName, Version? minimumVersion)
-    {
-        if (string.IsNullOrWhiteSpace(packageName) ||
-            packageName.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '.' and not '_'))
-        {
-            return false;
-        }
-
-        // Windows App SDK requires the framework, Main and Singleton packages.
-        // Checking only the framework package can produce a false positive and
-        // still lets the app fail at launch with "required components missing".
-        var packageNames = new[]
-        {
-            packageName,
-            "MicrosoftCorporationII.WinAppRuntime.Main.1.8",
-            "MicrosoftCorporationII.WinAppRuntime.Singleton"
-        };
-        var names = string.Join(",", packageNames.Select(name => $"'{name}'"));
-        var command = $"$ok=$true; foreach ($name in @({names})) {{ $p=Get-AppxPackage -Name $name -ErrorAction SilentlyContinue | " +
-                      "Where-Object { $_.Architecture -eq 'X64' -or $_.Architecture -eq 'Neutral' } | " +
-                      "Sort-Object Version -Descending | Select-Object -First 1; " +
-                      $"if ($null -eq $p -or $p.Version -lt [version]'{minimumVersion}') {{ $ok=$false }} }}; if ($ok) {{ 'true' }}";
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                Arguments = $"-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"{command}\""
-            });
-            if (process is null) return false;
-            var output = process.StandardOutput.ReadToEnd();
-            if (!process.WaitForExit(15_000)) { process.Kill(true); return false; }
-            return process.ExitCode == 0 && output.Trim().Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return false;
-        }
-    }
     internal static bool TryGetExistingInstallation(out string? installPath, out string? installedVersion)
     {
         installPath = null;

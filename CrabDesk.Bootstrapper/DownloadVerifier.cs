@@ -38,6 +38,12 @@ internal static class DownloadVerifier
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
+                    InstallerLogger.Log("INFO", "download_attempt", new Dictionary<string, object?>
+                    {
+                        ["attempt"] = attempt,
+                        ["file"] = Path.GetFileName(destination),
+                        ["maxBytes"] = maximumBytes
+                    });
                     await DownloadAttemptAsync(client, uri, partialPath, maximumBytes, progress, cancellationToken)
                         .ConfigureAwait(false);
                     File.Move(partialPath, destination, true);
@@ -46,12 +52,21 @@ internal static class DownloadVerifier
                 catch (Exception exception) when (IsRetryable(exception, cancellationToken) && attempt < SetupPolicy.DownloadMaxAttempts)
                 {
                     lastError = exception;
+                    InstallerLogger.LogException("download_retry", exception, new Dictionary<string, object?>
+                    {
+                        ["attempt"] = attempt,
+                        ["file"] = Path.GetFileName(destination)
+                    });
                     TryDelete(partialPath);
                     await Task.Delay(SetupPolicy.GetRetryDelay(attempt), cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
                     lastError = exception;
+                    InstallerLogger.LogException("download_failed", exception, new Dictionary<string, object?>
+                    {
+                        ["file"] = Path.GetFileName(destination)
+                    });
                     throw;
                 }
             }
@@ -109,8 +124,8 @@ internal static class DownloadVerifier
         var buffer = new byte[128 * 1024];
         long written = 0;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var speedEstimator = new DownloadSpeedEstimator();
         var lastReportTime = stopwatch.ElapsedMilliseconds;
-        long lastReportBytes = 0;
         while (true)
         {
             var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -121,16 +136,14 @@ internal static class DownloadVerifier
             var elapsedMs = stopwatch.ElapsedMilliseconds;
             if (elapsedMs - lastReportTime >= 150)
             {
-                var delta = Math.Max(0.001, (elapsedMs - lastReportTime) / 1000.0);
-                var speed = (written - lastReportBytes) / delta;
+                var speed = speedEstimator.AddSample(written, stopwatch.Elapsed);
                 lastReportTime = elapsedMs;
-                lastReportBytes = written;
                 var percent = totalBytes is > 0 ? Math.Clamp((double)written / totalBytes.Value * 100.0, 0, 100) : 0;
                 progress?.Report(new DownloadProgressReport(written, totalBytes, speed, percent));
             }
         }
         await target.FlushAsync(cancellationToken).ConfigureAwait(false);
-        progress?.Report(new DownloadProgressReport(written, totalBytes, 0, 100));
+        progress?.Report(new DownloadProgressReport(written, totalBytes, speedEstimator.CurrentSpeedBytesPerSecond, 100));
     }
 
     private static void TryDelete(string path)

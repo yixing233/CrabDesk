@@ -118,6 +118,45 @@ public sealed class BootstrapperTests
         Assert.Equal(expected, DependencyDetector.IsSupportedPackageVersion(actual, Version.Parse(minimum)));
     }
 
+    [Fact]
+    public void WindowsAppRuntimePackageSetAllowsServicedFrameworkWithBaselineDdlm()
+    {
+        var packages = new[]
+        {
+            new WindowsAppRuntimeDetector.Package("Microsoft.WindowsAppRuntime.1.8", Version.Parse("8000.946.1701.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("MicrosoftCorporationII.WinAppRuntime.Main.1.8", Version.Parse("8000.946.1701.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("MicrosoftCorporationII.WinAppRuntime.Singleton", Version.Parse("8002.4.0.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("Microsoft.WinAppRuntime.DDLM.8000.921.1539.0-x6", Version.Parse("8000.921.1539.0"), "X64", "Ok")
+        };
+
+        var result = WindowsAppRuntimeDetector.Evaluate(
+            packages,
+            "Microsoft.WindowsAppRuntime.1.8",
+            Version.Parse("8000.921.1539.0"));
+
+        Assert.True(result.IsInstalled, result.Details);
+    }
+
+    [Fact]
+    public void WindowsAppRuntimePackageSetRejectsMissingDdlmOrWrongArchitecture()
+    {
+        var packages = new[]
+        {
+            new WindowsAppRuntimeDetector.Package("Microsoft.WindowsAppRuntime.1.8", Version.Parse("8000.946.1701.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("MicrosoftCorporationII.WinAppRuntime.Main.1.8", Version.Parse("8000.946.1701.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("MicrosoftCorporationII.WinAppRuntime.Singleton", Version.Parse("8002.4.0.0"), "X64", "Ok"),
+            new WindowsAppRuntimeDetector.Package("Microsoft.WinAppRuntime.DDLM.8000.921.1539.0-x8", Version.Parse("8000.921.1539.0"), "X86", "Ok")
+        };
+
+        var result = WindowsAppRuntimeDetector.Evaluate(
+            packages,
+            "Microsoft.WindowsAppRuntime.1.8",
+            Version.Parse("8000.921.1539.0"));
+
+        Assert.False(result.IsInstalled);
+        Assert.Contains("DDLM", result.Details);
+    }
+
     [Theory]
     [InlineData(1, 1)]
     [InlineData(2, 2)]
@@ -128,12 +167,52 @@ public sealed class BootstrapperTests
     }
 
     [Fact]
+    public void DownloadSpeedEstimatorSmoothsShortTermJitter()
+    {
+        var estimator = new DownloadSpeedEstimator();
+        estimator.AddSample(0, TimeSpan.Zero);
+        var first = estimator.AddSample(1_000_000, TimeSpan.FromSeconds(1));
+        var second = estimator.AddSample(1_010_000, TimeSpan.FromSeconds(1.2));
+
+        Assert.Equal(1_000_000, first, 0);
+        Assert.InRange(second, 750_000, 1_000_000);
+    }
+
+    [Fact]
+    public void DownloadSpeedEstimatorKeepsLastSpeedAtCompletion()
+    {
+        var estimator = new DownloadSpeedEstimator();
+        estimator.AddSample(0, TimeSpan.Zero);
+        estimator.AddSample(500_000, TimeSpan.FromSeconds(1));
+
+        Assert.True(estimator.CurrentSpeedBytesPerSecond > 0);
+        Assert.Equal(500_000, estimator.CurrentSpeedBytesPerSecond, 0);
+    }
+
+
+    [Fact]
     public void RequiredSpaceIncludesDependencyAllowanceAndMargin()
     {
         var required = SetupPolicy.CalculateRequiredSpaceBytes(100, 2);
         Assert.Equal(100 + (2 * SetupPolicy.DependencyDownloadAllowanceBytes) + SetupPolicy.DiskSafetyMarginBytes, required);
         Assert.True(SetupPolicy.HasSufficientSpace(required, required));
         Assert.False(SetupPolicy.HasSufficientSpace(required - 1, required));
+    }
+
+    [Theory]
+    [InlineData("url", "https://user:secret@example.com/file.exe", "[REDACTED]")]
+    [InlineData("password", "sensitive-value", "[REDACTED]")]
+    public void InstallerLoggerRedactsSensitiveFields(string key, string value, string expected)
+    {
+        Assert.Equal(expected, InstallerLogger.Sanitize(key, value));
+    }
+
+    [Fact]
+    public void InstallerLoggerRemovesLogInjectionCharacters()
+    {
+        var value = InstallerLogger.Sanitize("message", "first\r\nlevel=ERROR");
+        Assert.DoesNotContain("\r", value);
+        Assert.DoesNotContain("\n", value);
     }
 
     [Fact]

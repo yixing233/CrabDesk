@@ -863,7 +863,7 @@ internal sealed class InstallerWindow
                     _state.CurrentAction = $"正在静默安装 {dep.DisplayName}...";
                     _state.SubAction = "可能出现系统权限确认，请稍候...";
 
-                    var exitCode = RunInstallerProcess(depPath, dep.SilentArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries), true);
+                    var exitCode = RunInstallerProcess(depPath, dep.SilentArguments.Split(' ', StringSplitOptions.RemoveEmptyEntries), dep.Kind != SetupDependencyKind.WindowsAppRuntime);
                     if (!SetupPolicy.IsSuccessfulInstallerExitCode(exitCode))
                     {
                         throw new InvalidOperationException($"{dep.DisplayName} 安装失败，退出代码：{exitCode}。");
