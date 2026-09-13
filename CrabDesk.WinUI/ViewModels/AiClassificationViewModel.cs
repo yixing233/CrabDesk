@@ -555,6 +555,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             UpdateTotalDuration();
             _operationStopwatch.Stop();
             FlushModelStream();
+            IsProgressIndeterminate = false;
             if (runCancellation is not null && ReferenceEquals(_runCancellation, runCancellation))
             {
                 _runCancellation = null;

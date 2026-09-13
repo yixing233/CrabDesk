@@ -486,7 +486,8 @@
                             </Grid>
 
                             <StackPanel Visibility="{Binding IsJsonViewMode, Converter={StaticResource BooleanNegationToVisibilityConverter}}" Spacing="6">
-                                <ItemsRepeater ItemsSource="{Binding ResultGroups}" MaxHeight="220">
+                                <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsRepeater ItemsSource="{Binding ResultGroups}">
                                     <ItemsRepeater.Layout>
                                         <StackLayout Spacing="6" />
                                     </ItemsRepeater.Layout>
@@ -520,6 +521,7 @@
                                         </DataTemplate>
                                     </ItemsRepeater.ItemTemplate>
                                 </ItemsRepeater>
+                                </ScrollViewer>
                                 <Border Background="{ThemeResource ControlFillColorSecondaryBrush}"
                                         BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                                         BorderThickness="1"
