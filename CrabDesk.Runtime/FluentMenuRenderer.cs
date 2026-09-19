@@ -207,9 +207,14 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
         return new Region(path);
     }
 
+    // Called from the Fluent drop-downs' OnHandleCreated so the very first
+    // frame already has rounded corners, and again once a menu is open for
+    // the Region fallback, which needs the final size. Never read Handle
+    // here: that would create a native window for a submenu that may never
+    // open, and the root theme pass visits every submenu.
     internal static void ApplyRoundedCorners(ToolStripDropDown menu)
     {
-        if (menu.Width <= 0 || menu.Height <= 0)
+        if (!menu.IsHandleCreated || menu.Width <= 0 || menu.Height <= 0)
         {
             return;
         }

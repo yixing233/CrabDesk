@@ -182,6 +182,10 @@ public partial class App : Application
         };
         runtime.ExitRequested += (_, _) => Shutdown();
         StartCommandListeners(runtime, _window.DispatcherQueue);
+        // Building the confirmation window on first use would stall the
+        // shared UI thread right after the user clicks "删除盒子"; build it
+        // once now, while idle, so a confirmation only has to show it.
+        _window.DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, DesktopConfirmWindow.Prewarm);
 
         if (organize) runtime.SmartOrganize();
         if (aiOrganize) OpenAiOrganizationWorkbench();
@@ -259,6 +263,7 @@ public partial class App : Application
         services.AddTransient<AiClassificationViewModel>();
         services.AddTransient<AppearanceViewModel>();
         services.AddTransient<BoxesViewModel>();
+        services.AddTransient<DiagnosticsViewModel>();
     }
 
     private void StartCommandListeners(CrabDeskRuntime runtime, DispatcherQueue dispatcher)

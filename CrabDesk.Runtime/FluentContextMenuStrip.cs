@@ -41,6 +41,12 @@ internal sealed class FluentToolStripDropDownMenu : ToolStripDropDownMenu
         }
     }
 
+    protected override void OnHandleCreated(EventArgs eventArgs)
+    {
+        base.OnHandleCreated(eventArgs);
+        FluentMenuRenderer.ApplyRoundedCorners(this);
+    }
+
     protected override void OnOpening(CancelEventArgs eventArgs)
     {
         base.OnOpening(eventArgs);
@@ -95,11 +101,14 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     private bool _allowImmediateClose;
     private ToolStripDropDownCloseReason _pendingCloseReason;
     private ToolStripItem? _pointerHoveredItem;
+    private long _openingStarted;
+    private bool _presentationPending;
 
     internal int MinimumMenuWidth { get; init; } = 112;
     internal bool OpacityAnimationAllowed { get; init; } = true;
     internal float? PreferredDpiScale { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
+    internal TimeSpan? ConstructionDuration { get; set; }
     internal ToolStripItem? PointerHoveredItem => _pointerHoveredItem;
 
     protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
@@ -155,8 +164,16 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         return new Padding(horizontal, vertical, horizontal, vertical);
     }
 
+    protected override void OnHandleCreated(EventArgs eventArgs)
+    {
+        base.OnHandleCreated(eventArgs);
+        FluentMenuRenderer.ApplyRoundedCorners(this);
+    }
+
     protected override void OnOpening(CancelEventArgs eventArgs)
     {
+        _openingStarted = Stopwatch.GetTimestamp();
+        _presentationPending = true;
         StopOpacityAnimation();
         Opacity = OpacityAnimationAllowed && AnimationsEnabled ? 0 : 1;
         base.OnOpening(eventArgs);
@@ -164,7 +181,26 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         if (eventArgs.Cancel)
         {
             Opacity = 1;
+            _presentationPending = false;
         }
+    }
+
+    protected override void OnPaint(PaintEventArgs eventArgs)
+    {
+        base.OnPaint(eventArgs);
+        if (!_presentationPending)
+        {
+            return;
+        }
+        _presentationPending = false;
+        // One line per open so a sluggish menu can be attributed to building
+        // it, laying it out, or getting its first frame on screen.
+        var build = ConstructionDuration is { } duration
+            ? duration.TotalMilliseconds.ToString("0")
+            : "-";
+        DiagnosticLog.Info(
+            $"Context menu presented items={Items.Count} buildMs={build} " +
+            $"openingToPaintMs={Stopwatch.GetElapsedTime(_openingStarted).TotalMilliseconds:0}");
     }
 
     protected override void OnLayout(LayoutEventArgs eventArgs)
@@ -181,6 +217,10 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         FluentMenuRenderer.ApplyRoundedCorners(this);
         StartOutsideClickMonitor();
         Invalidate(true);
+        // Paint now, inside Show(): WM_PAINT is the lowest-priority message,
+        // so otherwise the first frame waits behind whatever the desktop
+        // surface has already queued on this thread.
+        Update();
         if (OpacityAnimationAllowed && AnimationsEnabled)
         {
             StartOpacityAnimation(1, 90, false);

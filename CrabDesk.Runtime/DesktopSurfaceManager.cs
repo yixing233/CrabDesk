@@ -22,6 +22,24 @@ internal sealed class DesktopSurfaceManager : IDisposable
     private bool _boxHoverReconcilePending;
 
     internal int SurfaceCount => _surfaces.Count;
+
+    /// <summary>
+    /// The icon surface handle for a monitor, used as the "is CrabDesk still
+    /// answering?" target by the stall diagnostics. Zero when no surface exists
+    /// for that monitor or its handle was never created.
+    /// </summary>
+    internal IntPtr GetIconSurfaceHandle(string monitorId)
+    {
+        var surface = _iconSurfaces.FirstOrDefault(candidate =>
+            string.Equals(candidate.MonitorId, monitorId, StringComparison.OrdinalIgnoreCase));
+        if (surface is null || surface.IsDisposed || !surface.IsHandleCreated)
+        {
+            return IntPtr.Zero;
+        }
+
+        return surface.Handle;
+    }
+
     internal bool AcrylicRequested { get; }
 
     internal readonly record struct SurfaceVisibility(bool ShowIcons, bool ShowBoxes);
@@ -72,6 +90,13 @@ internal sealed class DesktopSurfaceManager : IDisposable
                             boxSurface.SetAcrylicBackground(_acrylicHost.EffectsEnabled);
                         Refresh();
                     };
+                    // An OLE drag from another process hit-tests this top-level
+                    // host, not the icon layer beneath it (HTTRANSPARENT only
+                    // defers within our thread). Accept drops on the host and
+                    // route them to the icon surface for the monitor under the
+                    // pointer; the list is filled in below and read at drag time.
+                    _acrylicHost.SetDropForwarding(point =>
+                        _iconSurfaces.FirstOrDefault(surface => surface.ContainsScreenPixel(point)));
                 }
                 catch (Exception exception)
                 {

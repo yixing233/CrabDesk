@@ -55,6 +55,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private bool _isBusy;
     private string _status = "准备就绪";
+    private string _workspaceFilter = string.Empty;
     private int _completedItems;
     private int _totalItems;
     private bool _isProgressIndeterminate;
@@ -116,6 +117,13 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> Models { get; } = [];
     public ObservableCollection<string> CategoryTags { get; } = [];
     public ObservableCollection<AiWorkbenchItemViewModel> WorkspaceItems { get; } = [];
+
+    /// <summary>
+    /// The subset of <see cref="WorkspaceItems"/> the grid shows: everything, or only
+    /// the items matching <see cref="WorkspaceFilter"/>. Selection state lives on the
+    /// items themselves, so filtering never changes what is selected.
+    /// </summary>
+    public ObservableCollection<AiWorkbenchItemViewModel> VisibleWorkspaceItems { get; } = [];
     public ObservableCollection<AiClassificationGroupViewModel> ResultGroups { get; } = [];
     public ObservableCollection<AiConversationMessageViewModel> Conversation { get; } = [];
 
@@ -172,6 +180,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _hasPreview, value))
             {
                 OnPropertyChanged(nameof(CanApplyPreview));
+                OnPropertyChanged(nameof(ClassifyButtonText));
                 UpdateResultGroups();
                 RefreshAiCommandState();
             }
@@ -179,17 +188,78 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     }
 
     public int SelectedItemCount => WorkspaceItems.Count(item => item.IsSelected);
-    public string SelectedItemSummary => $"已选择 {SelectedItemCount} 项";
+    public string SelectedItemSummary => IsWorkspaceFiltered
+        ? $"已选择 {SelectedItemCount} 项 · 匹配 {VisibleWorkspaceItems.Count}/{WorkspaceItems.Count} 项"
+        : $"已选择 {SelectedItemCount} 项";
     public int EffectiveAssignmentCount => WorkspaceItems.Count(item =>
         item.IsSelected && !string.IsNullOrWhiteSpace(item.EffectiveLabel));
     public bool IsWorkspaceEmpty => WorkspaceItems.Count == 0;
+    public bool IsWorkspaceFiltered => !string.IsNullOrWhiteSpace(WorkspaceFilter);
+    public bool HasNoFilterMatches => IsWorkspaceFiltered && !IsWorkspaceEmpty && VisibleWorkspaceItems.Count == 0;
+    public string NoFilterMatchesText => $"没有匹配「{WorkspaceFilter.Trim()}」的图标";
+
+    /// <summary>
+    /// Live search over the icon grid. Matches the display name or the current
+    /// classification text, case-insensitively; blank shows every item.
+    /// </summary>
+    public string WorkspaceFilter
+    {
+        get => _workspaceFilter;
+        set
+        {
+            if (SetProperty(ref _workspaceFilter, value ?? string.Empty))
+            {
+                OnPropertyChanged(nameof(IsWorkspaceFiltered));
+                OnPropertyChanged(nameof(NoFilterMatchesText));
+                RefreshVisibleWorkspaceItems();
+            }
+        }
+    }
     public bool CanApplyPreview => !IsBusy && HasPreview && EffectiveAssignmentCount > 0;
     public bool HasProgress => TotalItems > 0;
     public double ProgressValue => TotalItems == 0 ? 0 : Math.Clamp((double)CompletedItems / TotalItems * 100, 0, 100);
     public bool HasResultGroups => ResultGroups.Count > 0;
-    public string ResultSummaryText => !HasPreview
-        ? "尚未生成分类结果"
-        : $"已识别 {EffectiveAssignmentCount}/{SelectedItemCount} 项" + (WorkspaceItems.Count(item => item.IsSelected && item.IsUncertain) is var uncertain && uncertain > 0 ? $"（{uncertain} 项待确认）" : string.Empty);
+
+    /// <summary>The run button re-labels itself once there is a preview to redo.</summary>
+    public string ClassifyButtonText => HasPreview ? "重新分类" : "开始 AI 分类";
+
+    /// <summary>
+    /// What "确认应用" will do with the reviewed preview, including the user's edits.
+    /// Becomes the status line once a finished run is being adjusted.
+    /// </summary>
+    public string ResultSummaryText
+    {
+        get
+        {
+            if (!HasPreview)
+            {
+                return "尚未生成分类结果";
+            }
+
+            var reviewed = WorkspaceItems.Where(item => item.IsSelected && item.HasPreview).ToArray();
+            var assigned = reviewed.Count(item => !string.IsNullOrWhiteSpace(item.EffectiveLabel));
+            var uncertain = reviewed.Count(item => item.IsUncertain);
+            var adjusted = reviewed.Count(item => item.IsManuallyLabeled);
+            var excluded = reviewed.Count(item => item.IsExcluded);
+            var notes = new List<string>(3);
+            if (uncertain > 0)
+            {
+                notes.Add($"{uncertain} 项待确认");
+            }
+            if (adjusted > 0)
+            {
+                notes.Add($"{adjusted} 项手动调整");
+            }
+            if (excluded > 0)
+            {
+                notes.Add($"{excluded} 项不归类");
+            }
+
+            return $"确认后将归入盒子 {assigned}/{reviewed.Length} 项" +
+                   (notes.Count > 0 ? $"（{string.Join("，", notes)}）" : string.Empty) +
+                   "。";
+        }
+    }
 
     public bool IsJsonViewMode
     {
@@ -511,6 +581,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             var usage = new Progress<AiClassificationUsageProgress>(UpdateUsage);
             var transport = new Progress<AiClassificationTransportProgress>(AppendTransportProgress);
             var webSearch = new Progress<AiWebSearchProgress>(AppendWebSearchProgress);
+            var activities = new Progress<AiClassificationActivity>(AppendClassificationActivity);
             var preview = await _service.PreviewAiClassificationAsync(
                 _workspaceRevision,
                 selectedKeys,
@@ -520,7 +591,8 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                 modelStream: modelStream,
                 usageProgress: usage,
                 transportProgress: transport,
-                webSearchProgress: webSearch);
+                webSearchProgress: webSearch,
+                activityProgress: activities);
             FlushModelStream();
             if (runCancellation.IsCancellationRequested)
             {
@@ -535,6 +607,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             Status = preview.Assignments.Count == 0
                 ? "AI 未能确定分类，请为待确认项目选择标签后应用。"
                 : $"已生成预览：{preview.Assignments.Count}/{preview.Requested} 项获得 AI 分类。";
+            _liveMessage?.SetResultGroups(ResultGroups, Status);
             FinishLiveMessage(Status, isError: false);
         }
         catch (OperationCanceledException) when (runCancellation?.IsCancellationRequested == true)
@@ -576,9 +649,12 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         try
         {
             IsBusy = true;
+            // Items the user unchecked or marked "不归类" after the preview stay on the
+            // desktop; count them before the workspace reloads so the summary can say so.
+            var keptOnDesktop = WorkspaceItems.Count(item => item.HasPreview && (!item.IsSelected || item.IsExcluded));
             var preview = BuildPreviewWithManualAssignments(_preview);
             var result = await _service.ApplyAiClassificationPreviewAsync(preview);
-            Status = DescribeApplyResult(result);
+            Status = DescribeApplyResult(result, keptOnDesktop);
             _notifications.Show(Status, InfoBarSeverity.Success);
             AppendConversationMessage(AiConversationRole.Assistant, Status);
             ReloadWorkspaceCore(clearPreview: true);
@@ -608,10 +684,12 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         _service.CancelAiOrganization();
     }
 
+    // "全选" / "清除" act on what the user can see: with a search active they only
+    // touch the matching items, so a filter doubles as a bulk-selection tool.
     [RelayCommand(CanExecute = nameof(CanModifyWorkspace))]
     private void SelectAll()
     {
-        foreach (var item in WorkspaceItems)
+        foreach (var item in VisibleWorkspaceItems)
         {
             item.IsSelected = true;
         }
@@ -620,7 +698,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanModifyWorkspace))]
     private void ClearSelection()
     {
-        foreach (var item in WorkspaceItems)
+        foreach (var item in VisibleWorkspaceItems)
         {
             item.IsSelected = false;
         }
@@ -635,6 +713,58 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         }
 
         item.IsSelected = !item.IsSelected;
+    }
+
+    /// <summary>
+    /// The entries of a card's classification menu: every category tag (the current
+    /// one checked), "不归类", and a way back to the AI suggestion once the user has
+    /// moved away from it.
+    /// </summary>
+    public IReadOnlyList<AiWorkbenchLabelChoice> GetLabelChoices(AiWorkbenchItemViewModel item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var choices = CategoryTags
+            .Select(tag => new AiWorkbenchLabelChoice(
+                item,
+                AiWorkbenchLabelChoiceKind.Category,
+                tag,
+                IsCurrent: !item.IsExcluded && string.Equals(item.EffectiveLabel, tag, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        choices.Add(new AiWorkbenchLabelChoice(item, AiWorkbenchLabelChoiceKind.KeepOnDesktop, null, item.IsExcluded));
+        if (item.HasAiLabel && (item.IsExcluded || item.IsManuallyLabeled))
+        {
+            choices.Add(new AiWorkbenchLabelChoice(item, AiWorkbenchLabelChoiceKind.RestoreAiSuggestion, item.AiLabel, IsCurrent: false));
+        }
+
+        return choices;
+    }
+
+    [RelayCommand(CanExecute = nameof(CanModifyWorkspace))]
+    private void ChooseWorkspaceItemLabel(AiWorkbenchLabelChoice? choice)
+    {
+        if (choice is null || !WorkspaceItems.Contains(choice.Item) || !choice.Item.HasPreview)
+        {
+            return;
+        }
+
+        var item = choice.Item;
+        switch (choice.Kind)
+        {
+            case AiWorkbenchLabelChoiceKind.Category:
+                item.IsExcluded = false;
+                // Picking the model's own suggestion again is a restore, not an override.
+                item.ManualLabel = string.Equals(choice.Label, item.AiLabel, StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : choice.Label;
+                break;
+            case AiWorkbenchLabelChoiceKind.KeepOnDesktop:
+                item.IsExcluded = true;
+                break;
+            case AiWorkbenchLabelChoiceKind.RestoreAiSuggestion:
+                item.IsExcluded = false;
+                item.ManualLabel = null;
+                break;
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanModifyWorkspace))]
@@ -830,10 +960,16 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private AiClassificationPreview BuildPreviewWithManualAssignments(AiClassificationPreview preview)
     {
+        // The user's review wins: a manual label overrides the model's suggestion, and
+        // anything unchecked or marked "不归类" after the run is left on the desktop.
         var manualLabels = WorkspaceItems
-            .Where(item => item.IsSelected && item.IsUncertain && !string.IsNullOrWhiteSpace(item.ManualLabel))
+            .Where(item => item.IsSelected && item.IsManuallyLabeled)
             .ToDictionary(item => item.ItemKey, item => item.ManualLabel!, StringComparer.OrdinalIgnoreCase);
-        var assignments = AiClassificationWorkbench.MergeManualAssignments(preview, manualLabels, CategoryTags);
+        var excludedKeys = WorkspaceItems
+            .Where(item => !item.IsSelected || item.IsExcluded)
+            .Select(item => item.ItemKey)
+            .ToArray();
+        var assignments = AiClassificationWorkbench.MergeManualAssignments(preview, manualLabels, CategoryTags, excludedKeys);
         var names = WorkspaceItems.ToDictionary(item => item.ItemKey, item => item.DisplayName, StringComparer.OrdinalIgnoreCase);
         var namedAssignments = assignments
             .Select(assignment => assignment with
@@ -890,6 +1026,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             IsRunning = true,
             IsThinkingExpanded = true
         };
+        live.SetClassificationActivityTotal(itemCount);
         Conversation.Add(live);
         _liveMessage = live;
         ResetRunState();
@@ -903,9 +1040,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
             return;
         }
 
-        message.Text = text;
-        message.IsError = isError;
-        message.IsRunning = false;
+        message.Complete(text, isError);
         message.IsWebSearchActive = false;
         _liveMessage = null;
     }
@@ -949,6 +1084,20 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         {
             FlushModelStream();
         }
+    }
+
+    private void AppendClassificationActivity(AiClassificationActivity activity)
+    {
+        if (_liveMessage is not { } live)
+        {
+            return;
+        }
+
+        // The message keeps the full trace itself and exposes a bounded recent window
+        // for the live view, so nothing is trimmed here: every row must survive for
+        // the expandable "过程轨迹" once the turn finishes.
+        live.UpdateActivity(activity);
+        Status = activity.DisplayText;
     }
 
     private void AppendTransportProgress(AiClassificationTransportProgress progress)
@@ -1158,12 +1307,21 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
 
     private void OnWorkspaceItemPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName is nameof(AiWorkbenchItemViewModel.IsSelected) or
+        if (eventArgs.PropertyName is not (nameof(AiWorkbenchItemViewModel.IsSelected) or
             nameof(AiWorkbenchItemViewModel.ManualLabel) or
             nameof(AiWorkbenchItemViewModel.AiLabel) or
-            nameof(AiWorkbenchItemViewModel.HasPreview))
+            nameof(AiWorkbenchItemViewModel.IsExcluded) or
+            nameof(AiWorkbenchItemViewModel.HasPreview)))
         {
-            NotifyWorkbenchStateChanged();
+            return;
+        }
+
+        NotifyWorkbenchStateChanged();
+        if (HasPreview && !IsBusy)
+        {
+            // The user is reviewing a finished preview: keep the status line describing
+            // what "确认应用" will do with the current edits.
+            Status = ResultSummaryText;
         }
     }
 
@@ -1187,12 +1345,14 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         SelectAllCommand.NotifyCanExecuteChanged();
         ClearSelectionCommand.NotifyCanExecuteChanged();
         ToggleWorkspaceItemSelectionCommand.NotifyCanExecuteChanged();
+        ChooseWorkspaceItemLabelCommand.NotifyCanExecuteChanged();
         RefreshWorkspaceCommand.NotifyCanExecuteChanged();
         TestConnectivityCommand.NotifyCanExecuteChanged();
     }
 
     private void NotifyWorkbenchStateChanged()
     {
+        RefreshVisibleWorkspaceItems();
         OnPropertyChanged(nameof(SelectedItemCount));
         OnPropertyChanged(nameof(SelectedItemSummary));
         OnPropertyChanged(nameof(EffectiveAssignmentCount));
@@ -1201,6 +1361,34 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         UpdateResultGroups();
         RefreshAiCommandState();
     }
+
+    /// <summary>
+    /// Re-derives <see cref="VisibleWorkspaceItems"/> from the filter. Only mutates the
+    /// collection when the visible set actually changed, so the many per-item
+    /// notifications during a run do not make the grid re-realize its cards.
+    /// </summary>
+    private void RefreshVisibleWorkspaceItems()
+    {
+        var query = WorkspaceFilter.Trim();
+        var visible = query.Length == 0
+            ? WorkspaceItems.ToArray()
+            : WorkspaceItems.Where(item => MatchesFilter(item, query)).ToArray();
+        if (!VisibleWorkspaceItems.SequenceEqual(visible))
+        {
+            VisibleWorkspaceItems.Clear();
+            foreach (var item in visible)
+            {
+                VisibleWorkspaceItems.Add(item);
+            }
+        }
+
+        OnPropertyChanged(nameof(HasNoFilterMatches));
+        OnPropertyChanged(nameof(SelectedItemSummary));
+    }
+
+    private static bool MatchesFilter(AiWorkbenchItemViewModel item, string query) =>
+        item.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        item.ClassificationText.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private void UpdateResultGroups()
     {
@@ -1275,12 +1463,22 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
         ConnectivityTestSeverity = InfoBarSeverity.Informational;
     }
 
-    private static string DescribeApplyResult(AiClassificationApplyResult result) => result.Requested == 0
-        ? "没有需要分类的桌面图标。"
-        : $"已分类 {result.Applied}/{result.Requested} 项" +
-          (result.CreatedBoxes > 0 ? $"，新建 {result.CreatedBoxes} 个盒子" : string.Empty) +
-          (result.Unmatched > 0 ? $"，{result.Unmatched} 项未识别" : string.Empty) +
-          "。";
+    private static string DescribeApplyResult(AiClassificationApplyResult result, int keptOnDesktop)
+    {
+        if (result.Requested == 0)
+        {
+            return "没有需要分类的桌面图标。";
+        }
+
+        // Unmatched counts every requested item without an assignment, which includes
+        // the ones the user chose to keep; report those separately from AI misses.
+        var unmatched = Math.Max(0, result.Unmatched - keptOnDesktop);
+        return $"已分类 {result.Applied}/{result.Requested} 项" +
+               (result.CreatedBoxes > 0 ? $"，新建 {result.CreatedBoxes} 个盒子" : string.Empty) +
+               (keptOnDesktop > 0 ? $"，{keptOnDesktop} 项按你的选择保留在桌面" : string.Empty) +
+               (unmatched > 0 ? $"，{unmatched} 项未识别" : string.Empty) +
+               "。";
+    }
 
     private static DispatcherQueue? GetCurrentDispatcherQueueOrNull()
     {

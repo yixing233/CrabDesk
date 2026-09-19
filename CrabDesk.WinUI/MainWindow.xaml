@@ -60,6 +60,11 @@
                         <lucide:LucideIcon Icon="Keyboard" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="诊断" Tag="diagnostics" AutomationProperties.Name="诊断">
+                    <NavigationViewItem.Icon>
+                        <lucide:LucideIcon Icon="Stethoscope" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Content="关于" Tag="about" AutomationProperties.Name="关于 CrabDesk">
                     <NavigationViewItem.Icon>
                         <lucide:LucideIcon Icon="Info" />

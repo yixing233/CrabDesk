@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using CrabDesk.Core;
 
 namespace CrabDesk.Runtime;
 
@@ -102,7 +103,11 @@ internal static class DragGhostRenderer
         if (count > 1)
         {
             var badgeText = count.ToString();
-            using var badgeFont = new Font("Segoe UI", 8f, FontStyle.Bold, GraphicsUnit.Point);
+            using var badgeFont = new Font(
+                BoxAppearance.DefaultFontFamily,
+                8f,
+                FontStyle.Bold,
+                GraphicsUnit.Point);
             var badgeWidth = Math.Max(16f, graphics.MeasureString(badgeText, badgeFont).Width + 7f);
             var badge = new RectangleF(
                 origin.X + iconSize - badgeWidth * 0.35f,

@@ -124,6 +124,64 @@ public sealed class DesktopUiThreadStallTests
     }
 
     [Fact]
+    public void ActivatingExplorerForKeyboardInputNeverWaitsOnABusyWindowFromTheUiThread()
+    {
+        // Every icon click makes Explorer's desktop root the foreground window so F2
+        // and friends reach the desktop. SetForegroundWindow waits synchronously on
+        // the window being deactivated; after a drop from Explorer that is the
+        // source window, still busy refreshing, and CrabDesk's UI thread sat there
+        // for up to 8 s (watchdog: scope=icon window msg=0x0201). The call must run
+        // off the UI thread, coalesced, and the click handler must time its stages.
+        var activate = ExtractMethod(
+            ReadRuntimeSource("CrabDeskRuntime.cs"),
+            "internal void ActivateDesktopKeyboardInput()",
+            "// The icon surface owns the pointer-captured desktop drag.");
+        Assert.Contains("ThreadPool.UnsafeQueueUserWorkItem(", activate, StringComparison.Ordinal);
+        Assert.Contains("Interlocked.Exchange(ref _desktopInputActivationPending, 1)", activate, StringComparison.Ordinal);
+        Assert.Contains("Desktop input activation slow", activate, StringComparison.Ordinal);
+        // The native call itself stays in DesktopWindowTools; the runtime only ever reaches it from the pool.
+        Assert.DoesNotContain("NativeMethods.SetForegroundWindow", activate, StringComparison.Ordinal);
+
+        var native = ExtractMethod(
+            ReadNativeSource("DesktopWindowTools.cs"),
+            "public static bool TryActivateDesktopInput(IntPtr root)",
+            "public static void ToggleDesktop()");
+        Assert.Contains("GetForegroundWindow() == root", native, StringComparison.Ordinal);
+
+        var mouseDown = ExtractMethod(
+            ReadRuntimeSource("DesktopIconSurface.cs"),
+            "private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)",
+            "$\"Icon surface mouse down monitor=");
+        Assert.Contains("Slow desktop mouse down stages", mouseDown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DesktopSurfacesDetachTheirInputQueueFromExplorersThread()
+    {
+        // A cross-thread SetParent attaches the two input queues. Explorer's desktop
+        // thread blocks for seconds inside a COM activation whenever a file lands on
+        // the desktop (third-party shell extensions; reproduced with CrabDesk exited),
+        // and with attached queues the first click on our child window waited on it.
+        var tools = ReadNativeSource("DesktopWindowTools.cs");
+        var attach = ExtractMethod(
+            tools,
+            "public static void AttachAsDesktopChild(IntPtr hwnd, IntPtr desktopParent)",
+            "public static bool DetachInputQueueFromParentThread(");
+        var setParent = attach.IndexOf("NativeMethods.SetParent(hwnd, desktopParent);", StringComparison.Ordinal);
+        var detach = attach.IndexOf("DetachInputQueueFromParentThread(hwnd, desktopParent);", StringComparison.Ordinal);
+        Assert.True(setParent >= 0 && detach > setParent, "input queues must be detached right after SetParent");
+        Assert.Contains("NativeMethods.AttachThreadInput(childThread, parentThread, false)", tools, StringComparison.Ordinal);
+
+        // Detached queues no longer mirror Explorer's key state, so modifier reads must
+        // come from GetAsyncKeyState instead of Control.ModifierKeys (GetKeyState).
+        foreach (var file in new[] { "DesktopIconSurface.cs", "DesktopBoxForm.Input.cs", "DesktopBoxForm.cs", "DesktopBoxForm.DragDrop.cs", "DesktopSurfaceManager.cs" })
+        {
+            Assert.DoesNotContain("Control.ModifierKeys", ReadRuntimeSource(file), StringComparison.Ordinal);
+        }
+        Assert.Contains("GetAsyncKeyState(vkControl)", tools, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void APasteBurstQueuesInsteadOfRunningSeveralPastesAtOnce()
     {
         var source = ReadRuntimeSource("CrabDeskRuntime.cs");

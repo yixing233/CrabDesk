@@ -270,6 +270,72 @@ public sealed partial class CrabDeskRuntime : IDisposable
         Process.Start(new ProcessStartInfo(ConfigDirectory) { UseShellExecute = true });
     }
 
+    /// <summary>
+    /// Measures whether the desktop stall is Explorer's own third-party shell
+    /// extensions or CrabDesk blocking on them. Read-only: it creates one
+    /// temporary file per measured folder and deletes it again.
+    /// </summary>
+    public async Task<DesktopStallReport> RunDesktopStallDiagnosticsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // Resolve handles here: the surface list belongs to the UI thread and
+        // the measurement below runs on the thread pool.
+        var desktopView = DesktopHostService.FindDesktopView();
+        var crabDeskSurface = _surfaceManager?.GetIconSurfaceHandle(
+            Monitors.FirstOrDefault(monitor => monitor.IsPrimary)?.Id ?? string.Empty) ?? IntPtr.Zero;
+        if (crabDeskSurface == IntPtr.Zero && Monitors.Count > 0)
+        {
+            crabDeskSurface = _surfaceManager?.GetIconSurfaceHandle(Monitors[0].Id) ?? IntPtr.Zero;
+        }
+
+        var diagnostics = new DesktopStallDiagnostics(desktopView, crabDeskSurface);
+        var report = await diagnostics.RunAsync(cancellationToken).ConfigureAwait(false);
+        DiagnosticLog.Info(
+            $"Desktop stall diagnostics verdict={report.Verdict} " +
+            $"idle={report.IdleBaselineMs} control={report.OrdinaryFolderMs} " +
+            $"desktop={report.DesktopFolderMs} crabdesk={report.CrabDeskSurfaceMs} " +
+            $"extensions={report.Extensions.Count}");
+        return report;
+    }
+
+    /// <summary>Renders the stall report as plain text for the clipboard.</summary>
+    public static string FormatDesktopStallReport(DesktopStallReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var lines = new List<string>
+        {
+            "CrabDesk desktop stall diagnostics",
+            $"Captured: {report.CapturedAt:O}",
+            $"Verdict: {report.Verdict}",
+            $"Desktop window found: {report.DesktopFound}",
+            $"Idle baseline: {FormatMs(report.IdleBaselineMs)}",
+            $"Ordinary folder: {FormatMs(report.OrdinaryFolderMs)}",
+            $"Desktop folder: {FormatMs(report.DesktopFolderMs)}",
+            $"CrabDesk surface (same instant): {FormatMs(report.CrabDeskSurfaceMs)}",
+            string.Empty,
+            "Notes:"
+        };
+        lines.AddRange(report.Notes.Select(note => "  " + note));
+
+        lines.Add(string.Empty);
+        if (report.Extensions.Count == 0)
+        {
+            lines.Add("Shell extensions: none read");
+        }
+        else
+        {
+            lines.Add("Shell extensions:");
+            lines.AddRange(report.Extensions.Select(entry =>
+                $"  [{entry.Kind}] {entry.Product} :: {entry.Name} :: {entry.Path}"));
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatMs(int milliseconds) => milliseconds == DesktopStallAnalysis.NotMeasured
+        ? "not measured"
+        : $"{milliseconds} ms";
+
     public int ClearThumbnailCache()
     {
         var cleared = _iconProvider.ClearCache();
@@ -596,9 +662,46 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     internal void ActivateDesktopKeyboardInput()
     {
-        if (!_disposed && !IsPaused)
+        if (_disposed || IsPaused ||
+            !DesktopWindowTools.TryGetDesktopInputRoot(_desktopHost.DesktopListView, out var root))
         {
-            DesktopWindowTools.TryActivateDesktopInput(_desktopHost.DesktopListView);
+            return;
+        }
+        // SetForegroundWindow blocks on whichever window is being deactivated. After a
+        // drop from Explorer that is the still-busy source window, and the UI thread
+        // sat there for seconds (watchdog scope=icon window msg=0x0201). Run it off
+        // the UI thread and coalesce clicks: foreground rights are per process, so a
+        // pool thread may still claim it, and keyboard focus arriving a beat late
+        // beats a frozen desktop.
+        if (Interlocked.Exchange(ref _desktopInputActivationPending, 1) != 0)
+        {
+            return;
+        }
+        ThreadPool.UnsafeQueueUserWorkItem(_ => ActivateDesktopInputOffThread(root), null);
+    }
+
+    private int _desktopInputActivationPending;
+
+    private void ActivateDesktopInputOffThread(IntPtr desktopRoot)
+    {
+        var started = Stopwatch.StartNew();
+        var activated = false;
+        try
+        {
+            activated = DesktopWindowTools.TryActivateDesktopInput(desktopRoot);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Desktop keyboard input activation failed", exception);
+        }
+        finally
+        {
+            Volatile.Write(ref _desktopInputActivationPending, 0);
+            if (started.ElapsedMilliseconds >= 100)
+            {
+                DiagnosticLog.Info(
+                    $"Desktop input activation slow activated={activated} elapsedMs={started.ElapsedMilliseconds}");
+            }
         }
     }
 
@@ -774,9 +877,25 @@ public sealed partial class CrabDeskRuntime : IDisposable
     public MappedFolderSnapshot? GetMappedFolderSnapshot(Guid boxId) =>
         _mappedFolderSnapshots.GetValueOrDefault(boxId);
 
-    public DesktopBox AddBox(string title = "新盒子")
+    public DesktopBox AddBox(string title = "新盒子") => CommitNewBox(CreateBoxCore(title));
+
+    // Creates a box where the desktop was right-clicked: its top-left corner
+    // lands on the anchor (work-area DIPs of that monitor), pulled inside the
+    // work area when the click was near an edge. The tray, hotkey and
+    // settings paths keep the free-slot search in AddBox.
+    public DesktopBox AddBoxAt(string monitorId, double x, double y, string title = "新盒子")
     {
-        var box = CreateBoxCore(title);
+        var monitor = Monitors.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, monitorId, StringComparison.OrdinalIgnoreCase)) ??
+            Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
+        return CommitNewBox(CreateBoxCore(
+            title,
+            monitor,
+            BoxLayoutPlanner.PlaceAt(monitor.WorkArea, x, y, 420, 310)));
+    }
+
+    private DesktopBox CommitNewBox(DesktopBox box)
+    {
         if (IsPaused)
         {
             SetPaused(false);
@@ -791,13 +910,18 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private DesktopBox CreateBoxCore(string title)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
+        return CreateBoxCore(title, monitor, FindAvailableBoxBounds(monitor, 420, 310));
+    }
+
+    private DesktopBox CreateBoxCore(string title, MonitorLayout monitor, LayoutRect bounds)
+    {
         var shared = State.Boxes.FirstOrDefault();
         var box = new DesktopBox
         {
             Title = title,
             MonitorId = monitor.Id,
             StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
-            Bounds = FindAvailableBoxBounds(monitor, 420, 310),
+            Bounds = bounds,
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
             Appearance = CloneAppearance(shared?.Appearance)
@@ -2667,6 +2791,30 @@ public sealed partial class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
+    public void SetBoxBorderWidth(double value)
+    {
+        State.Settings.Appearance.BorderWidth = Math.Clamp(value, 1, 6);
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetBoxBorderColor(string value)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? "Auto" : value.Trim();
+        if (!BoxBorderStyle.IsAuto(normalized) &&
+            !BoxBorderStyle.TryParseColor(normalized, out _))
+        {
+            return;
+        }
+        State.Settings.Appearance.BorderColor = normalized;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetBoxBorderOpacity(double value)
+    {
+        State.Settings.Appearance.BorderOpacity = Math.Clamp(value, 0, 100);
+        NotifyWorkspaceChanged(true);
+    }
+
     public void SetShowResizeGrip(bool enabled)
     {
         State.Settings.Appearance.ShowResizeGrip = enabled;
@@ -2999,7 +3147,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null)
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+        IProgress<AiClassificationActivity>? activityProgress = null)
     {
         var workspace = GetAiClassificationWorkspace();
         return await PreviewAiClassificationAsync(
@@ -3011,7 +3160,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 modelStream,
                 usageProgress,
                 transportProgress,
-                webSearchProgress)
+                webSearchProgress,
+                activityProgress)
             .ConfigureAwait(false);
     }
 
@@ -3024,7 +3174,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+        IProgress<AiClassificationActivity>? activityProgress = null) =>
         await RunAiOrganizationAsync(async operationToken =>
         {
             if (expectedWorkspaceRevision != _workspaceRevision)
@@ -3122,6 +3273,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 var contentChunks = 0;
                 var contentCharacters = 0;
                 var batchNumber = completedBatches + 1;
+                foreach (var item in batch)
+                {
+                    activityProgress?.Report(new AiClassificationActivity(
+                        item.ItemKey, item.DisplayName, AiClassificationActivityPhase.Analyzing));
+                }
                 var streamProgress = new DirectProgress<AiClassificationModelStreamUpdate>(update =>
                 {
                     var (chunkCount, characterCount) = update.Kind switch
@@ -3234,6 +3390,23 @@ public sealed partial class CrabDeskRuntime : IDisposable
                             true,
                             AiWebSearchRequestException.SafeMessage));
                     }
+                }
+                var assignmentsByKey = result.ToDictionary(item => item.ItemKey, StringComparer.OrdinalIgnoreCase);
+                foreach (var item in batch)
+                {
+                    if (assignmentsByKey.TryGetValue(item.ItemKey, out var assignment))
+                    {
+                        activityProgress?.Report(new AiClassificationActivity(
+                            item.ItemKey, item.DisplayName, AiClassificationActivityPhase.Classified, assignment.Label));
+                    }
+                    else
+                    {
+                        activityProgress?.Report(new AiClassificationActivity(
+                            item.ItemKey, item.DisplayName, AiClassificationActivityPhase.Uncertain));
+                    }
+                    // Give the UI a beat between rows so the agent timeline reads as a
+                    // continuous classification flow instead of one bulk repaint.
+                    await Task.Delay(45, operationToken).ConfigureAwait(false);
                 }
                 classifications.AddRange(result);
                 completedItems += batch.Length;
@@ -3438,7 +3611,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     public OrganizationApplyResult ApplyOrganizationRules(bool notify = true)
     {
-        EnsureSmartOrganizationStructure();
+        var createdBoxIds = EnsureSmartOrganizationStructure();
         var decisions = _organizationRuleEngine.Preview(
             State,
             Items,
@@ -3449,7 +3622,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
             _lastOrganizationAssignments = new Dictionary<string, Guid>(
                 State.Assignments,
                 StringComparer.OrdinalIgnoreCase);
-            _lastOrganizationCreatedBoxes.Clear();
+            // Boxes this run created go with the undo; restoring the old
+            // assignments alone would leave them behind empty.
+            _lastOrganizationCreatedBoxes = createdBoxIds;
         }
         var assigned = 0;
         var unassigned = 0;
@@ -3504,7 +3679,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
             State.Assignments.Remove(staleKey);
             MoveItemOrderKey(staleKey, null);
         }
-        EnsureSmartOrganizationStructure();
         State.Organization.Enabled = true;
         var result = ApplyOrganizationRules(false);
         if (IsPaused)
@@ -3561,6 +3735,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
             if (!State.Assignments.Values.Contains(box.Id))
             {
                 State.Boxes.Remove(box);
+                // Unpin the rules routed into this box so they go back to
+                // "create on organize" instead of pointing at a missing target.
+                foreach (var rule in State.OrganizationRules.Where(rule => rule.TargetBoxId == box.Id))
+                {
+                    rule.TargetBoxId = null;
+                }
             }
         }
         NotifyWorkspaceChanged(true);
@@ -4066,11 +4246,22 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void EnsureSmartOrganizationStructure()
+    private HashSet<Guid> EnsureSmartOrganizationStructure()
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
         var active = new List<(DesktopBox Box, int ItemCount)>();
         var createdBoxIds = new HashSet<Guid>();
+        // Size each rule by what the engine will actually hand it, not by what
+        // the rule matches on its own: an item that a higher-priority rule
+        // claims first, or that already sits in another box, never arrives,
+        // and a box created for it would stay empty.
+        var decisions = _organizationRuleEngine.Preview(State, Items, State.Organization.ReassignExistingItems);
+        // Assignments whose desktop item was deleted survive in state, so every
+        // "is this box empty / how big should it be" question below has to be
+        // asked against the items that actually exist. Counting raw
+        // assignments kept a visibly empty box alive.
+        var liveItemKeys = Items.Select(item => item.Key.ToString())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var definition in BuiltInOrganizationRules.Definitions)
         {
             var rule = State.OrganizationRules.FirstOrDefault(candidate =>
@@ -4079,28 +4270,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
             {
                 continue;
             }
-            var matchingItems = rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox
-                ? Items.Where(item => OrganizationRuleEngine.MatchesRule(rule, item)).ToArray()
-                : [];
-            var box = rule.TargetBoxId is { } target
-                ? State.Boxes.FirstOrDefault(candidate => candidate.Id == target && !candidate.IsMappedFolder)
-                : State.Boxes.FirstOrDefault(candidate => candidate.IsAutoGenerated &&
-                    string.Equals(candidate.Title, rule.Title, StringComparison.CurrentCultureIgnoreCase));
+            var box = OrganizationRuleEngine.ResolveTargetBox(State, rule);
+            var itemCount = rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox
+                ? OrganizationRuleEngine.CountProjectedItems(decisions, State.Assignments, rule.Id, box?.Id, liveItemKeys)
+                : 0;
 
-            if (matchingItems.Length == 0)
+            if (itemCount == 0)
             {
-                // A user rule can reuse this auto-generated box (matching
-                // titles); removing it would orphan that rule's target and
-                // every future decision would count as an invalid target.
-                var referencedByAnotherRule = State.OrganizationRules.Any(candidate =>
-                    candidate.Id != rule.Id &&
-                    candidate.Enabled &&
-                    candidate.Action == OrganizationRuleAction.AssignToBox &&
-                    candidate.TargetBoxId == box?.Id);
-                if (box is not null &&
-                    !referencedByAnotherRule &&
-                    (box.IsAutoGenerated || rule.TargetBoxId == box.Id) &&
-                    !State.Assignments.Values.Contains(box.Id))
+                if (box is not null && OrganizationRuleEngine.CanRemoveEmptyBox(State, box, rule, liveItemKeys))
                 {
                     State.Boxes.Remove(box);
                     rule.TargetBoxId = null;
@@ -4133,7 +4310,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             rule.TargetBoxId = box.Id;
             if (box.IsAutoGenerated)
             {
-                active.Add((box, matchingItems.Length));
+                active.Add((box, itemCount));
             }
         }
 
@@ -4141,31 +4318,38 @@ public sealed partial class CrabDeskRuntime : IDisposable
                      rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox &&
                      string.IsNullOrWhiteSpace(rule.BuiltInId)).ToArray())
         {
-            var matchingItems = Items.Where(item => OrganizationRuleEngine.MatchesRule(rule, item)).ToArray();
-            if (matchingItems.Length == 0)
+            var box = OrganizationRuleEngine.ResolveTargetBox(State, rule);
+            var itemCount = OrganizationRuleEngine.CountProjectedItems(
+                decisions,
+                State.Assignments,
+                rule.Id,
+                box?.Id,
+                liveItemKeys);
+            if (itemCount == 0)
             {
+                // Same cleanup the built-in rules get: a box this pass owns and
+                // that no longer has anything to collect must not be left
+                // sitting empty on the desktop. Without this, deleting the
+                // files a custom rule matched left its box behind forever.
+                if (box is not null && OrganizationRuleEngine.CanRemoveEmptyBox(State, box, rule, liveItemKeys))
+                {
+                    State.Boxes.Remove(box);
+                    rule.TargetBoxId = null;
+                }
                 continue;
             }
 
-            var box = rule.TargetBoxId is { } target
-                ? State.Boxes.FirstOrDefault(candidate => candidate.Id == target && !candidate.IsMappedFolder)
-                : null;
             if (box is null)
             {
-                box = State.Boxes.FirstOrDefault(candidate => candidate.IsAutoGenerated &&
-                    string.Equals(candidate.Title, rule.Title, StringComparison.CurrentCultureIgnoreCase));
-                box ??= new DesktopBox
+                box = new DesktopBox
                 {
                     Title = rule.Title,
                     MonitorId = monitor.Id,
                     StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
                     IsAutoGenerated = true
                 };
-                if (!State.Boxes.Contains(box))
-                {
-                    State.Boxes.Add(box);
-                    createdBoxIds.Add(box.Id);
-                }
+                State.Boxes.Add(box);
+                createdBoxIds.Add(box.Id);
             }
             // Always pin the rule to its box (created or reused) so preview
             // decisions carry a valid target.
@@ -4176,7 +4360,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 {
                     box.MonitorId = monitor.Id;
                 }
-                active.Add((box, matchingItems.Length));
+                active.Add((box, itemCount));
             }
         }
 
@@ -4188,6 +4372,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             .ToArray();
         PlaceAutoGeneratedBoxes(active, createdBoxIds, monitor.Id, monitor.WorkArea, occupied);
         NormalizeRulePriorities();
+        return createdBoxIds;
     }
 
     private LayoutRect FindAvailableBoxBounds(MonitorLayout monitor, double width, double height)
@@ -4267,7 +4452,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     }
 
     private static string NormalizeFontFamily(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "Segoe UI" : value.Trim();
+        string.IsNullOrWhiteSpace(value) ? BoxAppearance.DefaultFontFamily : value.Trim();
 
     private void NotifyWorkspaceChanged(bool rebuild)
     {
@@ -5276,10 +5461,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
             : System.Drawing.Color.FromArgb(32, 36, 42);
         ApplyMenuMetrics(menu.Items, menuWidth - menu.Padding.Horizontal, dpiScale);
         menu.PerformLayout();
-        if (menu.Width > 0 && menu.Height > 0)
-        {
-            FluentMenuRenderer.ApplyRoundedCorners(menu);
-        }
     }
 
     /// <summary>
@@ -5438,10 +5619,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
                     return new object();
                 });
                 StretchDropDownItems(dropDown);
-                if (dropDown.Width > 0 && dropDown.Height > 0)
-                {
-                    FluentMenuRenderer.ApplyRoundedCorners(dropDown);
-                }
             }
         }
     }
@@ -5455,6 +5632,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         StretchDropDownItems(dropDown);
         FluentMenuRenderer.ApplyRoundedCorners(dropDown);
         dropDown.Invalidate(true);
+        dropDown.Update();
     }
 
     private static void StretchDropDownItems(System.Windows.Forms.ToolStripDropDown dropDown)
@@ -5574,8 +5752,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
         try
         {
+            // WatcherChangeTypes.All is the watcher reporting that it lost
+            // notifications (buffer overflow): only a full pass is safe then.
             if (!realtimeOrganization &&
-                eventArgs is FileSystemEventArgs ownedArgs &&
+                eventArgs is FileSystemEventArgs { ChangeType: not WatcherChangeTypes.All } ownedArgs &&
                 ShouldSuppressTargetedDesktopRefresh(ownedArgs.FullPath))
             {
                 await RefreshDesktopItemsAfterOwnedChangeAsync();

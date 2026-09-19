@@ -27,6 +27,17 @@ public static class BoxLayoutPlanner
         return placed;
     }
 
+    // Places one box with its top-left corner on an anchor point (work-area
+    // DIPs), keeping the size limits Arrange applies and pulling the box back
+    // inside the area when the anchor sits near an edge.
+    public static LayoutRect PlaceAt(LayoutRect workArea, double x, double y, double width, double height)
+    {
+        var localArea = new LayoutRect(0, 0, Math.Max(220, workArea.Width), Math.Max(120, workArea.Height));
+        var clampedWidth = Math.Clamp(width, 260, Math.Max(260, localArea.Width - Margin * 2));
+        var clampedHeight = Math.Clamp(height, 160, Math.Max(160, localArea.Height - Margin * 2));
+        return new LayoutRect(x, y, clampedWidth, clampedHeight).Clamp(localArea, 260, 160);
+    }
+
     private static LayoutRect FindFreePosition(
         LayoutRect area,
         double width,

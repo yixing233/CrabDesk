@@ -146,6 +146,9 @@ public sealed class DesktopItemReleaseRefreshTests
         Assert.True(dragEnd > dragStart);
         var dragMethod = iconSource[dragStart..dragEnd];
         Assert.Contains("var completedEffect =", dragMethod, StringComparison.Ordinal);
+        // Explorer's folder-to-folder rule copies across volumes; the preferred effect
+        // makes leaving the desktop a move regardless, so the source icon goes away.
+        Assert.Contains("FileClipboardCodec.WritePreferredDropEffect(data, move: true)", dragMethod, StringComparison.Ordinal);
         Assert.Contains("_runtime.ReconcileExternalDesktopMoveAsync(", dragMethod, StringComparison.Ordinal);
         Assert.Contains("!dragSession.HandledByBox", dragMethod, StringComparison.Ordinal);
         Assert.Contains("!dragSession.HandledByDesktop", dragMethod, StringComparison.Ordinal);

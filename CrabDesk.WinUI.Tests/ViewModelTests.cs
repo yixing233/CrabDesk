@@ -147,6 +147,31 @@ public sealed class ViewModelTests
         Assert.Equal(expected, output);
     }
 
+    [Theory]
+    [InlineData(true, null, 1d)]
+    [InlineData(false, null, BooleanToOpacityConverter.DimmedOpacity)]
+    [InlineData(false, "0.3", 0.3)]
+    [InlineData(false, "not-a-number", BooleanToOpacityConverter.DimmedOpacity)]
+    [InlineData(null, null, BooleanToOpacityConverter.DimmedOpacity)]
+    public void BooleanToOpacityConverterDimsDeselectedContent(object? value, string? parameter, double expected)
+    {
+        var converter = new BooleanToOpacityConverter();
+
+        var opacity = Assert.IsType<double>(converter.Convert(value!, typeof(double), parameter!, string.Empty));
+
+        Assert.Equal(expected, opacity, precision: 6);
+    }
+
+    [Theory]
+    [InlineData(true, null, PrimaryActionStyleConverter.PrimaryStyleKey)]
+    [InlineData(false, null, PrimaryActionStyleConverter.SecondaryStyleKey)]
+    [InlineData(true, "invert", PrimaryActionStyleConverter.SecondaryStyleKey)]
+    [InlineData(false, "invert", PrimaryActionStyleConverter.PrimaryStyleKey)]
+    public void PrimaryActionStyleConverterSwapsWhichButtonReadsAsPrimary(bool flag, string? parameter, string expectedKey)
+    {
+        Assert.Equal(expectedKey, PrimaryActionStyleConverter.GetStyleKey(flag, parameter));
+    }
+
     [Fact]
     public void UserFacingEnumsHaveChineseLabels()
     {
@@ -222,16 +247,32 @@ public sealed class ViewModelTests
         var state = CreateState();
         var service = CreateService(state);
         var fonts = new Mock<IFontCatalogService>();
+        fonts.SetupGet(item => item.FontFamilies).Returns(["Segoe UI", "Microsoft YaHei UI", "Consolas"]);
+        var viewModel = new AppearanceViewModel(service.Object, fonts.Object);
+
+        // Deliberately a font other than the default: the setters skip a value
+        // equal to the current one, so picking the default would prove nothing.
+        viewModel.TitleFontFamily = "Consolas";
+        viewModel.LabelFontFamily = "Consolas";
+        viewModel.LabelFontSize = 12.5;
+
+        service.Verify(item => item.SetBoxTitleFontFamily(null, "Consolas"), Times.Once);
+        service.Verify(item => item.SetBoxLabelFontFamily(null, "Consolas"), Times.Once);
+        service.Verify(item => item.SetBoxLabelFontSize(null, 12.5), Times.Once);
+    }
+
+    [Fact]
+    public void AppearanceViewModelDefaultsBoxFontsToMicrosoftYaHeiUi()
+    {
+        var state = CreateState();
+        var service = CreateService(state);
+        var fonts = new Mock<IFontCatalogService>();
         fonts.SetupGet(item => item.FontFamilies).Returns(["Segoe UI", "Microsoft YaHei UI"]);
         var viewModel = new AppearanceViewModel(service.Object, fonts.Object);
 
-        viewModel.TitleFontFamily = "Microsoft YaHei UI";
-        viewModel.LabelFontFamily = "Microsoft YaHei UI";
-        viewModel.LabelFontSize = 12.5;
-
-        service.Verify(item => item.SetBoxTitleFontFamily(null, "Microsoft YaHei UI"), Times.Once);
-        service.Verify(item => item.SetBoxLabelFontFamily(null, "Microsoft YaHei UI"), Times.Once);
-        service.Verify(item => item.SetBoxLabelFontSize(null, 12.5), Times.Once);
+        Assert.Equal("Microsoft YaHei UI", viewModel.TitleFontFamily);
+        Assert.Equal("Microsoft YaHei UI", viewModel.LabelFontFamily);
+        Assert.Equal("Microsoft YaHei UI", viewModel.IconLabelFontFamily);
     }
 
     [Fact]
@@ -487,7 +528,8 @@ public sealed class ViewModelTests
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
                 It.IsAny<IProgress<AiClassificationUsageProgress>>(),
                 It.IsAny<IProgress<AiClassificationTransportProgress>>(),
-                It.IsAny<IProgress<AiWebSearchProgress>>()))
+                It.IsAny<IProgress<AiWebSearchProgress>>(),
+                 It.IsAny<IProgress<AiClassificationActivity>>()))
             .ReturnsAsync(new AiClassificationPreview(7, 1, [], []) { RequestedItemKeys = ["one"] });
         var viewModel = new AiClassificationViewModel(
             service.Object,
@@ -506,7 +548,8 @@ public sealed class ViewModelTests
             It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
             It.IsAny<IProgress<AiClassificationUsageProgress>>(),
             It.IsAny<IProgress<AiClassificationTransportProgress>>(),
-            It.IsAny<IProgress<AiWebSearchProgress>>()), Times.Once);
+            It.IsAny<IProgress<AiWebSearchProgress>>(),
+             It.IsAny<IProgress<AiClassificationActivity>>()), Times.Once);
     }
 
     [Fact]
@@ -529,7 +572,52 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public async Task AiClassificationViewModelAppliesManualLabelOnlyToAnUncertainItem()
+    public void AiClassificationViewModelFiltersTheVisibleGridByNameOrLabelWithoutTouchingSelection()
+    {
+        var service = CreateService(CreateState());
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [
+                new AiClassificationWorkspaceItem("one", "Docker Desktop", DesktopItemKind.File, "C:\\One.txt"),
+                new AiClassificationWorkspaceItem("two", "QQ音乐", DesktopItemKind.File, "C:\\Two.txt"),
+                new AiClassificationWorkspaceItem("three", "Obsidian", DesktopItemKind.File, "C:\\Three.txt")
+            ]));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+        Assert.Equal(viewModel.WorkspaceItems, viewModel.VisibleWorkspaceItems);
+        Assert.False(viewModel.IsWorkspaceFiltered);
+
+        viewModel.WorkspaceFilter = "  desk ";
+        Assert.Equal(["one"], viewModel.VisibleWorkspaceItems.Select(item => item.ItemKey));
+        Assert.Equal("已选择 3 项 · 匹配 1/3 项", viewModel.SelectedItemSummary);
+        Assert.False(viewModel.HasNoFilterMatches);
+
+        // "清除" only clears what is visible; the other two stay selected.
+        viewModel.ClearSelectionCommand.Execute(null);
+        Assert.False(viewModel.WorkspaceItems[0].IsSelected);
+        Assert.Equal(2, viewModel.SelectedItemCount);
+
+        viewModel.WorkspaceFilter = "不存在";
+        Assert.Empty(viewModel.VisibleWorkspaceItems);
+        Assert.True(viewModel.HasNoFilterMatches);
+        Assert.Equal("没有匹配「不存在」的图标", viewModel.NoFilterMatchesText);
+
+        // Labels are searchable too once the item has a classification.
+        viewModel.WorkspaceItems[2].HasPreview = true;
+        viewModel.WorkspaceItems[2].AiLabel = "专业工具";
+        viewModel.WorkspaceFilter = "专业";
+        Assert.Equal(["three"], viewModel.VisibleWorkspaceItems.Select(item => item.ItemKey));
+
+        viewModel.WorkspaceFilter = string.Empty;
+        Assert.Equal(viewModel.WorkspaceItems, viewModel.VisibleWorkspaceItems);
+        Assert.False(viewModel.HasNoFilterMatches);
+        Assert.Equal("已选择 2 项", viewModel.SelectedItemSummary);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelAppliesAManualLabelToAnUncertainItem()
     {
         var state = CreateState();
         state.Settings.AiClassification.CategoryLabels = "工作\n学习";
@@ -549,7 +637,8 @@ public sealed class ViewModelTests
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
                 It.IsAny<IProgress<AiClassificationUsageProgress>>(),
                 It.IsAny<IProgress<AiClassificationTransportProgress>>(),
-                It.IsAny<IProgress<AiWebSearchProgress>>()))
+                It.IsAny<IProgress<AiWebSearchProgress>>(),
+                 It.IsAny<IProgress<AiClassificationActivity>>()))
             .ReturnsAsync(new AiClassificationPreview(
                 7,
                 2,
@@ -579,6 +668,101 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public async Task AiClassificationViewModelLetsTheUserAdjustAReviewedPreviewBeforeApplyingIt()
+    {
+        var state = CreateState();
+        state.Settings.AiClassification.CategoryLabels = "工作\n学习";
+        var service = CreateService(state);
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [
+                new AiClassificationWorkspaceItem("one", "One", DesktopItemKind.File, "C:\\One.txt"),
+                new AiClassificationWorkspaceItem("two", "Two", DesktopItemKind.File, "C:\\Two.txt"),
+                new AiClassificationWorkspaceItem("three", "Three", DesktopItemKind.File, "C:\\Three.txt")
+            ]));
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                7,
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>>(),
+                It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+                It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+                It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+                It.IsAny<IProgress<AiWebSearchProgress>>(),
+                It.IsAny<IProgress<AiClassificationActivity>>()))
+            .ReturnsAsync(new AiClassificationPreview(
+                7,
+                3,
+                [
+                    new AiClassificationAssignment("one", "One", "工作"),
+                    new AiClassificationAssignment("two", "Two", "工作"),
+                    new AiClassificationAssignment("three", "Three", "工作")
+                ],
+                []) { RequestedItemKeys = ["one", "two", "three"] });
+        AiClassificationPreview? applied = null;
+        service.Setup(item => item.ApplyAiClassificationPreviewAsync(
+                It.IsAny<AiClassificationPreview>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AiClassificationPreview, CancellationToken>((preview, _) => applied = preview)
+            .ReturnsAsync(new AiClassificationApplyResult(3, 1, 1, 0, 2, []));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+        Assert.Equal("开始 AI 分类", viewModel.ClassifyButtonText);
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+
+        Assert.Equal("重新分类", viewModel.ClassifyButtonText);
+        var one = viewModel.WorkspaceItems.Single(item => item.ItemKey == "one");
+        var two = viewModel.WorkspaceItems.Single(item => item.ItemKey == "two");
+        var three = viewModel.WorkspaceItems.Single(item => item.ItemKey == "three");
+
+        // The chip menu lists every category with the AI suggestion checked, plus "不归类".
+        var choices = viewModel.GetLabelChoices(one);
+        Assert.Equal(
+            [AiWorkbenchLabelChoiceKind.Category, AiWorkbenchLabelChoiceKind.Category, AiWorkbenchLabelChoiceKind.KeepOnDesktop],
+            choices.Select(choice => choice.Kind));
+        Assert.Equal("工作", Assert.Single(choices, choice => choice.IsCurrent).Label);
+
+        // Override the suggestion; a restore entry appears.
+        viewModel.ChooseWorkspaceItemLabelCommand.Execute(choices.Single(choice => choice.Label == "学习"));
+        Assert.True(one.IsManuallyLabeled);
+        Assert.Equal("学习", one.EffectiveLabel);
+        var restore = Assert.Single(
+            viewModel.GetLabelChoices(one),
+            choice => choice.Kind == AiWorkbenchLabelChoiceKind.RestoreAiSuggestion);
+        Assert.Equal("工作", restore.Label);
+
+        // Picking the model's own label again is a restore rather than an override.
+        viewModel.ChooseWorkspaceItemLabelCommand.Execute(viewModel.GetLabelChoices(one)
+            .Single(choice => choice.Kind == AiWorkbenchLabelChoiceKind.Category && choice.Label == "工作"));
+        Assert.True(one.ShowsAiLabel);
+        Assert.Null(one.ManualLabel);
+
+        viewModel.ChooseWorkspaceItemLabelCommand.Execute(viewModel.GetLabelChoices(one)
+            .Single(choice => choice.Label == "学习"));
+        viewModel.ChooseWorkspaceItemLabelCommand.Execute(viewModel.GetLabelChoices(two)
+            .Single(choice => choice.Kind == AiWorkbenchLabelChoiceKind.KeepOnDesktop));
+        Assert.True(two.IsExcluded);
+        Assert.Null(two.EffectiveLabel);
+        Assert.False(two.IsUncertain);
+        three.IsSelected = false;
+
+        Assert.Equal(1, viewModel.EffectiveAssignmentCount);
+        Assert.Equal("确认后将归入盒子 1/2 项（1 项手动调整，1 项不归类）。", viewModel.Status);
+
+        await viewModel.ApplyCommand.ExecuteAsync(null);
+
+        // Only the reviewed plan reaches the runtime: the override, minus the excluded and unchecked items.
+        var assignment = Assert.Single(applied!.Assignments);
+        Assert.Equal(("one", "学习"), (assignment.ItemKey, assignment.Label));
+        Assert.Contains(viewModel.Conversation, message =>
+            message.IsAssistant && message.Text == "已分类 1/3 项，2 项按你的选择保留在桌面。");
+    }
+
+    [Fact]
     public async Task AiClassificationViewModelGroupsPreviewResultsIntoCards()
     {
         var state = CreateState();
@@ -600,7 +784,8 @@ public sealed class ViewModelTests
                 It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
                 It.IsAny<IProgress<AiClassificationUsageProgress>>(),
                 It.IsAny<IProgress<AiClassificationTransportProgress>>(),
-                It.IsAny<IProgress<AiWebSearchProgress>>()))
+                It.IsAny<IProgress<AiWebSearchProgress>>(),
+                 It.IsAny<IProgress<AiClassificationActivity>>()))
             .ReturnsAsync(new AiClassificationPreview(
                 7,
                 3,
@@ -628,6 +813,80 @@ public sealed class ViewModelTests
         Assert.Equal("待确认项目", uncertainGroup.CategoryName);
         Assert.Equal(1, uncertainGroup.ItemCount);
         Assert.Equal("three", uncertainGroup.Items[0].ItemKey);
+    }
+
+    [Fact]
+    public async Task AiClassificationViewModelKeepsEveryActivityRowForTheFinishedTurn()
+    {
+        // Progress<T> posts through the ambient SynchronizationContext; run the
+        // callbacks inline so the assertions below are deterministic.
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new InlineSynchronizationContext());
+        try
+        {
+            const int itemCount = AiConversationMessageViewModel.RecentActivityWindow + 4;
+            var items = Enumerable.Range(1, itemCount)
+                .Select(index => new AiClassificationWorkspaceItem(
+                    $"item-{index}", $"Item {index}", DesktopItemKind.File, $"C:\\Item{index}.txt"))
+                .ToArray();
+            var state = CreateState();
+            state.Settings.AiClassification.CategoryLabels = "工作";
+            var service = CreateService(state);
+            service.Setup(item => item.GetAiClassificationWorkspace())
+                .Returns(new AiClassificationWorkspace(7, items));
+            service.Setup(item => item.PreviewAiClassificationAsync(
+                    7,
+                    It.IsAny<IReadOnlyCollection<string>>(),
+                    It.IsAny<IProgress<AiClassificationProgress>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<IProgress<string>>(),
+                    It.IsAny<IProgress<AiClassificationModelStreamUpdate>>(),
+                    It.IsAny<IProgress<AiClassificationUsageProgress>>(),
+                    It.IsAny<IProgress<AiClassificationTransportProgress>>(),
+                    It.IsAny<IProgress<AiWebSearchProgress>>(),
+                    It.IsAny<IProgress<AiClassificationActivity>>()))
+                .Callback(new InvocationAction(invocation =>
+                {
+                    // Mirror the runtime: the whole batch is marked analyzing, then classified one by one.
+                    var activities = Assert.IsAssignableFrom<IProgress<AiClassificationActivity>>(invocation.Arguments[9]);
+                    foreach (var item in items)
+                    {
+                        activities.Report(new AiClassificationActivity(
+                            item.ItemKey, item.DisplayName, AiClassificationActivityPhase.Analyzing));
+                    }
+                    foreach (var item in items)
+                    {
+                        activities.Report(new AiClassificationActivity(
+                            item.ItemKey, item.DisplayName, AiClassificationActivityPhase.Classified, "工作"));
+                    }
+                }))
+                .ReturnsAsync(new AiClassificationPreview(
+                    7,
+                    itemCount,
+                    items.Select(item => new AiClassificationAssignment(item.ItemKey, item.DisplayName, "工作")).ToArray(),
+                    []) { RequestedItemKeys = items.Select(item => item.ItemKey).ToArray() });
+            var viewModel = new AiClassificationViewModel(
+                service.Object,
+                Mock.Of<IInfoBarService>(),
+                Mock.Of<IDialogService>());
+
+            await viewModel.ClassifyCommand.ExecuteAsync(null);
+
+            var turn = viewModel.Conversation.Last(message => message.IsAssistant);
+            Assert.False(turn.IsRunning);
+            // Every processed item stays reviewable in the finished turn's trace...
+            Assert.Equal(
+                items.Select(item => item.ItemKey),
+                turn.ClassificationActivities.Select(row => row.ItemKey));
+            Assert.All(turn.ClassificationActivities, row => Assert.True(row.IsClassified));
+            Assert.Equal($"已处理 {itemCount}/{itemCount} 项", turn.ClassificationActivitySummary);
+            // ...while the live window stays bounded.
+            Assert.Equal(AiConversationMessageViewModel.RecentActivityWindow, turn.RecentClassificationActivities.Count);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
     }
 
     [Fact]
@@ -680,6 +939,13 @@ public sealed class ViewModelTests
 
     private static bool HasOnlyKey(IReadOnlyCollection<string> keys, string expected) =>
         keys.Count == 1 && keys.Contains(expected, StringComparer.Ordinal);
+
+    /// <summary>Runs posted callbacks on the calling thread so Progress&lt;T&gt; reports synchronously.</summary>
+    private sealed class InlineSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) => d(state);
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+    }
 
     private static Mock<ICrabDeskService> CreateService(CrabDeskState state)
     {

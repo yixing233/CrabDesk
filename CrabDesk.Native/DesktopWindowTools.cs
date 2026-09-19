@@ -32,19 +32,45 @@ public static class DesktopWindowTools
     }
 
     /// <summary>
-    /// Restores the native desktop as the foreground target after a click on a
-    /// no-activate CrabDesk child. This scopes keyboard actions such as F2 to
-    /// the desktop rather than the previously active application.
+    /// Resolves the top-level Explorer window that owns the desktop list view. This
+    /// is the window that has to become foreground for keyboard actions such as F2
+    /// to reach the desktop after a click on a no-activate CrabDesk child.
     /// </summary>
-    public static bool TryActivateDesktopInput(IntPtr desktopListView)
+    public static bool TryGetDesktopInputRoot(IntPtr desktopListView, out IntPtr root)
     {
+        root = IntPtr.Zero;
         if (desktopListView == IntPtr.Zero || !NativeMethods.IsWindow(desktopListView))
         {
             return false;
         }
 
-        var root = NativeMethods.GetAncestor(desktopListView, NativeMethods.GaRoot);
-        return root != IntPtr.Zero && NativeMethods.SetForegroundWindow(root);
+        root = NativeMethods.GetAncestor(desktopListView, NativeMethods.GaRoot);
+        return root != IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Makes the desktop root the foreground window unless it already is.
+    /// </summary>
+    /// <remarks>
+    /// <c>SetForegroundWindow</c> synchronously hands activation messages to the
+    /// new foreground thread and deactivation messages to the previous one. Right
+    /// after a file is dropped from Explorer, the source Explorer window is still
+    /// busy refreshing its folder, so the call waited on it for up to 8 s on the
+    /// next icon click (watchdog: <c>scope=icon window msg=0x0201</c>). Callers
+    /// on the UI thread must therefore run this off-thread; see
+    /// <c>CrabDeskRuntime.ActivateDesktopKeyboardInput</c>.
+    /// </remarks>
+    public static bool TryActivateDesktopInput(IntPtr root)
+    {
+        if (root == IntPtr.Zero || !NativeMethods.IsWindow(root))
+        {
+            return false;
+        }
+        if (NativeMethods.GetForegroundWindow() == root)
+        {
+            return true;
+        }
+        return NativeMethods.SetForegroundWindow(root);
     }
 
     public static void ToggleDesktop()
@@ -87,7 +113,54 @@ public static class DesktopWindowTools
         extendedStyle |= NativeMethods.WsExToolWindow | WsExNoActivate | WsExNoParentNotify;
         NativeMethods.SetWindowLongPtr(hwnd, NativeMethods.GwlExStyle, new IntPtr(extendedStyle));
         NativeMethods.SetParent(hwnd, desktopParent);
+        DetachInputQueueFromParentThread(hwnd, desktopParent);
         NormalizeDesktopSurfaceStyles(hwnd);
+    }
+
+    /// <summary>
+    /// Undoes the input-queue attachment that a cross-thread <c>SetParent</c>
+    /// creates. Explorer's desktop thread blocks for several seconds inside a COM
+    /// activation every time a new file appears on the desktop (third-party
+    /// overlay/sync shell extensions on this machine; measured 4–7 s with CrabDesk
+    /// not even running). With the queues attached, the first click on a CrabDesk
+    /// child window during that window waited on Explorer, so the whole desktop
+    /// froze. Detached, each thread processes its own input: CrabDesk never gets
+    /// keyboard focus anyway (WS_EX_NOACTIVATE, keyboard commands come from a
+    /// low-level hook) and reads modifiers through <see cref="GetAsyncModifierKeys"/>.
+    /// </summary>
+    public static bool DetachInputQueueFromParentThread(IntPtr hwnd, IntPtr parent)
+    {
+        if (hwnd == IntPtr.Zero || parent == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var childThread = NativeMethods.GetWindowThreadProcessId(hwnd, out _);
+        var parentThread = NativeMethods.GetWindowThreadProcessId(parent, out _);
+        if (childThread == 0 || parentThread == 0 || childThread == parentThread)
+        {
+            return false;
+        }
+
+        return NativeMethods.AttachThreadInput(childThread, parentThread, false);
+    }
+
+    /// <summary>
+    /// Modifier keys from the asynchronous (system-wide) key state rather than the
+    /// calling thread's input queue. <c>Control.ModifierKeys</c> uses <c>GetKeyState</c>,
+    /// which only tracks keys delivered to this thread's queue; once the desktop
+    /// surfaces are detached from Explorer's queue that would always read as none.
+    /// </summary>
+    public static System.Windows.Forms.Keys GetAsyncModifierKeys()
+    {
+        const int vkShift = 0x10;
+        const int vkControl = 0x11;
+        const int vkMenu = 0x12;
+        var keys = System.Windows.Forms.Keys.None;
+        if (NativeMethods.GetAsyncKeyState(vkShift) < 0) keys |= System.Windows.Forms.Keys.Shift;
+        if (NativeMethods.GetAsyncKeyState(vkControl) < 0) keys |= System.Windows.Forms.Keys.Control;
+        if (NativeMethods.GetAsyncKeyState(vkMenu) < 0) keys |= System.Windows.Forms.Keys.Alt;
+        return keys;
     }
 
     public static void PositionAboveDesktop(IntPtr hwnd, IntPtr desktopView, int x, int y, int width, int height)

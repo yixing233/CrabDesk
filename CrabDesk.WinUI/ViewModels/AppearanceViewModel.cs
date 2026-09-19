@@ -9,6 +9,7 @@ public partial class AppearanceViewModel : ObservableObject
 {
     private readonly ICrabDeskService _service;
     private string _manualTitleColor = "#FFFFFFFF";
+    private string _manualBorderColor = "#FFFFFFFF";
 
     public AppearanceViewModel(
         ICrabDeskService service,
@@ -17,7 +18,7 @@ public partial class AppearanceViewModel : ObservableObject
         _service = service;
         FontFamilies = fontCatalog.FontFamilies is { Count: > 0 } families
             ? families
-            : ["Segoe UI"];
+            : [BoxAppearance.DefaultFontFamily];
         _dispatcherQueue = ViewModelDispatch.CaptureDispatcherQueue();
         _service.Changed += (_, _) => ViewModelDispatch.Run(_dispatcherQueue, Refresh);
         Refresh();
@@ -38,6 +39,38 @@ public partial class AppearanceViewModel : ObservableObject
     public string OpacityLabel => UseAcrylicBoxes ? "染色强度" : "不透明度";
     public double CornerRadius { get => _service.State.Settings.Appearance.CornerRadius; set => _service.SetCornerRadius(value); }
     public bool ShowBorder { get => _service.State.Settings.Appearance.ShowBorder; set => _service.SetShowBoxBorder(value); }
+    public double BorderWidth { get => _service.State.Settings.Appearance.BorderWidth; set => _service.SetBoxBorderWidth(value); }
+    public double BorderOpacity { get => _service.State.Settings.Appearance.BorderOpacity; set => _service.SetBoxBorderOpacity(value); }
+    public string BorderColor
+    {
+        get => _service.State.Settings.Appearance.BorderColor;
+        set { if (IsBorderColor(value)) _service.SetBoxBorderColor(value); }
+    }
+    public bool UseAutomaticBorderColor
+    {
+        get => IsAutoBorderColor(BorderColor);
+        set
+        {
+            if (value == UseAutomaticBorderColor) return;
+            if (value && !IsAutoBorderColor(BorderColor)) _manualBorderColor = BorderColor;
+            _service.SetBoxBorderColor(value ? "Auto" : _manualBorderColor);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsManualBorderColorEnabled));
+            OnPropertyChanged(nameof(ManualBorderColor));
+        }
+    }
+    public bool IsManualBorderColorEnabled => !UseAutomaticBorderColor;
+    public string ManualBorderColor
+    {
+        get => IsAutoBorderColor(BorderColor) ? _manualBorderColor : BorderColor;
+        set
+        {
+            if (!IsColor(value)) return;
+            _manualBorderColor = value;
+            OnPropertyChanged();
+            if (!UseAutomaticBorderColor) _service.SetBoxBorderColor(value);
+        }
+    }
     public bool ShowResizeGrip { get => _service.State.Settings.Appearance.ShowResizeGrip; set => _service.SetShowResizeGrip(value); }
     public bool ShowBoxScrollBar { get => _service.State.Settings.Appearance.ShowBoxScrollBar; set => _service.SetShowBoxScrollBar(value); }
     public bool HoverFeedback { get => _service.State.Settings.Appearance.HoverFeedback; set => _service.SetHoverFeedback(value); }
@@ -90,7 +123,7 @@ public partial class AppearanceViewModel : ObservableObject
             if (value == IconLabelCustomEnabled) return;
             if (value)
             {
-                _service.SetIconLabelFontFamily("Segoe UI");
+                _service.SetIconLabelFontFamily(BoxAppearance.DefaultFontFamily);
                 _service.SetIconLabelFontSize(9);
             }
             else
@@ -108,7 +141,7 @@ public partial class AppearanceViewModel : ObservableObject
         get
         {
             var family = _service.State.Settings.Appearance.IconLabelFontFamily;
-            return string.IsNullOrWhiteSpace(family) ? "Segoe UI" : family;
+            return string.IsNullOrWhiteSpace(family) ? BoxAppearance.DefaultFontFamily : family;
         }
         set
         {
@@ -138,8 +171,20 @@ public partial class AppearanceViewModel : ObservableObject
         {
             _manualTitleColor = box.Appearance.TitleColor;
         }
+        if (!IsAutoBorderColor(_service.State.Settings.Appearance.BorderColor))
+        {
+            _manualBorderColor = _service.State.Settings.Appearance.BorderColor;
+        }
         OnPropertyChanged(string.Empty);
     }
+
+    // The border color accepts the same "Auto" sentinel as the title color, so
+    // the manual picker needs a concrete value to fall back to when the user
+    // turns automatic matching off.
+    private static bool IsAutoBorderColor(string value) =>
+        string.Equals(value?.Trim(), "Auto", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsBorderColor(string value) => IsColor(value) || IsAutoBorderColor(value);
 
     private static bool IsColor(string value)
     {

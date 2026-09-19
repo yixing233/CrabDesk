@@ -17,6 +17,17 @@ namespace CrabDesk.Runtime;
 internal sealed partial class DesktopBoxForm : Forms.Form
 {
 
+    private void ShowBoxMenu(DesktopBox box, Point location)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var menu = BuildBoxMenu(box);
+        if (menu is FluentContextMenuStrip fluentMenu)
+        {
+            fluentMenu.ConstructionDuration = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        }
+        menu.Show(this, location);
+    }
+
     private Forms.ContextMenuStrip BuildBoxMenu(DesktopBox box)
     {
         var menu = CreateContextMenu(box.Id);

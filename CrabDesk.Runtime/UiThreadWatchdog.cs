@@ -39,7 +39,7 @@ internal static class UiThreadWatchdog
         var previousTimestamp = _scopeEnteredTimestamp;
         Volatile.Write(ref _scopeEnteredTimestamp, Stopwatch.GetTimestamp());
         Volatile.Write(ref _scope, name);
-        return new ActivityScope(previousScope, previousTimestamp);
+        return new ActivityScope(previousScope, previousTimestamp, _scopeMessage);
     }
 
     /// <summary>
@@ -48,8 +48,9 @@ internal static class UiThreadWatchdog
     /// </summary>
     internal static ActivityScope EnterWindowMessage(string window, int message)
     {
+        var scope = Enter(window);
         Volatile.Write(ref _scopeMessage, message);
-        return Enter(window);
+        return scope;
     }
 
     internal static void Start()
@@ -117,10 +118,11 @@ internal static class UiThreadWatchdog
         }
     }
 
-    internal readonly struct ActivityScope(string previousScope, long previousTimestamp) : IDisposable
+    internal readonly struct ActivityScope(string previousScope, long previousTimestamp, int previousMessage) : IDisposable
     {
         public void Dispose()
         {
+            Volatile.Write(ref _scopeMessage, previousMessage);
             Volatile.Write(ref _scopeEnteredTimestamp, previousTimestamp);
             Volatile.Write(ref _scope, previousScope);
         }

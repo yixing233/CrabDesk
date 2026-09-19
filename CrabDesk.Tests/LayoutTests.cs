@@ -277,6 +277,22 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void ContextMenuBoxLandsWhereTheDesktopWasClicked()
+    {
+        var placed = BoxLayoutPlanner.PlaceAt(new LayoutRect(0, 0, 1920, 1040), 700, 300, 420, 310);
+
+        Assert.Equal(new LayoutRect(700, 300, 420, 310), placed);
+    }
+
+    [Fact]
+    public void ContextMenuBoxNearAnEdgeIsPulledInsideTheWorkArea()
+    {
+        var placed = BoxLayoutPlanner.PlaceAt(new LayoutRect(0, 0, 1920, 1040), 1800, 1000, 420, 310);
+
+        Assert.Equal(new LayoutRect(1500, 730, 420, 310), placed);
+    }
+
+    [Fact]
     public void ClampKeepsBoxInsideMonitor()
     {
         var monitor = new LayoutRect(0, 0, 1920, 1080);

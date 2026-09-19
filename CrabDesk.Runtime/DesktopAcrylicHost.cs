@@ -34,6 +34,7 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     private CompositionBackdropBrush? _backdrop;
     private Windows.System.DispatcherQueueController? _queueController;
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
+    private DesktopDropForwarder? _dropForwarder;
     private bool _effectsEnabled;
     private bool _desktopDisplayRequested;
     private bool _restoreQueued;
@@ -168,6 +169,42 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         EnsureDesktopPlacement();
     }
 
+    /// <summary>
+    /// Registers this host as an OLE drop target and routes every drag event it
+    /// receives to the desktop surface under the pointer. Required because an
+    /// external process's drag hit-tests this top-level window directly; see
+    /// <see cref="DesktopDropForwarder"/>.
+    /// </summary>
+    internal void SetDropForwarding(Func<Point, IDesktopDropForwardTarget?> resolve)
+    {
+        _dropForwarder = new DesktopDropForwarder(resolve);
+        AllowDrop = true;
+    }
+
+    protected override void OnDragEnter(Forms.DragEventArgs drgevent)
+    {
+        base.OnDragEnter(drgevent);
+        _dropForwarder?.DragOver(drgevent);
+    }
+
+    protected override void OnDragOver(Forms.DragEventArgs drgevent)
+    {
+        base.OnDragOver(drgevent);
+        _dropForwarder?.DragOver(drgevent);
+    }
+
+    protected override void OnDragLeave(EventArgs e)
+    {
+        base.OnDragLeave(e);
+        _dropForwarder?.DragLeave();
+    }
+
+    protected override void OnDragDrop(Forms.DragEventArgs drgevent)
+    {
+        base.OnDragDrop(drgevent);
+        _dropForwarder?.DragDrop(drgevent);
+    }
+
     internal void HideFromDesktop()
     {
         _desktopDisplayRequested = false;
@@ -228,7 +265,10 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     protected override void WndProc(ref Forms.Message message)
     {
         if (message.Msg == 0x0021) { message.Result = new IntPtr(3); return; } // MA_NOACTIVATE
-        if (message.Msg == 0x0084) { message.Result = new IntPtr(-1); return; } // children own input
+        // HTTRANSPARENT hands mouse input to the layered children on this
+        // thread. It does not reach an OLE drag from another process; those
+        // arrive through the drop target registered in SetDropForwarding.
+        if (message.Msg == 0x0084) { message.Result = new IntPtr(-1); return; }
         base.WndProc(ref message);
         if (message.Msg is 0x0018 or 0x0047) QueueDesktopRestore();
     }
@@ -238,6 +278,7 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         if (disposing)
         {
             _desktopDisplayRequested = false;
+            _dropForwarder = null;
             _orderTimer.Dispose();
             EffectsChanged = null;
             if (IsHandleCreated) DesktopAcrylicWindowTools.Release(Handle);

@@ -133,7 +133,7 @@ dotnet run --project CrabDesk.WinUI\CrabDesk.WinUI.csproj -c Debug
 .\build\verify-all.ps1 -IncludeDesktop -StabilitySeconds 30
 ```
 
-详细迭代规划见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)，发布门槛见 [docs/EXTERNAL_VALIDATION.md](docs/EXTERNAL_VALIDATION.md)。
+详细迭代规划见 [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)，发布门槛见 [docs/EXTERNAL_VALIDATION.md](docs/EXTERNAL_VALIDATION.md)，开发注意事项（接管桌面的进程不能强杀、不要在实例运行时跑桌面测试）见 [docs/DEVELOPMENT_NOTES.md](docs/DEVELOPMENT_NOTES.md)。
 
 ## 📄 许可证
 

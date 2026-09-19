@@ -1,5 +1,7 @@
 ﻿using CrabDesk.Core;
 using CrabDesk.Native;
+using DataFormats = System.Windows.Forms.DataFormats;
+using DataObject = System.Windows.Forms.DataObject;
 
 namespace CrabDesk.Tests;
 
@@ -23,6 +25,90 @@ public sealed class FileOperationServiceTests : IDisposable
 
         Assert.Equal(move, decoded.Move);
         Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], decoded.Paths);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WritePreferredDropEffectStampsAnExistingDragPayload(bool move)
+    {
+        // Desktop and box drags build their own DataObject (session formats, key lists)
+        // and only add the preferred effect afterwards, so Explorer moves by default.
+        var data = new DataObject();
+        data.SetData(DataFormats.FileDrop, new[] { Path.Combine(_root, "a.txt") });
+
+        FileClipboardCodec.WritePreferredDropEffect(data, move);
+
+        Assert.Equal(move, FileClipboardCodec.Read(data).Move);
+    }
+
+    [Fact]
+    public void OptimizedMoveHandshakeTellsTheSourceNotToDeleteWhatTheTargetAlreadyMoved()
+    {
+        // Explorer reads these two formats after DoDragDrop returns: Performed = NONE
+        // means "the target did the whole move, do not delete the originals"; the
+        // logical effect keeps its "what did the user see" bookkeeping as a move.
+        var data = new RecordingComDataObject();
+
+        Assert.True(ShellDropEffectProtocol.TryReportOptimizedMove(data));
+
+        Assert.Equal(
+            [(ShellDropEffectProtocol.PerformedDropEffectFormat, ShellDropEffectProtocol.DropEffectNone),
+             (ShellDropEffectProtocol.LogicalPerformedDropEffectFormat, ShellDropEffectProtocol.DropEffectMove)],
+            data.Written);
+    }
+
+    [Fact]
+    public void OptimizedMoveHandshakeSurvivesASourceThatRefusesSetData()
+    {
+        // Non-shell sources often throw from SetData; the drop must still complete.
+        Assert.False(ShellDropEffectProtocol.TryReportOptimizedMove(new RefusingComDataObject()));
+        Assert.False(ShellDropEffectProtocol.TryReportOptimizedMove(null));
+    }
+
+    private sealed class RecordingComDataObject : System.Runtime.InteropServices.ComTypes.IDataObject
+    {
+        public List<(string Format, int Effect)> Written { get; } = [];
+
+        public void SetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC formatIn, ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium, bool release)
+        {
+            var name = DataFormats.GetFormat(unchecked((ushort)formatIn.cfFormat)).Name;
+            // unionmember is a moveable HGLOBAL, not a pointer: lock it like the shell does.
+            var memory = GlobalLock(medium.unionmember);
+            var effect = System.Runtime.InteropServices.Marshal.ReadInt32(memory);
+            GlobalUnlock(medium.unionmember);
+            Written.Add((name, effect));
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern IntPtr GlobalLock(IntPtr handle);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool GlobalUnlock(IntPtr handle);
+
+        public int DAdvise(ref System.Runtime.InteropServices.ComTypes.FORMATETC pFormatetc, System.Runtime.InteropServices.ComTypes.ADVF advf, System.Runtime.InteropServices.ComTypes.IAdviseSink adviseSink, out int connection) => throw new NotImplementedException();
+        public void DUnadvise(int connection) => throw new NotImplementedException();
+        public int EnumDAdvise(out System.Runtime.InteropServices.ComTypes.IEnumSTATDATA enumAdvise) => throw new NotImplementedException();
+        public System.Runtime.InteropServices.ComTypes.IEnumFORMATETC EnumFormatEtc(System.Runtime.InteropServices.ComTypes.DATADIR direction) => throw new NotImplementedException();
+        public int GetCanonicalFormatEtc(ref System.Runtime.InteropServices.ComTypes.FORMATETC formatIn, out System.Runtime.InteropServices.ComTypes.FORMATETC formatOut) => throw new NotImplementedException();
+        public void GetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC format, out System.Runtime.InteropServices.ComTypes.STGMEDIUM medium) => throw new NotImplementedException();
+        public void GetDataHere(ref System.Runtime.InteropServices.ComTypes.FORMATETC format, ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium) => throw new NotImplementedException();
+        public int QueryGetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC format) => throw new NotImplementedException();
+    }
+
+    private sealed class RefusingComDataObject : System.Runtime.InteropServices.ComTypes.IDataObject
+    {
+        public void SetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC formatIn, ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium, bool release) =>
+            throw new System.Runtime.InteropServices.COMException("E_NOTIMPL", unchecked((int)0x80004001));
+
+        public int DAdvise(ref System.Runtime.InteropServices.ComTypes.FORMATETC pFormatetc, System.Runtime.InteropServices.ComTypes.ADVF advf, System.Runtime.InteropServices.ComTypes.IAdviseSink adviseSink, out int connection) => throw new NotImplementedException();
+        public void DUnadvise(int connection) => throw new NotImplementedException();
+        public int EnumDAdvise(out System.Runtime.InteropServices.ComTypes.IEnumSTATDATA enumAdvise) => throw new NotImplementedException();
+        public System.Runtime.InteropServices.ComTypes.IEnumFORMATETC EnumFormatEtc(System.Runtime.InteropServices.ComTypes.DATADIR direction) => throw new NotImplementedException();
+        public int GetCanonicalFormatEtc(ref System.Runtime.InteropServices.ComTypes.FORMATETC formatIn, out System.Runtime.InteropServices.ComTypes.FORMATETC formatOut) => throw new NotImplementedException();
+        public void GetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC format, out System.Runtime.InteropServices.ComTypes.STGMEDIUM medium) => throw new NotImplementedException();
+        public void GetDataHere(ref System.Runtime.InteropServices.ComTypes.FORMATETC format, ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium) => throw new NotImplementedException();
+        public int QueryGetData(ref System.Runtime.InteropServices.ComTypes.FORMATETC format) => throw new NotImplementedException();
     }
 
     [Fact]

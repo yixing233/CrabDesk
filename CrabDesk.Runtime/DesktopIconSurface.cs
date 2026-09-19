@@ -14,7 +14,7 @@ namespace CrabDesk.Runtime;
 /// underlying desktop files retain their normal attributes and remain visible
 /// to every common file dialog.
 /// </summary>
-internal sealed class DesktopIconSurface : Forms.Form
+internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
 {
     // Carries CrabDesk's stable item keys alongside the standard FileDrop
     // payload used by external applications.
@@ -39,6 +39,48 @@ internal sealed class DesktopIconSurface : Forms.Form
         return (allowedEffects & preferredEffect) != 0
             ? preferredEffect
             : Forms.DragDropEffects.None;
+    }
+
+    /// <summary>
+    /// The effect for files dragged in from Explorer or another application and
+    /// dropped on the desktop itself. Dropping on the desktop moves by default,
+    /// whatever volume the files come from; Ctrl asks for a copy, Shift forces a
+    /// move, and the Recycle Bin only ever moves. Whichever is preferred, the
+    /// source's allowed effects decide what is actually possible.
+    /// </summary>
+    /// <remarks>
+    /// Drop handlers must call this too: OLE hands <c>IDropTarget::Drop</c> the
+    /// source's allowed-effect mask as the initial effect, not the value the last
+    /// DragOver negotiated, so comparing <c>eventArgs.Effect</c> to Move there is
+    /// always false and silently turns every drop into a copy.
+    /// </remarks>
+    internal static Forms.DragDropEffects ResolveExternalFileDropEffect(
+        Forms.DragDropEffects allowedEffects,
+        int keyState,
+        bool overRecycleBin)
+    {
+        const int shiftKey = 4;
+        const int controlKey = 8;
+        var controlPressed = (keyState & controlKey) != 0;
+        var shiftPressed = (keyState & shiftKey) != 0;
+        if (overRecycleBin)
+        {
+            return (allowedEffects & Forms.DragDropEffects.Move) != 0
+                ? Forms.DragDropEffects.Move
+                : Forms.DragDropEffects.None;
+        }
+
+        var preferredEffect = controlPressed && !shiftPressed
+            ? Forms.DragDropEffects.Copy
+            : Forms.DragDropEffects.Move;
+        var fallbackEffect = preferredEffect == Forms.DragDropEffects.Move
+            ? Forms.DragDropEffects.Copy
+            : Forms.DragDropEffects.Move;
+        return (allowedEffects & preferredEffect) != 0
+            ? preferredEffect
+            : (allowedEffects & fallbackEffect) != 0
+                ? fallbackEffect
+                : Forms.DragDropEffects.None;
     }
     internal static RectangleF CalculateDesktopFolderDropHighlightBounds(RectangleF iconBounds) =>
         RectangleF.Inflate(iconBounds, 12, 12);
@@ -902,6 +944,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void RenderQueuedDragFrame()
     {
+        using var diagnosticScope = UiThreadWatchdog.Enter("queued drag frame");
         if (!_dragRenderPending || IsDisposed)
         {
             return;
@@ -1881,6 +1924,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private bool PresentHoverOverlay(RectangleF workAreaBounds)
     {
+        using var diagnosticScope = UiThreadWatchdog.Enter("icon hover overlay presentation");
         if (_hoverOverlayUnavailable)
         {
             _hoverOverlay.HideOverlay();
@@ -2795,7 +2839,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
         var systemIconFont = SystemFonts.IconTitleFont;
         return systemIconFont is null
-            ? new Font("Segoe UI", 9, FontStyle.Regular, GraphicsUnit.Point)
+            ? new Font(BoxAppearance.DefaultFontFamily, 9, FontStyle.Regular, GraphicsUnit.Point)
             : new Font(
                 systemIconFont.FontFamily,
                 systemIconFont.Size,
@@ -3206,15 +3250,30 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        // Stage timing: the watchdog can only say "msg=0x0201 took 8 s"; this
+        // names which of the pre-log steps did it (2026-09-16 stalls).
+        var stageStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         // A click on the desktop while an inline rename is open commits the
         // edit (the surface never activates, so Deactivate does not fire).
         _runtime.CommitActiveDesktopInlineRename();
+        var commitMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         var point = ToDip(eventArgs.Location);
         var item = GetItemAt(point);
+        var hitMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds - commitMs;
         if (item is not null)
         {
-            _runtime.ActivateDesktopKeyboardInput();
+            // Do not synchronously hand activation to Explorer from a desktop click.
+            // After an external drop Explorer may still be servicing the source shell
+            // operation; SetForegroundWindow can block Explorer and make the click
+            // appear frozen. Keyboard routing is handled by the global command path.
             TryBeginSlowDoubleClickRename(item);
+        }
+        var totalMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
+        if (totalMs >= 100)
+        {
+            DiagnosticLog.Info(
+                $"Slow desktop mouse down stages commitMs={commitMs:0} hitTestMs={hitMs:0} " +
+                $"activateMs={totalMs - commitMs - hitMs:0} totalMs={totalMs:0}");
         }
         DiagnosticLog.Info(
             $"Icon surface mouse down monitor={_monitor.Id} button={eventArgs.Button} " +
@@ -3270,7 +3329,7 @@ internal sealed class DesktopIconSurface : Forms.Form
         {
             // Shift behaves like Ctrl for a rubber band: an empty-space drag
             // must not throw away the range the user just built with Shift.
-            var additive = (Forms.Control.ModifierKeys &
+            var additive = (DesktopWindowTools.GetAsyncModifierKeys() &
                 (Forms.Keys.Control | Forms.Keys.Shift)) != 0;
             _runtime.PrepareDesktopSelection(
                 this,
@@ -3303,8 +3362,8 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
 
         var itemKey = item.Item.Key.ToString();
-        var controlPressed = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
-        var shiftPressed = (Forms.Control.ModifierKeys & Forms.Keys.Shift) != 0;
+        var controlPressed = (DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Control) != 0;
+        var shiftPressed = (DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Shift) != 0;
         var targetAlreadySelected = _selection.Contains(itemKey);
         if (shiftPressed)
         {
@@ -3426,9 +3485,14 @@ internal sealed class DesktopIconSurface : Forms.Form
         if (!_dragStarted)
         {
             BeginDesktopDrag(_pressedItem.Key.ToString());
-            if (_dragStarted && TryStartDesktopOleDrag())
+            // Keep desktop-to-desktop movement on CrabDesk's own pointer state
+            // machine. WinForms DoDragDrop enters the Explorer/OLE modal loop and
+            // was captured blocking the UI for 4+ seconds after a newly dropped
+            // file was moved. External export remains handled by the explicit
+            // desktop drop forwarding path.
+            if (_dragStarted)
             {
-                return;
+                DiagnosticLog.Info("Desktop icon drag using non-OLE pointer path");
             }
         }
         if (!_dragStarted)
@@ -3636,36 +3700,10 @@ internal sealed class DesktopIconSurface : Forms.Form
                 $"External drag entered count={paths.Length} recycle={overRecycleBin}");
         }
         RequestDragRender();
-        // External folder drags follow Windows Explorer: same volume defaults
-        // to Move, cross volume (e.g. USB/D: to C:) defaults to Copy.
-        // Ctrl forces copy; Shift forces move. Recycle bin always uses Move.
-        var controlPressed = (eventArgs.KeyState & 8) != 0;
-        var shiftPressed = (eventArgs.KeyState & 4) != 0;
-        var desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var isSameVolume = BoxTransferPolicy.AreAllSameVolume(paths, desktopDir);
-        var transferEffect = BoxTransferPolicy.Resolve(
-            internalItems: false,
-            sourceMapped: false,
-            targetMapped: false,
-            shiftPressed: shiftPressed,
-            controlPressed: controlPressed,
-            sourceMappedReadOnly: false,
-            isSameVolume: isSameVolume);
-        var preferredEffect = transferEffect == BoxTransferEffect.MoveFiles
-            ? Forms.DragDropEffects.Move
-            : Forms.DragDropEffects.Copy;
-        var fallbackEffect = preferredEffect == Forms.DragDropEffects.Move
-            ? Forms.DragDropEffects.Copy
-            : Forms.DragDropEffects.Move;
-        eventArgs.Effect = overRecycleBin
-            ? (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
-                ? Forms.DragDropEffects.Move
-                : Forms.DragDropEffects.None
-            : (eventArgs.AllowedEffect & preferredEffect) != 0
-                ? preferredEffect
-                : (eventArgs.AllowedEffect & fallbackEffect) != 0
-                    ? fallbackEffect
-                    : Forms.DragDropEffects.None;
+        eventArgs.Effect = ResolveExternalFileDropEffect(
+            eventArgs.AllowedEffect,
+            eventArgs.KeyState,
+            overRecycleBin);
     }
 
     // The box window owns the OLE drag route while the pointer is over it,
@@ -3738,6 +3776,20 @@ internal sealed class DesktopIconSurface : Forms.Form
         }
         _boxDragGrabOffset = null;
     }
+
+    // With acrylic boxes enabled a top-level host sits above this child layer.
+    // Its HTTRANSPARENT hit test only defers to windows on this thread, so an
+    // OLE drag from Explorer or any other process lands on the host instead of
+    // here. The host forwards those events; DragEventArgs carry screen pixels,
+    // so PointToClient in the shared handlers resolves against this window.
+    public bool ContainsScreenPixel(Point screenPixel) =>
+        DesktopDropForwarder.ContainsPixel(_monitor.PixelBounds, screenPixel);
+
+    public void ForwardDragOver(Forms.DragEventArgs eventArgs) => OnDragOver(this, eventArgs);
+
+    public void ForwardDragLeave() => OnDragLeave(this, EventArgs.Empty);
+
+    public void ForwardDragDrop(Forms.DragEventArgs eventArgs) => OnDragDrop(this, eventArgs);
 
     private void OnDragLeave(object? sender, EventArgs eventArgs)
     {
@@ -3816,20 +3868,43 @@ internal sealed class DesktopIconSurface : Forms.Form
                     ClearExternalDragPreview();
                     _dragOverlay.HideOverlay();
                     var dropPoint = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+                    var overRecycleBin = IsOverRecycleBin(dropPoint);
+                    // Re-negotiate here: the incoming Effect is the source's allowed
+                    // mask, not the DragOver result (see ResolveExternalFileDropEffect).
+                    var effect = ResolveExternalFileDropEffect(
+                        eventArgs.AllowedEffect,
+                        eventArgs.KeyState,
+                        overRecycleBin);
+                    var move = effect == Forms.DragDropEffects.Move;
                     DiagnosticLog.Info(
                         $"Icon surface external drop monitor={_monitor.Id} paths={externalPaths.Length} " +
-                        $"point={dropPoint.X:0},{dropPoint.Y:0} move={eventArgs.Effect == Forms.DragDropEffects.Move}");
-                    if (IsOverRecycleBin(dropPoint))
+                        $"point={dropPoint.X:0},{dropPoint.Y:0} allowed={eventArgs.AllowedEffect} move={move}");
+                    if (effect == Forms.DragDropEffects.None)
                     {
-                        await DeleteExternalDropToRecycleBinAsync(externalPaths);
+                        eventArgs.Effect = Forms.DragDropEffects.None;
+                        return;
                     }
-                    else
+                    // Shell optimized-move handshake. CrabDesk moves (or recycles) the
+                    // files itself, so the source must not delete them afterwards:
+                    // report Performed DropEffect = NONE and return a non-MOVE effect.
+                    // Returning MOVE here made Explorer delete already-moved files and
+                    // stall in its retry path, freezing both processes for seconds.
+                    if (move)
                     {
-                        await ImportExternalDropToDesktopAsync(
-                            externalPaths,
-                            eventArgs.Effect == Forms.DragDropEffects.Move,
-                            dropPoint);
+                        var handshake = ShellDropEffectProtocol.TryReportOptimizedMove(
+                            eventArgs.Data as System.Runtime.InteropServices.ComTypes.IDataObject);
+                        DiagnosticLog.Info($"Icon surface external drop optimized-move handshake accepted={handshake}");
                     }
+                    eventArgs.Effect = move ? Forms.DragDropEffects.Copy : effect;
+                    // Do not keep Explorer's OLE DoDragDrop call waiting for the
+                    // filesystem/layout operation. Explorer owns the source drag
+                    // loop and blocks until this handler returns; awaiting the move
+                    // here freezes Explorer even though CrabDesk itself is responsive.
+                    QueueExternalDropCompletion(
+                        externalPaths,
+                        move,
+                        dropPoint,
+                        overRecycleBin);
                 }
                 return;
             }
@@ -4195,6 +4270,7 @@ internal sealed class DesktopIconSurface : Forms.Form
 
     private void EndDesktopDragAndPresent()
     {
+        using var diagnosticScope = UiThreadWatchdog.Enter("icon drag settlement");
         var initialVisualBounds = _desktopDragInitialVisualBounds;
         var draggedItemKeys = _dragItemKeys.ToArray();
         var pendingBoxVisualBounds = _pendingBoxVisualBounds;
@@ -4471,10 +4547,13 @@ internal sealed class DesktopIconSurface : Forms.Form
         };
 
         var crabDesk = CreateDesktopBackgroundMenuItem("CrabDesk", LucideRuntimeIcon.AppWindow);
+        // Land the new box where the desktop was right-clicked, on this
+        // monitor, instead of the first free slot of the primary one.
+        var boxAnchor = ToWorkAreaDip(location);
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "创建盒子",
             LucideRuntimeIcon.SquarePlus,
-            (_, _) => TryAction(() => _runtime.AddBox())));
+            (_, _) => TryAction(() => _runtime.AddBoxAt(_monitor.Id, boxAnchor.X, boxAnchor.Y))));
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "设置中心",
             LucideRuntimeIcon.Cog,
@@ -4568,6 +4647,12 @@ internal sealed class DesktopIconSurface : Forms.Form
             var collection = new StringCollection();
             collection.AddRange(selectedItems.Select(item => item.FileSystemPath!).ToArray());
             data.SetFileDropList(collection);
+            // Dragging off the desktop is a move, whatever volume the target is
+            // on. Explorer would otherwise apply its folder-to-folder rule and
+            // copy across volumes, leaving the original behind on the desktop.
+            // Copy stays in the allowed set below so Ctrl (and copy-only targets
+            // such as browser uploads) can still copy.
+            FileClipboardCodec.WritePreferredDropEffect(data, move: true);
         }
 
         var completedEffect = Forms.DragDropEffects.None;
@@ -4584,8 +4669,11 @@ internal sealed class DesktopIconSurface : Forms.Form
             using var pointerPreview = pointerImage is null ? null : ItemDragPointerPreview.TryCreate(
                 this, pointerImage, grabOffset);
             RequestDragRender();
-            completedEffect = DoDragDrop(data, allFileSystemItems
-                ? ExternalFileDropEffects : Forms.DragDropEffects.Move);
+            using (UiThreadWatchdog.Enter("icon OLE DoDragDrop"))
+            {
+                completedEffect = DoDragDrop(data, allFileSystemItems
+                    ? ExternalFileDropEffects : Forms.DragDropEffects.Move);
+            }
         }
         catch (Exception exception)
         {
@@ -4886,6 +4974,57 @@ internal sealed class DesktopIconSurface : Forms.Form
                 (Directory.Exists(path) || File.Exists(path)))
             .ToArray();
         return paths.Length > 0;
+    }
+
+    private void QueueExternalDropCompletion(
+        IReadOnlyList<string> paths,
+        bool move,
+        PointF dropPointDip,
+        bool overRecycleBin)
+    {
+        try
+        {
+            // BeginInvoke is intentional: invoking an async method directly still
+            // executes its synchronous prefix inside the Explorer OLE callback.
+            // Yield to the message loop first so Explorer can leave DoDragDrop
+            // before CrabDesk starts filesystem work or refresh coordination.
+            BeginInvoke((Action)(() => _ = CompleteExternalDropAfterOleReturnAsync(
+                paths,
+                move,
+                dropPointDip,
+                overRecycleBin)));
+            DiagnosticLog.Info("External desktop drop completion queued after OLE return");
+        }
+        catch (InvalidOperationException exception)
+        {
+            DiagnosticLog.Error("Failed to queue external desktop drop completion", exception);
+        }
+    }
+
+    private async Task CompleteExternalDropAfterOleReturnAsync(
+        IReadOnlyList<string> paths,
+        bool move,
+        PointF dropPointDip,
+        bool overRecycleBin)
+    {
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        DiagnosticLog.Info(
+            $"Deferred external desktop drop started paths={paths.Count} move={move} recycle={overRecycleBin}");
+        try
+        {
+            if (overRecycleBin)
+            {
+                await DeleteExternalDropToRecycleBinAsync(paths).ConfigureAwait(true);
+            }
+            else
+            {
+                await ImportExternalDropToDesktopAsync(paths, move, dropPointDip).ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Deferred external desktop drop failed", exception);
+        }
     }
 
     // External files dropped on the desktop land in the real desktop folder,
@@ -5577,6 +5716,15 @@ internal sealed class DesktopIconSurface : Forms.Form
         DesktopIconSortState sort) => DesktopItemSortService.Order(items, sort);
 
     private PointF ToDip(Point point) => new(point.X / (float)_scale, point.Y / (float)_scale);
+
+    // Box bounds are stored relative to the monitor's work area, while this
+    // surface (and ToDip) covers the whole monitor.
+    private PointF ToWorkAreaDip(Point point)
+    {
+        var dip = ToDip(point);
+        var workArea = MonitorCoordinateConverter.GetMonitorRelativeWorkArea(_monitor);
+        return new PointF(dip.X - (float)workArea.X, dip.Y - (float)workArea.Y);
+    }
 
     private static Color ParseColor(string value, Color fallback)
     {

@@ -314,7 +314,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (string.IsNullOrWhiteSpace(family) || size <= 0)
         {
             var systemFont = SystemFonts.IconTitleFont;
-            family = systemFont?.FontFamily.Name ?? "Segoe UI";
+            family = systemFont?.FontFamily.Name ?? BoxAppearance.DefaultFontFamily;
             size = systemFont?.Size ?? 9;
         }
         return CreateFont(family, (float)size, FontStyle.Regular, GraphicsUnit.Point);
@@ -630,6 +630,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 var sourcePaths = ExtractSourcePaths(eventArgs);
                 var move = ResolveFilesystemDropEffect(eventArgs, mappedFolderTarget.FileSystemPath ?? string.Empty, sourcePaths);
+                ReportOptimizedMoveForExternalPayload(eventArgs, move);
                 await ImportIntoTargetFolderAsync(box, mappedFolderTarget, eventArgs, move);
                 return;
             }
@@ -711,6 +712,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 try
                 {
                     var isMove = transferEffect == BoxTransferEffect.MoveFiles;
+                    ReportOptimizedMoveForExternalPayload(eventArgs, isMove);
                     var imported = await _runtime.ImportFilesToBoxAsync(
                         paths,
                         box.Box.Id,
@@ -750,6 +752,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             if (external.Count > 0)
             {
                 var isMove = transferEffect == BoxTransferEffect.MoveFiles;
+                ReportOptimizedMoveForExternalPayload(eventArgs, isMove);
                 var imported = await _runtime.ImportFilesAsync(
                     external,
                     box.Box.Id,
@@ -779,6 +782,31 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         const int shiftKeyState = 4;
         return (eventArgs.KeyState & shiftKeyState) != 0;
+    }
+
+    /// <summary>
+    /// Shell optimized-move handshake for files dragged in from another process.
+    /// CrabDesk moves the files itself, so the source must be told not to delete
+    /// them: Performed DropEffect = NONE plus a non-MOVE return effect. Explorer
+    /// otherwise deletes the already-moved originals and stalls in its retry
+    /// path, freezing both processes. CrabDesk's own drags carry a session or
+    /// key-list format and reconcile through the runtime instead.
+    /// </summary>
+    private static void ReportOptimizedMoveForExternalPayload(Forms.DragEventArgs eventArgs, bool move)
+    {
+        if (!move ||
+            eventArgs.Data is null ||
+            eventArgs.Data.GetDataPresent(ItemKeysFormat) ||
+            eventArgs.Data.GetDataPresent(DragSessionFormat) ||
+            eventArgs.Data.GetDataPresent(DesktopIconSurface.DesktopIconDragSessionFormat))
+        {
+            return;
+        }
+
+        var handshake = ShellDropEffectProtocol.TryReportOptimizedMove(
+            eventArgs.Data as System.Runtime.InteropServices.ComTypes.IDataObject);
+        eventArgs.Effect = Forms.DragDropEffects.Copy;
+        DiagnosticLog.Info($"Box external drop optimized-move handshake accepted={handshake}");
     }
 
     private static bool IsControlPressed(Forms.DragEventArgs eventArgs)

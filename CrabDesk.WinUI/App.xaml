@@ -16,6 +16,8 @@
             <converters:BooleanNegationConverter x:Key="BooleanNegationConverter" />
             <converters:BooleanNegationToVisibilityConverter x:Key="BooleanNegationToVisibilityConverter" />
             <converters:StringNotEmptyToVisibilityConverter x:Key="StringNotEmptyToVisibilityConverter" />
+            <converters:BooleanToOpacityConverter x:Key="BooleanToOpacityConverter" />
+            <converters:PrimaryActionStyleConverter x:Key="PrimaryActionStyleConverter" />
             <converters:ViewToggleBrushConverter x:Key="BoolToViewToggleBrushConverter" />
             <converters:ViewToggleForegroundConverter x:Key="ViewToggleForegroundConverter" />
             <converters:HexColorConverter x:Key="HexColorConverter" />

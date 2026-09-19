@@ -36,24 +36,41 @@ public sealed class AiOrganizationWindowTests
             .Single(element => (string?)element.Attribute(Xaml + "Name") == "WorkbenchHost");
 
         Assert.NotNull(host);
+        // ContentControl aligns its content Left/Top by default, which sizes the workbench page
+        // to whole icon columns and leaves the remainder as a blank strip at the window's right edge.
+        Assert.Equal("Stretch", (string?)host.Attribute("HorizontalContentAlignment"));
+        Assert.Equal("Stretch", (string?)host.Attribute("VerticalContentAlignment"));
     }
 
     [Fact]
     public void AiOrganizationWindowConfiguresItsIconAndMinimumSize()
     {
-        var source = File.ReadAllText(Path.Combine(
-            FindSolutionDirectory(),
-            "CrabDesk.WinUI",
-            "Windows",
-            "AiOrganizationWindow.xaml.cs"));
+        var source = ReadSource("CrabDesk.WinUI", "Windows", "AiOrganizationWindow.xaml.cs");
         var project = LoadXaml("CrabDesk.WinUI", "CrabDesk.WinUI.csproj");
 
-        Assert.Contains("AppWindow.SetIcon(", source, StringComparison.Ordinal);
+        Assert.Contains("WindowIcon.Apply(this);", source, StringComparison.Ordinal);
         Assert.Contains("InstallMinimumSizeTracking();", source, StringComparison.Ordinal);
         Assert.Contains("MinimumWidthDips", source, StringComparison.Ordinal);
         Assert.Contains(project.Descendants("Content"), element =>
             (string?)element.Attribute("Include") == "Assets\\CrabDesk.ico" &&
             (string?)element.Attribute("CopyToOutputDirectory") == "PreserveNewest");
+    }
+
+    [Fact]
+    public void SettingsWindowAppliesTheSharedAppIcon()
+    {
+        // WinUI windows do not inherit the exe's ApplicationIcon: until MainWindow applied the
+        // icon itself, the taskbar and Alt+Tab showed the generic window glyph for "CrabDesk 设置".
+        var helper = ReadSource("CrabDesk.WinUI", "Windows", "WindowIcon.cs");
+        var mainWindow = ReadSource("CrabDesk.WinUI", "MainWindow.xaml.cs");
+
+        Assert.Contains("AppWindow.SetIcon(", helper, StringComparison.Ordinal);
+        Assert.Contains("WindowIcon.Apply(this);", mainWindow, StringComparison.Ordinal);
+    }
+
+    private static string ReadSource(params string[] pathParts)
+    {
+        return File.ReadAllText(Path.Combine([FindSolutionDirectory(), .. pathParts]));
     }
 
     private static XDocument LoadXaml(params string[] pathParts)

@@ -213,6 +213,115 @@
                                                   AutomationProperties.Name="显示外边框" />
                                 </Grid>
 
+                                <!-- 边框粗细 -->
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="边框粗细" FontWeight="Medium" />
+                                        <TextBlock Text="描边的线条宽度，数值越大轮廓越明显" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <Slider x:Name="BorderWidthSlider"
+                                                Width="200"
+                                                Style="{StaticResource ParameterSliderStyle}"
+                                                Minimum="1" Maximum="6" StepFrequency="1"
+                                                IsEnabled="{Binding ShowBorder}"
+                                                Value="{Binding BorderWidth, Mode=TwoWay}"
+                                                AutomationProperties.Name="边框粗细" />
+                                        <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
+                                            <Run Text="{Binding Value, ElementName=BorderWidthSlider}" /><Run Text=" px" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 边框不透明度 -->
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="边框不透明度" FontWeight="Medium" />
+                                        <TextBlock Text="描边的浓淡程度，数值越低轮廓越含蓄" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <Slider x:Name="BorderOpacitySlider"
+                                                Width="200"
+                                                Style="{StaticResource ParameterSliderStyle}"
+                                                Minimum="0" Maximum="100" StepFrequency="1"
+                                                IsEnabled="{Binding ShowBorder}"
+                                                Value="{Binding BorderOpacity, Mode=TwoWay}"
+                                                AutomationProperties.Name="边框不透明度" />
+                                        <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
+                                            <Run Text="{Binding Value, ElementName=BorderOpacitySlider}" /><Run Text="%" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- 边框颜色 -->
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="自动匹配边框颜色" FontWeight="Medium" />
+                                        <TextBlock Text="根据盒子背景亮度自动推导描边颜色，深色盒子偏亮、浅色盒子偏暗" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="1"
+                                                  IsOn="{Binding UseAutomaticBorderColor, Mode=TwoWay}"
+                                                  IsEnabled="{Binding ShowBorder}"
+                                                  OnContent="" OffContent=""
+                                                  HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                  AutomationProperties.Name="自动匹配边框颜色" />
+                                </Grid>
+
+                                <!-- 自定义边框颜色 -->
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="自定义边框颜色" FontWeight="Medium" />
+                                        <TextBlock Text="在未启用自动颜色匹配时使用的自选描边颜色" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Style="{StaticResource ColorPickerButtonStyle}"
+                                            IsEnabled="{Binding IsManualBorderColorEnabled}"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            AutomationProperties.Name="选择自定义边框颜色">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="{StaticResource ColorSwatchSize}"
+                                                    Height="{StaticResource ColorSwatchSize}"
+                                                    CornerRadius="3"
+                                                    Background="{Binding ManualBorderColor, Converter={StaticResource HexBrushConverter}}"
+                                                    BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                                    BorderThickness="1" />
+                                            <TextBlock Grid.Column="1" Text="{Binding ManualBorderColor}" FontFamily="Consolas" VerticalAlignment="Center" />
+                                        </Grid>
+                                        <Button.Flyout>
+                                            <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
+                                                <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                             IsAlphaEnabled="False"
+                                                             IsColorPreviewVisible="True"
+                                                             IsColorSliderVisible="True"
+                                                             IsColorChannelTextInputVisible="True"
+                                                             IsHexInputVisible="True"
+                                                             Color="{Binding ManualBorderColor, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                             AutomationProperties.Name="边框颜色选择器" />
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </Grid>
+
                                 <!-- 悬停高亮 -->
                                 <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
                                     <Grid.ColumnDefinitions>

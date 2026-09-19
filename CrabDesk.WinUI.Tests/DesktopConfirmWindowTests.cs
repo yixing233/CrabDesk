@@ -1,3 +1,4 @@
+using CrabDesk.WinUI.Windows;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
@@ -5,22 +6,32 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopConfirmWindowTests
 {
     [Fact]
-    public void WindowIsSizedAndPositionedBeforeItBecomesVisible()
+    public void DialogIsCentredOnTheOwnerWorkAreaAtTheOwnerDpi()
     {
-        var source = File.ReadAllText(Path.Combine(
-            FindSolutionDirectory(),
-            "CrabDesk.WinUI",
-            "Windows",
-            "DesktopConfirmWindow.xaml.cs"));
-        var showMethod = source.IndexOf(
-            "internal static Task<bool> ShowAsync(",
-            StringComparison.Ordinal);
-        var configure = source.IndexOf("window.ConfigureWindow();", showMethod, StringComparison.Ordinal);
-        var activate = source.IndexOf("window.Activate();", showMethod, StringComparison.Ordinal);
+        var bounds = DesktopConfirmWindow.CalculateBounds(0, 0, 2560, 1380, 120);
 
-        Assert.True(showMethod >= 0);
-        Assert.True(configure > showMethod);
-        Assert.True(activate > configure);
+        Assert.Equal(550, bounds.Width);
+        Assert.Equal(260, bounds.Height);
+        Assert.Equal(1005, bounds.X);
+        Assert.Equal(560, bounds.Y);
+    }
+
+    [Fact]
+    public void ConfirmationWindowIsBuiltOnceAndHiddenBetweenRequests()
+    {
+        var window = ReadSource("CrabDesk.WinUI", "Windows", "DesktopConfirmWindow.xaml.cs");
+        var app = ReadSource("CrabDesk.WinUI", "App.xaml.cs");
+
+        // Creating a WinUI window on every "删除盒子" stalled the UI thread the
+        // desktop surfaces share; the dialog is prewarmed and reused instead.
+        Assert.Contains("AppWindow.Hide();", window, StringComparison.Ordinal);
+        Assert.DoesNotContain("Close();", window, StringComparison.Ordinal);
+        Assert.Contains("DesktopConfirmWindow.Prewarm", app, StringComparison.Ordinal);
+    }
+
+    private static string ReadSource(params string[] pathParts)
+    {
+        return File.ReadAllText(Path.Combine([FindSolutionDirectory(), .. pathParts]));
     }
 
     private static string FindSolutionDirectory()

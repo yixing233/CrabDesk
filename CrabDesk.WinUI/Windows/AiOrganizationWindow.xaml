@@ -3,7 +3,12 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid x:Name="RootGrid">
-        <ContentControl x:Name="WorkbenchHost" />
+        <!-- ContentControl defaults to Left/Top content alignment, which would size the page
+             to its natural width (whole icon columns) and leave the remainder as a blank strip
+             on the right. Stretch it so the page owns the full window like MainWindow's Frame. -->
+        <ContentControl x:Name="WorkbenchHost"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch" />
         <InfoBar x:Name="NotificationBar"
                  Width="420"
                  Margin="0,16,24,0"

@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Services;
 using CrabDesk.WinUI.Views;
+using CrabDesk.WinUI.Windows;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -60,6 +61,7 @@ public sealed partial class MainWindow : Window
         ContentFrame.Navigated += ContentFrame_OnNavigated;
 
         Title = "CrabDesk 设置";
+        WindowIcon.Apply(this);
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         InstallMinimumSizeTracking();
@@ -273,6 +275,7 @@ public sealed partial class MainWindow : Window
             "backup" => typeof(BackupPage),
             "smart-organization" or "organization" => typeof(OrganizationPage),
             "appearance" or "boxes" => typeof(DesktopBoxesPage),
+            "diagnostics" => typeof(DiagnosticsPage),
             "about" => typeof(AboutPage),
             _ => typeof(GeneralPage)
         });

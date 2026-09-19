@@ -93,7 +93,7 @@ public sealed class DesktopRangeSelectionTests
         // only just built with Shift+click.
         var desktopMarquee = ExtractMethod(
             ExtractDesktopMouseDown(),
-            "var additive = (Forms.Control.ModifierKeys &",
+            "var additive = (DesktopWindowTools.GetAsyncModifierKeys() &",
             "var itemKey = item.Item.Key.ToString();");
         var boxMarquee = ExtractMethod(
             ReadRuntimeSource("DesktopBoxForm.Input.cs"),

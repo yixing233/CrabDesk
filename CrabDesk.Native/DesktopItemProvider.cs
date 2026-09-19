@@ -20,7 +20,21 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
     private readonly string[] _desktopDirectories;
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly System.Threading.Timer _changeTimer;
+    private readonly object _changeSync = new();
+    private FileSystemEventArgs? _pendingChange;
+    private bool _pendingBurstHasNonRename;
     private bool _disposed;
+
+    /// <summary>
+    /// Notifications are coalesced for this long before one ItemsChanged is
+    /// raised. A save typically produces several in a row (create, writes,
+    /// rename of a temporary file); one snapshot refresh covers them all.
+    /// </summary>
+    internal const int ChangeQuietPeriodMilliseconds = 250;
+
+    // The default 8 KB buffer overflows on a burst of a few dozen changes,
+    // after which every queued notification is discarded silently.
+    private const int WatcherBufferSize = 64 * 1024;
 
     public DesktopItemProvider()
     {
@@ -34,25 +48,32 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        _changeTimer = new System.Threading.Timer(_ => { var change = _pendingChange; _pendingChange = null; if (change is not null) ItemsChanged?.Invoke(this, change); });
+        _changeTimer = new System.Threading.Timer(_ => FlushPendingChange());
         foreach (var directory in _desktopDirectories)
         {
             var watcher = new FileSystemWatcher(directory)
             {
                 IncludeSubdirectories = false,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite
+                // Attributes: a file some applications save hidden and reveal
+                // once the write completes only becomes a desktop item when
+                // the attribute clears; without this filter that is silent.
+                NotifyFilter = NotifyFilters.FileName |
+                               NotifyFilters.DirectoryName |
+                               NotifyFilters.LastWrite |
+                               NotifyFilters.Attributes,
+                InternalBufferSize = WatcherBufferSize
             };
             watcher.Created += OnChanged;
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
             watcher.Changed += OnChanged;
+            watcher.Error += OnWatcherError;
             watcher.EnableRaisingEvents = true;
             _watchers.Add(watcher);
         }
     }
 
     public event EventHandler? ItemsChanged;
-    private FileSystemEventArgs? _pendingChange;
 
     public Task<IReadOnlyList<DesktopItemRef>> EnumerateAsync(CancellationToken cancellationToken = default)
     {
@@ -140,10 +161,91 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         _changeTimer.Dispose();
     }
 
-    private void OnChanged(object sender, FileSystemEventArgs args)
+    private void OnChanged(object sender, FileSystemEventArgs args) => QueueChange(args);
+
+    private void OnWatcherError(object sender, ErrorEventArgs args)
     {
-        _pendingChange = args;
-        _changeTimer.Change(250, Timeout.Infinite);
+        // The watcher keeps running after an internal buffer overflow, but the
+        // notifications it dropped are gone. Report the directory itself so the
+        // runtime takes a full pass and a file saved during the burst still
+        // appears. If the watcher stopped altogether, re-arm it.
+        if (sender is FileSystemWatcher watcher)
+        {
+            if (!_disposed && !watcher.EnableRaisingEvents)
+            {
+                try
+                {
+                    watcher.EnableRaisingEvents = true;
+                }
+                catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+                {
+                }
+            }
+            QueueChange(new FileSystemEventArgs(WatcherChangeTypes.All, watcher.Path, null));
+        }
+    }
+
+    private void QueueChange(FileSystemEventArgs args)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        lock (_changeSync)
+        {
+            _pendingChange = args;
+            _pendingBurstHasNonRename |= args.ChangeType != WatcherChangeTypes.Renamed;
+        }
+        try
+        {
+            _changeTimer.Change(ChangeQuietPeriodMilliseconds, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void FlushPendingChange()
+    {
+        FileSystemEventArgs? change;
+        lock (_changeSync)
+        {
+            change = _pendingChange;
+            var burstHadNonRename = _pendingBurstHasNonRename;
+            _pendingChange = null;
+            _pendingBurstHasNonRename = false;
+            if (change is not null)
+            {
+                change = DescribeBurst(change, burstHadNonRename);
+            }
+        }
+
+        if (change is not null && !_disposed)
+        {
+            ItemsChanged?.Invoke(this, change);
+        }
+    }
+
+    /// <summary>
+    /// Chooses the single notification that stands for a coalesced burst. The
+    /// last event wins, except that a burst which also created, deleted or
+    /// modified something is reported as a plain change on the final path: a
+    /// new file that was written under a temporary name and then renamed must
+    /// not look like a mere rename, which the runtime may treat as cosmetic.
+    /// </summary>
+    internal static FileSystemEventArgs DescribeBurst(FileSystemEventArgs last, bool burstHadNonRename)
+    {
+        ArgumentNullException.ThrowIfNull(last);
+        if (!burstHadNonRename || last.ChangeType != WatcherChangeTypes.Renamed)
+        {
+            return last;
+        }
+
+        return new FileSystemEventArgs(
+            WatcherChangeTypes.Changed,
+            Path.GetDirectoryName(last.FullPath) ?? string.Empty,
+            last.Name);
     }
 
     private static DateTimeOffset? ReadShellModifiedAt(string path, bool isDirectory)

@@ -39,7 +39,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var item = GetItemAtPoint(box, point);
         if (item is not null)
         {
-            _runtime.ActivateDesktopKeyboardInput();
+            // Avoid SetForegroundWindow while Explorer may still be completing a
+            // shell drop; activation can block both Explorer and the desktop UI.
             TryBeginSlowDoubleClickRename(item);
         }
         DiagnosticLog.Info(
@@ -74,7 +75,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             else if (box is not null)
             {
-                BuildBoxMenu(box.Box).Show(this, eventArgs.Location);
+                ShowBoxMenu(box.Box, eventArgs.Location);
             }
             return;
         }
@@ -92,8 +93,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (item is not null)
         {
             var key = item.Item.Key.ToString();
-            var controlPressed = (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0;
-            var shiftPressed = (Forms.Control.ModifierKeys & Forms.Keys.Shift) != 0;
+            var controlPressed = (DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Control) != 0;
+            var shiftPressed = (DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Shift) != 0;
             var targetAlreadySelected = _selection.Contains(key);
             if (shiftPressed &&
                 _selectionAnchorBoxId == item.Box.Id &&
@@ -155,7 +156,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         if (box.Menu.Contains(point))
         {
-            BuildBoxMenu(box.Box).Show(this, eventArgs.Location);
+            ShowBoxMenu(box.Box, eventArgs.Location);
             return;
         }
         var resizeEdges = GetResizeEdges(box, point);
@@ -177,7 +178,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             // Shift behaves like Ctrl for a rubber band: an empty-space drag
             // must not throw away the range the user just built with Shift.
-            var additive = (Forms.Control.ModifierKeys &
+            var additive = (DesktopWindowTools.GetAsyncModifierKeys() &
                 (Forms.Keys.Control | Forms.Keys.Shift)) != 0;
             _runtime.PrepareDesktopSelection(
                 this,
@@ -348,6 +349,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var collection = new StringCollection();
             collection.AddRange(paths);
             data.SetFileDropList(collection);
+            // Same default as the desktop surface: leaving a box for Explorer is
+            // a move unless the mapping is read-only (which only offers Copy).
+            FileClipboardCodec.WritePreferredDropEffect(data, move: !sourceMappedReadOnly);
         }
         _dragDropCommitted = false;
         _dragCancelled = false;
@@ -1631,7 +1635,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             handledEventArgs.Handled = true;
         }
-        if ((Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
+        if ((DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Control) != 0)
         {
             return;
         }

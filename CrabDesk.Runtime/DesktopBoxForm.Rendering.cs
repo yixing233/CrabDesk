@@ -402,6 +402,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         using var fill = new SolidBrush(boxColor);
         graphics.FillPath(fill, path);
 
+        // The outline is stroked on top of the fill, before the header and
+        // items, so the content never paints over its own rim. It traces the
+        // fill path exactly: the stroke is centred on that path, so its outer
+        // half reaches geometry.Bounds and its corners stay concentric with the
+        // fill's instead of cutting inside them.
+        var appearance = _runtime.State.Settings.Appearance;
+        if (appearance.ShowBorder)
+        {
+            var stroke = BoxBorderStyle.ApplyTint(
+                BoxBorderStyle.ResolveStroke(
+                    baseColor,
+                    isDarkSurface,
+                    appearance.BorderColor,
+                    appearance.BorderOpacity),
+                opacity);
+            using var border = new Pen(stroke, BoxBorderStyle.ResolveWidth(appearance.BorderWidth));
+            graphics.DrawPath(border, path);
+        }
+
         using var titleFont = CreateFont(
             geometry.Box.Appearance.TitleFontFamily,
             (float)geometry.Box.Appearance.TitleFontSize,
@@ -418,11 +437,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (_editingBox?.Id != geometry.Box.Id)
         {
             var titleBounds = CalculateTitleTextBounds(geometry.Header, centered: true);
-            var displayedTitle = geometry.ActiveManualTabId is { } activeTabId
-                ? geometry.Box.ManualTabs.FirstOrDefault(tab => tab.Id == activeTabId)?.Title
-                : null;
+            // The header always names the box, never the selected sub-tab. A
+            // collapsed box hides its tab bar, so borrowing the tab title left
+            // it wearing a name with no way to tell it apart from a real box of
+            // that name. The tab bar already marks the active tab with the
+            // accent colour and an underline.
             graphics.DrawString(
-                string.IsNullOrWhiteSpace(displayedTitle) ? geometry.Box.Title : displayedTitle,
+                geometry.Box.Title,
                 titleFont, titleBrush,
                 titleBounds,
                 titleFormat);
@@ -1305,14 +1326,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         try
         {
             return new Font(
-                string.IsNullOrWhiteSpace(familyName) ? "Segoe UI" : familyName,
+                string.IsNullOrWhiteSpace(familyName) ? BoxAppearance.DefaultFontFamily : familyName,
                 size,
                 style,
                 unit);
         }
         catch (ArgumentException)
         {
-            return new Font("Segoe UI", size, style, unit);
+            return new Font(BoxAppearance.DefaultFontFamily, size, style, unit);
         }
     }
 

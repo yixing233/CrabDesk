@@ -39,6 +39,8 @@ public interface ICrabDeskService
     void OpenConfigDirectory();
     int ClearThumbnailCache();
     string GetDesktopHostDiagnosticsText();
+    Task<DesktopStallReport> RunDesktopStallDiagnosticsAsync(CancellationToken cancellationToken = default);
+    string FormatDesktopStallReport(DesktopStallReport report);
     Task<LayoutResetResult> ResetLayoutAsync();
     DesktopBox AddBox(string title = "新盒子");
     Task<DesktopBox> AddMappedFolderBoxAsync(string path, bool isReadOnly = false);
@@ -82,7 +84,8 @@ public interface ICrabDeskService
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null);
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+        IProgress<AiClassificationActivity>? activityProgress = null);
     Task<AiClassificationPreview> PreviewAiClassificationAsync(
         long expectedWorkspaceRevision,
         IReadOnlyCollection<string> selectedItemKeys,
@@ -92,7 +95,8 @@ public interface ICrabDeskService
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null);
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+        IProgress<AiClassificationActivity>? activityProgress = null);
     Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default);
@@ -110,6 +114,9 @@ public interface ICrabDeskService
     void SetCornerRadius(double value);
     void SetAcrylicBoxes(bool enabled);
     void SetShowBoxBorder(bool enabled);
+    void SetBoxBorderWidth(double value);
+    void SetBoxBorderColor(string value);
+    void SetBoxBorderOpacity(double value);
     void SetShowResizeGrip(bool enabled);
     void SetShowBoxScrollBar(bool enabled);
     void SetHoverFeedback(bool enabled);

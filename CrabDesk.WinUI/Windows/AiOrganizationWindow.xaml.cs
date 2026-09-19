@@ -32,7 +32,7 @@ public sealed partial class AiOrganizationWindow : Window
         InitializeComponent();
         Title = "AI 整理 - CrabDesk";
         AppWindow.IsShownInSwitchers = true;
-        ConfigureWindowIcon();
+        WindowIcon.Apply(this);
         InstallMinimumSizeTracking();
         AppWindow.Changed += AppWindow_OnChanged;
 
@@ -121,15 +121,6 @@ public sealed partial class AiOrganizationWindow : Window
         RootGrid.Loaded -= RootGrid_OnLoaded;
         WorkbenchHost.Content = null;
         _viewModel.Dispose();
-    }
-
-    private void ConfigureWindowIcon()
-    {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "CrabDesk.ico");
-        if (File.Exists(iconPath))
-        {
-            AppWindow.SetIcon(iconPath);
-        }
     }
 
     private void AppWindow_OnChanged(AppWindow sender, AppWindowChangedEventArgs args)

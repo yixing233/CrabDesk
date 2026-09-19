@@ -115,7 +115,7 @@ function Save-WindowCapture([IntPtr]$Handle, [string]$Path) {
 
 $previousDataDirectory = $env:CRABDESK_DATA_DIR
 $env:CRABDESK_DATA_DIR = $dataDirectory
-$pages = @("general", "hotkeys", "backup", "organization", "appearance", "boxes", "about")
+$pages = @("general", "hotkeys", "backup", "organization", "appearance", "boxes", "diagnostics", "about")
 $themes = @("System", "Light", "Dark")
 $manifest = @()
 try {

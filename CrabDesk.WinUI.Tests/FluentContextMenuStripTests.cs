@@ -91,6 +91,51 @@ public sealed class FluentContextMenuStripTests
     }
 
     [Fact]
+    public void RoundedCornersDoNotCreateAHandleForAClosedMenu()
+    {
+        using var menu = new FluentToolStripDropDownMenu();
+        menu.Items.Add("子项");
+        menu.PerformLayout();
+
+        // The root theme pass visits every submenu; reading Handle here used
+        // to create one native window per submenu on every open.
+        FluentMenuRenderer.ApplyRoundedCorners(menu);
+
+        Assert.False(menu.IsHandleCreated);
+    }
+
+    [Fact]
+    public void MenuIconDrawsIdenticallyFromTheGlyphCache()
+    {
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "lucide.ttf")));
+
+        var first = RenderIcon(LucideRuntimeIcon.Trash2);
+        var second = RenderIcon(LucideRuntimeIcon.Trash2);
+
+        Assert.Contains(first, pixel => ((pixel >> 24) & 0xFF) != 0);
+        Assert.Equal(first, second);
+    }
+
+    private static int[] RenderIcon(LucideRuntimeIcon icon)
+    {
+        using var bitmap = new Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            LucideRuntimeIcons.Draw(graphics, icon, new RectangleF(4, 4, 24, 24), Color.Black, 24);
+        }
+
+        var pixels = new int[bitmap.Width * bitmap.Height];
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                pixels[y * bitmap.Width + x] = bitmap.GetPixel(x, y).ToArgb();
+            }
+        }
+        return pixels;
+    }
+
+    [Fact]
     public void BoxAccentIsLiftedWhenItHasLowContrastAgainstBackground()
     {
         var background = Color.FromArgb(42, 70, 72);

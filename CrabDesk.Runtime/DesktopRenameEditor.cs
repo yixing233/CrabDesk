@@ -1,4 +1,5 @@
 using System.Drawing;
+using CrabDesk.Core;
 using Forms = System.Windows.Forms;
 
 namespace CrabDesk.Runtime;
@@ -94,7 +95,11 @@ internal sealed class DesktopRenameEditor : Forms.Form
         BackColor = isDarkTheme ? Color.FromArgb(102, 102, 102) : Color.FromArgb(150, 150, 150);
         _input.BackColor = isDarkTheme ? Color.FromArgb(50, 50, 50) : Color.White;
         _input.ForeColor = isDarkTheme ? Color.FromArgb(245, 245, 245) : Color.FromArgb(31, 31, 31);
-        _input.Font = labelFont ?? new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
+        _input.Font = labelFont ?? new Font(
+            BoxAppearance.DefaultFontFamily,
+            9F,
+            FontStyle.Regular,
+            GraphicsUnit.Point);
         _input.Multiline = wordWrap;
         _input.WordWrap = wordWrap;
         // The caller already converts the label's DIP geometry to monitor

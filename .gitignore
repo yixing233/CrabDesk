@@ -43,3 +43,11 @@ Backups/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Local scratch that must never reach the repository.
+# %SystemDrive% is created when a script fails to expand the environment
+# variable, and the .backup file is another desktop tool's binary state.
+%SystemDrive%/
+*.backup
+.todo/
+.zcode/

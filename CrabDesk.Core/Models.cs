@@ -135,16 +135,23 @@ public readonly record struct LayoutRect(double X, double Y, double Width, doubl
 
 public sealed class BoxAppearance
 {
+    /// <summary>
+    /// The font every box text falls back to. Microsoft YaHei UI ships with
+    /// Windows and renders Chinese glyphs natively, so titles and labels no
+    /// longer depend on Segoe UI's font fallback to borrow them.
+    /// </summary>
+    public const string DefaultFontFamily = "Microsoft YaHei UI";
+
     public string Background { get; set; } = "#FF2A2D32";
     public string Accent { get; set; } = "#FF4EA1D3";
     public double Opacity { get; set; } = 1;
     public double IconSize { get; set; } = 42;
-    public string LabelFontFamily { get; set; } = "Segoe UI";
+    public string LabelFontFamily { get; set; } = DefaultFontFamily;
     public double LabelFontSize { get; set; } = 8.5;
     public bool ShowItemLabels { get; set; } = true;
     public double TitleBarHeight { get; set; } = 38;
     public string TitleColor { get; set; } = "Auto";
-    public string TitleFontFamily { get; set; } = "Segoe UI";
+    public string TitleFontFamily { get; set; } = DefaultFontFamily;
     public double TitleFontSize { get; set; } = 10;
     public bool TitleFontBold { get; set; } = true;
 }
@@ -283,6 +290,61 @@ public sealed record DesktopHostDiagnostics(
     IReadOnlyList<string> Monitors);
 
 public sealed record LayoutResetResult(LayoutBackupInfo Backup, int DisabledRuleCount);
+
+/// <summary>
+/// Who is responsible for a measured desktop stall.
+/// </summary>
+public enum DesktopStallVerdict
+{
+    /// <summary>The desktop thread answered promptly; nothing stalled.</summary>
+    NoStall,
+
+    /// <summary>
+    /// The desktop folder stalls but CrabDesk's own surface does not, so the
+    /// desktop namespace's third-party shell extensions are doing it.
+    /// </summary>
+    ThirdPartyShellExtensions,
+
+    /// <summary>
+    /// Explorer and CrabDesk stalled together, which means CrabDesk's input
+    /// queue is attached to Explorer's desktop thread again.
+    /// </summary>
+    CrabDeskBlocked,
+
+    /// <summary>No desktop, or the measurement failed; nothing can be attributed.</summary>
+    Inconclusive
+}
+
+public enum ShellExtensionKind
+{
+    /// <summary>A handler registered under ShellIconOverlayIdentifiers.</summary>
+    IconOverlay,
+
+    /// <summary>A non-Microsoft DLL loaded inside the desktop's explorer.exe.</summary>
+    LoadedModule
+}
+
+public sealed record ShellExtensionEntry(
+    string Name,
+    ShellExtensionKind Kind,
+    string Product,
+    string Path);
+
+/// <summary>
+/// Result of the desktop stall attribution measurement. Latency fields hold
+/// <see cref="CrabDesk.Core.DesktopStallAnalysis.NotMeasured"/> when the step
+/// could not run.
+/// </summary>
+public sealed record DesktopStallReport(
+    DateTimeOffset CapturedAt,
+    bool DesktopFound,
+    int IdleBaselineMs,
+    int OrdinaryFolderMs,
+    int DesktopFolderMs,
+    int CrabDeskSurfaceMs,
+    DesktopStallVerdict Verdict,
+    IReadOnlyList<ShellExtensionEntry> Extensions,
+    IReadOnlyList<string> Notes);
 
 public sealed record AiClassificationAssignment(string ItemKey, string ItemName, string Label);
 
@@ -611,6 +673,11 @@ public sealed class GlobalAppearanceSettings
     public bool UseAcrylicBoxes { get; set; }
     public double CornerRadius { get; set; } = 8;
     public bool ShowBorder { get; set; } = true;
+    // "Auto" derives the outline from each box's own background; any other
+    // value is a #RRGGBB/#AARRGGBB color used as-is.
+    public double BorderWidth { get; set; } = 1;
+    public string BorderColor { get; set; } = "Auto";
+    public double BorderOpacity { get; set; } = 40;
     public bool ShowResizeGrip { get; set; } = true;
     public bool ShowBoxScrollBar { get; set; } = true;
     public double IconHorizontalSpacing { get; set; } = 76;
@@ -618,10 +685,12 @@ public sealed class GlobalAppearanceSettings
     public string SelectionColor { get; set; } = "#FF4A5BB1";
     public bool HoverFeedback { get; set; } = true;
     public bool AnimationEnabled { get; set; } = true;
-    // Empty family/zero size keeps the system icon-title font; set both to
-    // override the desktop item label appearance.
-    public string IconLabelFontFamily { get; set; } = string.Empty;
-    public double IconLabelFontSize { get; set; }
+    // A concrete family and size keep the desktop labels on Microsoft YaHei UI
+    // like the rest of the box text. Both must be set: the renderer only honours
+    // the override when the family is non-empty AND the size is above zero, so
+    // changing the family alone would leave the system icon font in place.
+    public string IconLabelFontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
+    public double IconLabelFontSize { get; set; } = 9;
 }
 
 public sealed class BackupSettings
@@ -657,7 +726,7 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 21;
+    public int SchemaVersion { get; set; } = 22;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);

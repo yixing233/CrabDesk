@@ -16,9 +16,15 @@ internal static class DiagnosticLog
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CrabDesk",
         "logs",
-        "crabdesk.log");
+        $"crabdesk-{Environment.ProcessId}-{DateTime.Now:yyyyMMdd-HHmmss-fff}.log");
 
-    internal static void Initialize() => _ = Writer.Value;
+    internal static void Initialize()
+    {
+        _ = Writer.Value;
+        Info($"Diagnostic session started pid={Environment.ProcessId} path={LogPath} " +
+            $"base={AppContext.BaseDirectory} command={Environment.ProcessPath}");
+        Flush(TimeSpan.FromSeconds(2));
+    }
 
     internal static void Info(string message) => Write("INFO", message, null);
 
@@ -69,7 +75,9 @@ internal static class DiagnosticLog
             .Append(DateTimeOffset.Now.ToString("O"))
             .Append(" [")
             .Append(level)
-            .Append("] [T")
+            .Append("] [P")
+            .Append(Environment.ProcessId)
+            .Append(" T")
             .Append(Environment.CurrentManagedThreadId)
             .Append("] ")
             .Append(message);

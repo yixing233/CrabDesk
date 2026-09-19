@@ -427,9 +427,20 @@ public static class FileClipboardCodec
         var normalized = paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var data = new DataObject();
         data.SetData(DataFormats.FileDrop, normalized);
+        WritePreferredDropEffect(data, move);
+        return data;
+    }
+
+    /// <summary>
+    /// Tells the shell which operation to default to for this payload. Explorer
+    /// consults it for drags as well as pastes; without it a FileDrop dragged
+    /// across volumes defaults to Copy even when the source advertises Move.
+    /// </summary>
+    public static void WritePreferredDropEffect(DataObject data, bool move)
+    {
+        ArgumentNullException.ThrowIfNull(data);
         var effect = BitConverter.GetBytes(move ? DropEffectMove : DropEffectCopy);
         data.SetData(PreferredDropEffect, new MemoryStream(effect, writable: false));
-        return data;
     }
 
     public static FileClipboardContent Read(ClipboardDataObject? data)

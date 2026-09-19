@@ -86,7 +86,7 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 21;
+        state.SchemaVersion = 22;
         state.Settings ??= new AppSettings();
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
@@ -138,6 +138,12 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.Backup.IntervalHours = Math.Clamp(state.Settings.Backup.IntervalHours, 1, 8760);
         state.Settings.Backup.RetentionDays = Math.Clamp(state.Settings.Backup.RetentionDays, 1, 365);
         state.Settings.Appearance.CornerRadius = Math.Clamp(state.Settings.Appearance.CornerRadius, 0, 20);
+        state.Settings.Appearance.BorderWidth = Math.Clamp(state.Settings.Appearance.BorderWidth, 1, 6);
+        state.Settings.Appearance.BorderOpacity = Math.Clamp(state.Settings.Appearance.BorderOpacity, 0, 100);
+        if (string.IsNullOrWhiteSpace(state.Settings.Appearance.BorderColor))
+        {
+            state.Settings.Appearance.BorderColor = "Auto";
+        }
         if (previousVersion < 18)
         {
             if (Math.Abs(state.Settings.Appearance.IconHorizontalSpacing - 82) < 0.001)
@@ -162,6 +168,30 @@ public sealed class JsonLayoutStore : ILayoutStore
             state.Settings.Appearance.SelectionColor = "#FF4A5BB1";
         }
         state.Boxes ??= [];
+        // The box text default moved from Segoe UI to Microsoft YaHei UI. An
+        // existing install stores the old default explicitly, so without this
+        // migration the font change would only ever reach fresh installs.
+        // Only the exact old default is rewritten; a deliberately chosen font
+        // stays as it is.
+        if (previousVersion < 22)
+        {
+            if (IsLegacyDefaultFont(state.Settings.Appearance.IconLabelFontFamily))
+            {
+                state.Settings.Appearance.IconLabelFontFamily = BoxAppearance.DefaultFontFamily;
+            }
+            foreach (var box in state.Boxes)
+            {
+                box.Appearance ??= new BoxAppearance();
+                if (IsLegacyDefaultFont(box.Appearance.TitleFontFamily))
+                {
+                    box.Appearance.TitleFontFamily = BoxAppearance.DefaultFontFamily;
+                }
+                if (IsLegacyDefaultFont(box.Appearance.LabelFontFamily))
+                {
+                    box.Appearance.LabelFontFamily = BoxAppearance.DefaultFontFamily;
+                }
+            }
+        }
         state.Assignments = new Dictionary<string, Guid>(state.Assignments ?? [], StringComparer.OrdinalIgnoreCase);
         state.DesktopIconPositions = new Dictionary<string, DesktopIconPlacement>(
             state.DesktopIconPositions ?? [],
@@ -450,7 +480,12 @@ public sealed class JsonLayoutStore : ILayoutStore
     }
 
     private static string NormalizeFontFamily(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "Segoe UI" : value.Trim();
+        string.IsNullOrWhiteSpace(value) ? BoxAppearance.DefaultFontFamily : value.Trim();
+
+    // The pre-migration default. Compared case-insensitively so a hand-edited
+    // state file still migrates.
+    private static bool IsLegacyDefaultFont(string? value) =>
+        string.Equals(value?.Trim(), "Segoe UI", StringComparison.OrdinalIgnoreCase);
 
     private static void NormalizeHotkey(HotkeyBinding binding, HotkeyKey defaultKey)
     {

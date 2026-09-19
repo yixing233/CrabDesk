@@ -59,6 +59,7 @@ internal static class LucideRuntimeIcons
     private static PrivateFontCollection? _fontCollection;
     private static FontFamily? _drawingFontFamily;
     private static readonly Dictionary<int, Font> DrawingFonts = [];
+    private static readonly Dictionary<(LucideRuntimeIcon Icon, int FontSizeHundredths), GraphicsPath> GlyphPaths = [];
     private static WpfMedia.FontFamily? _wpfFontFamily;
     private static bool _fontLoadAttempted;
 
@@ -122,8 +123,13 @@ internal static class LucideRuntimeIcons
         var font = GetDrawingFont(AlignEmSizeToPhysicalPixels(
             emSize,
             GetGraphicsScale(graphics)));
-        var glyph = GetGlyph(icon);
-        if (font is null || glyph.Length == 0 || bounds.Width <= 0 || bounds.Height <= 0)
+        if (font is null || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        using var path = GetGlyphPath(icon, font);
+        if (path is null)
         {
             return;
         }
@@ -136,47 +142,72 @@ internal static class LucideRuntimeIcons
             graphics.CompositingQuality = CompositingQuality.HighQuality;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            using var path = new GraphicsPath();
-            using var format = new StringFormat(StringFormat.GenericTypographic)
-            {
-                Alignment = StringAlignment.Center,
-                LineAlignment = StringAlignment.Center,
-                FormatFlags = StringFormatFlags.NoClip
-            };
-            path.AddString(
-                glyph,
-                font.FontFamily,
-                (int)font.Style,
-                font.Size,
-                PointF.Empty,
-                format);
+            using var translation = new Matrix();
+            translation.Translate(
+                bounds.Left + bounds.Width / 2f,
+                bounds.Top + bounds.Height / 2f,
+                MatrixOrder.Append);
+            path.Transform(translation);
 
             // Fill the glyph outline as a vector path instead of asking GDI+
             // to rasterize text directly. This keeps Lucide's thin strokes
             // smooth at the small title-bar sizes used by the box actions.
-            var glyphBounds = path.GetBounds();
-            if (!glyphBounds.IsEmpty)
-            {
-                var glyphCenter = new PointF(
-                    glyphBounds.Left + glyphBounds.Width / 2f,
-                    glyphBounds.Top + glyphBounds.Height / 2f);
-                var targetCenter = new PointF(
-                    bounds.Left + bounds.Width / 2f,
-                    bounds.Top + bounds.Height / 2f);
-                using var translation = new Matrix();
-                translation.Translate(
-                    targetCenter.X - glyphCenter.X,
-                    targetCenter.Y - glyphCenter.Y,
-                    MatrixOrder.Append);
-                path.Transform(translation);
-
-                using var brush = new SolidBrush(color);
-                graphics.FillPath(brush, path);
-            }
+            using var brush = new SolidBrush(color);
+            graphics.FillPath(brush, path);
         }
         finally
         {
             graphics.Restore(state);
+        }
+    }
+
+    // Extracting a glyph outline from the font is the expensive part of an
+    // icon draw, and a menu repaints the same icons on every hover change.
+    // Keep one outline per icon and size, centred on the origin, and hand
+    // out clones for callers to position.
+    private static GraphicsPath? GetGlyphPath(LucideRuntimeIcon icon, Font font)
+    {
+        var glyph = GetGlyph(icon);
+        if (glyph.Length == 0)
+        {
+            return null;
+        }
+
+        var key = (icon, (int)Math.Round(font.Size * 100f));
+        lock (FontSync)
+        {
+            if (!GlyphPaths.TryGetValue(key, out var path))
+            {
+                path = new GraphicsPath();
+                using var format = new StringFormat(StringFormat.GenericTypographic)
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center,
+                    FormatFlags = StringFormatFlags.NoClip
+                };
+                path.AddString(
+                    glyph,
+                    font.FontFamily,
+                    (int)font.Style,
+                    font.Size,
+                    PointF.Empty,
+                    format);
+                var glyphBounds = path.GetBounds();
+                if (glyphBounds.IsEmpty)
+                {
+                    path.Dispose();
+                    return null;
+                }
+
+                using var centre = new Matrix();
+                centre.Translate(
+                    -(glyphBounds.Left + glyphBounds.Width / 2f),
+                    -(glyphBounds.Top + glyphBounds.Height / 2f),
+                    MatrixOrder.Append);
+                path.Transform(centre);
+                GlyphPaths[key] = path;
+            }
+            return (GraphicsPath)path.Clone();
         }
     }
 

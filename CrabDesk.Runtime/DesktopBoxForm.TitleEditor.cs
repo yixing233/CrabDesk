@@ -193,16 +193,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private static string ResolveTitleEditorFontFamily(string? configuredFamily, string title)
     {
-        // GDI+ resolves Chinese glyphs in Segoe UI through Microsoft YaHei.
-        // WPF otherwise picks the UI fallback, whose metrics and strokes differ
-        // visibly from the title that the editor replaces.
+        // An explicit Segoe UI pick still needs this: GDI+ resolves Chinese
+        // glyphs in Segoe UI through Microsoft YaHei, while WPF otherwise picks
+        // the UI fallback, whose metrics and strokes differ visibly from the
+        // title that the editor replaces. The default family now renders
+        // Chinese natively, so it needs no such substitution.
         if (string.Equals(configuredFamily, "Segoe UI", StringComparison.OrdinalIgnoreCase) &&
             title.Any(character => character is >= '\u3400' and <= '\u9FFF'))
         {
             return "Microsoft YaHei";
         }
 
-        return string.IsNullOrWhiteSpace(configuredFamily) ? "Segoe UI" : configuredFamily;
+        return string.IsNullOrWhiteSpace(configuredFamily)
+            ? BoxAppearance.DefaultFontFamily
+            : configuredFamily;
     }
 
     private void ResetTitleEditorHighlight()

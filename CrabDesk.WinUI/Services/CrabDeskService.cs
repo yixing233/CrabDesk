@@ -53,6 +53,10 @@ public sealed class CrabDeskService : ICrabDeskService
     public void OpenConfigDirectory() => _runtime.OpenConfigDirectory();
     public int ClearThumbnailCache() => _runtime.ClearThumbnailCache();
     public string GetDesktopHostDiagnosticsText() => _runtime.GetDesktopHostDiagnosticsText();
+    public Task<DesktopStallReport> RunDesktopStallDiagnosticsAsync(CancellationToken cancellationToken = default) =>
+        _runtime.RunDesktopStallDiagnosticsAsync(cancellationToken);
+    public string FormatDesktopStallReport(DesktopStallReport report) =>
+        CrabDeskRuntime.FormatDesktopStallReport(report);
     public Task<LayoutResetResult> ResetLayoutAsync() => _runtime.ResetLayoutAsync();
     public DesktopBox AddBox(string title = "新盒子") => _runtime.AddBox(title);
     public Task<DesktopBox> AddMappedFolderBoxAsync(string path, bool isReadOnly = false) => _runtime.AddMappedFolderBoxAsync(path, isReadOnly);
@@ -107,9 +111,10 @@ public sealed class CrabDeskService : ICrabDeskService
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+         IProgress<AiClassificationActivity>? activityProgress = null) =>
         _runtime.PreviewAiClassificationAsync(
-            progress, cancellationToken, modelOutput, modelStream, usageProgress, transportProgress, webSearchProgress);
+            progress, cancellationToken, modelOutput, modelStream, usageProgress, transportProgress, webSearchProgress, activityProgress);
     public Task<AiClassificationPreview> PreviewAiClassificationAsync(
         long expectedWorkspaceRevision,
         IReadOnlyCollection<string> selectedItemKeys,
@@ -119,7 +124,8 @@ public sealed class CrabDeskService : ICrabDeskService
         IProgress<AiClassificationModelStreamUpdate>? modelStream = null,
         IProgress<AiClassificationUsageProgress>? usageProgress = null,
         IProgress<AiClassificationTransportProgress>? transportProgress = null,
-        IProgress<AiWebSearchProgress>? webSearchProgress = null) =>
+        IProgress<AiWebSearchProgress>? webSearchProgress = null,
+         IProgress<AiClassificationActivity>? activityProgress = null) =>
         _runtime.PreviewAiClassificationAsync(
             expectedWorkspaceRevision,
             selectedItemKeys,
@@ -129,7 +135,7 @@ public sealed class CrabDeskService : ICrabDeskService
             modelStream,
             usageProgress,
             transportProgress,
-            webSearchProgress);
+            webSearchProgress, activityProgress);
     public Task<AiClassificationApplyResult> ApplyAiClassificationPreviewAsync(
         AiClassificationPreview preview,
         CancellationToken cancellationToken = default) =>
@@ -148,6 +154,9 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetCornerRadius(double value) => _runtime.SetCornerRadius(value);
     public void SetAcrylicBoxes(bool enabled) => _runtime.SetAcrylicBoxes(enabled);
     public void SetShowBoxBorder(bool enabled) => _runtime.SetShowBoxBorder(enabled);
+    public void SetBoxBorderWidth(double value) => _runtime.SetBoxBorderWidth(value);
+    public void SetBoxBorderColor(string value) => _runtime.SetBoxBorderColor(value);
+    public void SetBoxBorderOpacity(double value) => _runtime.SetBoxBorderOpacity(value);
     public void SetShowResizeGrip(bool enabled) => _runtime.SetShowResizeGrip(enabled);
     public void SetShowBoxScrollBar(bool enabled) => _runtime.SetShowBoxScrollBar(enabled);
     public void SetHoverFeedback(bool enabled) => _runtime.SetHoverFeedback(enabled);

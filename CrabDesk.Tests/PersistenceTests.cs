@@ -43,6 +43,9 @@ public sealed class PersistenceTests : IDisposable
         state.Settings.Appearance.HoverFeedback = false;
         state.Settings.Appearance.ShowBoxScrollBar = false;
         state.Settings.Appearance.AnimationEnabled = false;
+        state.Settings.Appearance.BorderWidth = 4;
+        state.Settings.Appearance.BorderColor = "#FF3B82F6";
+        state.Settings.Appearance.BorderOpacity = 65;
         state.Settings.Updates.CheckOnStartup = false;
         state.Settings.Updates.Channel = UpdateChannel.Preview;
         state.Settings.Updates.CachedETag = "\"release-etag\"";
@@ -89,6 +92,9 @@ public sealed class PersistenceTests : IDisposable
         Assert.False(loaded.Settings.Appearance.HoverFeedback);
         Assert.False(loaded.Settings.Appearance.ShowBoxScrollBar);
         Assert.False(loaded.Settings.Appearance.AnimationEnabled);
+        Assert.Equal(4, loaded.Settings.Appearance.BorderWidth);
+        Assert.Equal("#FF3B82F6", loaded.Settings.Appearance.BorderColor);
+        Assert.Equal(65, loaded.Settings.Appearance.BorderOpacity);
         Assert.False(loaded.Settings.Updates.CheckOnStartup);
         Assert.Equal(UpdateChannel.Preview, loaded.Settings.Updates.Channel);
         Assert.Equal("\"release-etag\"", loaded.Settings.Updates.CachedETag);
@@ -303,7 +309,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Equal(76, loaded.Settings.Appearance.IconHorizontalSpacing);
         Assert.Equal(80, loaded.Settings.Appearance.IconVerticalSpacing);
     }
@@ -329,7 +335,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Equal(
             [primaryBack, primaryFront],
             BoxStacking.OrderBackToFront(loaded.Boxes, "primary").Select(box => box.Id));
@@ -412,7 +418,7 @@ public sealed class PersistenceTests : IDisposable
 
         var fixedBox = loaded.Boxes.Single(box => box.Title == "固定");
         var hoverBox = loaded.Boxes.Single(box => box.Title == "悬停");
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.False(fixedBox.ExpandOnHover);
         Assert.False(fixedBox.IsCollapsed);
         Assert.True(hoverBox.ExpandOnHover);
@@ -434,7 +440,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -457,7 +463,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -482,7 +488,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
     }
@@ -502,7 +508,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
@@ -563,7 +569,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -587,14 +593,134 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(21, loaded.SchemaVersion);
+        Assert.Equal(22, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);
-        Assert.Equal("Segoe UI", appearance.TitleFontFamily);
-        Assert.Equal("Segoe UI", appearance.LabelFontFamily);
+        Assert.Equal(BoxAppearance.DefaultFontFamily, appearance.TitleFontFamily);
+        Assert.Equal(BoxAppearance.DefaultFontFamily, appearance.LabelFontFamily);
         Assert.Equal(8.5, appearance.LabelFontSize);
         Assert.True(appearance.ShowItemLabels);
+    }
+
+    [Fact]
+    public async Task NewStateDefaultsEveryBoxFontToMicrosoftYaHeiUi()
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.LabelFontFamily);
+        Assert.Equal("Microsoft YaHei UI", loaded.Settings.Appearance.IconLabelFontFamily);
+    }
+
+    [Fact]
+    public async Task LegacySegoeUiDefaultMigratesToTheNewFont()
+    {
+        // An existing install stores the old default explicitly. Without the
+        // migration the font change would only ever reach fresh installs.
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 21,
+          "Boxes": [{
+            "Id": "11111111-1111-1111-1111-111111111111",
+            "Title": "旧盒子",
+            "MonitorId": "primary",
+            "Bounds": { "X": 10, "Y": 10, "Width": 300, "Height": 200 },
+            "Appearance": {
+              "Background": "#FF2A2D32",
+              "TitleFontFamily": "Segoe UI",
+              "LabelFontFamily": "Segoe UI"
+            }
+          }],
+          "Settings": { "Appearance": { "IconLabelFontFamily": "Segoe UI" } },
+          "Assignments": {}
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.LabelFontFamily);
+        Assert.Equal("Microsoft YaHei UI", loaded.Settings.Appearance.IconLabelFontFamily);
+    }
+
+    [Fact]
+    public async Task LegacyMigrationLeavesDeliberatelyChosenFontsAlone()
+    {
+        // Only the exact old default is rewritten: a user who picked another
+        // font must keep it, or the migration would silently undo their choice.
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 21,
+          "Boxes": [{
+            "Id": "11111111-1111-1111-1111-111111111111",
+            "Title": "自定义字体",
+            "MonitorId": "primary",
+            "Bounds": { "X": 10, "Y": 10, "Width": 300, "Height": 200 },
+            "Appearance": {
+              "Background": "#FF2A2D32",
+              "TitleFontFamily": "Consolas",
+              "LabelFontFamily": "Microsoft JhengHei UI"
+            }
+          }],
+          "Settings": { "Appearance": { "IconLabelFontFamily": "Arial" } },
+          "Assignments": {}
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal("Consolas", loaded.Boxes[0].Appearance.TitleFontFamily);
+        Assert.Equal("Microsoft JhengHei UI", loaded.Boxes[0].Appearance.LabelFontFamily);
+        Assert.Equal("Arial", loaded.Settings.Appearance.IconLabelFontFamily);
+    }
+
+    [Fact]
+    public async Task LegacyMigrationMatchesTheOldDefaultCaseInsensitively()
+    {
+        // A hand-edited state file may not match the exact casing.
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(Path.Combine(_root, "config.json"), """
+        {
+          "SchemaVersion": 21,
+          "Boxes": [{
+            "Id": "11111111-1111-1111-1111-111111111111",
+            "Title": "小写",
+            "MonitorId": "primary",
+            "Bounds": { "X": 10, "Y": 10, "Width": 300, "Height": 200 },
+            "Appearance": { "Background": "#FF2A2D32", "TitleFontFamily": "segoe ui" }
+          }],
+          "Assignments": {}
+        }
+        """);
+
+        var loaded = await new JsonLayoutStore(_root).LoadAsync();
+
+        Assert.Equal("Microsoft YaHei UI", loaded.Boxes[0].Appearance.TitleFontFamily);
+    }
+
+    [Fact]
+    public async Task MigrationRunsOnlyOnceSoALaterSegoeUiPickSurvives()
+    {
+        // After the schema has advanced, an explicit Segoe UI choice is a real
+        // user decision and must not be rewritten on every subsequent load.
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
+        state.Boxes[0].Appearance.TitleFontFamily = "Segoe UI";
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(22, loaded.SchemaVersion);
+        Assert.Equal("Segoe UI", loaded.Boxes[0].Appearance.TitleFontFamily);
     }
 
     [Theory]
@@ -611,6 +737,57 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await store.LoadAsync();
 
         Assert.Equal(expected, loaded.Boxes[0].Appearance.Opacity);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-4, 1)]
+    [InlineData(99, 6)]
+    [InlineData(3, 3)]
+    public async Task BoxBorderWidthIsClampedWhenStateIsSaved(double width, double expected)
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
+        state.Settings.Appearance.BorderWidth = width;
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(expected, loaded.Settings.Appearance.BorderWidth);
+    }
+
+    [Theory]
+    [InlineData(-20, 0)]
+    [InlineData(240, 100)]
+    [InlineData(65, 65)]
+    public async Task BoxBorderOpacityIsClampedWhenStateIsSaved(double opacity, double expected)
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
+        state.Settings.Appearance.BorderOpacity = opacity;
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(expected, loaded.Settings.Appearance.BorderOpacity);
+    }
+
+    [Fact]
+    public async Task BlankBorderColorFallsBackToAutomatic()
+    {
+        // A missing or blank value must not leave the outline without a color
+        // source; it degrades to the derived stroke.
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState("primary");
+        state.Boxes.Add(new DesktopBox { MonitorId = "primary" });
+        state.Settings.Appearance.BorderColor = "   ";
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal("Auto", loaded.Settings.Appearance.BorderColor);
     }
 
     public void Dispose()

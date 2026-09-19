@@ -372,7 +372,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
         if (message.Msg == WmMouseWheel &&
-            (Forms.Control.ModifierKeys & Forms.Keys.Control) != 0)
+            (DesktopWindowTools.GetAsyncModifierKeys() & Forms.Keys.Control) != 0)
         {
             // The low-level hook already converts Ctrl+wheel over a box into
             // a box-icon zoom. Swallowing the native message here stops
