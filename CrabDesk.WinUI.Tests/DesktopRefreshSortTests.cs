@@ -79,7 +79,7 @@ public sealed class DesktopRefreshSortTests
             "private void RebuildGeometry()",
             "private DesktopIconLayoutSnapshot? GetStoredLayoutPlacement(");
 
-        Assert.Contains("!_runtime.IsDesktopResortPending;", rebuild, StringComparison.Ordinal);
+        Assert.Contains("!_runtime.IsDesktopResortPending &&", rebuild, StringComparison.Ordinal);
 
         // With no stored cells left, every item takes the auto-placement path,
         // which is the one that honours the active sort property.
@@ -97,6 +97,31 @@ public sealed class DesktopRefreshSortTests
             "PersistCurrentLayoutIfNeeded(storedLayout);",
             rebuild[persist..],
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnExplorerReconnectKeepsTheSavedGridWhenAutoArrangeIsTransientlyReported()
+    {
+        var rebuild = ExtractMethod(
+            ReadRuntimeSource("DesktopIconSurface.cs"),
+            "private void RebuildGeometry()",
+            "private DesktopIconLayoutSnapshot? GetStoredLayoutPlacement(");
+
+        Assert.Contains("var hasStoredLayout = _runtime.State.DesktopIconLayout.Count > 0;", rebuild, StringComparison.Ordinal);
+        Assert.Contains("(!desktopViewState.AutoArrange || hasStoredLayout);", rebuild, StringComparison.Ordinal);
+        Assert.Contains(
+            "Explorer can briefly report its default AutoArrange flag",
+            rebuild,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SmallExplorerSpacingCannotCollapseTheReplacementGrid()
+    {
+        var source = ReadRuntimeSource("DesktopIconSurface.cs");
+
+        Assert.Contains("Math.Max(nativeSpacing.Width / scale, DefaultHorizontalSpacing)", source, StringComparison.Ordinal);
+        Assert.Contains("Math.Max(nativeSpacing.Height / scale, DefaultVerticalSpacing)", source, StringComparison.Ordinal);
     }
 
     [Fact]

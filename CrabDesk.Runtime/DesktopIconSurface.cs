@@ -2350,8 +2350,15 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         var gridTopology = new DesktopGridTopology(grid.ColumnCount, grid.RowCount);
         var occupiedCells = new HashSet<GridCell>();
         var placedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var useStoredLayout = !desktopViewState.AutoArrange &&
-            !_runtime.IsDesktopResortPending;
+        // Explorer can briefly report its default AutoArrange flag while its
+        // desktop ListView is being recreated (notably after explorer.exe
+        // restarts). CrabDesk's persisted layout is authoritative while the
+        // replacement layer is active; otherwise the transient flag redraws
+        // every icon into a fresh sorted grid. An explicit Sort/Refresh still
+        // sets IsDesktopResortPending and intentionally bypasses the snapshot.
+        var hasStoredLayout = _runtime.State.DesktopIconLayout.Count > 0;
+        var useStoredLayout = !_runtime.IsDesktopResortPending &&
+            (!desktopViewState.AutoArrange || hasStoredLayout);
         var storedLayout = useStoredLayout
             ? _runtime.State.DesktopIconLayout
             : new Dictionary<string, DesktopIconLayoutSnapshot>(StringComparer.OrdinalIgnoreCase);
@@ -3485,14 +3492,15 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         if (!_dragStarted)
         {
             BeginDesktopDrag(_pressedItem.Key.ToString());
-            // Keep desktop-to-desktop movement on CrabDesk's own pointer state
-            // machine. WinForms DoDragDrop enters the Explorer/OLE modal loop and
-            // was captured blocking the UI for 4+ seconds after a newly dropped
-            // file was moved. External export remains handled by the explicit
-            // desktop drop forwarding path.
-            if (_dragStarted)
+            // Hand desktop items to the shell's OLE drag loop so they can be
+            // dropped on other applications. CrabDesk's own pointer state
+            // machine cannot export anything: only a real DoDragDrop publishes
+            // the FileDrop payload that another process can accept. Desktop-to-
+            // desktop movement still resolves through the same private session,
+            // which the icon surface reads back on drop.
+            if (_dragStarted && TryStartDesktopOleDrag())
             {
-                DiagnosticLog.Info("Desktop icon drag using non-OLE pointer path");
+                return;
             }
         }
         if (!_dragStarted)
@@ -5707,8 +5715,20 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
         var scale = (float)Math.Max(_scale, 0.01d);
         _iconSize = Math.Clamp(nativeIconSize / scale, 16f, 256f);
-        _horizontalSpacing = Math.Clamp(nativeSpacing.Width / scale, _iconSize + 8, 512f);
-        _verticalSpacing = Math.Clamp(nativeSpacing.Height / scale, _iconSize + 30, 512f);
+        // The ListView spacing is a physical-pixel value. After converting it
+        // to DIPs, small-icon Explorer layouts can report values as low as
+        // 70x76, which is too narrow for CrabDesk's replacement labels and
+        // produces the visibly cramped grid after an Explorer reconnect.
+        // Keep the existing CrabDesk baseline as the lower bound while still
+        // honoring larger native spacing and user zoom changes.
+        _horizontalSpacing = Math.Clamp(
+            Math.Max(nativeSpacing.Width / scale, DefaultHorizontalSpacing),
+            _iconSize + 8,
+            512f);
+        _verticalSpacing = Math.Clamp(
+            Math.Max(nativeSpacing.Height / scale, DefaultVerticalSpacing),
+            _iconSize + 30,
+            512f);
     }
 
     private static IOrderedEnumerable<DesktopItemRef> OrderDesktopItems(

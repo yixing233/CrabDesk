@@ -177,6 +177,45 @@ public sealed class DesktopItemReleaseRefreshTests
         Assert.DoesNotContain("RefreshItemsAsync(", reconcileMethod, StringComparison.Ordinal);
     }
 
+    // Dragging a desktop item to another application only works if the icon
+    // surface hands the drag to the shell's OLE loop. CrabDesk's own pointer
+    // state machine never publishes a FileDrop payload, so a drag start that
+    // skips TryStartDesktopOleDrag silently makes every desktop item
+    // undraggable out of the desktop.
+    [Fact]
+    public void StartingADesktopDragHandsOffToTheOleDragLoop()
+    {
+        var solutionDirectory = FindSolutionDirectory();
+        var iconSource = File.ReadAllText(Path.Combine(
+            solutionDirectory,
+            "CrabDesk.Runtime",
+            "DesktopIconSurface.cs"));
+
+        var moveStart = iconSource.IndexOf(
+            "private void OnMouseMove(",
+            StringComparison.Ordinal);
+        var moveEnd = iconSource.IndexOf(
+            "private void OnMouseUp(",
+            Math.Max(0, moveStart),
+            StringComparison.Ordinal);
+        Assert.True(moveStart >= 0);
+        Assert.True(moveEnd > moveStart);
+        var moveMethod = iconSource[moveStart..moveEnd];
+
+        Assert.Contains("BeginDesktopDrag(", moveMethod, StringComparison.Ordinal);
+        Assert.Contains("TryStartDesktopOleDrag()", moveMethod, StringComparison.Ordinal);
+
+        // The OLE call must stay reachable, not merely defined.
+        Assert.Contains(
+            "private bool TryStartDesktopOleDrag()",
+            iconSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "FileClipboardCodec.WritePreferredDropEffect(data, move: true)",
+            iconSource,
+            StringComparison.Ordinal);
+    }
+
     private static string FindSolutionDirectory()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
