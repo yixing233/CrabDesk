@@ -70,7 +70,7 @@ git push origin v20260913.01
 5. `build/build-installer.ps1`（Inno Setup）生成 `CrabDesk-Payload-x64.exe` 并签名
 6. `build/publish-bootstrapper.ps1` 生成 `CrabDesk-Setup-x64.exe` 并签名
 7. 仅当配置了证书：校验 Authenticode 签名、时间戳、证书一致性
-8. 生成 `SHA256SUMS.txt`，创建 GitHub Release，上传 **Setup + SHA256SUMS**，
+8. 生成覆盖两个安装程序的 `SHA256SUMS.txt`，创建 GitHub Release，上传 **Setup + Payload + SHA256SUMS**，
    发布说明取 `docs/releases/v<版本>.md`（不存在则自动生成）
 
 ### 第 3 步：发布后校验
@@ -80,12 +80,12 @@ gh run watch                                    # 盯 workflow
 gh release view v20260913.01                    # 确认资产齐全
 ```
 
-确认资产为三个：`CrabDesk-Setup-x64.exe`、`CrabDesk-Payload-x64.exe`、
-`SHA256SUMS.txt`。若 Payload 缺失（workflow 目前不自动上传），手动补传：
+确认自动上传的三个资产齐全：`CrabDesk-Setup-x64.exe`、`CrabDesk-Payload-x64.exe`、
+`SHA256SUMS.txt`，下载后分别核对两个 exe 的 SHA-256。
 
-```bash
-gh release upload v20260913.01 artifacts/installer/CrabDesk-Payload-x64.exe
-```
+- Setup 是推荐安装入口：内嵌应用负载，并按需下载缺少的运行依赖。
+- Payload 为应用安装负载：供已安装所需运行依赖的环境使用，不负责补装依赖。
+- 附件校验值必须来自同一次发布构建，不混用其他本地构建的安装负载。
 
 ---
 

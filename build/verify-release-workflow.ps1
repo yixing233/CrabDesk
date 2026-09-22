@@ -85,8 +85,20 @@ if ($createReleaseIndex -lt 0) {
     throw "Release workflow does not contain the GitHub Release step."
 }
 $createReleaseBlock = $workflow.Substring($createReleaseIndex)
-if ($createReleaseBlock.IndexOf("CrabDesk-Payload-x64.exe", [System.StringComparison]::Ordinal) -ge 0) {
-    throw "The embedded payload must not be uploaded as a separate GitHub Release asset."
+foreach ($asset in @("CrabDesk-Setup-x64.exe", "CrabDesk-Payload-x64.exe", "SHA256SUMS.txt")) {
+    if ($createReleaseBlock.IndexOf($asset, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Release upload is missing required asset: $asset"
+    }
+}
+$packageIndex = $workflow.IndexOf('- name: Package release assets', [System.StringComparison]::Ordinal)
+if ($packageIndex -lt 0 -or $packageIndex -ge $createReleaseIndex) {
+    throw "Release checksums must be generated before uploading assets."
+}
+$packageBlock = $workflow.Substring($packageIndex, $createReleaseIndex - $packageIndex)
+foreach ($asset in @("CrabDesk-Setup-x64.exe", "CrabDesk-Payload-x64.exe")) {
+    if ($packageBlock.IndexOf($asset, [System.StringComparison]::Ordinal) -lt 0) {
+        throw "Release checksum list is missing required executable: $asset"
+    }
 }
 
-Write-Host "Optional signing, single embedded-payload setup, dependency resolver and release-validator policy passed."
+Write-Host "Optional signing, setup and payload assets, dependency resolver and release-validator policy passed."
