@@ -1,4 +1,4 @@
-﻿using CrabDesk.Core;
+using CrabDesk.Core;
 using CrabDesk.Native;
 using DataFormats = System.Windows.Forms.DataFormats;
 using DataObject = System.Windows.Forms.DataObject;
@@ -123,7 +123,10 @@ public sealed class FileOperationServiceTests : IDisposable
             Kind = DesktopItemKind.Shell
         };
 
-        await new FileOperationService().DeleteAsync([shellItem]);
+        var result = await new FileOperationService().DeleteAsync([shellItem]);
+
+        Assert.Empty(result.Items);
+        Assert.False(result.HasFailures);
     }
 
     [Theory]

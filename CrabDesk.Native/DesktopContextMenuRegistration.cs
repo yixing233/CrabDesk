@@ -118,9 +118,20 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
             normalizedExecutable,
             "--reconnect",
             GetMenuIconPath(iconDirectory, "reconnect.ico", DrawReconnectIcon));
+        // Refresh re-places every icon in Explorer's active sort order. It is
+        // registered here so the command is reachable as an ordinary command
+        // line, which works on every Windows shell build rather than only where
+        // the desktop popup exposes a classic #32768 menu for the input hook.
         WriteCommand(
             submenu,
-            "06Exit",
+            "06Refresh",
+            "\u5237\u65B0\u56FE\u6807",
+            normalizedExecutable,
+            "--refresh-desktop",
+            GetMenuIconPath(iconDirectory, "refresh.ico", DrawRefreshIcon));
+        WriteCommand(
+            submenu,
+            "07Exit",
             "\u9000\u51FA CrabDesk",
             normalizedExecutable,
             "--exit",
@@ -451,6 +462,21 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         if (family != null)
         {
             DrawLucideGlyph(graphics, size, "\uE145", MenuIconColor); // RefreshCw
+        }
+        else
+        {
+            DrawReconnectIconFallback(graphics, new RectangleF(0, 0, size, size));
+        }
+    }
+
+    private static void DrawRefreshIcon(Graphics graphics, int size)
+    {
+        var family = GetLucideFontFamily();
+        if (family != null)
+        {
+            // RefreshCcw reads as "re-run" while the reconnect entry keeps the
+            // clockwise glyph, so the two neighbouring commands stay distinct.
+            DrawLucideGlyph(graphics, size, "\uE144", MenuIconColor); // RefreshCcw
         }
         else
         {

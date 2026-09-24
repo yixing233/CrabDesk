@@ -63,8 +63,6 @@ public interface IDesktopInputMonitor : IDisposable
     event EventHandler? DesktopContextMenuRequested;
     event EventHandler? DesktopContextMenuCommandRequested;
     event EventHandler? DesktopContextMenuRefreshRequested;
-    event EventHandler? DesktopDeleteRequested;
-    event EventHandler? DesktopRenameRequested;
     event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;
     IntPtr DesktopListView { get; set; }
     bool Enabled { get; set; }
@@ -128,7 +126,15 @@ public interface IFileOperationService
     void OpenLocation(DesktopItemRef item);
     void ShowProperties(DesktopItemRef item);
     Task<string> RenameAsync(DesktopItemRef item, string newName, CancellationToken cancellationToken = default);
-    Task DeleteAsync(IEnumerable<DesktopItemRef> items, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends items to the Recycle Bin. Every item is attempted even when an
+    /// earlier one fails, and the result reports each outcome so the caller can
+    /// tell the user which entries were skipped.
+    /// </summary>
+    Task<FileDeleteBatchResult> DeleteAsync(
+        IEnumerable<DesktopItemRef> items,
+        CancellationToken cancellationToken = default);
     Task<FileImportBatchResult> ImportAsync(IEnumerable<string> sourcePaths, string destinationDirectory, bool move, CancellationToken cancellationToken = default);
     void SetClipboardFiles(IEnumerable<DesktopItemRef> items, bool move);
     FileClipboardContent GetClipboardFiles();

@@ -230,6 +230,10 @@ public sealed class DesktopItemRef
     public string? FileSystemPath { get; init; }
     public DesktopItemKind Kind { get; init; }
     public DateTimeOffset? ModifiedAt { get; init; }
+    // Explorer's "Date created" column is System.DateCreated. A desktop item
+    // sorted by creation time needs its own value: DateModified moves whenever
+    // the file is edited, so the two orderings genuinely differ.
+    public DateTimeOffset? CreatedAt { get; init; }
     public bool IsReadOnly { get; init; }
     public bool IsSystem => Kind == DesktopItemKind.Shell;
 }
@@ -523,6 +527,41 @@ public sealed record BoxPasteResult(int AssignedCount, FileImportBatchResult Imp
     public bool HasFailures => ImportResult.HasFailures;
 }
 
+/// <summary>
+/// One item's outcome in a desktop deletion. Deletion is not transactional: a
+/// file held open by another process must not stop the rest of the selection
+/// from being removed, so each item reports its own result.
+/// </summary>
+public sealed record FileDeleteItemResult(
+    string Path,
+    string? ErrorMessage)
+{
+    public bool Succeeded => string.IsNullOrWhiteSpace(ErrorMessage);
+}
+
+public sealed record FileDeleteBatchResult(IReadOnlyList<FileDeleteItemResult> Items)
+{
+    public static FileDeleteBatchResult Empty { get; } = new([]);
+
+    public IReadOnlyList<FileDeleteItemResult> SucceededItems => Items
+        .Where(item => item.Succeeded)
+        .ToArray();
+
+    public IReadOnlyList<FileDeleteItemResult> FailedItems => Items
+        .Where(item => !item.Succeeded)
+        .ToArray();
+
+    // Only the paths that actually reached the Recycle Bin: a failed item still
+    // occupies its desktop cell and must not be reconciled as removed.
+    public IReadOnlyList<string> SucceededPaths => SucceededItems
+        .Select(item => item.Path)
+        .ToArray();
+
+    public int SucceededCount => Items.Count(item => item.Succeeded);
+    public int FailedCount => Items.Count - SucceededCount;
+    public bool HasFailures => FailedCount > 0;
+}
+
 public sealed class AppSettings
 {
     public bool StartWithWindows { get; set; }
@@ -726,12 +765,14 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 22;
+    public int SchemaVersion { get; set; } = 23;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DesktopIconPlacement> DesktopIconPositions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DesktopIconLayoutSnapshot> DesktopIconLayout { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string LastKnownDesktopSortMode { get; set; } = string.Empty;
+    public bool LastKnownDesktopSortDescending { get; set; }
     public OrganizationSettings Organization { get; set; } = new();
     public List<OrganizationRule> OrganizationRules { get; set; } = [];
 

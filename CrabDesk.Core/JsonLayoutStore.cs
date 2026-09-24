@@ -86,8 +86,9 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 22;
+        state.SchemaVersion = 23;
         state.Settings ??= new AppSettings();
+        state.LastKnownDesktopSortMode = state.LastKnownDesktopSortMode?.Trim() ?? string.Empty;
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();

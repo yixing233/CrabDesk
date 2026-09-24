@@ -88,23 +88,52 @@ public sealed class FileOperationService : IFileOperationService
         }, cancellationToken);
     }
 
-    public Task DeleteAsync(IEnumerable<DesktopItemRef> items, CancellationToken cancellationToken = default)
+    public Task<FileDeleteBatchResult> DeleteAsync(
+        IEnumerable<DesktopItemRef> items,
+        CancellationToken cancellationToken = default)
     {
-        var paths = items.Where(item => item.FileSystemPath is not null).Select(item => item.FileSystemPath!).ToArray();
+        var paths = items
+            .Where(item => item.FileSystemPath is not null)
+            .Select(item => item.FileSystemPath!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         return Task.Run(() =>
         {
+            var results = new List<FileDeleteItemResult>(paths.Length);
             foreach (var path in paths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (Directory.Exists(path))
+                try
                 {
-                    FileSystem.DeleteDirectory(path, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                    // A locked or missing item must not abandon the rest of the
+                    // selection, so each path is attempted independently and
+                    // reports its own failure.
+                    if (Directory.Exists(path))
+                    {
+                        FileSystem.DeleteDirectory(path, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                    }
+                    else if (File.Exists(path))
+                    {
+                        FileSystem.DeleteFile(path, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                    }
+                    else
+                    {
+                        // Already gone: a concurrent external delete removed it
+                        // between the selection and this pass. Reporting it as
+                        // removed keeps a stale cell from lingering on screen.
+                    }
+                    results.Add(new FileDeleteItemResult(path, null));
                 }
-                else if (File.Exists(path))
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    FileSystem.DeleteFile(path, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    results.Add(new FileDeleteItemResult(path, exception.Message));
                 }
             }
+            return new FileDeleteBatchResult(results);
         }, cancellationToken);
     }
 

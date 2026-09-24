@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CrabDesk.WinUI.Tests" />
+    <InternalsVisibleTo Include="CrabDesk.Tests" />
   </ItemGroup>
 
 </Project>

@@ -7,7 +7,8 @@ public enum DesktopIconSortMode
     Name,
     Size,
     Type,
-    Modified
+    Modified,
+    Created
 }
 
 /// <summary>
@@ -26,7 +27,9 @@ public readonly record struct DesktopIconViewState(
     int? IconSize,
     bool DesktopIconsVisible,
     bool AutoArrange,
-    string Signature);
+    string Signature,
+    bool HasAuthoritativeSort = false,
+    bool HasLiveSortColumns = false);
 
 /// <summary>
 /// Reads the Windows desktop icon-size preference and forwards an explicit
@@ -67,11 +70,34 @@ public static class DesktopIconPositionService
         var state = ReadDesktopViewState();
         lock (ShellReadCacheGate)
         {
+            if (_hasCachedViewState)
+            {
+                state = PreserveLastKnownSortWhenSnapshotHasNoLiveSort(
+                    state,
+                    _cachedViewState);
+            }
             _cachedViewState = state;
             _hasCachedViewState = true;
         }
         return state;
     }
+
+    /// <summary>
+    /// A concurrent COM read can finish late with empty or unrecognized
+    /// SortColumns after another reader has already published a valid sort.
+    /// Such a snapshot may update the other view fields, but cannot downgrade
+    /// the shared last-known sort.
+    /// </summary>
+    internal static DesktopIconViewState PreserveLastKnownSortWhenSnapshotHasNoLiveSort(
+        DesktopIconViewState snapshot,
+        DesktopIconViewState cached) =>
+        snapshot.HasLiveSortColumns || !cached.HasAuthoritativeSort
+            ? snapshot
+            : snapshot with
+            {
+                Sort = cached.Sort,
+                HasAuthoritativeSort = true
+            };
 
     /// <summary>
     /// Returns the last desktop view published by a live reader. Rendering
@@ -121,7 +147,13 @@ public static class DesktopIconPositionService
     {
         if (TryReadExplorerDesktopView(out var explorerView))
         {
-            var sort = DecodeDesktopSortColumns(explorerView.SortColumns);
+            // Explorer can transiently return empty or unknown SortColumns while
+            // applying a desktop change. Keep the last known order, but do not
+            // mistake that fallback for a fresh authoritative sort command.
+            var fallback = GetLastKnownDesktopSortState();
+            var hasLiveSort = TryDecodeDesktopSortColumns(explorerView.SortColumns, out var liveSort);
+            var sort = hasLiveSort ? liveSort : fallback.Sort;
+            var hasAuthoritativeSort = hasLiveSort || fallback.HasAuthoritativeSort;
             var iconSize = explorerView.IconSize is { } size and > 0
                 ? Math.Clamp(size, 16, 256)
                 : GetPersistedDesktopIconSize();
@@ -133,31 +165,56 @@ public static class DesktopIconPositionService
             var signature = $"shell:{explorerView.SortColumns.Trim()}|" +
                 $"size:{iconSize?.ToString() ?? string.Empty}|" +
                 $"flags:{explorerView.FolderFlags?.ToString("X8") ?? "unknown"}";
-            return new DesktopIconViewState(sort, iconSize, iconsVisible, autoArrange, signature);
+            return new DesktopIconViewState(
+                sort,
+                iconSize,
+                iconsVisible,
+                autoArrange,
+                signature,
+                hasAuthoritativeSort,
+                hasLiveSort);
         }
 
         return ReadPersistedDesktopViewState();
     }
 
+    private static (DesktopIconSortState Sort, bool HasAuthoritativeSort) GetLastKnownDesktopSortState()
+    {
+        lock (ShellReadCacheGate)
+        {
+            if (_hasCachedViewState)
+            {
+                return (_cachedViewState.Sort, _cachedViewState.HasAuthoritativeSort);
+            }
+        }
+
+        var persistedValue = GetDesktopSortValue();
+        var isKnown = TryDecodePersistedDesktopSortMode(persistedValue, out var mode);
+        return (new DesktopIconSortState(mode, false), isKnown);
+    }
+
     private static DesktopIconViewState ReadPersistedDesktopViewState()
     {
         var persistedSort = GetDesktopSortValue();
+        var hasAuthoritativeSort = TryDecodePersistedDesktopSortMode(persistedSort, out var mode);
         var persistedIconSize = GetPersistedDesktopIconSize();
         return new DesktopIconViewState(
-            new DesktopIconSortState(DecodeDesktopSortMode(persistedSort), false),
+            new DesktopIconSortState(mode, false),
             persistedIconSize,
             true,
             false,
             $"registry:{(persistedSort is { Length: > 0 } ? Convert.ToHexString(persistedSort) : string.Empty)}|" +
-            $"size:{persistedIconSize?.ToString() ?? string.Empty}");
+            $"size:{persistedIconSize?.ToString() ?? string.Empty}",
+            hasAuthoritativeSort);
     }
 
     public static int? GetDesktopIconSize() => GetDesktopViewState().IconSize;
 
     /// <summary>
-    /// Decodes Explorer's persisted desktop sort property.  The shell stores
-    /// its property key as a binary REG value; an all-zero key represents the
-    /// default Name ordering.
+    /// Decodes Explorer's persisted desktop sort property. The shell stores
+    /// its property key as a binary REG value. A zero-filled value is treated
+    /// as the Name fallback by the decoder, but is not an authoritative sort
+    /// selection when Explorer's live SortColumns is temporarily unavailable.
     /// </summary>
     public static DesktopIconSortMode GetDesktopSortMode()
     {
@@ -178,18 +235,60 @@ public static class DesktopIconPositionService
 
     public static DesktopIconSortMode DecodeDesktopSortMode(byte[]? value)
     {
-        if (value is null || value.Length == 0)
+        TryDecodePersistedDesktopSortMode(value, out var mode);
+        return mode;
+    }
+
+    internal static bool TryDecodePersistedDesktopSortMode(
+        byte[]? value,
+        out DesktopIconSortMode mode)
+    {
+        mode = DesktopIconSortMode.Name;
+        if (value is null || value.Length < 20)
         {
-            return DesktopIconSortMode.Name;
+            return false;
         }
 
-        return ContainsPropertyKey(value, ShellItemPropertyFormat, 12)
-            ? DesktopIconSortMode.Size
-            : ContainsPropertyKey(value, ShellItemPropertyFormat, 4)
-                ? DesktopIconSortMode.Type
-                : ContainsPropertyKey(value, ShellDatePropertyFormat, 14)
-                    ? DesktopIconSortMode.Modified
-                    : DesktopIconSortMode.Name;
+        // An all-zero registry value is only a fallback/default representation,
+        // not proof that Name is the active order. In particular, Explorer can
+        // transiently expose empty SortColumns while applying a drag or view
+        // change; treating zeroes as authoritative would replace a known
+        // Created-time order with A-Z. Explicit ItemNameDisplay is authoritative.
+        if (value.All(static item => item == 0))
+        {
+            return false;
+        }
+        if (ContainsPropertyKey(value, ShellItemPropertyFormat, 10))
+        {
+            return true;
+        }
+
+        // PKEY_DateCreated (15) and PKEY_DateModified (14) use the Shell item
+        // property format. Keep the legacy date-property format checks too for
+        // older Bags values, but prefer the current property keys.
+        if (ContainsPropertyKey(value, ShellItemPropertyFormat, 12))
+        {
+            mode = DesktopIconSortMode.Size;
+            return true;
+        }
+        if (ContainsPropertyKey(value, ShellItemPropertyFormat, 4))
+        {
+            mode = DesktopIconSortMode.Type;
+            return true;
+        }
+        if (ContainsPropertyKey(value, ShellItemPropertyFormat, 15))
+        {
+            mode = DesktopIconSortMode.Created;
+            return true;
+        }
+        if (ContainsPropertyKey(value, ShellItemPropertyFormat, 14) ||
+            ContainsPropertyKey(value, ShellDatePropertyFormat, 14))
+        {
+            mode = DesktopIconSortMode.Modified;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -197,14 +296,27 @@ public static class DesktopIconPositionService
     /// <c>prop:-System.DateModified;</c>. A leading minus denotes descending
     /// order and is not represented in Explorer's persisted Sort value.
     /// </summary>
-    public static DesktopIconSortState DecodeDesktopSortColumns(string? sortColumns)
+    public static DesktopIconSortState DecodeDesktopSortColumns(string? sortColumns) =>
+        DecodeDesktopSortColumns(
+            sortColumns,
+            new DesktopIconSortState(DesktopIconSortMode.Name, false));
+
+    public static DesktopIconSortState DecodeDesktopSortColumns(
+        string? sortColumns,
+        DesktopIconSortState fallback) =>
+        TryDecodeDesktopSortColumns(sortColumns, out var state) ? state : fallback;
+
+    private static bool TryDecodeDesktopSortColumns(
+        string? sortColumns,
+        out DesktopIconSortState state)
     {
+        state = default;
         var token = sortColumns?
             .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .FirstOrDefault();
         if (string.IsNullOrWhiteSpace(token))
         {
-            return new DesktopIconSortState(DesktopIconSortMode.Name, false);
+            return false;
         }
 
         if (token.StartsWith("prop:", StringComparison.OrdinalIgnoreCase))
@@ -215,12 +327,20 @@ public static class DesktopIconPositionService
         token = token.TrimStart('-');
         var mode = token.ToLowerInvariant() switch
         {
+            "system.itemnamedisplay" or "system.name" => DesktopIconSortMode.Name,
             "system.size" => DesktopIconSortMode.Size,
             "system.itemtype" or "system.itemtypetext" => DesktopIconSortMode.Type,
             "system.datemodified" => DesktopIconSortMode.Modified,
-            _ => DesktopIconSortMode.Name
+            "system.datecreated" => DesktopIconSortMode.Created,
+            _ => (DesktopIconSortMode?)null
         };
-        return new DesktopIconSortState(mode, descending);
+        if (mode is not { } decodedMode)
+        {
+            return false;
+        }
+
+        state = new DesktopIconSortState(decodedMode, descending);
+        return true;
     }
 
     /// <summary>

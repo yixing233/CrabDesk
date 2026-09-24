@@ -2326,11 +2326,23 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         graphics.SetClip(workAreaBounds, CombineMode.Replace);
     }
 
+    internal static DesktopIconSortState ResolveGeometrySortState(
+        bool resortPending,
+        DesktopIconSortState runtimeSort,
+        DesktopIconViewState desktopViewState) =>
+        resortPending || !desktopViewState.HasAuthoritativeSort
+            ? runtimeSort
+            : desktopViewState.Sort;
+
     private void RebuildGeometry()
     {
         _items.Clear();
         _expandedItemHitBounds.Clear();
         var desktopViewState = DesktopIconPositionService.GetCachedDesktopViewState();
+        var desktopSortState = ResolveGeometrySortState(
+            _runtime.IsDesktopResortPending,
+            _runtime.DesktopSortState,
+            desktopViewState);
         SynchronizeNativeMetrics(desktopViewState);
         var connectedMonitorIds = _runtime.Monitors
             .Select(monitor => monitor.Id)
@@ -2429,7 +2441,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         // change, a repaint — leaves the icons the user arranged where they are.
         foreach (var item in OrderDesktopItems(
                      desktopItems.Where(item => !placedKeys.Contains(item.Key.ToString())).ToArray(),
-                     desktopViewState.Sort))
+                     desktopSortState))
         {
             var cell = FindFirstFreeCell(grid, occupiedCells);
             if (cell is not { } automaticCell)
@@ -4949,9 +4961,17 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
 
         try
         {
-            var deletedPaths = items.Select(item => item.FileSystemPath!).ToArray();
-            await _runtime.FileOperations.DeleteAsync(items);
-            await _runtime.RefreshAfterDesktopItemsDeletedAsync(deletedPaths);
+            var result = await _runtime.FileOperations.DeleteAsync(items);
+            await _runtime.RefreshAfterDesktopItemsDeletedAsync(result.SucceededPaths);
+            if (result.HasFailures)
+            {
+                DesktopConfirmationDialog.ShowMessage(
+                    this,
+                    _runtime.IsDarkTheme,
+                    "部分项目未能删除",
+                    DesktopSurfaceManager.DescribeDeleteOutcome(result, blockedCount: 0),
+                    DesktopDialogKind.Error);
+            }
         }
         catch (Exception exception)
         {
@@ -5335,8 +5355,17 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
                     ? DesktopItemKind.Folder
                     : DesktopItemKind.File
             }).ToArray();
-            await _runtime.FileOperations.DeleteAsync(items);
-            await _runtime.RefreshAfterDesktopItemsDeletedAsync(paths);
+            var result = await _runtime.FileOperations.DeleteAsync(items);
+            await _runtime.RefreshAfterDesktopItemsDeletedAsync(result.SucceededPaths);
+            if (result.HasFailures)
+            {
+                DesktopConfirmationDialog.ShowMessage(
+                    this,
+                    _runtime.IsDarkTheme,
+                    "部分项目未能删除",
+                    DesktopSurfaceManager.DescribeDeleteOutcome(result, blockedCount: 0),
+                    DesktopDialogKind.Error);
+            }
         }
         catch (Exception exception)
         {

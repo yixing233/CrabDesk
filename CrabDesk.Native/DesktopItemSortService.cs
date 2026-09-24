@@ -34,6 +34,14 @@ public static class DesktopItemSortService
             .OrderBy(item => item.ModifiedAt is not null)
             .ThenBy(item => item.ModifiedAt)
             .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
+        DesktopIconSortMode.Created when sort.Descending => items
+            .OrderByDescending(item => item.CreatedAt is not null)
+            .ThenByDescending(item => item.CreatedAt)
+            .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
+        DesktopIconSortMode.Created => items
+            .OrderBy(item => item.CreatedAt is not null)
+            .ThenBy(item => item.CreatedAt)
+            .ThenBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
         DesktopIconSortMode.Name when sort.Descending => items
             .OrderByDescending(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase),
         _ => items.OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)

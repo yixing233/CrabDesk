@@ -23,6 +23,7 @@ public partial class App : Application
     private EventWaitHandle? _aiOrganizeEvent;
     private EventWaitHandle? _createBoxEvent;
     private EventWaitHandle? _reconnectEvent;
+    private EventWaitHandle? _refreshDesktopEvent;
     private EventWaitHandle? _settingsEvent;
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
@@ -80,6 +81,7 @@ public partial class App : Application
         var aiOrganize = commandLine.Any(argument => string.Equals(argument, "--ai-organize", StringComparison.OrdinalIgnoreCase));
         var createBox = commandLine.Any(argument => string.Equals(argument, "--create-box", StringComparison.OrdinalIgnoreCase));
         var reconnect = commandLine.Any(argument => string.Equals(argument, "--reconnect", StringComparison.OrdinalIgnoreCase));
+        var refreshDesktop = commandLine.Any(argument => string.Equals(argument, "--refresh-desktop", StringComparison.OrdinalIgnoreCase));
         var undoOrganization = commandLine.Any(argument => string.Equals(argument, "--undo-organization", StringComparison.OrdinalIgnoreCase));
         var showSettings = commandLine.Any(argument => string.Equals(argument, "--show-settings", StringComparison.OrdinalIgnoreCase));
         var validationPage = GetArgumentValue(commandLine, "--validation-page");
@@ -98,6 +100,7 @@ public partial class App : Application
                 aiOrganize,
                 createBox,
                 reconnect,
+                refreshDesktop,
                 showSettings,
                 undoOrganization));
             Exit();
@@ -116,6 +119,7 @@ public partial class App : Application
         _aiOrganizeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.AiOrganize");
         _createBoxEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.CreateBox");
         _reconnectEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Reconnect");
+        _refreshDesktopEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.RefreshDesktop");
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Settings");
         _undoOrganizationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.UndoOrganization");
 
@@ -182,6 +186,9 @@ public partial class App : Application
         };
         runtime.ExitRequested += (_, _) => Shutdown();
         StartCommandListeners(runtime, _window.DispatcherQueue);
+        // A context-menu invocation may start CrabDesk as the first instance,
+        // in which case there is no resident process to signal above.
+        if (refreshDesktop) runtime.RequestDesktopRefresh();
         // Building the confirmation window on first use would stall the
         // shared UI thread right after the user clicks "删除盒子"; build it
         // once now, while idle, so a confirmation only has to show it.
@@ -192,7 +199,7 @@ public partial class App : Application
         if (createBox) runtime.AddBox();
         if (undoOrganization) runtime.UndoLastOrganization();
 
-        var background = commandLine.Any(argument =>
+        var background = refreshDesktop || commandLine.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
         if (showSettings || (!background && !aiOrganize && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
         {
@@ -274,6 +281,7 @@ public partial class App : Application
         StartListener(_aiOrganizeEvent!, dispatcher, OpenAiOrganizationWorkbench);
         StartListener(_createBoxEvent!, dispatcher, () => runtime.AddBox());
         StartListener(_reconnectEvent!, dispatcher, () => _ = runtime.ReconnectDesktopAsync());
+        StartListener(_refreshDesktopEvent!, dispatcher, runtime.RequestDesktopRefresh);
         StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
         StartListener(_undoOrganizationEvent!, dispatcher, runtime.UndoLastOrganization);
     }
@@ -327,6 +335,7 @@ public partial class App : Application
         bool aiOrganize,
         bool createBox,
         bool reconnect,
+        bool refreshDesktop,
         bool showSettings,
         bool undoOrganization)
     {
@@ -335,6 +344,7 @@ public partial class App : Application
         if (aiOrganize) return @"Local\CrabDesk.AiOrganize";
         if (createBox) return @"Local\CrabDesk.CreateBox";
         if (reconnect) return @"Local\CrabDesk.Reconnect";
+        if (refreshDesktop) return @"Local\CrabDesk.RefreshDesktop";
         if (showSettings) return @"Local\CrabDesk.Settings";
         if (undoOrganization) return @"Local\CrabDesk.UndoOrganization";
         return @"Local\CrabDesk.Activate";
@@ -360,6 +370,7 @@ public partial class App : Application
         _aiOrganizeEvent?.Dispose();
         _createBoxEvent?.Dispose();
         _reconnectEvent?.Dispose();
+        _refreshDesktopEvent?.Dispose();
         _settingsEvent?.Dispose();
         _undoOrganizationEvent?.Dispose();
         if (_ownsSingleInstanceMutex)

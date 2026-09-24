@@ -76,8 +76,6 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     public event EventHandler? DesktopContextMenuRequested;
     public event EventHandler? DesktopContextMenuCommandRequested;
     public event EventHandler? DesktopContextMenuRefreshRequested;
-    public event EventHandler? DesktopDeleteRequested;
-    public event EventHandler? DesktopRenameRequested;
     public event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;
 
     public IntPtr DesktopListView { get; set; }
@@ -344,14 +342,6 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         DesktopKeyboardCommandRequested?.Invoke(
             this,
             new DesktopKeyboardCommandEventArgs(command));
-        if (command == DesktopKeyboardCommand.Delete)
-        {
-            DesktopDeleteRequested?.Invoke(this, EventArgs.Empty);
-        }
-        else if (command == DesktopKeyboardCommand.Rename)
-        {
-            DesktopRenameRequested?.Invoke(this, EventArgs.Empty);
-        }
         return true;
     }
 

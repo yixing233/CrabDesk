@@ -119,6 +119,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                                 // system desktop items that is the last-write
                                 // timestamp, independent of icon placement.
                                 ModifiedAt = ReadShellModifiedAt(fullPath, isDirectory),
+                                CreatedAt = ReadShellCreatedAt(fullPath, isDirectory),
                                 IsReadOnly = attributes.HasFlag(FileAttributes.ReadOnly)
                             });
                         }
@@ -256,6 +257,30 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
                 ? Directory.GetLastWriteTimeUtc(path)
                 : File.GetLastWriteTimeUtc(path);
             return modified == DateTime.MinValue ? null : modified;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Explorer's "Date created" column is System.DateCreated, the file
+    /// system's creation timestamp. It is read separately from the modified
+    /// time because editing a file changes only the latter.
+    /// </summary>
+    private static DateTimeOffset? ReadShellCreatedAt(string path, bool isDirectory)
+    {
+        try
+        {
+            var created = isDirectory
+                ? Directory.GetCreationTimeUtc(path)
+                : File.GetCreationTimeUtc(path);
+            return created == DateTime.MinValue ? null : created;
         }
         catch (IOException)
         {

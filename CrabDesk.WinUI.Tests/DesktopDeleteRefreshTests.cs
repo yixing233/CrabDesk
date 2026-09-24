@@ -1,3 +1,5 @@
+using CrabDesk.Core;
+using CrabDesk.Runtime;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
@@ -19,20 +21,69 @@ public sealed class DesktopDeleteRefreshTests
     }
 
     [Fact]
-    public void TheDeletedPathsAreCapturedBeforeTheFilesAreGone()
+    public void TheDeletedPathsComeFromTheBatchResultAfterTheFilesAreGone()
     {
         var method = ReadManagerMethod(
             "internal async Task DeleteSelectedItemsAsync()",
-            "private async Task PasteToDesktopAsync()");
+            "private void ReportDeleteOutcome(");
 
-        var capture = method.IndexOf(
-            "deletedPaths = selection.DeletableItems",
-            StringComparison.Ordinal);
         var delete = method.IndexOf(
             "await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);",
             StringComparison.Ordinal);
-        Assert.True(capture >= 0);
-        Assert.True(delete > capture);
+        var capture = method.IndexOf("deletedPaths = result.SucceededPaths", StringComparison.Ordinal);
+        Assert.True(delete >= 0);
+        Assert.True(capture > delete);
+
+        // A failed item is still on the desktop, so only the paths the batch
+        // actually removed may be reconciled as gone.
+        Assert.DoesNotContain(
+            "deletedPaths = selection.DeletableItems",
+            method,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APartialDeleteReportsTheFailuresAndOnlyRepaintsWhatLeft()
+    {
+        var method = ReadManagerMethod(
+            "internal async Task DeleteSelectedItemsAsync()",
+            "private void ReportDeleteOutcome(");
+
+        // Refreshing is skipped entirely when nothing was removed, so a total
+        // failure cannot blank cells that still hold real files.
+        Assert.Contains("if (deleteAttempted && deletedPaths.Length > 0)", method, StringComparison.Ordinal);
+        Assert.Contains("ReportDeleteOutcome(result, selection.BlockedCount);", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeleteOutcomeMessageNamesSuccessesFailuresAndSkippedItems()
+    {
+        var result = new FileDeleteBatchResult(
+        [
+            new FileDeleteItemResult(@"C:\Desktop\kept.txt", null),
+            new FileDeleteItemResult(@"C:\Desktop\locked.txt", "文件正在使用中。")
+        ]);
+
+        var message = DesktopSurfaceManager.DescribeDeleteOutcome(result, blockedCount: 2);
+
+        Assert.Contains("已删除 1 项", message, StringComparison.Ordinal);
+        Assert.Contains("1 项失败", message, StringComparison.Ordinal);
+        Assert.Contains("locked.txt", message, StringComparison.Ordinal);
+        Assert.Contains("2 项系统桌面项目或只读映射目录已跳过", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeleteOutcomeMessageStaysSilentAboutSkippedItemsWhenThereAreNone()
+    {
+        var result = new FileDeleteBatchResult(
+        [
+            new FileDeleteItemResult(@"C:\Desktop\gone.txt", null)
+        ]);
+
+        var message = DesktopSurfaceManager.DescribeDeleteOutcome(result, blockedCount: 0);
+
+        Assert.Contains("已删除 1 项", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("已跳过", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -43,14 +94,14 @@ public sealed class DesktopDeleteRefreshTests
             "private async void CompleteRecycleBinDrop(DesktopIconSurfaceDragSession dragSession)",
             "private static bool TryGetExternalFileDrop(");
 
-        var capture = method.IndexOf("var deletedPaths = items.Select(", StringComparison.Ordinal);
         var delete = method.IndexOf(
             "await _runtime.FileOperations.DeleteAsync(items);",
             StringComparison.Ordinal);
-        Assert.True(capture >= 0);
-        Assert.True(delete > capture);
+        var capture = method.IndexOf("result.SucceededPaths", StringComparison.Ordinal);
+        Assert.True(delete >= 0);
+        Assert.True(capture > delete);
         Assert.Contains(
-            "await _runtime.RefreshAfterDesktopItemsDeletedAsync(deletedPaths);",
+            "await _runtime.RefreshAfterDesktopItemsDeletedAsync(result.SucceededPaths);",
             method,
             StringComparison.Ordinal);
         Assert.DoesNotContain("_runtime.RefreshItemsAsync(", method, StringComparison.Ordinal);
@@ -65,7 +116,7 @@ public sealed class DesktopDeleteRefreshTests
             "private void ClearExternalDragPreview()");
 
         Assert.Contains(
-            "await _runtime.RefreshAfterDesktopItemsDeletedAsync(paths);",
+            "await _runtime.RefreshAfterDesktopItemsDeletedAsync(result.SucceededPaths);",
             method,
             StringComparison.Ordinal);
         Assert.DoesNotContain("_runtime.RefreshItemsAsync(", method, StringComparison.Ordinal);

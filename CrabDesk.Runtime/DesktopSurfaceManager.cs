@@ -1090,10 +1090,12 @@ internal sealed class DesktopSurfaceManager : IDisposable
             }
 
             deleteAttempted = true;
-            deletedPaths = selection.DeletableItems
-                .Select(item => item.FileSystemPath!)
-                .ToArray();
-            await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);
+            var result = await _runtime.FileOperations.DeleteAsync(selection.DeletableItems);
+            // Only the items that actually reached the Recycle Bin vacate their
+            // cells. A failed item is still on the desktop, so reconciling it as
+            // removed would blank a cell that still holds a real file.
+            deletedPaths = result.SucceededPaths.ToArray();
+            ReportDeleteOutcome(result, selection.BlockedCount);
         }
         catch (Exception exception)
         {
@@ -1102,7 +1104,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
         finally
         {
-            if (deleteAttempted)
+            if (deleteAttempted && deletedPaths.Length > 0)
             {
                 try
                 {
@@ -1116,6 +1118,51 @@ internal sealed class DesktopSurfaceManager : IDisposable
             _deleteInProgress = false;
             _runtime.ActivateDesktopKeyboardInput();
         }
+    }
+
+    // A selection can be partly removable: system icons and read-only mapped
+    // folders are skipped, and an individual file can be held open by another
+    // process. Reporting only when nothing at all was deletable left the user
+    // believing a mixed selection had been fully removed.
+    private void ReportDeleteOutcome(FileDeleteBatchResult result, int blockedCount)
+    {
+        if (result.HasFailures)
+        {
+            ShowDeleteMessage(
+                "部分项目未能删除",
+                DescribeDeleteOutcome(result, blockedCount),
+                DesktopDialogKind.Error);
+            return;
+        }
+
+        if (blockedCount > 0)
+        {
+            ShowDeleteMessage(
+                "部分项目未删除",
+                $"已删除 {result.SucceededCount} 项，{blockedCount} 项已跳过。" +
+                $"{Environment.NewLine}{Environment.NewLine}" +
+                "被跳过的项目属于系统桌面项目或只读映射目录，无法删除。",
+                DesktopDialogKind.Warning);
+        }
+    }
+
+    internal static string DescribeDeleteOutcome(FileDeleteBatchResult result, int blockedCount)
+    {
+        var details = string.Join(
+            Environment.NewLine,
+            result.FailedItems.Take(3).Select(item =>
+                $"- {Path.GetFileName(item.Path)}: {item.ErrorMessage}"));
+        if (result.FailedCount > 3)
+        {
+            details += Environment.NewLine + $"另有 {result.FailedCount - 3} 项未删除。";
+        }
+
+        var blocked = blockedCount > 0
+            ? $"{Environment.NewLine}{blockedCount} 项系统桌面项目或只读映射目录已跳过。"
+            : string.Empty;
+        return $"已删除 {result.SucceededCount} 项，{result.FailedCount} 项失败。" +
+            blocked +
+            $"{Environment.NewLine}{Environment.NewLine}{details}";
     }
 
     // Ctrl+V on the replacement desktop is handled here instead of falling

@@ -104,6 +104,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private string _desktopSortSignature = string.Empty;
     private string _desktopSystemIconVisibilitySignature = string.Empty;
     private DesktopIconSortState _desktopSortState;
+    private bool _desktopSortStateIsAuthoritative;
     private bool _desktopAutoArrange;
     private bool _desktopIconsVisible = true;
     private bool _virtualBoxDesktopDropEnabled;
@@ -423,7 +424,20 @@ public sealed partial class CrabDeskRuntime : IDisposable
         EnsureDesktopInput("startup");
         var initialDesktopViewState = await Task.Run(ReadInitialDesktopShellState);
         _desktopSortSignature = initialDesktopViewState.Signature;
-        _desktopSortState = initialDesktopViewState.Sort;
+        var initialSortState = ResolveInitialDesktopSortState(initialDesktopViewState, State);
+        _desktopSortState = initialSortState ?? initialDesktopViewState.Sort;
+        _desktopSortStateIsAuthoritative = initialSortState.HasValue;
+        if (initialDesktopViewState.HasAuthoritativeSort &&
+            TryStoreLastKnownDesktopSortState(State, initialDesktopViewState.Sort))
+        {
+            ScheduleSave();
+        }
+        else if (!initialDesktopViewState.HasAuthoritativeSort && initialSortState.HasValue)
+        {
+            DiagnosticLog.Info(
+                $"Restored persisted desktop sort mode={initialSortState.Value.Mode} " +
+                $"descending={initialSortState.Value.Descending} because Explorer sort is unavailable.");
+        }
         _desktopAutoArrange = initialDesktopViewState.AutoArrange;
         _desktopIconsVisible = initialDesktopViewState.DesktopIconsVisible;
         _desktopSystemIconVisibilitySignature =
@@ -628,10 +642,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
         DesktopIconPositionService.GetCachedDesktopViewState().AutoArrange;
 
     // True while a geometry rebuild must ignore the persisted manual grid and
-    // lay every icon out in Explorer's active sort order: once after a native
-    // Sort by command, and for the rebuild an explicit Refresh performs.
+    // lay every icon out in the resolved sort order: once after a native Sort
+    // by command, and for the rebuild an explicit Refresh performs.
     internal bool IsDesktopResortPending =>
         _desktopSortCommandPending || _desktopRefreshResortPending;
+
+    internal DesktopIconSortState DesktopSortState => _desktopSortState;
 
     internal bool TryDropDesktopItemsIntoBox(
         System.Drawing.Point screenPoint,
@@ -4630,7 +4646,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             if (!hostChanged && !topologyChanged)
             {
                 if (!IsPaused &&
-                    !TryApplyPendingDesktopSort(desktopViewChanged) &&
+                    !TryApplyPendingDesktopSort(sortChanged: false, hasLiveSortColumns: false) &&
                     desktopViewChanged)
                 {
                     RefreshDesktopView();
@@ -4875,24 +4891,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
         });
     }
 
-    private void OnDesktopDeleteRequested(object? sender, EventArgs eventArgs)
-    {
-        BeginInvoke("desktop delete", () => _ = DeleteSelectedDesktopItemsAsync());
-    }
-
-    private void OnDesktopRenameRequested(object? sender, EventArgs eventArgs)
-    {
-        BeginInvoke("desktop rename", () =>
-        {
-            if (_disposed || IsPaused)
-            {
-                return;
-            }
-
-            _surfaceManager?.BeginRenameSelectedItem();
-        });
-    }
-
     private void OnDesktopKeyboardCommandRequested(
         object? sender,
         DesktopKeyboardCommandEventArgs eventArgs)
@@ -4916,23 +4914,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
         catch (Exception exception)
         {
             DiagnosticLog.Error($"Desktop keyboard command '{command}' failed.", exception);
-        }
-    }
-
-    private async Task DeleteSelectedDesktopItemsAsync()
-    {
-        try
-        {
-            if (_disposed || IsPaused || _surfaceManager is null)
-            {
-                return;
-            }
-
-            await _surfaceManager.DeleteSelectedItemsAsync();
-        }
-        catch (Exception exception)
-        {
-            DiagnosticLog.Error("Desktop selection deletion failed.", exception);
         }
     }
 
@@ -4965,9 +4946,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void OnDesktopContextMenuCommandRequested(object? sender, EventArgs eventArgs)
     {
-        // A sort item can be selected repeatedly without changing Explorer's
-        // SortColumns signature. Clear the saved grid before the command is
-        // applied so the next redraw is still a one-time native sort.
+        // The input hook sees the menu selection on mouse-down, before Explorer
+        // necessarily publishes its new SortColumns value. Keep the saved grid
+        // intact until a live, recognized sort state is available; an empty
+        // transient snapshot must never turn this command into an A-Z rebuild.
         BeginInvoke("desktop menu command", () =>
         {
             if (_disposed || IsPaused)
@@ -4978,7 +4960,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
             var now = DateTimeOffset.UtcNow;
             _desktopSortCommandPending = true;
             _desktopSortCommandReadyAt = now + DesktopSortCommandMinimumWait;
-            ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
             _desktopViewRefreshDeadline = now + DesktopViewRefreshWindow;
             _desktopViewRefreshTimer.Start();
         });
@@ -4986,6 +4967,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void OnDesktopContextMenuRefreshRequested(object? sender, EventArgs eventArgs)
     {
+        DiagnosticLog.Info("Native desktop Refresh command detected by input monitor.");
         BeginInvoke("desktop menu refresh request", () =>
         {
             if (_disposed || IsPaused)
@@ -5006,10 +4988,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
     /// unchanged, so the normal context-menu synchronization has no change token
     /// to act on. The short delay lets Explorer finish its own command first,
     /// and coalesces a burst — a held F5, a double-taken menu click — into one
-    /// pass over the replacement icon layer.
+    /// pass over the replacement icon layer. Public because the registered
+    /// desktop menu reaches it through the application's command line.
     /// </remarks>
-    internal void RequestDesktopRefresh()
+    public void RequestDesktopRefresh()
     {
+        DiagnosticLog.Info("Desktop refresh queued.");
         _desktopMenuRefreshPending = true;
         _desktopViewRefreshDeadline = null;
         _desktopViewRefreshTimer.Stop();
@@ -5035,13 +5019,31 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
         _desktopMenuRefreshPending = false;
         _desktopMenuRefreshInProgress = true;
-        // A Refresh re-places every icon in the order Explorer currently sorts
-        // by, the same way a Sort by command does. Dropping the persisted grid
-        // before the rebuild is what restarts the sequence from the first cell;
-        // the pending flag makes the icon surfaces ignore the saved grid for
-        // the rebuild RefreshItemsAsync performs, after which they persist the
-        // new cells as the manual layout again.
-        var sortState = _desktopSortState;
+        DiagnosticLog.Info("Desktop refresh execution started.");
+        // Explorer owns the desktop view and its COM-backed state read can
+        // block behind shell work. An explicit refresh must still re-enumerate
+        // CrabDesk's items and redraw even if Explorer is busy. Use the last
+        // known order when available; when the Shell exposes no sort at all,
+        // make the explicit refresh useful by applying Created ascending.
+        var hasAuthoritativeSort = _desktopSortStateIsAuthoritative;
+        var sortState = ResolveDesktopRefreshSortState(_desktopSortState, hasAuthoritativeSort);
+        var viewSignature = string.IsNullOrWhiteSpace(_desktopSortSignature)
+            ? "unavailable"
+            : _desktopSortSignature;
+        if (!hasAuthoritativeSort)
+        {
+            _desktopSortState = sortState;
+            if (TryStoreLastKnownDesktopSortState(State, sortState))
+            {
+                ScheduleSave();
+            }
+            DiagnosticLog.Info(
+                $"Explorer desktop sort unavailable; applying and saving fallback " +
+                $"mode={sortState.Mode} descending={sortState.Descending} for explicit refresh.");
+        }
+
+        // Dropping the persisted grid restarts the sequence from the first
+        // cell, and the one-shot flag makes the icon surface apply this sort.
         _desktopRefreshResortPending = true;
         ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
         try
@@ -5049,7 +5051,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
             await RefreshItemsAsync(false);
             DiagnosticLog.Info(
                 $"Explorer desktop refresh synchronized items={Items.Count} " +
-                $"resorted mode={sortState.Mode} descending={sortState.Descending}");
+                $"resorted mode={sortState.Mode} descending={sortState.Descending} " +
+                $"sortSource={(hasAuthoritativeSort ? "last-known" : "Created fallback")} " +
+                $"viewSignature='{viewSignature}'");
         }
         catch (Exception exception)
         {
@@ -5091,13 +5095,13 @@ public sealed partial class CrabDeskRuntime : IDisposable
             return;
         }
 
-        var viewChanged = CaptureDesktopViewState(desktopViewState);
+        CaptureDesktopViewState(desktopViewState, out var sortChanged);
         DiagnosticLog.Info(
             $"Desktop icon zoom synchronized size={nativeIconSize} " +
             $"spacing={(shellState.HasSpacing ? $"{shellState.Spacing.Width}x{shellState.Spacing.Height}" : "unchanged")}");
         // Desktop icon zoom belongs to Explorer's unassigned-icon layer. Box
         // icon sizes remain an explicit per-box appearance setting.
-        if (!TryApplyPendingDesktopSort(viewChanged) && !_desktopSortCommandPending)
+        if (!TryApplyPendingDesktopSort(sortChanged, desktopViewState.HasLiveSortColumns) && !_desktopSortCommandPending)
         {
             RefreshDesktopView();
         }
@@ -5119,15 +5123,17 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 _desktopViewRefreshDeadline = null;
                 return;
             }
-            var viewChanged = CaptureDesktopViewState(desktopViewState);
-            if (TryApplyPendingDesktopSort(viewChanged))
+            var viewChanged = CaptureDesktopViewState(desktopViewState, out var sortChanged);
+            if (TryApplyPendingDesktopSort(sortChanged, desktopViewState.HasLiveSortColumns))
             {
                 return;
             }
             if (viewChanged)
             {
+                // Unknown transient SortColumns can still change the view
+                // signature. Redraw without dropping the saved grid, then keep
+                // polling while the selected native sort is pending.
                 RefreshDesktopView();
-                return;
             }
         }
         catch (Exception exception)
@@ -5142,6 +5148,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
         else
         {
             _desktopViewRefreshDeadline = null;
+            if (_desktopSortCommandPending)
+            {
+                _desktopSortCommandPending = false;
+                _desktopSortCommandReadyAt = null;
+                DiagnosticLog.Info(
+                    "Explorer desktop sort command was not applied because no live sort state became available; " +
+                    "the saved icon layout was preserved.");
+            }
         }
     }
 
@@ -5152,23 +5166,72 @@ public sealed partial class CrabDeskRuntime : IDisposable
     /// once. This also covers selecting the currently active sort command,
     /// where Explorer leaves SortColumns unchanged.
     /// </summary>
-    private bool TryApplyPendingDesktopSort(bool explorerViewChanged)
+    internal static DesktopIconSortState ResolveDesktopRefreshSortState(
+        DesktopIconSortState currentSort,
+        bool hasAuthoritativeSort) =>
+        hasAuthoritativeSort
+            ? currentSort
+            : new DesktopIconSortState(DesktopIconSortMode.Created, Descending: false);
+
+    internal static DesktopIconSortState? ResolveInitialDesktopSortState(
+        DesktopIconViewState shellState,
+        CrabDeskState state)
     {
-        if (!_desktopSortCommandPending)
+        if (shellState.HasAuthoritativeSort)
+        {
+            return shellState.Sort;
+        }
+
+        return Enum.TryParse<DesktopIconSortMode>(
+                state.LastKnownDesktopSortMode,
+                ignoreCase: true,
+                out var mode) &&
+            Enum.IsDefined(mode)
+                ? new DesktopIconSortState(mode, state.LastKnownDesktopSortDescending)
+                : null;
+    }
+
+    internal static bool TryStoreLastKnownDesktopSortState(
+        CrabDeskState state,
+        DesktopIconSortState sort)
+    {
+        var mode = sort.Mode.ToString();
+        if (string.Equals(state.LastKnownDesktopSortMode, mode, StringComparison.Ordinal) &&
+            state.LastKnownDesktopSortDescending == sort.Descending)
         {
             return false;
         }
 
-        if (!explorerViewChanged &&
-            _desktopSortCommandReadyAt is { } readyAt &&
-            DateTimeOffset.UtcNow < readyAt)
+        state.LastKnownDesktopSortMode = mode;
+        state.LastKnownDesktopSortDescending = sort.Descending;
+        return true;
+    }
+
+    internal static bool ShouldApplyPendingDesktopSort(
+        bool commandPending,
+        bool hasLiveSortColumns,
+        bool sortChanged,
+        bool minimumWaitElapsed) =>
+        commandPending && hasLiveSortColumns && (sortChanged || minimumWaitElapsed);
+
+    private bool TryApplyPendingDesktopSort(bool sortChanged, bool hasLiveSortColumns)
+    {
+        var minimumWaitElapsed = _desktopSortCommandReadyAt is not { } readyAt ||
+            DateTimeOffset.UtcNow >= readyAt;
+        if (!ShouldApplyPendingDesktopSort(
+                _desktopSortCommandPending,
+                hasLiveSortColumns,
+                sortChanged,
+                minimumWaitElapsed))
         {
             return false;
         }
 
-        // Keep the pending flag true during this call. DesktopIconSurface
-        // reads it while rebuilding geometry and deliberately skips the
-        // saved grid for this one native sort operation.
+        // The click is observed before Explorer commits the menu command. Do
+        // not discard manual cells until a recognized live sort is available.
+        // Keep the pending flag true during this call so the surface bypasses
+        // those cells for this one native sort operation.
+        ResetDesktopIconLayoutForAutoArrange(refreshWorkspace: false);
         RefreshDesktopView();
         _desktopSortCommandPending = false;
         _desktopSortCommandReadyAt = null;
@@ -5178,27 +5241,42 @@ public sealed partial class CrabDeskRuntime : IDisposable
         return true;
     }
 
-    private bool CaptureDesktopViewState(DesktopIconViewState desktopViewState)
+    private bool CaptureDesktopViewState(
+        DesktopIconViewState desktopViewState,
+        out bool sortChanged)
     {
-        var sortChanged = _desktopSortState != desktopViewState.Sort;
+        sortChanged = desktopViewState.HasAuthoritativeSort &&
+            _desktopSortStateIsAuthoritative &&
+            _desktopSortState != desktopViewState.Sort;
         var autoArrangeChanged = _desktopAutoArrange != desktopViewState.AutoArrange;
         var changed = !string.Equals(
             _desktopSortSignature,
             desktopViewState.Signature,
             StringComparison.Ordinal);
         _desktopSortSignature = desktopViewState.Signature;
-        _desktopSortState = desktopViewState.Sort;
+        var persistedSortChanged = desktopViewState.HasAuthoritativeSort &&
+            TryStoreLastKnownDesktopSortState(State, desktopViewState.Sort);
+        if (desktopViewState.HasAuthoritativeSort)
+        {
+            _desktopSortState = desktopViewState.Sort;
+            _desktopSortStateIsAuthoritative = true;
+        }
         _desktopAutoArrange = desktopViewState.AutoArrange;
         _desktopIconsVisible = desktopViewState.DesktopIconsVisible;
+        var layoutCleared = false;
         if ((sortChanged || autoArrangeChanged) &&
             (State.DesktopIconPositions.Count > 0 || State.DesktopIconLayout.Count > 0))
         {
             State.DesktopIconPositions.Clear();
             State.DesktopIconLayout.Clear();
-            ScheduleSave();
+            layoutCleared = true;
             DiagnosticLog.Info(
                 $"Desktop icon layout cleared after Explorer view change sortChanged={sortChanged} " +
                 $"autoArrangeChanged={autoArrangeChanged} autoArrange={desktopViewState.AutoArrange}.");
+        }
+        if (persistedSortChanged || layoutCleared)
+        {
+            ScheduleSave();
         }
         if (changed)
         {
@@ -5214,7 +5292,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 $"Explorer desktop view changed mode={desktopViewState.Sort.Mode} " +
                 $"descending={desktopViewState.Sort.Descending} " +
                 $"iconSize={desktopViewState.IconSize?.ToString() ?? "unknown"} " +
-                $"iconsVisible={desktopViewState.DesktopIconsVisible}");
+                $"iconsVisible={desktopViewState.DesktopIconsVisible} " +
+                $"sortColumns='{desktopViewState.Signature}'");
         }
         return changed;
     }
