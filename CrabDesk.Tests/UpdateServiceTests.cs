@@ -51,6 +51,49 @@ public sealed class UpdateServiceTests
         Assert.True(firstRelease.CompareTo(secondRelease) < 0);
     }
 
+    // The date channel predates 1.0.0 and must stay below it. Comparing the raw
+    // numeric fields instead ranked 20260924.01 (Major 20260924) above 1.0.0
+    // (Major 1), so the first stable release was never offered to anyone
+    // already on the date channel.
+    [Theory]
+    [InlineData("20260924.01", "1.0.0", -1)]
+    [InlineData("1.0.0", "20260924.01", 1)]
+    [InlineData("20260924.01", "0.7.0", 1)]
+    [InlineData("20260813.01", "20260924.01", -1)]
+    [InlineData("1.0.0-beta.1", "20260924.01", 1)]
+    [InlineData("20260924.01", "1.0.0-beta.1", -1)]
+    public void StableVersionsOutrankDateRevisionsWhichOutrankLegacyZeroReleases(
+        string left,
+        string right,
+        int expected)
+    {
+        Assert.True(SemanticVersion.TryParse(left, out var leftVersion));
+        Assert.True(SemanticVersion.TryParse(right, out var rightVersion));
+
+        Assert.Equal(expected, Math.Sign(leftVersion.CompareTo(rightVersion)));
+    }
+
+    [Fact]
+    public async Task FirstStableReleaseIsOfferedToAClientOnTheDateChannel()
+    {
+        using var client = new HttpClient(new StubHandler(_ => JsonResponse("""
+        [
+          { "tag_name": "v20260924.01", "name": "CrabDesk 20260924.01", "draft": false, "prerelease": true, "assets": [] },
+          { "tag_name": "v1.0.0", "name": "CrabDesk 1.0.0", "draft": false, "prerelease": false, "assets": [
+              { "name": "CrabDesk-Setup-x64.exe", "browser_download_url": "https://download/setup.exe" },
+              { "name": "SHA256SUMS.txt", "browser_download_url": "https://download/sha256.txt" }
+            ] }
+        ]
+        """))) { BaseAddress = new Uri("https://api.github.test") };
+        using var service = new GitHubUpdateService(client);
+
+        var result = await service.CheckAsync(Request() with { CurrentVersion = "20260924.01" });
+
+        Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
+        Assert.Equal("1.0.0", result.LatestVersion);
+        Assert.False(result.IsPrerelease);
+    }
+
     [Fact]
     public async Task UnifiedReleaseStreamSelectsFixedAssets()
     {

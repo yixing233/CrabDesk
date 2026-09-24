@@ -71,15 +71,31 @@ public sealed class SemanticVersion : IComparable<SemanticVersion>
         return true;
     }
 
+    /// <summary>
+    /// Comparison key for release ordering. Date revisions (<c>YYYYMMDD.NN</c>)
+    /// are the pre-1.0 channel: they must sort above the historical <c>0.x.y</c>
+    /// releases and below any <c>X.Y.Z</c> stable version. Comparing the raw
+    /// fields would rank <c>20260924.01</c> (Major 20260924) above <c>1.0.0</c>,
+    /// so existing users would never be offered the first stable release.
+    /// </summary>
+    private (int Major, int Minor, int Patch) GetOrderingKey() =>
+        IsDateRevision
+            // Reuse the fields inside the 0.x line: the date code becomes the
+            // minor component and the daily revision the patch.
+            ? (0, Major, Minor)
+            : (Major, Minor, Patch);
+
     public int CompareTo(SemanticVersion? other)
     {
         if (other is null)
         {
             return 1;
         }
-        var main = Major.CompareTo(other.Major);
-        if (main == 0) main = Minor.CompareTo(other.Minor);
-        if (main == 0) main = Patch.CompareTo(other.Patch);
+        var leftKey = GetOrderingKey();
+        var rightKey = other.GetOrderingKey();
+        var main = leftKey.Major.CompareTo(rightKey.Major);
+        if (main == 0) main = leftKey.Minor.CompareTo(rightKey.Minor);
+        if (main == 0) main = leftKey.Patch.CompareTo(rightKey.Patch);
         if (main != 0)
         {
             return main;
