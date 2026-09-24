@@ -1,7 +1,6 @@
 param(
     [switch]$IncludeDesktop,
     [switch]$IncludeExplorerRestart,
-    [switch]$SkipNetwork,
     [switch]$SkipInstaller,
     [switch]$ContinueOnFailure,
     [int]$StabilitySeconds = 0,
@@ -126,14 +125,6 @@ try {
     }
     Invoke-VerificationStep "Release workflow policy" {
         & (Join-Path $PSScriptRoot "verify-release-workflow.ps1")
-    }
-    if ($SkipNetwork) {
-        Add-SkippedStep "GitHub update service" "Skipped by -SkipNetwork"
-    }
-    else {
-        Invoke-VerificationStep "GitHub update service" {
-            & (Join-Path $PSScriptRoot "verify-github-updates.ps1")
-        }
     }
     if ($SkipInstaller) {
         Add-SkippedStep "Installer build and lifecycle" "Skipped by -SkipInstaller"

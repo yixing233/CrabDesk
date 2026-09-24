@@ -3,7 +3,6 @@ param()
 $ErrorActionPreference = "Stop"
 $root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $policy = Join-Path $PSScriptRoot "assert-release-configuration.ps1"
-$releaseValidator = Join-Path $PSScriptRoot "verify-github-release.ps1"
 $workflowPath = Join-Path $root ".github\workflows\release.yml"
 $bootstrapperPublisherPath = Join-Path $PSScriptRoot "publish-bootstrapper.ps1"
 $dependencyManifestPath = Join-Path $root "installer\setup-dependencies.json"
@@ -31,8 +30,31 @@ function Assert-Fails([scriptblock]$Action, [string]$ExpectedMessage) {
 # SHA-256SUMS digest in the in-app update chain.
 & $policy -Version "1.0.0" -CertificateBase64 "" -CertificatePassword ""
 Assert-Fails { & $policy -Version "release-one" -CertificateBase64 "test" -CertificatePassword "test" } "Invalid release version"
-Assert-Fails { & $releaseValidator -Owner "invalid/owner" -Repository "repo" } "unsupported characters"
-Assert-Fails { & $releaseValidator -Owner "owner" -Repository "repo" -Tag "invalid" } "Release tag is invalid"
+
+# The interactive GitHub download/update verifiers were retired: CI cannot run
+# them (they need a desktop session and a published release), and their release
+# assertions moved into this script and verify-installer.ps1. Guard the scripts
+# and workflows that would actually fail if a reference survived, so a stale
+# call cannot break the release gate. Archived planning notes under
+# docs/superpowers/plans are historical prose and are intentionally not scanned.
+$retiredVerifiers = @("verify-github-release.ps1", "verify-github-updates.ps1")
+$referenceSearchRoots = @($PSScriptRoot, (Join-Path $root ".github"))
+foreach ($retired in $retiredVerifiers) {
+    if (Test-Path -LiteralPath (Join-Path $PSScriptRoot $retired)) {
+        throw "Retired verifier is still present: $retired"
+    }
+    foreach ($searchRoot in $referenceSearchRoots) {
+        if (-not (Test-Path -LiteralPath $searchRoot)) {
+            continue
+        }
+        $references = @(Get-ChildItem -LiteralPath $searchRoot -Recurse -File -Include *.ps1, *.yml, *.yaml -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -ne $PSCommandPath } |
+            Select-String -Pattern ([regex]::Escape($retired)) -SimpleMatch -ErrorAction SilentlyContinue)
+        if ($references.Count -gt 0) {
+            throw "$retired is retired but is still called by $($references[0].Path):$($references[0].LineNumber)."
+        }
+    }
+}
 
 $workflow = Get-Content -LiteralPath $workflowPath -Raw -Encoding UTF8
 $requiredFragments = @(
@@ -101,4 +123,4 @@ foreach ($asset in @("CrabDesk-Setup-x64.exe", "CrabDesk-Payload-x64.exe")) {
     }
 }
 
-Write-Host "Optional signing, setup and payload assets, dependency resolver and release-validator policy passed."
+Write-Host "Optional signing, setup and payload assets, dependency resolver and retired-verifier policy passed."

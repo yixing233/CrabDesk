@@ -118,17 +118,32 @@ Get-AuthenticodeSignature artifacts\release\CrabDesk-Setup-x64.exe
 6. 下载 GitHub Release 资产，重新验证 SHA-256、Authenticode 签名、安装和卸载。
 7. 确认 Release 使用 `docs\releases\v1.0.0.md`，并在已配置正式仓库的客户端中检查到 `1.0.0`。
 
-正式 Release 可用后，使用以下命令一次性下载并验证发布说明、固定资产、SHA-256、安装包 Authenticode 签名、可信时间戳、发布者一致性以及隔离安装/卸载：
+正式 Release 可用后，一次性下载并验证发布说明、发布资产、SHA-256、安装包 Authenticode 签名、可信时间戳、发布者一致性以及隔离安装/卸载：
 
 ```powershell
-.\build\verify-github-release.ps1 `
-  -Owner yixing233 `
-  -Repository CrabDesk `
-  -Tag v1.0.0 `
-  -ExpectedPublisherSubject "CN=<正式证书主体>"
+# 1. 下载三个发布资产到隔离目录
+$tag = "v1.0.0"
+$target = "artifacts\external-validation\github-release\downloads"
+New-Item -ItemType Directory -Force -Path $target | Out-Null
+gh release download $tag --repo yixing233/CrabDesk --dir $target
+
+# 2. 按 SHA256SUMS.txt 核对两个安装包的 SHA-256 与文件名
+Get-Content "$target\SHA256SUMS.txt"
+Get-FileHash "$target\CrabDesk-Setup-x64.exe"   -Algorithm SHA256
+Get-FileHash "$target\CrabDesk-Payload-x64.exe" -Algorithm SHA256
+
+# 3. 核对签名、时间戳、EKU 与两个包的发布者一致（未签名时应如实记录为未签名）
+Get-AuthenticodeSignature "$target\CrabDesk-Setup-x64.exe"   | Format-List Status,SignerCertificate,TimeStamperCertificate
+Get-AuthenticodeSignature "$target\CrabDesk-Payload-x64.exe" | Format-List Status,SignerCertificate,TimeStamperCertificate
+
+# 4. 隔离安装/卸载
+.\build\verify-installer.ps1
 ```
 
-通过后证据写入 `artifacts\external-validation\github-release\session.json` 和 `latest.md`。该证据与 GitHub Actions 成功记录共同作为首次正式发布、资产、签名和发布说明四项门槛的验收依据。
+`gh release download` 同时会取回发布说明（`gh release view $tag --repo yixing233/CrabDesk --json body`），
+需逐条核对正文与 `docs\releases\$tag.md` 一致。两项结果连同上面的哈希与签名输出一起作为首次正式发布、
+资产、签名和发布说明四项门槛的验收依据，写入
+`artifacts\external-validation\github-release\`（结构见 `build\audit-external-readiness.ps1`）。
 
 正式 Release 验证完成前，不得将开发计划中的签名、GitHub 标签发布或发布说明展示标记为完成。
 
