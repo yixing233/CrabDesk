@@ -84,6 +84,22 @@ $config = @{
 }
 $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $dataDirectory "config.json") -Encoding UTF8
 
+# Reproduce an upgrade from the retired self-contained flavor: its app-local
+# .NET host files linger in the install directory and poison the framework-
+# dependent payload (app-local hostfxr.dll pins the .NET root to {app}).
+# The installer must scrub them via [InstallDelete]; the list mirrors
+# installer\CrabDesk.iss.
+$staleRuntimeFiles = @(
+    "clrcompression.dll", "clretwrc.dll", "clrgc.dll", "clrjit.dll", "coreclr.dll",
+    "createdump.exe", "hostfxr.dll", "hostpolicy.dll", "Microsoft.WindowsAppRuntime.dll",
+    "mscordaccore.dll", "mscordaccore_amd64_8_0_28_x64.dll", "mscordbi.dll",
+    "mscorrc.dll", "mscorlib.dll", "netstandard.dll", "System.Private.CoreLib.dll"
+)
+[System.IO.Directory]::CreateDirectory($installDirectory) | Out-Null
+foreach ($staleFile in $staleRuntimeFiles) {
+    Set-Content -LiteralPath (Join-Path $installDirectory $staleFile) -Value "stale self-contained runtime leftover" -Encoding ascii
+}
+
 $appProcess = $null
 $uninstaller = Join-Path $installDirectory "unins000.exe"
 try {
@@ -97,6 +113,11 @@ try {
     foreach ($required in $installedApp, (Join-Path $installDirectory "LICENSE"), (Join-Path $installDirectory "PRIVACY.md"), $uninstaller) {
         if (-not (Test-Path -LiteralPath $required)) {
             throw "Installed file is missing: $required"
+        }
+    }
+    foreach ($staleFile in $staleRuntimeFiles) {
+        if (Test-Path -LiteralPath (Join-Path $installDirectory $staleFile)) {
+            throw "Stale self-contained runtime file survived the upgrade: $staleFile"
         }
     }
     $productVersion = (Get-Item -LiteralPath $installedApp).VersionInfo.ProductVersion

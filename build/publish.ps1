@@ -52,10 +52,23 @@ if (-not (Test-Path -LiteralPath $pri)) {
 }
 
 Get-ChildItem -LiteralPath $output -Filter "*.pdb" | Remove-Item -Force
-foreach ($runtimeFile in @("coreclr.dll", "hostfxr.dll", "hostpolicy.dll", "Microsoft.WindowsAppRuntime.dll")) {
+# App-local runtime files from the retired self-contained flavor. If any of
+# these reach the framework-dependent payload, an upgrade leaves them in {app}
+# and the app-local hostfxr.dll pins the .NET root to the install directory
+# (startup fails with 0x80008096). installer\CrabDesk.iss deletes this same set
+# from {app} before every install.
+$staleRuntimeFiles = @(
+    "clrcompression.dll", "clretwrc.dll", "clrgc.dll", "clrjit.dll", "coreclr.dll",
+    "createdump.exe", "hostfxr.dll", "hostpolicy.dll", "Microsoft.WindowsAppRuntime.dll",
+    "mscordbi.dll", "mscorrc.dll", "mscorlib.dll", "netstandard.dll", "System.Private.CoreLib.dll"
+)
+foreach ($runtimeFile in $staleRuntimeFiles) {
     if (Test-Path -LiteralPath (Join-Path $output $runtimeFile)) {
         throw "Framework-dependent publish unexpectedly contains app-local runtime file: $runtimeFile"
     }
+}
+if (Get-ChildItem -LiteralPath $output -Filter "mscordaccore*" -ErrorAction SilentlyContinue | Select-Object -First 1) {
+    throw "Framework-dependent publish unexpectedly contains app-local runtime file: mscordaccore*"
 }
 if (-not (Test-Path -LiteralPath (Join-Path $output "CrabDesk.WinUI.runtimeconfig.json"))) {
     throw "Framework-dependent publish did not produce CrabDesk.WinUI.runtimeconfig.json."

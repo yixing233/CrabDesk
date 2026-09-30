@@ -277,6 +277,42 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void ScreenPointConvertsToMonitorWorkAreaDips()
+    {
+        var monitor = new MonitorLayout
+        {
+            Id = "secondary",
+            DeviceName = "\\\\.\\DISPLAY2",
+            PixelBounds = new LayoutRect(-1600, 0, 1600, 1200),
+            PixelWorkArea = new LayoutRect(-1600, 40, 1600, 1160),
+            Bounds = new LayoutRect(-1066.6667, 0, 1066.6667, 800),
+            WorkArea = new LayoutRect(-1066.6667, 26.6667, 1066.6667, 773.3333),
+            DpiScale = 1.5
+        };
+
+        Assert.True(MonitorCoordinateConverter.TryGetWorkAreaDip(monitor, -800, 640, out var x, out var y));
+        Assert.Equal(533.3333, x, 3);
+        Assert.Equal(400, y, 3);
+    }
+
+    [Fact]
+    public void ScreenPointOutsideMonitorIsRejected()
+    {
+        var monitor = new MonitorLayout
+        {
+            Id = "primary",
+            DeviceName = "\\\\.\\DISPLAY1",
+            PixelBounds = new LayoutRect(0, 0, 1920, 1080),
+            PixelWorkArea = new LayoutRect(0, 0, 1920, 1040),
+            Bounds = new LayoutRect(0, 0, 1920, 1080),
+            WorkArea = new LayoutRect(0, 0, 1920, 1040),
+            DpiScale = 1
+        };
+
+        Assert.False(MonitorCoordinateConverter.TryGetWorkAreaDip(monitor, 1920, 500, out _, out _));
+    }
+
+    [Fact]
     public void ContextMenuBoxLandsWhereTheDesktopWasClicked()
     {
         var placed = BoxLayoutPlanner.PlaceAt(new LayoutRect(0, 0, 1920, 1040), 700, 300, 420, 310);

@@ -164,7 +164,7 @@ public sealed class DesktopBox
     // Persistent back-to-front order within one monitor. Native window order
     // remains owned by the desktop surface, never by individual boxes.
     public int StackOrder { get; set; }
-    public LayoutRect Bounds { get; set; } = new(32, 32, 420, 300);
+    public LayoutRect Bounds { get; set; } = new(32, 32, 244, 288);
     // Kept in the JSON shape for backward compatibility. It is always derived
     // from ExpandOnHover, so the box has only two display modes.
     public bool IsCollapsed { get; set; }
@@ -606,6 +606,13 @@ public sealed class UpdateSettings
     public string LastMessage { get; set; } = string.Empty;
     public string CachedETag { get; set; } = string.Empty;
     public string LatestKnownVersion { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Application version that produced the cached latest release. The cached
+    /// version and its ETag are only meaningful when interpreted by the same
+    /// release-ordering rules that wrote them, so any upgrade invalidates them.
+    /// </summary>
+    public string CacheAppVersion { get; set; } = string.Empty;
     public string CachedReleaseName { get; set; } = string.Empty;
     public DateTimeOffset? CachedPublishedAt { get; set; }
     public string CachedReleaseNotes { get; set; } = string.Empty;

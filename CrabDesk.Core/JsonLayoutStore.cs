@@ -107,6 +107,7 @@ public sealed class JsonLayoutStore : ILayoutStore
         }
         state.Settings.Updates.LastMessage ??= string.Empty;
         state.Settings.Updates.LatestKnownVersion ??= string.Empty;
+        state.Settings.Updates.CacheAppVersion ??= string.Empty;
         state.Settings.Updates.CachedReleaseName ??= string.Empty;
         state.Settings.Updates.CachedReleaseNotes ??= string.Empty;
         state.Settings.Updates.CachedReleasePageUrl ??= string.Empty;

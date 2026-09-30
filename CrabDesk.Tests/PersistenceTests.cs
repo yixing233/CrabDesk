@@ -50,6 +50,7 @@ public sealed class PersistenceTests : IDisposable
         state.Settings.Updates.Channel = UpdateChannel.Preview;
         state.Settings.Updates.CachedETag = "\"release-etag\"";
         state.Settings.Updates.LatestKnownVersion = "0.6.1-beta.1";
+        state.Settings.Updates.CacheAppVersion = "0.6.0";
         state.Settings.Updates.LastStatus = UpdateCheckStatus.UpdateAvailable;
         state.Settings.Updates.LastMessage = "cached";
         state.OrganizationRules.Add(new OrganizationRule
@@ -99,6 +100,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(UpdateChannel.Preview, loaded.Settings.Updates.Channel);
         Assert.Equal("\"release-etag\"", loaded.Settings.Updates.CachedETag);
         Assert.Equal("0.6.1-beta.1", loaded.Settings.Updates.LatestKnownVersion);
+        Assert.Equal("0.6.0", loaded.Settings.Updates.CacheAppVersion);
         Assert.Equal(UpdateCheckStatus.UpdateAvailable, loaded.Settings.Updates.LastStatus);
         Assert.Equal("cached", loaded.Settings.Updates.LastMessage);
         var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>

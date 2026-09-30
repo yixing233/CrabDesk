@@ -109,6 +109,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private bool _desktopIconsVisible = true;
     private bool _virtualBoxDesktopDropEnabled;
     private DateTimeOffset? _desktopViewRefreshDeadline;
+    private DateTimeOffset? _desktopContextMenuPositionCapturedAt;
+    private Point _desktopContextMenuPosition;
     private bool _desktopMenuRefreshPending;
     private bool _desktopMenuRefreshInProgress;
     private bool _desktopSortCommandPending;
@@ -368,6 +370,17 @@ public sealed partial class CrabDeskRuntime : IDisposable
             State.Settings.Updates.RepositoryName = updateRepository.Repository;
         }
         var cachedUpdate = State.Settings.Updates;
+        // A cached release was ranked by the build that fetched it; an upgrade
+        // can change the ordering rules, so the cache must not outlive the
+        // version that wrote it.
+        var cacheWrittenBy = cachedUpdate.CacheAppVersion;
+        if (UpdateCachePolicy.InvalidateIfStale(cachedUpdate, CurrentVersion))
+        {
+            DiagnosticLog.Info(
+                $"Discarded cached update state written by " +
+                $"{(string.IsNullOrWhiteSpace(cacheWrittenBy) ? "an unstamped build" : cacheWrittenBy)} " +
+                $"while running {CurrentVersion}");
+        }
         var cachedStatus = cachedUpdate.LastStatus;
         var cachedMessage = cachedUpdate.LastMessage;
         if (SemanticVersion.TryParse(CurrentVersion, out var currentSemanticVersion) &&
@@ -890,15 +903,34 @@ public sealed partial class CrabDeskRuntime : IDisposable
     public bool BringBoxToFront(Guid boxId) =>
         MoveBoxInStack(boxId, BoxStackMove.ToFront);
 
+    private const double DefaultBoxWidth = 244;
+    private const double DefaultBoxHeight = 288;
+
     public MappedFolderSnapshot? GetMappedFolderSnapshot(Guid boxId) =>
         _mappedFolderSnapshots.GetValueOrDefault(boxId);
 
     public DesktopBox AddBox(string title = "新盒子") => CommitNewBox(CreateBoxCore(title));
 
-    // Creates a box where the desktop was right-clicked: its top-left corner
-    // lands on the anchor (work-area DIPs of that monitor), pulled inside the
-    // work area when the click was near an edge. The tray, hotkey and
-    // settings paths keep the free-slot search in AddBox.
+    public DesktopBox AddBoxAtScreenPoint(int screenPixelX, int screenPixelY, string title = "新盒子")
+    {
+        var monitor = Monitors.FirstOrDefault(candidate =>
+            screenPixelX >= candidate.PixelBounds.X &&
+            screenPixelX < candidate.PixelBounds.X + candidate.PixelBounds.Width &&
+            screenPixelY >= candidate.PixelBounds.Y &&
+            screenPixelY < candidate.PixelBounds.Y + candidate.PixelBounds.Height);
+        if (monitor is null || !MonitorCoordinateConverter.TryGetWorkAreaDip(
+                monitor,
+                screenPixelX,
+                screenPixelY,
+                out var x,
+                out var y))
+        {
+            return AddBox(title);
+        }
+
+        return AddBoxAt(monitor.Id, x, y, title);
+    }
+
     public DesktopBox AddBoxAt(string monitorId, double x, double y, string title = "新盒子")
     {
         var monitor = Monitors.FirstOrDefault(candidate =>
@@ -907,7 +939,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         return CommitNewBox(CreateBoxCore(
             title,
             monitor,
-            BoxLayoutPlanner.PlaceAt(monitor.WorkArea, x, y, 420, 310)));
+            BoxLayoutPlanner.PlaceAt(monitor.WorkArea, x, y, DefaultBoxWidth, DefaultBoxHeight)));
     }
 
     private DesktopBox CommitNewBox(DesktopBox box)
@@ -926,7 +958,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private DesktopBox CreateBoxCore(string title)
     {
         var monitor = Monitors.FirstOrDefault(candidate => candidate.IsPrimary) ?? Monitors.First();
-        return CreateBoxCore(title, monitor, FindAvailableBoxBounds(monitor, 420, 310));
+        return CreateBoxCore(title, monitor, FindAvailableBoxBounds(monitor, DefaultBoxWidth, DefaultBoxHeight));
     }
 
     private DesktopBox CreateBoxCore(string title, MonitorLayout monitor, LayoutRect bounds)
@@ -956,7 +988,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             Title = Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
             MonitorId = monitor.Id,
             StackOrder = BoxStacking.GetFrontStackOrder(State.Boxes, monitor.Id),
-            Bounds = FindAvailableBoxBounds(monitor, 420, 310),
+            Bounds = FindAvailableBoxBounds(monitor, DefaultBoxWidth, DefaultBoxHeight),
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
             Appearance = CloneAppearance(shared?.Appearance),
@@ -2588,6 +2620,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             {
                 settings.CachedETag = result.ETag;
                 settings.LatestKnownVersion = result.LatestVersion;
+                settings.CacheAppVersion = CurrentVersion;
                 settings.CachedReleaseName = result.ReleaseName;
                 settings.CachedPublishedAt = result.PublishedAt;
                 settings.CachedReleaseNotes = result.ReleaseNotes;
@@ -4917,8 +4950,19 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
     }
 
-    private void OnDesktopContextMenuRequested(object? sender, EventArgs eventArgs)
+    private void OnDesktopContextMenuRequested(object? sender, DesktopContextMenuEventArgs eventArgs)
     {
+        _desktopContextMenuPosition = new Point(eventArgs.X, eventArgs.Y);
+        _desktopContextMenuPositionCapturedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            DesktopContextMenuPositionStore.Write(eventArgs.X, eventArgs.Y);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Could not persist the native desktop context-menu position.", exception);
+        }
+
         // Explorer commits a native context-menu command only after the menu
         // closes. Poll briefly after the request so a chosen sort mode reaches
         // the replacement icon layer without waiting for the host health tick.
@@ -4934,14 +4978,27 @@ public sealed partial class CrabDeskRuntime : IDisposable
         });
     }
 
-    internal void NotifyDesktopContextMenuOpened()
+    internal void NotifyDesktopContextMenuOpened(Point screenPoint)
     {
+        _desktopContextMenuPosition = screenPoint;
+        _desktopContextMenuPositionCapturedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            DesktopContextMenuPositionStore.Write(screenPoint.X, screenPoint.Y);
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Could not persist the forwarded desktop context-menu position.", exception);
+        }
+
         // DesktopIconSurface forwards its background context menu by posting
         // WM_CONTEXTMENU to Explorer. Arm the input monitor explicitly so it
         // can identify a selected sort item even when SortColumns itself does
         // not change (for example, repeating the active sort mode).
         _desktopInputMonitor?.TrackDesktopContextMenu();
-        OnDesktopContextMenuRequested(this, EventArgs.Empty);
+        OnDesktopContextMenuRequested(this, new DesktopContextMenuEventArgs(
+            _desktopContextMenuPosition.X,
+            _desktopContextMenuPosition.Y));
     }
 
     private void OnDesktopContextMenuCommandRequested(object? sender, EventArgs eventArgs)

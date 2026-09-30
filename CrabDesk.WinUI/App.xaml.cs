@@ -196,7 +196,7 @@ public partial class App : Application
 
         if (organize) runtime.SmartOrganize();
         if (aiOrganize) OpenAiOrganizationWorkbench();
-        if (createBox) runtime.AddBox();
+        if (createBox) CreateBoxFromContext(runtime);
         if (undoOrganization) runtime.UndoLastOrganization();
 
         var background = refreshDesktop || commandLine.Any(argument =>
@@ -279,7 +279,7 @@ public partial class App : Application
         StartListener(_exitEvent!, dispatcher, Shutdown);
         StartListener(_organizeEvent!, dispatcher, () => runtime.SmartOrganize());
         StartListener(_aiOrganizeEvent!, dispatcher, OpenAiOrganizationWorkbench);
-        StartListener(_createBoxEvent!, dispatcher, () => runtime.AddBox());
+        StartListener(_createBoxEvent!, dispatcher, () => CreateBoxFromContext(runtime));
         StartListener(_reconnectEvent!, dispatcher, () => _ = runtime.ReconnectDesktopAsync());
         StartListener(_refreshDesktopEvent!, dispatcher, runtime.RequestDesktopRefresh);
         StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
@@ -304,6 +304,17 @@ public partial class App : Application
 
         _aiOrganizationWindow.AppWindow.Show();
         _aiOrganizationWindow.Activate();
+    }
+
+    private static void CreateBoxFromContext(CrabDeskRuntime runtime)
+    {
+        if (DesktopContextMenuPositionStore.TryConsume(out var position))
+        {
+            runtime.AddBoxAtScreenPoint(position.X, position.Y);
+            return;
+        }
+
+        runtime.AddBox();
     }
 
     private static void StartListener(EventWaitHandle handle, DispatcherQueue dispatcher, Action action)

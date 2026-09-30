@@ -41,6 +41,26 @@ public partial class BoxesViewModel : ObservableObject
     public bool IsMappedFolder => SelectedBox?.IsMappedFolder == true;
     public string BoxTypeText => IsMappedFolder ? "映射文件夹" : "普通盒子";
     public string MonitorId => SelectedBox?.MonitorId ?? string.Empty;
+    public double PositionX
+    {
+        get => SelectedBox?.Bounds.X ?? 0;
+        set => UpdateBounds(bounds => bounds with { X = value });
+    }
+    public double PositionY
+    {
+        get => SelectedBox?.Bounds.Y ?? 0;
+        set => UpdateBounds(bounds => bounds with { Y = value });
+    }
+    public double Width
+    {
+        get => SelectedBox?.Bounds.Width ?? 0;
+        set => UpdateBounds(bounds => bounds with { Width = value });
+    }
+    public double Height
+    {
+        get => SelectedBox?.Bounds.Height ?? 0;
+        set => UpdateBounds(bounds => bounds with { Height = value });
+    }
     public string Title
     {
         get => SelectedBox?.Title ?? string.Empty;
@@ -115,11 +135,35 @@ public partial class BoxesViewModel : ObservableObject
         OnPropertyChanged(nameof(IsMappedFolder));
         OnPropertyChanged(nameof(BoxTypeText));
         OnPropertyChanged(nameof(MonitorId));
+        OnPropertyChanged(nameof(PositionX));
+        OnPropertyChanged(nameof(PositionY));
+        OnPropertyChanged(nameof(Width));
+        OnPropertyChanged(nameof(Height));
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(MappedFolderPath));
         OnPropertyChanged(nameof(MappedFolderReadOnly));
         OnPropertyChanged(nameof(MappedFolderCategoryTabs));
         DeleteCommand.NotifyCanExecuteChanged();
+    }
+
+    private void UpdateBounds(Func<LayoutRect, LayoutRect> update)
+    {
+        if (SelectedBox is null) return;
+        var current = SelectedBox.Bounds;
+        var updated = update(current);
+        if (!double.IsFinite(updated.X) || !double.IsFinite(updated.Y) ||
+            !double.IsFinite(updated.Width) || !double.IsFinite(updated.Height) ||
+            updated == current)
+        {
+            return;
+        }
+
+        SelectedBox.Bounds = updated;
+        _service.BoxChanged(SelectedBox, true);
+        OnPropertyChanged(nameof(PositionX));
+        OnPropertyChanged(nameof(PositionY));
+        OnPropertyChanged(nameof(Width));
+        OnPropertyChanged(nameof(Height));
     }
 
     partial void OnStatusChanged(string value) => OnPropertyChanged(nameof(HasStatus));

@@ -4613,7 +4613,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
                 screenPoint.X,
                 screenPoint.Y))
         {
-            _runtime.NotifyDesktopContextMenuOpened();
+            _runtime.NotifyDesktopContextMenuOpened(new Point(screenPoint.X, screenPoint.Y));
         }
     }
 

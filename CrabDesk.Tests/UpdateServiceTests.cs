@@ -209,6 +209,120 @@ public sealed class UpdateServiceTests
         Assert.Equal("Cached release", result.ReleaseName);
     }
 
+    // A cached release must not survive an application upgrade. Build
+    // 20260924.01 ranked date revisions above stable versions and cached
+    // 20260924.02 as newest while 1.0.0 was live; the ETag still matched after
+    // upgrading, GitHub answered 304, and the fixed comparator never ran, so the
+    // user was told "already up to date" indefinitely.
+    [Fact]
+    public void StaleCachedReleaseIsDiscardedAfterAnApplicationUpgrade()
+    {
+        var settings = new UpdateSettings
+        {
+            CacheAppVersion = "20260924.01",
+            CachedETag = "\"stale-etag\"",
+            LatestKnownVersion = "20260924.02",
+            CachedReleaseName = "CrabDesk 20260924.02",
+            CachedReleaseNotes = "notes",
+            CachedReleasePageUrl = "https://github.test/20260924.02",
+            CachedInstallerUrl = "https://download/setup-20260924.02.exe",
+            CachedSha256Url = "https://download/sha-20260924.02.txt",
+            CachedIsPrerelease = true,
+            CachedPublishedAt = DateTimeOffset.Parse("2026-09-24T12:24:14Z"),
+            LastStatus = UpdateCheckStatus.UpToDate,
+            LastMessage = "当前已是最新版本",
+            LastCheckedAt = DateTimeOffset.Now
+        };
+
+        var invalidated = UpdateCachePolicy.InvalidateIfStale(settings, "20260924.02");
+
+        Assert.True(invalidated);
+        Assert.Equal(string.Empty, settings.CachedETag);
+        Assert.Equal(string.Empty, settings.LatestKnownVersion);
+        Assert.Equal(string.Empty, settings.CachedReleaseName);
+        Assert.Equal(string.Empty, settings.CachedInstallerUrl);
+        Assert.Equal(string.Empty, settings.CachedSha256Url);
+        Assert.Null(settings.CachedPublishedAt);
+        Assert.False(settings.CachedIsPrerelease);
+        Assert.Equal(UpdateCheckStatus.NotChecked, settings.LastStatus);
+        Assert.Null(settings.LastCheckedAt);
+        Assert.Equal("20260924.02", settings.CacheAppVersion);
+    }
+
+    [Fact]
+    public void CacheWrittenByTheCurrentVersionIsKept()
+    {
+        var settings = new UpdateSettings
+        {
+            CacheAppVersion = "1.0.0",
+            CachedETag = "\"live-etag\"",
+            LatestKnownVersion = "1.0.0",
+            LastStatus = UpdateCheckStatus.UpToDate,
+            LastCheckedAt = DateTimeOffset.Now
+        };
+
+        var invalidated = UpdateCachePolicy.InvalidateIfStale(settings, "1.0.0");
+
+        Assert.False(invalidated);
+        Assert.Equal("\"live-etag\"", settings.CachedETag);
+        Assert.Equal("1.0.0", settings.LatestKnownVersion);
+        Assert.Equal(UpdateCheckStatus.UpToDate, settings.LastStatus);
+    }
+
+    // A cache written before the stamp existed carries no version; it cannot be
+    // trusted to have been ranked by current rules.
+    [Fact]
+    public void CacheWithoutAStampIsTreatedAsStale()
+    {
+        var settings = new UpdateSettings
+        {
+            CacheAppVersion = string.Empty,
+            CachedETag = "\"legacy-etag\"",
+            LatestKnownVersion = "20260924.02",
+            LastStatus = UpdateCheckStatus.UpToDate
+        };
+
+        Assert.True(UpdateCachePolicy.InvalidateIfStale(settings, "1.0.0"));
+        Assert.Equal(UpdateCheckStatus.NotChecked, settings.LastStatus);
+        Assert.Equal("1.0.0", settings.CacheAppVersion);
+    }
+
+    // After invalidation the very next check must reach the network and offer
+    // 1.0.0, proving the discarded cache no longer masks the stable release.
+    [Fact]
+    public async Task UpgradedClientWithDiscardedCacheIsOfferedTheStableRelease()
+    {
+        using var client = new HttpClient(new StubHandler(_ => JsonResponse("""
+        [
+          { "tag_name": "v20260924.02", "name": "CrabDesk 20260924.02", "draft": false, "prerelease": true, "assets": [] },
+          { "tag_name": "v20260924.01", "name": "CrabDesk 20260924.01", "draft": false, "prerelease": true, "assets": [] },
+          { "tag_name": "v1.0.0", "name": "CrabDesk 1.0.0", "draft": false, "prerelease": false, "assets": [
+              { "name": "CrabDesk-Setup-x64.exe", "browser_download_url": "https://download/setup.exe" },
+              { "name": "SHA256SUMS.txt", "browser_download_url": "https://download/sha256.txt" }
+            ] }
+        ]
+        """))) { BaseAddress = new Uri("https://api.github.test") };
+        using var service = new GitHubUpdateService(client);
+        var settings = new UpdateSettings
+        {
+            CacheAppVersion = "20260924.01",
+            CachedETag = "\"stale-etag\"",
+            LatestKnownVersion = "20260924.02",
+            LastStatus = UpdateCheckStatus.UpToDate
+        };
+        UpdateCachePolicy.InvalidateIfStale(settings, "20260924.02");
+
+        var result = await service.CheckAsync(Request() with
+        {
+            CurrentVersion = "20260924.02",
+            CachedETag = settings.CachedETag,
+            CachedLatestVersion = settings.LatestKnownVersion
+        });
+
+        Assert.Equal(UpdateCheckStatus.UpdateAvailable, result.Status);
+        Assert.Equal("1.0.0", result.LatestVersion);
+    }
+
     [Fact]
     public async Task RateLimitAndOfflineHaveExplicitNonThrowingStates()
     {

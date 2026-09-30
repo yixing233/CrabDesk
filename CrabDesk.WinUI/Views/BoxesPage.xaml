@@ -25,6 +25,10 @@
                                 <StackPanel Grid.Column="1">
                                     <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                                     <TextBlock Text="{Binding MonitorId}" Style="{StaticResource SecondaryBodyStyle}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Style="{StaticResource SecondaryBodyStyle}" TextTrimming="CharacterEllipsis">
+                                        <Run Text="X " /><Run Text="{Binding Bounds.X}" /><Run Text="  Y " /><Run Text="{Binding Bounds.Y}" />
+                                        <Run Text="  ·  " /><Run Text="{Binding Bounds.Width}" /><Run Text=" × " /><Run Text="{Binding Bounds.Height}" /><Run Text=" DIP" />
+                                    </TextBlock>
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
@@ -52,12 +56,50 @@
                                            Foreground="{ThemeResource SecondaryTextBrush}" />
                             </Grid>
                         </Border>
-                        <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
+                        <Border Style="{StaticResource SettingRowStyle}">
                             <Grid ColumnSpacing="16">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="所在显示器" FontWeight="SemiBold" VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="1" Text="{Binding MonitorId}" VerticalAlignment="Center"
                                            Foreground="{ThemeResource SecondaryTextBrush}" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="位置" FontWeight="SemiBold" />
+                                    <TextBlock Text="相对显示器工作区 · DIP" Style="{StaticResource SecondaryBodyStyle}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <NumberBox Header="X" Width="{StaticResource NumericSettingsControlWidth}"
+                                               Value="{Binding PositionX, Mode=TwoWay}" Minimum="-100000" Maximum="100000"
+                                               SmallChange="1" SpinButtonPlacementMode="Compact"
+                                               IsEnabled="{Binding HasSelection}" AutomationProperties.Name="盒子位置 X（DIP）" />
+                                    <NumberBox Header="Y" Width="{StaticResource NumericSettingsControlWidth}"
+                                               Value="{Binding PositionY, Mode=TwoWay}" Minimum="-100000" Maximum="100000"
+                                               SmallChange="1" SpinButtonPlacementMode="Compact"
+                                               IsEnabled="{Binding HasSelection}" AutomationProperties.Name="盒子位置 Y（DIP）" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SettingRowStyle}" BorderThickness="0">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="尺寸" FontWeight="SemiBold" />
+                                    <TextBlock Text="宽度和高度 · DIP" Style="{StaticResource SecondaryBodyStyle}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <NumberBox Header="宽度" Width="{StaticResource NumericSettingsControlWidth}"
+                                               Value="{Binding Width, Mode=TwoWay}" Minimum="1" Maximum="100000"
+                                               SmallChange="1" SpinButtonPlacementMode="Compact"
+                                               IsEnabled="{Binding HasSelection}" AutomationProperties.Name="盒子宽度（DIP）" />
+                                    <NumberBox Header="高度" Width="{StaticResource NumericSettingsControlWidth}"
+                                               Value="{Binding Height, Mode=TwoWay}" Minimum="1" Maximum="100000"
+                                               SmallChange="1" SpinButtonPlacementMode="Compact"
+                                               IsEnabled="{Binding HasSelection}" AutomationProperties.Name="盒子高度（DIP）" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </StackPanel>

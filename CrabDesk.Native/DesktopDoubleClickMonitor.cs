@@ -73,7 +73,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     public event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
     public event EventHandler<DesktopMouseWheelEventArgs>? BoxDragMouseWheelRequested;
     public event EventHandler? DesktopSurfaceClicked;
-    public event EventHandler? DesktopContextMenuRequested;
+    public event EventHandler<DesktopContextMenuEventArgs>? DesktopContextMenuRequested;
     public event EventHandler? DesktopContextMenuCommandRequested;
     public event EventHandler? DesktopContextMenuRefreshRequested;
     public event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;
@@ -204,7 +204,9 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
             if (message == WmRButtonDown)
             {
                 TrackDesktopContextMenu();
-                DesktopContextMenuRequested?.Invoke(this, EventArgs.Empty);
+                DesktopContextMenuRequested?.Invoke(
+                    this,
+                    new DesktopContextMenuEventArgs(mouse.Point.X, mouse.Point.Y));
             }
         }
         else if (message == WmLButtonDown && IsDesktopContextMenuActive())

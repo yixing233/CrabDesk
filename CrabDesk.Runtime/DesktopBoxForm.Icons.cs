@@ -339,10 +339,21 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 continue;
             }
 
+            var wasAnimating = _heightAnimations.ContainsKey(boxId);
             PrepareHeightAnimationVisualCache(box);
             if (_heightAnimationVisualCaches.ContainsKey(boxId))
             {
                 _prewarmedHeightAnimationCacheBoxId = boxId;
+                if (wasAnimating)
+                {
+                    _dynamicVisualVersion++;
+                    var dirtyBounds = new RectangleF(
+                        (float)box.Bounds.X,
+                        (float)box.Bounds.Y,
+                        (float)box.Bounds.Width,
+                        (float)box.Bounds.Height);
+                    _iconLayerPartialRenderRequest?.Invoke(dirtyBounds);
+                }
             }
         }
     }

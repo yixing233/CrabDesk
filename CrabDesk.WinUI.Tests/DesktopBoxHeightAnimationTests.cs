@@ -113,6 +113,29 @@ public sealed class DesktopBoxHeightAnimationTests
         Assert.Equal(1, CountOccurrences(frame, "DesktopBoxes.FirstOrDefault("));
     }
 
+    [Fact]
+    public void MissingIconsDoNotForceEveryAnimationFrameToRedrawTheWholeBox()
+    {
+        var prepare = ExtractMethod(
+            ReadRuntimeSource("DesktopBoxForm.Rendering.cs"),
+            "private void PrepareHeightAnimationVisualCache(",
+            "private void EnsureHeightAnimationVisualCache(");
+
+        Assert.Contains("_heightAnimationCacheRequestBoxIds.Add(box.Id);", prepare, StringComparison.Ordinal);
+        Assert.Contains("_heightAnimationVisualCaches[box.Id] = new BoxHeightVisualCache(bitmap, cacheBounds);", prepare, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueueIconBitmapLoad(key);\n            }\n            return;", prepare, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompletingMissingIconsRebuildsTheAnimationCache()
+    {
+        var source = ReadRuntimeSource("DesktopBoxForm.Icons.cs");
+
+        Assert.Contains("var wasAnimating = _heightAnimations.ContainsKey(boxId);", source, StringComparison.Ordinal);
+        Assert.Contains("_dynamicVisualVersion++;", source, StringComparison.Ordinal);
+        Assert.Contains("_iconLayerPartialRenderRequest?.Invoke(dirtyBounds);", source, StringComparison.Ordinal);
+    }
+
     private static int CountOccurrences(string source, string value)
     {
         var count = 0;

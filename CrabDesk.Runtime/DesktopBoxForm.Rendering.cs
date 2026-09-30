@@ -146,15 +146,20 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         if (!AreRequiredBoxIconsLoaded(box))
         {
+            // Keep loading icons asynchronously, but still build a provisional
+            // cache from the currently available bitmaps. Without this cache,
+            // every animation frame falls back to DrawBox until the slowest
+            // icon arrives, turning a local blit into a full box redraw.
             _heightAnimationCacheRequestBoxIds.Add(box.Id);
             foreach (var key in GetRequiredBoxIconBitmapKeys(box))
             {
                 QueueIconBitmapLoad(key);
             }
-            return;
         }
-
-        _heightAnimationCacheRequestBoxIds.Remove(box.Id);
+        else
+        {
+            _heightAnimationCacheRequestBoxIds.Remove(box.Id);
+        }
         ReleaseHeightAnimationVisualCache(box.Id);
 
         var geometry = CreateBoxGeometry(box, (float)box.Bounds.Height, isCollapsed: false);

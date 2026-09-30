@@ -79,6 +79,44 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void BoxesViewModelEditsPositionAndSizeThroughBoxChanged()
+    {
+        var state = CreateState();
+        state.Boxes[0].Bounds = new LayoutRect(40, 50, 420, 310);
+        var service = CreateService(state);
+        var viewModel = new BoxesViewModel(
+            service.Object,
+            Mock.Of<IDialogService>(),
+            Mock.Of<IFilePickerService>());
+
+        viewModel.PositionX = 80;
+        viewModel.PositionY = 90;
+        viewModel.Width = 500;
+        viewModel.Height = 360;
+
+        Assert.Equal(new LayoutRect(80, 90, 500, 360), viewModel.SelectedBox!.Bounds);
+        service.Verify(item => item.BoxChanged(viewModel.SelectedBox, true), Times.Exactly(4));
+    }
+
+    [Fact]
+    public void BoxesViewModelIgnoresNonFiniteGeometryValues()
+    {
+        var state = CreateState();
+        var service = CreateService(state);
+        var viewModel = new BoxesViewModel(
+            service.Object,
+            Mock.Of<IDialogService>(),
+            Mock.Of<IFilePickerService>());
+        var bounds = viewModel.SelectedBox!.Bounds;
+
+        viewModel.PositionX = double.NaN;
+        viewModel.Width = double.PositiveInfinity;
+
+        Assert.Equal(bounds, viewModel.SelectedBox.Bounds);
+        service.Verify(item => item.BoxChanged(It.IsAny<DesktopBox>(), true), Times.Never);
+    }
+
+    [Fact]
     public async Task BoxesViewModelHonorsDeleteConfirmationSetting()
     {
         var state = CreateState();

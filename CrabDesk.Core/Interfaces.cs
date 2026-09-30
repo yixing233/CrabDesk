@@ -55,12 +55,18 @@ public sealed class DesktopKeyboardCommandEventArgs(DesktopKeyboardCommand comma
     public DesktopKeyboardCommand Command { get; } = command;
 }
 
+public sealed class DesktopContextMenuEventArgs(int x, int y) : EventArgs
+{
+    public int X { get; } = x;
+    public int Y { get; } = y;
+}
+
 public interface IDesktopInputMonitor : IDisposable
 {
     event EventHandler<DesktopIconZoomEventArgs>? IconZoomRequested;
     event EventHandler<DesktopMouseWheelEventArgs>? BoxDragMouseWheelRequested;
     event EventHandler? DesktopSurfaceClicked;
-    event EventHandler? DesktopContextMenuRequested;
+    event EventHandler<DesktopContextMenuEventArgs>? DesktopContextMenuRequested;
     event EventHandler? DesktopContextMenuCommandRequested;
     event EventHandler? DesktopContextMenuRefreshRequested;
     event EventHandler<DesktopKeyboardCommandEventArgs>? DesktopKeyboardCommandRequested;

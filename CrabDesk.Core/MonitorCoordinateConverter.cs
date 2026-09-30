@@ -29,6 +29,30 @@ public static class MonitorCoordinateConverter
             pixels.Height / scale);
     }
 
+    public static bool TryGetWorkAreaDip(
+        MonitorLayout monitor,
+        int screenPixelX,
+        int screenPixelY,
+        out double x,
+        out double y)
+    {
+        ArgumentNullException.ThrowIfNull(monitor);
+        if (screenPixelX < monitor.PixelBounds.X ||
+            screenPixelX >= monitor.PixelBounds.X + monitor.PixelBounds.Width ||
+            screenPixelY < monitor.PixelBounds.Y ||
+            screenPixelY >= monitor.PixelBounds.Y + monitor.PixelBounds.Height)
+        {
+            x = 0;
+            y = 0;
+            return false;
+        }
+
+        var scale = NormalizeScale(monitor.DpiScale);
+        x = (screenPixelX - monitor.PixelWorkArea.X) / scale;
+        y = (screenPixelY - monitor.PixelWorkArea.Y) / scale;
+        return true;
+    }
+
     public static LayoutRect DipsToPixels(LayoutRect dips, double dpiScale)
     {
         var scale = NormalizeScale(dpiScale);
