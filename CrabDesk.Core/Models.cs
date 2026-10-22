@@ -730,6 +730,7 @@ public sealed class GlobalAppearanceSettings
     public double IconVerticalSpacing { get; set; } = 80;
     public string SelectionColor { get; set; } = "#FF4A5BB1";
     public bool HoverFeedback { get; set; } = true;
+    public double IconHoverCornerRadius { get; set; } = 8;
     public bool AnimationEnabled { get; set; } = true;
     // A concrete family and size keep the desktop labels on Microsoft YaHei UI
     // like the rest of the box text. Both must be set: the renderer only honours

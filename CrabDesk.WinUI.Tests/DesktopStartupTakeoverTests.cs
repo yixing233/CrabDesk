@@ -61,6 +61,27 @@ public sealed class DesktopStartupTakeoverTests
     }
 
     [Fact]
+    public void DesktopMenuRegistrationSurvivesExitAndIsRemovedByTheUninstaller()
+    {
+        var dispose = ExtractMethod(ReadRuntimeSource("CrabDeskRuntime.cs"),
+            "public void Dispose()", "private void StartTakeover()");
+
+        // Explorer can retain registry handles across application restarts.
+        // Ordinary shutdown must not delete the keys those handles reference.
+        Assert.DoesNotContain("_desktopContextMenu.SetEnabled(false", dispose, StringComparison.Ordinal);
+
+        var installer = File.ReadAllText(Path.Combine(FindSolutionDirectory(), "installer", "CrabDesk.iss"));
+        foreach (var key in new[]
+        {
+            @"Software\Classes\DesktopBackground\Shell\CrabDesk",
+            @"Software\Classes\CrabDesk.DesktopContextMenu.Commands"
+        })
+        {
+            Assert.Contains($"Subkey: \"{key}\"; Flags: uninsdeletekey dontcreatekey", installer, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void DesktopRenderingIsolatesDrawingFailuresFromTheProcess()
     {
         var iconSource = ReadRuntimeSource("DesktopIconSurface.cs");

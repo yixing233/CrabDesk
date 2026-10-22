@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using CrabDesk.Core;
 
 namespace CrabDesk.Native;
 
@@ -15,7 +16,7 @@ public static class DesktopPreviewCapture
     private const uint PwRenderFullContent = 0x00000002;
     private const int MaximumPreviewEdge = 1280;
 
-    public static byte[]? TryCapturePng(IntPtr desktopParent)
+    public static byte[]? TryCapturePng(IntPtr desktopParent, Action<Graphics, LayoutRect>? renderOverlay = null)
     {
         if (desktopParent == IntPtr.Zero || !NativeMethods.IsWindow(desktopParent))
         {
@@ -42,6 +43,14 @@ public static class DesktopPreviewCapture
                 {
                     graphics.ReleaseHdc(deviceContext);
                 }
+            }
+
+            if (renderOverlay is not null)
+            {
+                using var graphics = Graphics.FromImage(source);
+                graphics.CompositingMode = CompositingMode.SourceOver;
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                renderOverlay(graphics, bounds);
             }
 
             var scale = Math.Min(1d, MaximumPreviewEdge / (double)Math.Max(width, height));

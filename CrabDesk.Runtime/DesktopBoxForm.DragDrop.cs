@@ -151,7 +151,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             incoming,
             target.Box.Id,
             beforeKey,
-            manualTab?.Id);
+            manualTab is null ? target.ActiveManualTabId : manualTab.Id);
     }
 
     private void SetDropPreview(DropPreviewState? preview, bool requestRender = true)
@@ -322,6 +322,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnDragOver(object? sender, Forms.DragEventArgs eventArgs)
     {
+        if (TryGetManualTabDrag(eventArgs, out var tabDrag))
+        {
+            UpdateManualTabDrop(eventArgs, tabDrag, commit: false);
+            return;
+        }
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
         ForwardDragStateToIconSurface(eventArgs, point);
         // Box geometry is static during an OLE item drag; the shared compositor
@@ -338,7 +343,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (targetGeometry is not null && !targetGeometry.Box.IsMappedFolder && GetManualBoxTabAtPoint(targetGeometry, point) is not null)
         {
             // A drag over a child tab is an explicit tab-selection gesture.
-            if (TrySelectBoxTab(targetGeometry, point))
+            if (TrySelectBoxTab(targetGeometry, point, preserveItemSelection: true))
             {
                 EnsureGeometry();
                 targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
@@ -517,6 +522,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnDragLeave(object? sender, EventArgs eventArgs)
     {
+        ClearManualTabDropPreview();
         ClearDropPreview();
         _iconDragStateForward?.Invoke(PointF.Empty, null, null, null);
     }
@@ -609,6 +615,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _iconDragStateForward?.Invoke(PointF.Empty, null, null, null);
         try
         {
+            if (TryGetManualTabDrag(eventArgs, out var tabDrag))
+            {
+                UpdateManualTabDrop(eventArgs, tabDrag, commit: true);
+                return;
+            }
             if (eventArgs.Data is null)
             {
                 return;
@@ -621,6 +632,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 return;
             }
             var manualTargetTab = GetManualBoxTabAtPoint(box, point);
+            var targetTabId = manualTargetTab is null ? box.ActiveManualTabId : manualTargetTab.Id;
             var mappedTargetTab = GetMappedFolderTabAtPoint(box, point);
             var mappedFolderTarget = GetFolderDropTargetForDrag(box, point, eventArgs);
             DiagnosticLog.Info(
@@ -674,8 +686,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     {
                         return;
                     }
-                    var beforeKey = GetReorderBeforeKey(box, point);
-                    _runtime.ReorderBoxItems(box.Box.Id, keys, beforeKey);
+                    var beforeKey = ResolveInsertBeforeKey(box, point, keys.ToHashSet(StringComparer.OrdinalIgnoreCase));
+                    _runtime.ReorderBoxItems(box.Box.Id, keys, beforeKey, targetTabId,
+                        updateTabAssignment: box.ActiveManualTabId is not null);
                     return;
                 }
                 try
@@ -684,12 +697,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                         sourceBoxId,
                         keys,
                         box.Box.Id,
-                        transferEffect == BoxTransferEffect.MoveFiles);
+                        transferEffect == BoxTransferEffect.MoveFiles,
+                        targetTabId,
+                        ResolveInsertBeforeKey(box, point, keys.ToHashSet(StringComparer.OrdinalIgnoreCase)));
                     ShowImportFailures(imported);
-                    if (manualTargetTab is not null)
-                    {
-                        _runtime.MoveItemsToManualTab(box.Box.Id, keys, manualTargetTab.Id);
-                    }
                 }
                 catch (Exception exception)
                 {
@@ -756,7 +767,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 var imported = await _runtime.ImportFilesAsync(
                     external,
                     box.Box.Id,
-                    isMove);
+                    isMove,
+                    targetTabId);
                 ShowImportFailures(imported);
             }
             // Assigned desktop icons are parked outside the visible work area by
@@ -774,6 +786,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         finally
         {
+            ClearManualTabDropPreview();
             ClearDropPreview();
         }
     }

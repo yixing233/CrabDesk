@@ -205,8 +205,8 @@ public sealed class DesktopPasteRefreshTests
             "internal async Task<FileImportBatchResult> ImportDesktopItemsIntoFolderAsync(",
             "internal async Task ReconcileExternalDesktopMoveAsync(");
 
-        Assert.Contains("RefreshDesktopItemsRemoved(movedItemKeys)", method, StringComparison.Ordinal);
-        Assert.Contains("item.Key.ToString()", method, StringComparison.Ordinal);
+        Assert.Contains("RefreshAfterDesktopItemsDeletedAsync(movedSources)", method, StringComparison.Ordinal);
+        Assert.Contains("item.SourcePath", method, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "RefreshDesktopItemsRemoved(result.ImportedPaths)",
             method,

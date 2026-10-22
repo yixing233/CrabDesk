@@ -338,6 +338,7 @@
                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
                                                   AutomationProperties.Name="鼠标悬停反馈" />
                                 </Grid>
+
                             </StackPanel>
                         </Border>
 
@@ -567,6 +568,29 @@
                                                 AutomationProperties.Name="图标尺寸" />
                                         <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
                                             <Run Text="{Binding Value, ElementName=IconSizeSlider}" /><Run Text=" px" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="图标高亮圆角" FontWeight="Medium" />
+                                        <TextBlock Text="统一调整桌面和盒内图标悬停、选中高亮的圆角，0 为直角"
+                                                   Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <Slider x:Name="IconHighlightCornerRadiusSlider"
+                                                Width="200"
+                                                Style="{StaticResource ParameterSliderStyle}"
+                                                Minimum="0" Maximum="20" StepFrequency="1"
+                                                Value="{Binding IconHighlightCornerRadius, Mode=TwoWay}"
+                                                AutomationProperties.Name="图标高亮圆角" />
+                                        <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
+                                            <Run Text="{Binding Value, ElementName=IconHighlightCornerRadiusSlider}" /><Run Text=" px" />
                                         </TextBlock>
                                     </StackPanel>
                                 </Grid>

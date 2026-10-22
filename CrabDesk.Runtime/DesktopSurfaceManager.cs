@@ -23,6 +23,18 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     internal int SurfaceCount => _surfaces.Count;
 
+    internal void RenderBackupOverlay(Graphics graphics, LayoutRect desktopBounds)
+    {
+        // The acrylic host is a separate top-level composition window, so
+        // PrintWindow on Explorer cannot include its foreground box pixels.
+        // Ordinary child-window boxes are already part of that capture.
+        if (_acrylicHost is null) return;
+        foreach (var surface in _surfaces)
+        {
+            surface.RenderBackupLayer(graphics, desktopBounds);
+        }
+    }
+
     /// <summary>
     /// The icon surface handle for a monitor, used as the "is CrabDesk still
     /// answering?" target by the stall diagnostics. Zero when no surface exists
@@ -277,6 +289,24 @@ internal sealed class DesktopSurfaceManager : IDisposable
         if (anyFailure)
         {
             DiagnosticLog.Info("Desktop surface refresh completed with failures.");
+        }
+    }
+
+    internal void RefreshRecycleBinIcons()
+    {
+        var itemKeys = _runtime.Items
+            .Where(item => item.Kind == DesktopItemKind.Shell && ShellIconProvider.IsRecycleBin(item.ParsingName))
+            .Select(item => item.Key.ToString())
+            .ToArray();
+        var boxIds = itemKeys
+            .Where(key => _runtime.State.Assignments.ContainsKey(key))
+            .Select(key => _runtime.State.Assignments[key])
+            .Distinct()
+            .ToArray();
+        RefreshBoxItems(boxIds);
+        foreach (var iconSurface in _iconSurfaces)
+        {
+            iconSurface.RefreshIconImages(itemKeys);
         }
     }
 

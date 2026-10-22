@@ -74,6 +74,7 @@ public partial class AppearanceViewModel : ObservableObject
     public bool ShowResizeGrip { get => _service.State.Settings.Appearance.ShowResizeGrip; set => _service.SetShowResizeGrip(value); }
     public bool ShowBoxScrollBar { get => _service.State.Settings.Appearance.ShowBoxScrollBar; set => _service.SetShowBoxScrollBar(value); }
     public bool HoverFeedback { get => _service.State.Settings.Appearance.HoverFeedback; set => _service.SetHoverFeedback(value); }
+    public double IconHighlightCornerRadius { get => _service.State.Settings.Appearance.IconHoverCornerRadius; set => _service.SetIconHoverCornerRadius(value); }
     public double HorizontalSpacing { get => _service.State.Settings.Appearance.IconHorizontalSpacing; set => _service.SetIconSpacing(value, VerticalSpacing); }
     public double VerticalSpacing { get => _service.State.Settings.Appearance.IconVerticalSpacing; set => _service.SetIconSpacing(HorizontalSpacing, value); }
     public string SelectionColor { get => _service.State.Settings.Appearance.SelectionColor; set { if (IsColor(value)) _service.SetSelectionColor(value); } }

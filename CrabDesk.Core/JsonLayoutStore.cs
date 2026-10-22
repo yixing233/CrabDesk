@@ -140,6 +140,7 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.Backup.IntervalHours = Math.Clamp(state.Settings.Backup.IntervalHours, 1, 8760);
         state.Settings.Backup.RetentionDays = Math.Clamp(state.Settings.Backup.RetentionDays, 1, 365);
         state.Settings.Appearance.CornerRadius = Math.Clamp(state.Settings.Appearance.CornerRadius, 0, 20);
+        state.Settings.Appearance.IconHoverCornerRadius = Math.Clamp(state.Settings.Appearance.IconHoverCornerRadius, 0, 20);
         state.Settings.Appearance.BorderWidth = Math.Clamp(state.Settings.Appearance.BorderWidth, 1, 6);
         state.Settings.Appearance.BorderOpacity = Math.Clamp(state.Settings.Appearance.BorderOpacity, 0, 100);
         if (string.IsNullOrWhiteSpace(state.Settings.Appearance.BorderColor))

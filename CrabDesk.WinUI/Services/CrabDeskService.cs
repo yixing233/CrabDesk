@@ -160,6 +160,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetShowResizeGrip(bool enabled) => _runtime.SetShowResizeGrip(enabled);
     public void SetShowBoxScrollBar(bool enabled) => _runtime.SetShowBoxScrollBar(enabled);
     public void SetHoverFeedback(bool enabled) => _runtime.SetHoverFeedback(enabled);
+    public void SetIconHoverCornerRadius(double value) => _runtime.SetIconHoverCornerRadius(value);
     public void SetIconSpacing(double horizontal, double vertical) => _runtime.SetIconSpacing(horizontal, vertical);
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);

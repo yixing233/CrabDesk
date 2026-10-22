@@ -190,13 +190,14 @@ public sealed class FileOperationServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true, false, false, false, false, false, true)]
-    [InlineData(false, false, false, false, false, false, false)]
-    [InlineData(true, true, false, false, false, false, false)]
-    [InlineData(true, false, true, false, false, false, false)]
-    [InlineData(true, false, false, true, false, false, false)]
-    [InlineData(true, false, false, false, true, false, false)]
-    [InlineData(true, false, false, false, false, true, false)]
+    [InlineData(true, false, false, false, false, false, true, true)]
+    [InlineData(false, false, false, false, false, false, true, false)]
+    [InlineData(true, true, false, false, false, false, true, false)]
+    [InlineData(true, false, true, false, false, false, true, false)]
+    [InlineData(true, false, false, true, false, false, true, false)]
+    [InlineData(true, false, false, false, true, false, true, false)]
+    [InlineData(true, false, false, false, false, true, true, false)]
+    [InlineData(true, false, false, false, false, false, false, false)]
     public void DragCompletionOnlyUnassignsCommittedDropOutsideEveryBox(
         bool committed,
         bool cancelled,
@@ -204,6 +205,7 @@ public sealed class FileOperationServiceTests : IDisposable
         bool sourceMapped,
         bool pointerOverBox,
         bool externalDropAccepted,
+        bool pointerOverDesktop,
         bool expected)
     {
         Assert.Equal(expected, BoxDragCompletionPolicy.ShouldUnassign(
@@ -212,7 +214,8 @@ public sealed class FileOperationServiceTests : IDisposable
             handledByBox,
             sourceMapped,
             pointerOverBox,
-            externalDropAccepted));
+            externalDropAccepted,
+            pointerOverDesktop));
     }
 
     [Theory]

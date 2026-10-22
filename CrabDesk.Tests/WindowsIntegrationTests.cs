@@ -93,6 +93,33 @@ public sealed class WindowsIntegrationTests
     }
 
     [Fact]
+    public void ReRegisteringDesktopMenuKeepsExistingShellRegistryHandlesUsable()
+    {
+        var keyPath = @"Software\CrabDesk\Tests\ContextMenu\" + Guid.NewGuid().ToString("N");
+        var submenuKeyPath = keyPath + ".Commands";
+        var legacyOrganizeKeyPath = keyPath + ".Organize";
+        var registration = new DesktopContextMenuRegistration(
+            Registry.CurrentUser, keyPath, "CrabDesk.Tests.Commands", submenuKeyPath, legacyOrganizeKeyPath);
+        var executable = Path.Combine(Path.GetTempPath(), "CrabDesk.WinUI.exe");
+        try
+        {
+            registration.SetEnabled(true, executable);
+            using var shellRootHandle = Registry.CurrentUser.OpenSubKey(keyPath);
+            using var shellSubmenuHandle = Registry.CurrentUser.OpenSubKey(submenuKeyPath);
+
+            registration.SetEnabled(true, executable);
+
+            Assert.Equal("CrabDesk", shellRootHandle?.GetValue("MUIVerb"));
+            using var command = shellSubmenuHandle?.OpenSubKey(@"shell\02Settings\command");
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", command?.GetValue(null));
+        }
+        finally
+        {
+            registration.SetEnabled(false, executable);
+        }
+    }
+
+    [Fact]
     public async Task GlobalHotkeyDetectsConflictAndReleasesRegistration()
     {
         if (!OperatingSystem.IsWindows())

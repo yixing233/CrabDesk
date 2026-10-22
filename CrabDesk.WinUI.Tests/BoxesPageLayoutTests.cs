@@ -26,6 +26,29 @@ public sealed class BoxesPageLayoutTests
     }
 
     [Fact]
+    public void BoxesPageDetailsAreIndependentlyScrollable()
+    {
+        var document = LoadXaml("CrabDesk.WinUI", "Views", "BoxesPage.xaml");
+        var scrollViewer = document.Descendants(Presentation + "ScrollViewer")
+            .SingleOrDefault(item => (string?)item.Attribute("Grid.Column") == "1");
+
+        Assert.NotNull(scrollViewer);
+        Assert.Equal("Auto", (string?)scrollViewer!.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", (string?)scrollViewer.Attribute("HorizontalScrollBarVisibility"));
+    }
+
+    [Fact]
+    public void BoxesPageColumnsFillAvailableHeight()
+    {
+        var document = LoadXaml("CrabDesk.WinUI", "Views", "BoxesPage.xaml");
+        var boxList = document.Descendants(Presentation + "Border")
+            .Single(item => item.Descendants(Presentation + "ListView").Any());
+
+        Assert.Equal("Stretch", (string?)boxList.Attribute("VerticalAlignment"));
+        Assert.Null(boxList.Attribute("MaxHeight"));
+    }
+
+    [Fact]
     public void BoxesPageAllowsNegativePositionAndPositiveSizeRanges()
     {
         var document = LoadXaml("CrabDesk.WinUI", "Views", "BoxesPage.xaml");

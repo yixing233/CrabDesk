@@ -120,6 +120,7 @@ public interface ICrabDeskService
     void SetShowResizeGrip(bool enabled);
     void SetShowBoxScrollBar(bool enabled);
     void SetHoverFeedback(bool enabled);
+    void SetIconHoverCornerRadius(double value);
     void SetIconSpacing(double horizontal, double vertical);
     void SetSelectionColor(string value);
     void SetIconLabelFontSize(double value);

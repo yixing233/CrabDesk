@@ -87,6 +87,52 @@ public sealed class BackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LegacyDesktopImageKeepsItsSavedBoxesAvailableForAnOverlay()
+    {
+        var service = new JsonBackupService(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        state.Boxes.Add(new DesktopBox { Title = "工具", Bounds = new LayoutRect(100, 80, 300, 200) });
+        var snapshotBox = new LayoutBackupBoxSnapshot("工具", state.Boxes[0].Bounds, "#FF202020", "#FF4080FF", true);
+        var legacy = new
+        {
+            State = state,
+            Snapshot = new
+            {
+                DesktopBounds = new LayoutRect(0, 0, 1920, 1080),
+                Boxes = new[] { snapshotBox },
+                DesktopPreviewFileName = "legacy.preview.png"
+            }
+        };
+        await File.WriteAllTextAsync(Path.Combine(_root, "legacy.crabdesk.json"), System.Text.Json.JsonSerializer.Serialize(legacy));
+        await File.WriteAllBytesAsync(Path.Combine(_root, "legacy.preview.png"), [137, 80, 78, 71]);
+
+        var backup = Assert.Single(await service.GetBackupsAsync());
+
+        Assert.True(backup.HasDesktopPreview);
+        Assert.False(backup.HasCompleteDesktopPreview);
+        Assert.True(backup.Snapshot.NeedsBoxOverlay);
+        Assert.Equal(snapshotBox, Assert.Single(backup.Snapshot.Boxes));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BoxLayerCaptureMetadataSurvivesBackupRoundTrip(bool includesBoxes)
+    {
+        var service = new JsonBackupService(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        state.Boxes.Add(new DesktopBox { Title = "工具" });
+        var capture = new DesktopBackupCapture([], "", [137, 80, 78, 71], includesBoxes);
+
+        var backup = await service.CreateAsync(state, capture);
+        var document = await service.LoadDocumentAsync(backup.Path);
+
+        Assert.Equal(includesBoxes, document.Snapshot.DesktopPreviewIncludesBoxes);
+        Assert.Equal(!includesBoxes, document.Snapshot.NeedsBoxOverlay);
+        Assert.Equal(includesBoxes, backup.HasCompleteDesktopPreview);
+    }
+
+    [Fact]
     public async Task EnumerationSkipsCorruptBackups()
     {
         var service = new JsonBackupService(_root);

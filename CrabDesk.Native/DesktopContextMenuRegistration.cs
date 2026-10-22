@@ -59,7 +59,15 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         }
 
         var normalizedExecutable = Path.GetFullPath(executablePath);
-        DeleteOwnedKeys();
+        WriteRegistration(normalizedExecutable);
+        NotifyShell();
+    }
+
+    private void WriteRegistration(string normalizedExecutable)
+    {
+        // Explorer can retain handles to these keys. Update them in place and
+        // publish the completed registration after all write handles close.
+        _root.DeleteSubKeyTree(_legacyOrganizeKeyPath, false);
 
         using var key = _root.CreateSubKey(_keyPath, true)
             ?? throw new InvalidOperationException("Unable to create the CrabDesk desktop context-menu entry.");
@@ -136,14 +144,6 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
             normalizedExecutable,
             "--exit",
             GetMenuIconPath(iconDirectory, "exit.ico", DrawExitIcon));
-
-        try
-        {
-            SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
-        }
-        catch
-        {
-        }
     }
 
     private static void WriteCommand(
@@ -172,7 +172,11 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         _root.DeleteSubKeyTree(_keyPath, false);
         _root.DeleteSubKeyTree(_submenuKeyPath, false);
         _root.DeleteSubKeyTree(_legacyOrganizeKeyPath, false);
+        NotifyShell();
+    }
 
+    private static void NotifyShell()
+    {
         try
         {
             SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);

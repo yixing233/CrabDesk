@@ -485,6 +485,61 @@ public static class DesktopIconPositionService
         return false;
     }
 
+    public static bool TryClearDesktopSelection()
+    {
+        object? shellObject = null;
+        IShellWindows? shellWindows = null;
+        IWebBrowser? desktopBrowser = null;
+        object? browserObject = null;
+        IShellView? nativeView = null;
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("Shell.Application");
+            shellObject = shellType is null ? null : Activator.CreateInstance(shellType);
+            if (shellObject is not IShellDispatch shell ||
+                shell.Windows(out shellWindows) != 0 || shellWindows is null)
+            {
+                return false;
+            }
+
+            object location = null!;
+            object root = null!;
+            if (shellWindows.FindWindowSW(ref location, ref root,
+                    ShellWindowClassDesktop, out _, ShellWindowFindNeedDispatch,
+                    out desktopBrowser) != 0 || desktopBrowser is not IServiceProvider services)
+            {
+                return false;
+            }
+
+            var serviceId = new Guid("4C96BE40-915C-11CF-99D3-00AA004AE837"); // SID_STopLevelBrowser
+            var browserId = typeof(IShellBrowser).GUID;
+            if (services.QueryService(ref serviceId, ref browserId, out browserObject) != 0 ||
+                browserObject is not IShellBrowser browser ||
+                browser.QueryActiveShellView(out nativeView) != 0 || nativeView is null)
+            {
+                return false;
+            }
+
+            // Clearing CrabDesk's selection does not clear Explorer's. The
+            // native menu (including More options) can otherwise use a stale
+            // selected shortcut and show its target executable's file verbs.
+            const uint svsiDeselectOthers = 0x0004;
+            return nativeView.SelectItem(IntPtr.Zero, svsiDeselectOthers) == 0;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ReleaseComObject(nativeView);
+            if (!ReferenceEquals(browserObject, desktopBrowser)) ReleaseComObject(browserObject);
+            ReleaseComObject(desktopBrowser);
+            ReleaseComObject(shellWindows);
+            ReleaseComObject(shellObject);
+        }
+    }
+
     private static bool TryReadExplorerDesktopView(out ExplorerDesktopView explorerView)
     {
         explorerView = default;
@@ -562,9 +617,52 @@ public static class DesktopIconPositionService
         int? IconSize,
         uint? FolderFlags);
 
-    // The Shell automation interfaces below are used only to read the live
-    // desktop view. They never issue Explorer commands or inspect ListView
-    // process memory.
+    [ComImport, Guid("6D5140C1-7436-11CE-8034-00AA006009FA")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IServiceProvider
+    {
+        [PreserveSig] int QueryService(ref Guid service, ref Guid iid, [MarshalAs(UnmanagedType.IUnknown)] out object result);
+    }
+
+    [ComImport, Guid("000214E2-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellBrowser
+    {
+        [PreserveSig] int GetWindow(out IntPtr window);
+        [PreserveSig] int ContextSensitiveHelp([MarshalAs(UnmanagedType.Bool)] bool enterMode);
+        [PreserveSig] int InsertMenusSB(IntPtr menu, IntPtr widths);
+        [PreserveSig] int SetMenuSB(IntPtr menu, IntPtr oleMenu, IntPtr activeObject);
+        [PreserveSig] int RemoveMenusSB(IntPtr menu);
+        [PreserveSig] int SetStatusTextSB([MarshalAs(UnmanagedType.LPWStr)] string text);
+        [PreserveSig] int EnableModelessSB([MarshalAs(UnmanagedType.Bool)] bool enable);
+        [PreserveSig] int TranslateAcceleratorSB(IntPtr message, ushort id);
+        [PreserveSig] int BrowseObject(IntPtr pidl, uint flags);
+        [PreserveSig] int GetViewStateStream(uint mode, out IntPtr stream);
+        [PreserveSig] int GetControlWindow(uint id, out IntPtr window);
+        [PreserveSig] int SendControlMsg(uint id, uint message, IntPtr wParam, IntPtr lParam, out IntPtr result);
+        [PreserveSig] int QueryActiveShellView([MarshalAs(UnmanagedType.Interface)] out IShellView view);
+    }
+
+    [ComImport, Guid("000214E3-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellView
+    {
+        [PreserveSig] int GetWindow(out IntPtr window);
+        [PreserveSig] int ContextSensitiveHelp([MarshalAs(UnmanagedType.Bool)] bool enterMode);
+        [PreserveSig] int TranslateAccelerator(IntPtr message);
+        [PreserveSig] int EnableModeless([MarshalAs(UnmanagedType.Bool)] bool enable);
+        [PreserveSig] int UIActivate(uint state);
+        [PreserveSig] int Refresh();
+        [PreserveSig] int CreateViewWindow(IntPtr previous, IntPtr settings, IntPtr browser, IntPtr bounds, out IntPtr window);
+        [PreserveSig] int DestroyViewWindow();
+        [PreserveSig] int GetCurrentInfo(IntPtr settings);
+        [PreserveSig] int AddPropertySheetPages(uint reserved, IntPtr callback, IntPtr lParam);
+        [PreserveSig] int SaveViewState();
+        [PreserveSig] int SelectItem(IntPtr pidl, uint flags);
+    }
+
+    // Shell automation resolves the live desktop view without inspecting
+    // Explorer's ListView process memory.
     [ComImport]
     [Guid("D8F015C0-C278-11CE-A49E-444553540000")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

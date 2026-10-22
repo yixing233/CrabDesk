@@ -61,6 +61,9 @@ internal static class NativeMethods
     internal static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
 
     [DllImport("user32.dll")]
+    internal static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetForegroundWindow(IntPtr hwnd);
 

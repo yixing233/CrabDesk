@@ -37,7 +37,7 @@ public sealed partial class BackupPreviewWindow : Window
             true);
         RootGrid.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
         DetailsText.Text = $"{backup.CreatedAtText} · {backup.BoxCount} 个盒子 · {backup.RuleCount} 条规则 · {backup.MonitorCount} 块屏幕";
-        if (backup.HasDesktopPreview)
+        if (backup.HasCompleteDesktopPreview)
         {
             PreviewImage.Source = new BitmapImage(new Uri(backup.DesktopPreviewPath, UriKind.Absolute));
         }
@@ -46,6 +46,7 @@ public sealed partial class BackupPreviewWindow : Window
             PreviewImage.Visibility = Visibility.Collapsed;
             LayoutPreview.Visibility = Visibility.Visible;
             LayoutPreview.Snapshot = backup.Snapshot;
+            LayoutPreview.DesktopPreviewPath = backup.DesktopPreviewPath;
         }
 
         if (AppWindow.Presenter is OverlappedPresenter presenter)

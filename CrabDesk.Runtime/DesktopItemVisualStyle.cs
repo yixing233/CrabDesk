@@ -27,8 +27,8 @@ public static class DesktopItemVisualStyle
     /// <summary>Extra space around the icon+label union that receives the highlight.</summary>
     public static float SelectionPadding(float iconSize) => Math.Max(1f, iconSize / 24f);
 
-    /// <summary>Highlight corner radius, scaled with the icon size.</summary>
-    public static float SelectionCornerRadius(float iconSize) => Math.Clamp(iconSize / 6f, 6f, 12f);
+    /// <summary>Configured corner radius shared by hover and selection highlights.</summary>
+    public static float HighlightCornerRadius(double configuredRadius) => (float)Math.Clamp(configuredRadius, 0, 20);
 
     /// <summary>Blends <paramref name="color"/> towards white for the hover treatment.</summary>
     public static Color Brighten(Color color, float amount = HoverBrightness)

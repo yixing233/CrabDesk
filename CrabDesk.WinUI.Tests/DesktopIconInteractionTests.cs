@@ -760,7 +760,8 @@ public sealed class DesktopIconInteractionTests
     [InlineData(true, false, false, DragDropEffects.Move)]
     [InlineData(true, false, true, DragDropEffects.Copy)]
     [InlineData(false, true, true, DragDropEffects.Move)]
-    [InlineData(false, false, false, DragDropEffects.Copy)]
+    [InlineData(false, false, false, DragDropEffects.Move)]
+    [InlineData(false, false, true, DragDropEffects.Move)]
     public void DesktopFolderDropUsesExplorerStyleEffects(
         bool acceptsFolder,
         bool overRecycleBin,
@@ -786,6 +787,20 @@ public sealed class DesktopIconInteractionTests
                 acceptsFolder: true,
                 overRecycleBin: false,
                 controlPressed: false));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RepositioningSystemIconsAcceptsTheMoveOnlySource(bool controlPressed)
+    {
+        Assert.Equal(
+            DragDropEffects.Move,
+            DesktopIconSurface.ResolveDesktopDragEffect(
+                DragDropEffects.Move,
+                acceptsFolder: false,
+                overRecycleBin: false,
+                controlPressed));
     }
 
     [Theory]

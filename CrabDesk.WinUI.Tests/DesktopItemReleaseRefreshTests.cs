@@ -111,9 +111,7 @@ public sealed class DesktopItemReleaseRefreshTests
         Assert.True(importStart >= 0);
         Assert.True(importEnd > importStart);
         var importMethod = runtimeSource[importStart..importEnd];
-        Assert.Contains("RefreshItemsCoreAsync(", importMethod, StringComparison.Ordinal);
-        Assert.Contains("refreshSurfaces: false", importMethod, StringComparison.Ordinal);
-        Assert.Contains("RefreshDesktopItemsRemoved(", importMethod, StringComparison.Ordinal);
+        Assert.Contains("RefreshAfterDesktopItemsDeletedAsync(movedSources)", importMethod, StringComparison.Ordinal);
         Assert.Contains("RegisterTargetedDesktopRefresh(", importMethod, StringComparison.Ordinal);
         Assert.DoesNotContain("NotifyWorkspaceChanged(true);", importMethod, StringComparison.Ordinal);
 
@@ -168,12 +166,8 @@ public sealed class DesktopItemReleaseRefreshTests
         Assert.True(reconcileStart >= 0);
         Assert.True(reconcileEnd > reconcileStart);
         var reconcileMethod = runtimeSource[reconcileStart..reconcileEnd];
-        Assert.Contains("refreshSurfaces: false", reconcileMethod, StringComparison.Ordinal);
-        Assert.Contains("RefreshDesktopItemsRemoved(", reconcileMethod, StringComparison.Ordinal);
-        Assert.Contains(
-            "Environment.SpecialFolder.DesktopDirectory",
-            reconcileMethod,
-            StringComparison.Ordinal);
+        Assert.Contains("RefreshAfterDesktopItemsDeletedAsync(movedPaths)", reconcileMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshDesktopItemsRemoved(movedPaths)", reconcileMethod, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshItemsAsync(", reconcileMethod, StringComparison.Ordinal);
     }
 

@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace CrabDesk.Native;
 
@@ -21,6 +22,8 @@ public sealed class ShellIconProvider
     private const uint StgMedium = 0;
     private const uint ShgsiIcon = 0x000000100;
     private const uint SiidDocNoAssoc = 2;
+    private const uint SiidRecycler = 31;
+    private const uint SiidRecyclerFull = 32;
     private static Bitmap? _genericFileIcon;
     private readonly object _cacheLock = new();
     private readonly Dictionary<CacheKey, CacheEntry> _cache = [];
@@ -29,6 +32,8 @@ public sealed class ShellIconProvider
     private long _hits;
     private long _misses;
     private long _evictions;
+    private bool? _recycleBinIsEmpty;
+    private long _recycleBinIconVersion;
 
     public ShellIconProvider(int cacheCapacity = DefaultCacheCapacity)
     {
@@ -37,9 +42,41 @@ public sealed class ShellIconProvider
 
     public Bitmap? GetIcon(string parsingName) => GetIcon(parsingName, 48);
 
+    public static bool IsRecycleBin(string parsingName) =>
+        string.Equals(parsingName, "::{645FF040-5081-101B-9F08-00AA002F954E}", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(parsingName, "shell:::{645FF040-5081-101B-9F08-00AA002F954E}", StringComparison.OrdinalIgnoreCase);
+
+    // Shell items have no file timestamp. All image-cache layers use this
+    // revision so an empty/full transition cannot reuse the previous image.
+    public long GetIconCacheStamp(string parsingName, long modifiedTicks = 0) =>
+        IsRecycleBin(parsingName) ? Volatile.Read(ref _recycleBinIconVersion) : modifiedTicks;
+
+    public bool RefreshRecycleBinState()
+    {
+        var info = new ShQueryRecycleBinInfo { Size = (uint)Marshal.SizeOf<ShQueryRecycleBinInfo>() };
+        var result = SHQueryRecycleBin(null, ref info);
+        return UpdateRecycleBinState(result == 0 ? info.ItemCount == 0 : null);
+    }
+
+    internal bool UpdateRecycleBinState(bool? isEmpty)
+    {
+        lock (_cacheLock)
+        {
+            if (isEmpty is null || _recycleBinIsEmpty == isEmpty)
+            {
+                return false;
+            }
+
+            _recycleBinIsEmpty = isEmpty;
+            Interlocked.Increment(ref _recycleBinIconVersion);
+            return true;
+        }
+    }
+
     public Bitmap? GetIcon(string parsingName, int pixelSize)
     {
         var key = CreateCacheKey(parsingName, pixelSize);
+        bool? recycleBinIsEmpty;
         lock (_cacheLock)
         {
             if (_cache.TryGetValue(key, out var cached))
@@ -49,9 +86,12 @@ public sealed class ShellIconProvider
                 return cached.Image;
             }
             _misses++;
+            recycleBinIsEmpty = _recycleBinIsEmpty;
         }
 
-        var image = LoadImage(key.ParsingName, key.PixelSize);
+        var image = IsRecycleBin(key.ParsingName) && recycleBinIsEmpty is { } isEmpty
+            ? LoadRecycleBinImage(isEmpty, key.PixelSize) ?? LoadImage(key.ParsingName, key.PixelSize)
+            : LoadImage(key.ParsingName, key.PixelSize);
         lock (_cacheLock)
         {
             if (_cache.TryGetValue(key, out var cached))
@@ -104,7 +144,7 @@ public sealed class ShellIconProvider
         }
     }
 
-    private static CacheKey CreateCacheKey(string parsingName, int pixelSize)
+    private CacheKey CreateCacheKey(string parsingName, int pixelSize)
     {
         var normalizedName = parsingName;
         long modifiedTicks = 0;
@@ -131,11 +171,91 @@ public sealed class ShellIconProvider
         catch (UnauthorizedAccessException)
         {
         }
-        return new CacheKey(normalizedName, Math.Clamp(pixelSize, 16, 256), modifiedTicks, length);
+        return new CacheKey(
+            normalizedName,
+            Math.Clamp(pixelSize, 16, 256),
+            GetIconCacheStamp(parsingName, modifiedTicks),
+            length);
     }
 
     private static Bitmap? LoadImage(string parsingName, int pixelSize) =>
+        LoadNamespaceIconImage(parsingName, pixelSize) ??
         LoadShellItemImage(parsingName, pixelSize) ?? LoadLegacyIcon(parsingName);
+
+    internal static bool TryGetNamespaceClsid(string parsingName, out Guid clsid)
+    {
+        var name = parsingName.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)
+            ? parsingName[6..] : parsingName;
+        clsid = default;
+        return name.StartsWith("::", StringComparison.Ordinal) && Guid.TryParse(name[2..], out clsid);
+    }
+
+    private static Bitmap? LoadNamespaceIconImage(string parsingName, int pixelSize)
+    {
+        if (!TryGetNamespaceClsid(parsingName, out var clsid)) return null;
+        // Virtual folders can yield a generic folder image from the image
+        // factory. Use the registered desktop icon, including user overrides.
+        var path = $@"CLSID\{clsid:B}\DefaultIcon";
+        using var userKey = Registry.CurrentUser.OpenSubKey(
+            @"Software\Microsoft\Windows\CurrentVersion\Explorer\" + path);
+        using var defaultKey = Registry.ClassesRoot.OpenSubKey(path);
+        return LoadConfiguredIcon(userKey?.GetValue(null) as string ?? defaultKey?.GetValue(null) as string, pixelSize);
+    }
+
+    private static Bitmap? LoadConfiguredIcon(string? location, int pixelSize)
+    {
+        if (string.IsNullOrWhiteSpace(location)) return null;
+        var path = location;
+        var index = 0;
+        var separator = location.LastIndexOf(',');
+        if (separator >= 0 && int.TryParse(location[(separator + 1)..], out index))
+            path = location[..separator];
+        return LoadIconResource(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')), index, pixelSize);
+    }
+
+    private static Bitmap? LoadRecycleBinImage(bool isEmpty, int pixelSize)
+    {
+        // The namespace image factory can return DefaultIcon for both states.
+        // Read the explicit empty/full resource, including per-user overrides.
+        const string clsidPath = @"CLSID\{645FF040-5081-101B-9F08-00AA002F954E}\DefaultIcon";
+        using var userKey = Registry.CurrentUser.OpenSubKey(
+            @"Software\Microsoft\Windows\CurrentVersion\Explorer\" + clsidPath);
+        using var defaultKey = Registry.ClassesRoot.OpenSubKey(clsidPath);
+        var valueName = isEmpty ? "empty" : "full";
+        var location = userKey?.GetValue(valueName) as string ?? defaultKey?.GetValue(valueName) as string;
+        var configuredImage = LoadConfiguredIcon(location, pixelSize);
+        if (configuredImage is not null)
+        {
+            return configuredImage;
+        }
+
+        var stock = new ShStockIconInfo { Size = (uint)Marshal.SizeOf<ShStockIconInfo>() };
+        return SHGetStockIconInfo(isEmpty ? SiidRecycler : SiidRecyclerFull, 0, ref stock) == 0
+            ? LoadIconResource(stock.Path, stock.Index, pixelSize)
+            : null;
+    }
+
+    private static Bitmap? LoadIconResource(string path, int index, int pixelSize)
+    {
+        IntPtr iconHandle = IntPtr.Zero;
+        try
+        {
+            if (SHDefExtractIcon(path, index, 0, out iconHandle, IntPtr.Zero, (uint)pixelSize) != 0 ||
+                iconHandle == IntPtr.Zero)
+            {
+                return null;
+            }
+            using var icon = (Icon)Icon.FromHandle(iconHandle).Clone();
+            return icon.ToBitmap();
+        }
+        finally
+        {
+            if (iconHandle != IntPtr.Zero)
+            {
+                DestroyIcon(iconHandle);
+            }
+        }
+    }
 
     // A transient Shell failure (Explorer rebuilding its image list, cloud
     // placeholder, permission flip) must never leave a box item rendered as
@@ -152,7 +272,7 @@ public sealed class ShellIconProvider
         try
         {
             var info = new ShStockIconInfo { Size = (uint)Marshal.SizeOf<ShStockIconInfo>() };
-            if (SHGetStockIconInfo(SiidDocNoAssoc, ShgsiIcon, ref info, info.Size) != 0 ||
+            if (SHGetStockIconInfo(SiidDocNoAssoc, ShgsiIcon, ref info) != 0 ||
                 info.Icon == IntPtr.Zero)
             {
                 return null;
@@ -279,6 +399,17 @@ public sealed class ShellIconProvider
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ShQueryRecycleBinInfo
+    {
+        internal uint Size;
+        internal long TotalBytes;
+        internal long ItemCount;
+    }
+
+    [DllImport("shell32.dll", EntryPoint = "SHQueryRecycleBinW", CharSet = CharSet.Unicode)]
+    private static extern int SHQueryRecycleBin(string? rootPath, ref ShQueryRecycleBinInfo info);
+
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHCreateItemFromParsingName(
         string path,
@@ -314,8 +445,16 @@ public sealed class ShellIconProvider
     private static extern int SHGetStockIconInfo(
         uint iconId,
         uint flags,
-        ref ShStockIconInfo stockIconInfo,
-        uint stockIconInfoSize);
+        ref ShStockIconInfo stockIconInfo);
+
+    [DllImport("shell32.dll", EntryPoint = "SHDefExtractIconW", CharSet = CharSet.Unicode)]
+    private static extern int SHDefExtractIcon(
+        string path,
+        int index,
+        uint flags,
+        out IntPtr largeIcon,
+        IntPtr smallIcon,
+        uint iconSize);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ShStockIconInfo

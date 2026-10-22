@@ -54,13 +54,15 @@ public sealed partial class DesktopSnapshotView : UserControl
     {
         SnapshotCanvas.Children.Clear();
         SnapshotWallpaper.Source = null;
+        var hasDesktopPreview = false;
         if (!string.IsNullOrWhiteSpace(DesktopPreviewPath) && File.Exists(DesktopPreviewPath))
         {
             try
             {
                 SnapshotWallpaper.Opacity = 1;
                 SnapshotWallpaper.Source = new BitmapImage(new Uri(DesktopPreviewPath, UriKind.Absolute));
-                return;
+                hasDesktopPreview = true;
+                if (Snapshot?.NeedsBoxOverlay != true) return;
             }
             catch
             {
@@ -68,7 +70,7 @@ public sealed partial class DesktopSnapshotView : UserControl
             }
         }
 
-        SnapshotWallpaper.Opacity = 0.34;
+        SnapshotWallpaper.Opacity = hasDesktopPreview ? 1 : 0.34;
         if (Snapshot is not { } snapshot ||
             SnapshotCanvas.ActualWidth <= 0 ||
             SnapshotCanvas.ActualHeight <= 0 ||
@@ -78,7 +80,7 @@ public sealed partial class DesktopSnapshotView : UserControl
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(snapshot.WallpaperPath) &&
+        if (!hasDesktopPreview && !string.IsNullOrWhiteSpace(snapshot.WallpaperPath) &&
             File.Exists(snapshot.WallpaperPath))
         {
             try
@@ -102,7 +104,7 @@ public sealed partial class DesktopSnapshotView : UserControl
         var offsetX = inset + (availableWidth - renderedWidth) / 2;
         var offsetY = inset + (availableHeight - renderedHeight) / 2;
 
-        foreach (var position in snapshot.IconPositions ?? [])
+        foreach (var position in hasDesktopPreview ? [] : snapshot.IconPositions ?? [])
         {
             var markerSize = Math.Clamp(5 * scale, 1.5, 5);
             var marker = new Border

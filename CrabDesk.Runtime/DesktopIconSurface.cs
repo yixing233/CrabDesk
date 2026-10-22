@@ -29,13 +29,15 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         bool overRecycleBin,
         bool controlPressed)
     {
+        // Moving a private desktop selection only changes its layout. Shell
+        // icons and mixed selections advertise Move without a FileDrop payload.
         var preferredEffect = overRecycleBin
             ? Forms.DragDropEffects.Move
             : acceptsFolder
                 ? controlPressed
                     ? Forms.DragDropEffects.Copy
                     : Forms.DragDropEffects.Move
-                : Forms.DragDropEffects.Copy;
+                : Forms.DragDropEffects.Move;
         return (allowedEffects & preferredEffect) != 0
             ? preferredEffect
             : Forms.DragDropEffects.None;
@@ -153,6 +155,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
     private bool _desktopOleDragActive;
     private string? _hoveredItemKey;
     private ShellContextMenuSession? _shellContextMenu;
+    private bool _desktopContextMenuPending;
     private bool _lastPresentSucceeded;
     private bool _lastRegionSucceeded;
     private float _iconSize = DefaultIconSize;
@@ -419,6 +422,27 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             QueueBoxVisualFrame();
         }
         return true;
+    }
+
+    internal void RefreshIconImages(IReadOnlyCollection<string> itemKeys)
+    {
+        if (itemKeys.Count == 0 || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        var dirtyBounds = _items
+            .Where(item => itemKeys.Contains(item.Item.Key.ToString()))
+            .Select(item => item.Bounds)
+            .Aggregate((RectangleF?)null, (current, bounds) => current is { } existing
+                ? RectangleF.Union(existing, bounds)
+                : bounds);
+        if (dirtyBounds is { } dirty)
+        {
+            PruneDesktopIconCache();
+            _dragBaseReady = false;
+            RequestBoxVisualFrame(dirty);
+        }
     }
 
     internal bool RefreshRemovedItems(IReadOnlyCollection<string> removedItemKeys)
@@ -2076,7 +2100,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         var visualBounds = GetItemVisualBounds(iconBounds, textHitBounds);
         using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
         using var border = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
-        using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
+        using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.HighlightCornerRadius(_runtime.State.Settings.Appearance.IconHoverCornerRadius));
         graphics.FillPath(fill, path);
         graphics.DrawPath(border, path);
 
@@ -2731,14 +2755,14 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
                 var hoverColor = DesktopItemVisualStyle.Brighten(selectionColor);
                 using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
                 using var border = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
-                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
+                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.HighlightCornerRadius(_runtime.State.Settings.Appearance.IconHoverCornerRadius));
                 graphics.FillPath(fill, path);
                 graphics.DrawPath(border, path);
             }
             else if (selected)
             {
                 using var fill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, selectionColor));
-                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
+                using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.HighlightCornerRadius(_runtime.State.Settings.Appearance.IconHoverCornerRadius));
                 graphics.FillPath(fill, path);
             }
 
@@ -2820,7 +2844,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
                 entry.HitBounds.IsEmpty ? GetItemHitBounds(entry) : entry.HitBounds,
                 padding,
                 padding);
-            using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.SelectionCornerRadius(_iconSize));
+            using var path = RoundedRectangle(visualBounds, DesktopItemVisualStyle.HighlightCornerRadius(_runtime.State.Settings.Appearance.IconHoverCornerRadius));
             graphics.FillPath(highlightFill, path);
             graphics.DrawPath(highlightBorder, path);
         }
@@ -2959,10 +2983,11 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
     }
 
-    private static (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(
+    private (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(
         DesktopItemRef item,
         int pixelSize) =>
-        (item.ParsingName, pixelSize, item.ModifiedAt?.UtcDateTime.Ticks ?? 0);
+        (item.ParsingName, pixelSize,
+            _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0));
 
     private void PruneDesktopIconCache()
     {
@@ -3275,16 +3300,15 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         // A click on the desktop while an inline rename is open commits the
         // edit (the surface never activates, so Deactivate does not fire).
         _runtime.CommitActiveDesktopInlineRename();
+        // This no-activate surface must restore the desktop foreground for the
+        // keyboard hook. The runtime queues activation off the UI thread.
+        _runtime.ActivateDesktopKeyboardInput();
         var commitMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
         var point = ToDip(eventArgs.Location);
         var item = GetItemAt(point);
         var hitMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds - commitMs;
         if (item is not null)
         {
-            // Do not synchronously hand activation to Explorer from a desktop click.
-            // After an external drop Explorer may still be servicing the source shell
-            // operation; SetForegroundWindow can block Explorer and make the click
-            // appear frozen. Keyboard routing is handled by the global command path.
             TryBeginSlowDoubleClickRename(item);
         }
         var totalMs = System.Diagnostics.Stopwatch.GetElapsedTime(stageStarted).TotalMilliseconds;
@@ -3695,7 +3719,24 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
 
         var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+        var fileTarget = GetDesktopFolderDropTarget(point, itemKeys);
+        var specialTargetChanged = SetDesktopFolderDropTarget(fileTarget);
+        var recycleTarget = fileTarget is null && IsOverRecycleBin(point) &&
+            itemKeys.All(key => _runtime.FindItemByKey(key)?.FileSystemPath is not null);
+        if (_overRecycleBin != recycleTarget || specialTargetChanged)
+        {
+            _overRecycleBin = recycleTarget;
+            RequestDragRender();
+        }
         var acceptsDrop = UpdateBoxDropPlacement(point, itemKeys);
+        if (fileTarget is not null || recycleTarget)
+        {
+            _boxDropTargetCell = null;
+            eventArgs.Effect = ResolveDesktopDragEffect(eventArgs.AllowedEffect,
+                acceptsFolder: fileTarget is not null, overRecycleBin: recycleTarget,
+                controlPressed: (eventArgs.KeyState & 8) != 0);
+            return;
+        }
         eventArgs.Effect = acceptsDrop &&
                            (eventArgs.AllowedEffect & Forms.DragDropEffects.Move) != 0
             ? Forms.DragDropEffects.Move
@@ -3930,6 +3971,25 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             }
 
             var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
+            var folderDropTarget = GetDesktopFolderDropTarget(point, itemKeys);
+            var recycleDropTarget = folderDropTarget is null && IsOverRecycleBin(point) &&
+                itemKeys.All(key => _runtime.FindItemByKey(key)?.FileSystemPath is not null);
+            if (folderDropTarget is not null || recycleDropTarget)
+            {
+                var effect = ResolveDesktopDragEffect(eventArgs.AllowedEffect,
+                    acceptsFolder: folderDropTarget is not null, overRecycleBin: recycleDropTarget,
+                    controlPressed: (eventArgs.KeyState & 8) != 0);
+                eventArgs.Effect = effect;
+                if (effect == Forms.DragDropEffects.None) return;
+                // Claim the private session before the source OLE loop returns.
+                // Otherwise it can unassign files while the filesystem work runs.
+                dragSession.HandledByDesktop = true;
+                var files = new DesktopIconSurfaceDragSession(this, itemKeys);
+                if (recycleDropTarget) CompleteRecycleBinDrop(files);
+                else await CompleteDesktopFolderDropAsync(files, folderDropTarget!.Item,
+                    move: (effect & Forms.DragDropEffects.Move) != 0);
+                return;
+            }
             if (!UpdateBoxDropPlacement(point, itemKeys) ||
                 _boxDropTargetCell is not { } targetCell)
             {
@@ -3959,7 +4019,10 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
         finally
         {
+            _overRecycleBin = false;
+            _desktopFolderDropTargetKey = null;
             ClearBoxDropState();
+            RequestDragRender();
         }
     }
 
@@ -4605,15 +4668,44 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         menu.Show(this, location);
     }
 
-    private void ShowNativeDesktopContextMenu(Point location)
+    private async void ShowNativeDesktopContextMenu(Point location)
     {
-        var screenPoint = PointToScreen(location);
-        if (DesktopWindowTools.ShowDesktopContextMenu(
-                _desktopListView,
-                screenPoint.X,
-                screenPoint.Y))
+        if (_desktopContextMenuPending)
         {
-            _runtime.NotifyDesktopContextMenuOpened(new Point(screenPoint.X, screenPoint.Y));
+            return;
+        }
+        var screenPoint = PointToScreen(location);
+        _desktopContextMenuPending = true;
+        try
+        {
+            // Explorer maintains its own selection even with its icon layer
+            // hidden. Clear it before opening either native menu variant.
+            var cleared = await Task.Run(DesktopIconPositionService.TryClearDesktopSelection);
+            if (IsDisposed || !IsHandleCreated)
+            {
+                return;
+            }
+            if (!cleared)
+            {
+                DiagnosticLog.Info("Desktop background menu cancelled: Explorer selection could not be cleared.");
+                return;
+            }
+            if (DesktopWindowTools.ShowDesktopContextMenu(
+                    _desktopListView,
+                    screenPoint.X,
+                    screenPoint.Y))
+            {
+                DiagnosticLog.Info($"Desktop background menu opened x={screenPoint.X} y={screenPoint.Y} nativeSelectionCleared=True");
+                _runtime.NotifyDesktopContextMenuOpened(new Point(screenPoint.X, screenPoint.Y));
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Could not open the desktop background menu.", exception);
+        }
+        finally
+        {
+            _desktopContextMenuPending = false;
         }
     }
 
@@ -4701,6 +4793,9 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
         finally
         {
+            DiagnosticLog.Info(
+                $"Desktop file drag completed count={selectedItems.Length} effect={completedEffect} " +
+                $"internal={dragSession.HandledByBox || dragSession.HandledByDesktop}");
             _desktopOleDragActive = false;
             UpdatePhysicalDragPointerTracking();
             UpdateDropTargetRegistration();
@@ -4709,8 +4804,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             EndDesktopDragAndPresent();
             Capture = false;
             if (!dragSession.HandledByBox &&
-                !dragSession.HandledByDesktop &&
-                (completedEffect & Forms.DragDropEffects.Move) != 0)
+                !dragSession.HandledByDesktop)
             {
                 _ = _runtime.ReconcileExternalDesktopMoveAsync(selectedItems);
             }
@@ -4822,6 +4916,11 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
     private DesktopIconGeometry? GetDesktopFolderDropTarget(
         PointF point,
         DesktopIconSurfaceDragSession dragSession)
+        => GetDesktopFolderDropTarget(point, dragSession.ItemKeys);
+
+    private DesktopIconGeometry? GetDesktopFolderDropTarget(
+        PointF point,
+        IReadOnlyList<string> itemKeys)
     {
         var candidate = GetItemAt(point);
         if (candidate is null)
@@ -4829,7 +4928,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             return null;
         }
 
-        var draggedKeySet = dragSession.ItemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var draggedKeySet = itemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var draggedItems = draggedKeySet
             .Select(_runtime.FindItemByKey)
             .Where(item => item is not null)
@@ -5790,6 +5889,12 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
     private static GraphicsPath RoundedRectangle(RectangleF bounds, float radius)
     {
         var path = new GraphicsPath();
+        radius = Math.Min(Math.Max(0, radius), Math.Min(bounds.Width, bounds.Height) / 2);
+        if (radius <= 0.1f)
+        {
+            path.AddRectangle(bounds);
+            return path;
+        }
         var diameter = radius * 2;
         path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
         path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);

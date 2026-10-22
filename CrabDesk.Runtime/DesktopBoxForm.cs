@@ -1148,6 +1148,25 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     /// lets their configured translucency reveal the icons underneath instead
     /// of hiding them with a native sibling window.
     /// </summary>
+    internal void RenderBackupLayer(Graphics graphics, LayoutRect desktopBounds)
+    {
+        var state = graphics.Save();
+        try
+        {
+            graphics.TranslateTransform(
+                (float)(_monitor.PixelBounds.X - desktopBounds.X),
+                (float)(_monitor.PixelBounds.Y - desktopBounds.Y));
+            graphics.ScaleTransform((float)_scale, (float)_scale);
+            RenderOnIconLayer(graphics, new RectangleF(0, 0,
+                (float)(_monitor.PixelBounds.Width / _scale),
+                (float)(_monitor.PixelBounds.Height / _scale)));
+        }
+        finally
+        {
+            graphics.Restore(state);
+        }
+    }
+
     internal void RenderOnIconLayer(Graphics graphics, RectangleF clipBounds)
     {
         if (IsDisposed || _resourcesDisposed)

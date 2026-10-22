@@ -767,7 +767,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .ToArray();
     }
 
-    private static void DrawBoxTabs(
+    private void DrawBoxTabs(
         Graphics graphics,
         BoxGeometry geometry,
         Color accent,
@@ -835,6 +835,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     geometry.TabBar.Bottom - 1);
             }
         }
+        DrawManualTabInsertion(graphics, geometry, accent);
     }
 
     private void DrawMappedFolderState(Graphics graphics, BoxGeometry geometry, Color textColor)
@@ -909,7 +910,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             _expandedItemHitBounds.Remove(visualKey);
         }
-        var cornerRadius = DesktopItemVisualStyle.SelectionCornerRadius(iconSize);
+        var cornerRadius = DesktopItemVisualStyle.HighlightCornerRadius(_runtime.State.Settings.Appearance.IconHoverCornerRadius);
         if (isFolderDropTarget)
         {
             // The drop target folder inside a mapped box is highlighted with
@@ -930,7 +931,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var hoverColor = DesktopItemVisualStyle.Brighten(configuredSelection);
             using var hovered = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
             using var hoverBorder = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
-            using var hoveredPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
+            using var hoveredPath = RoundedRectangle(
+                RectangleF.Inflate(visualBounds, -2, -2),
+                cornerRadius);
             graphics.FillPath(hovered, hoveredPath);
             graphics.DrawPath(hoverBorder, hoveredPath);
         }

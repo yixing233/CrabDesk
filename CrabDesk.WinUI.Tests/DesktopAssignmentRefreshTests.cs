@@ -175,6 +175,32 @@ public sealed class DesktopAssignmentRefreshTests
     }
 
     [Fact]
+    public void DeleteBoxResolvesTheCurrentBoxByIdAndDoesNotProtectTheLastNormalBox()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            "CrabDeskRuntime.cs"));
+        var methodStart = source.IndexOf(
+            "public void DeleteBox(",
+            StringComparison.Ordinal);
+        var methodEnd = source.IndexOf(
+            "public void AssignItem(",
+            Math.Max(0, methodStart),
+            StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0);
+        Assert.True(methodEnd > methodStart);
+        var method = source[methodStart..methodEnd];
+        Assert.Contains(
+            "State.Boxes.FirstOrDefault(candidate => candidate.Id == box.Id)",
+            method,
+            StringComparison.Ordinal);
+        Assert.Contains("State.Boxes.Remove(currentBox);", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("Count(candidate => !candidate.IsMappedFolder)", method, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CrossBoxTransferRefreshesSourceAndTargetWithoutGlobalRefresh()
     {
         var source = File.ReadAllText(Path.Combine(

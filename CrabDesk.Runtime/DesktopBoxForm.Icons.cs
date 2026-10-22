@@ -173,7 +173,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             BeginInvoke((Action)(() =>
             {
                 _pendingIconLoads.Remove(key);
-                if (IsDisposed || cacheVersion != _iconCacheVersion)
+                if (IsDisposed || cacheVersion != _iconCacheVersion ||
+                    key.ModifiedTicks != _runtime.IconProvider.GetIconCacheStamp(key.ParsingName, key.ModifiedTicks))
                 {
                     bitmap?.Dispose();
                     return;
@@ -273,7 +274,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             yield return new IconBitmapKey(
                 item.ParsingName,
                 Math.Clamp(center + offset, 16, 256),
-                item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
+                _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0),
                 0);
         }
     }
@@ -289,7 +290,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return new IconBitmapKey(
             item.ParsingName,
             QuantizeIconPixelSize((int)Math.Round(iconSize * _scale)),
-            item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
+            _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0),
             0);
     }
 

@@ -4,6 +4,34 @@ namespace CrabDesk.WinUI.Tests;
 
 public sealed class DesktopDeleteInteractionTests
 {
+    [Theory]
+    [InlineData("DesktopIconSurface.cs")]
+    [InlineData("DesktopBoxForm.Input.cs")]
+    public void SelectingDesktopIconsRestoresKeyboardInputBeforeHandlingTheSelection(string fileName)
+    {
+        // Desktop children use WS_EX_NOACTIVATE. After switching from another
+        // app, both clicks and marquee selection must activate the desktop root
+        // or the global keyboard hook will reject Delete as a non-desktop key.
+        var source = File.ReadAllText(Path.Combine(
+            FindSolutionDirectory(),
+            "CrabDesk.Runtime",
+            fileName));
+        var mouseDownStart = source.IndexOf(
+            "private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)",
+            StringComparison.Ordinal);
+        Assert.True(mouseDownStart >= 0);
+        var firstReturn = source.IndexOf("return;", mouseDownStart, StringComparison.Ordinal);
+        var restoreInput = source.IndexOf(
+            "_runtime.ActivateDesktopKeyboardInput();",
+            mouseDownStart,
+            StringComparison.Ordinal);
+
+        Assert.True(restoreInput > mouseDownStart,
+            $"{fileName} must restore desktop keyboard input when a selection starts.");
+        Assert.True(restoreInput < firstReturn,
+            "Keyboard activation must cover both item clicks and blank-area selection.");
+    }
+
     [Fact]
     public void DeleteCompletionRestoresDesktopKeyboardInputAfterClearingBusyState()
     {

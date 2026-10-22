@@ -40,6 +40,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     private IntPtr _keyboardHook;
     private uint _hookThreadId;
     private long _desktopContextMenuExpiresAt;
+    private readonly ModernDesktopMenuTracker _modernMenuTracker = new();
     private readonly HashSet<uint> _interceptedKeyboardKeys = [];
     private volatile bool _enabled;
     private bool _disposed;
@@ -99,9 +100,11 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     /// </summary>
     public void TrackDesktopContextMenu()
     {
+        var expiresAt = Environment.TickCount64 + DesktopContextMenuTrackingWindowMilliseconds;
         Volatile.Write(
             ref _desktopContextMenuExpiresAt,
-            Environment.TickCount64 + DesktopContextMenuTrackingWindowMilliseconds);
+            expiresAt);
+        _modernMenuTracker.Track(DesktopListView, expiresAt);
     }
 
     public void Dispose()
@@ -112,6 +115,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         }
         _disposed = true;
         Enabled = false;
+        _modernMenuTracker.Dispose();
         var hookThreadId = _hookThreadId;
         if (hookThreadId != 0)
         {
@@ -196,6 +200,16 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     {
         var isDesktopSurface = IsDesktopSurfacePoint(mouse.Point);
         var targetWindow = WindowFromPoint(mouse.Point);
+        // Composition menu hosts can be skipped by WindowFromPoint, so check
+        // their cached screen bounds before routing a click to the desktop below.
+        if (message == WmLButtonDown && IsDesktopContextMenuActive() &&
+            _modernMenuTracker.IsRefreshAt(targetWindow, mouse.Point.X, mouse.Point.Y))
+        {
+            Volatile.Write(ref _desktopContextMenuExpiresAt, 0);
+            _modernMenuTracker.Stop();
+            DesktopContextMenuRefreshRequested?.Invoke(this, EventArgs.Empty);
+            return false;
+        }
         if ((message == WmLButtonDown || message == WmRButtonDown) &&
             isDesktopSurface &&
             !IsCurrentProcessWindow(targetWindow))
@@ -215,6 +229,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
             if (isRefresh)
             {
                 Volatile.Write(ref _desktopContextMenuExpiresAt, 0);
+                _modernMenuTracker.Stop();
                 DesktopContextMenuRefreshRequested?.Invoke(this, EventArgs.Empty);
             }
             else if (IsNativeSortMenuItem(targetWindow, mouse.Point))

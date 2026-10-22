@@ -77,3 +77,4 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--exit-existing"; Flags: runhidd
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\DesktopBackground\Shell\CrabDesk"; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\CrabDesk.DesktopContextMenu.Commands"; Flags: uninsdeletekey dontcreatekey

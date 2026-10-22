@@ -7,6 +7,19 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopInputHookLatencyTests
 {
     [Fact]
+    public void ModernMenuClicksOnlyReadTheBackgroundAccessibilityCache()
+    {
+        var handler = ExtractMethod(
+            ReadNativeSource("DesktopDoubleClickMonitor.cs"),
+            "private bool HandleMouseMessage(",
+            "internal static bool ShouldRouteBoxDragWheel(");
+        Assert.Contains("_modernMenuTracker.IsRefreshAt(", handler, StringComparison.Ordinal);
+        Assert.Contains("DesktopContextMenuRefreshRequested?.Invoke", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutomationElement", handler, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReadRefreshItems", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BothLowLevelHooksAreInstalledOnTheirOwnMessageLoopThread()
     {
         var source = ReadNativeSource("DesktopDoubleClickMonitor.cs");
@@ -308,7 +321,7 @@ public sealed class DesktopInputHookLatencyTests
         var loadIcon = ExtractMethod(
             source,
             "private async Task LoadDesktopIconAsync(",
-            "private static (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(");
+            "private (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(");
 
         Assert.DoesNotContain("ClearDesktopIconCache()", refresh, StringComparison.Ordinal);
         Assert.Contains("PruneDesktopIconCache()", refresh, StringComparison.Ordinal);

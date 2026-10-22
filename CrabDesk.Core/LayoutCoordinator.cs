@@ -383,11 +383,13 @@ public static class BoxDragCompletionPolicy
         bool handledByBox,
         bool sourceMapped,
         bool pointerOverBox,
-        bool externalDropAccepted) =>
+        bool externalDropAccepted,
+        bool pointerOverDesktop) =>
         dropCommitted &&
         !cancelled &&
         !handledByBox &&
         !sourceMapped &&
         !pointerOverBox &&
-        !externalDropAccepted;
+        !externalDropAccepted &&
+        pointerOverDesktop;
 }

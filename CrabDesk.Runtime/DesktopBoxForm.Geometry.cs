@@ -394,7 +394,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             : item.Bounds;
     }
 
-    private bool TrySelectBoxTab(BoxGeometry box, PointF point)
+    private bool TrySelectBoxTab(BoxGeometry box, PointF point, bool preserveItemSelection = false)
     {
         var manualTab = GetManualBoxTabAtPoint(box, point);
         if (manualTab is not null)
@@ -408,7 +408,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _scrollOffsets.Remove(new ItemViewKey(
                 box.Box.Id,
                 $"manual:{manualTab.Id?.ToString("N") ?? "all"}"));
-            ClearBoxItemSelection(box.Box.Id);
+            if (!preserveItemSelection) ClearBoxItemSelection(box.Box.Id);
             _geometryDirty = true;
             InvalidateDip(box.TabBar);
             InvalidateDip(box.Body);
@@ -428,7 +428,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
         _activeMappedFolderCategories[box.Box.Id] = tab.Category;
         _scrollOffsets.Remove(new ItemViewKey(box.Box.Id, $"mapped:{tab.Category}"));
-        ClearBoxItemSelection(box.Box.Id);
+        if (!preserveItemSelection) ClearBoxItemSelection(box.Box.Id);
         _geometryDirty = true;
         InvalidateDip(box.TabBar);
         InvalidateDip(box.Body);
@@ -538,8 +538,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return targetItem.Key.ToString();
         }
 
-        var orderedKeys = GetCachedItemsForBox(geometry.Box.Id)
+        var orderedKeys = GetVisibleItemsForBox(geometry)
             .Select(item => item.Key.ToString())
+            .Where(key => incomingKeys is null || !incomingKeys.Contains(key))
             .ToArray();
         var index = Array.FindIndex(
             orderedKeys,

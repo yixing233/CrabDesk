@@ -27,6 +27,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             FinishTitleEdit(true);
         }
+        // The keyboard hook requires the desktop foreground even though this
+        // surface does not activate. The runtime queues activation off-thread.
+        _runtime.ActivateDesktopKeyboardInput();
         RebuildGeometry();
         var point = ToDip(eventArgs.Location);
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
@@ -39,8 +42,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var item = GetItemAtPoint(box, point);
         if (item is not null)
         {
-            // Avoid SetForegroundWindow while Explorer may still be completing a
-            // shell drop; activation can block both Explorer and the desktop UI.
             TryBeginSlowDoubleClickRename(item);
         }
         DiagnosticLog.Info(
@@ -88,6 +89,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _resizeEdges = ResizeEdges.None;
         if (box is not null && TrySelectBoxTab(box, point))
         {
+            _pressedItem = null;
+            _pressedBoxId = null;
+            if (GetManualBoxTabAtPoint(box, point)?.Id is { } tabId)
+                _pressedManualTab = new ManualTabDrag(box.Box.Id, tabId);
             return;
         }
         if (item is not null)
@@ -275,6 +280,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnMouseMove(object? sender, Forms.MouseEventArgs eventArgs)
     {
         var point = ToDip(eventArgs.Location);
+        if (_manualTabDragActive) return;
+        if (HandleManualTabMouseMove(point, eventArgs.Button)) return;
         if (_scrollBarDrag is not null)
         {
             UpdateScrollBarDrag(point);
@@ -342,6 +349,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var sourceBox = _runtime.State.Boxes.FirstOrDefault(box => box.Id == sourceBoxId);
         var sourceMapped = sourceBox?.IsMappedFolder == true;
         var sourceMappedReadOnly = sourceBox?.MappedFolder?.IsReadOnly == true;
+        var sourceTabId = _activeManualTabIds.GetValueOrDefault(sourceBoxId);
         var paths = selected.Where(candidate => candidate.FileSystemPath is not null).Select(candidate => candidate.FileSystemPath!).ToArray();
         if (paths.Length > 0 &&
             BoxDragCompletionPolicy.ShouldExposeFileDrop(paths.Length == selected.Length))
@@ -358,6 +366,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _showVirtualDesktopDropCursor = !sourceMapped;
         _runtime.SetVirtualBoxDesktopDropEnabled(!sourceMapped);
         var shouldReleaseToDesktop = false;
+        var handledInternally = false;
         var dragEffect = Forms.DragDropEffects.None;
         try
         {
@@ -400,13 +409,23 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 Forms.Cursor.Current = Forms.Cursors.Default;
             }
 
+            handledInternally = dragSession.HandledByBox || dragSession.HandledByDesktop;
+            if (_dragCancelled && !sourceMapped)
+            {
+                _activeManualTabIds[sourceBoxId] = sourceTabId;
+                _geometryDirty = true;
+            }
             shouldReleaseToDesktop = BoxDragCompletionPolicy.ShouldUnassign(
                 _dragDropCommitted,
                 _dragCancelled,
-                dragSession.HandledByBox || dragSession.HandledByDesktop,
+                handledInternally,
                 sourceMapped,
                 IsPointerOverAnyBox(Forms.Cursor.Position),
-                dragEffect != Forms.DragDropEffects.None);
+                dragEffect != Forms.DragDropEffects.None,
+                _runtime.IsDesktopSurfacePoint(Forms.Cursor.Position));
+            DiagnosticLog.Info(
+                $"Box file drag completed count={selected.Length} effect={dragEffect} " +
+                $"cancelled={_dragCancelled} internal={handledInternally} release={shouldReleaseToDesktop}");
         }
         finally
         {
@@ -416,6 +435,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (shouldReleaseToDesktop)
         {
             _ = ReleaseBoxItemsToDesktopAsync(itemKeys, Forms.Cursor.Position);
+        }
+        else if (!handledInternally)
+        {
+            // Shell targets may return Copy or None after physically moving files.
+            // Reconcile actual missing paths rather than relying on the OLE effect.
+            _ = _runtime.ReconcileExternalDesktopMoveAsync(selected);
         }
     }
 
@@ -1120,6 +1145,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        if (eventArgs.Button == Forms.MouseButtons.Left && _pressedManualTab is not null)
+        {
+            _pressedManualTab = null;
+            Capture = false;
+            return;
+        }
         DiagnosticLog.Verbose(
             $"Surface mouse up monitor={_monitor.Id} button={eventArgs.Button} moving={_movingBox is not null} resizing={_resizingBox is not null} selecting={_selectionBox is not null}");
         if (eventArgs.Button == Forms.MouseButtons.Left && _scrollBarDrag is not null)

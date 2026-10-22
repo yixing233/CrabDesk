@@ -10,6 +10,24 @@ public static class DesktopWindowTools
     private const long WsExNoActivate = 0x08000000L;
     private const long WsExNoParentNotify = 0x00000004L;
 
+    public static bool IsDesktopSurfaceAtPoint(IntPtr desktopListView, System.Drawing.Point point) =>
+        IsDesktopSurfaceWindow(desktopListView, NativeMethods.WindowFromPoint(
+            new NativeMethods.Point { X = point.X, Y = point.Y }));
+
+    internal static bool IsDesktopSurfaceWindow(IntPtr desktopListView, IntPtr target)
+    {
+        if (!NativeMethods.IsWindow(desktopListView) || !NativeMethods.IsWindow(target))
+        {
+            return false;
+        }
+
+        // Monitor bounds alone also contain Explorer and other applications.
+        // Only a real desktop window can accept the virtual unassignment fallback.
+        return NativeMethods.GetAncestor(target, NativeMethods.GaRoot) ==
+               NativeMethods.GetAncestor(desktopListView, NativeMethods.GaRoot) ||
+               DesktopAcrylicWindowTools.IsAcrylicSurface(target);
+    }
+
     /// <summary>
     /// Routes a background right-click from a CrabDesk desktop child back to
     /// Explorer so the normal desktop context menu remains available while
@@ -22,12 +40,27 @@ public static class DesktopWindowTools
             return false;
         }
 
+        var desktopView = NativeMethods.GetParent(desktopListView);
+        if (desktopView == IntPtr.Zero || !NativeMethods.IsWindow(desktopView))
+        {
+            return false;
+        }
+
+        // Explorer can show its icon layer again after a shell refresh. Its
+        // positions differ from CrabDesk's, so even a background request sent
+        // directly to DefView can hit an unrelated native file. Restore the
+        // replacement layer's invariant before Explorer performs hit testing.
+        if (!TryHideDesktopIconView(desktopListView, out _))
+        {
+            return false;
+        }
+
         var coordinates = unchecked((uint)(ushort)(short)screenX) |
             (unchecked((uint)(ushort)(short)screenY) << 16);
         return NativeMethods.PostMessage(
-            desktopListView,
+            desktopView,
             NativeMethods.WmContextMenu,
-            desktopListView,
+            desktopView,
             new IntPtr(unchecked((int)coordinates)));
     }
 

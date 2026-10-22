@@ -31,11 +31,14 @@ public sealed class IconImageLayoutTests
     }
 
     [Theory]
-    [InlineData(24, 6)]
-    [InlineData(48, 8)]
-    [InlineData(96, 12)]
-    public void SelectionCornerRadiusScalesWithinFluentBounds(float iconSize, float expected)
+    [InlineData(-5, 0)]
+    [InlineData(0, 0)]
+    [InlineData(8, 8)]
+    [InlineData(12, 12)]
+    [InlineData(20, 20)]
+    [InlineData(25, 20)]
+    public void HighlightCornerRadiusUsesTheConfiguredValueWithinItsRange(double configuredRadius, float expected)
     {
-        Assert.Equal(expected, DesktopItemVisualStyle.SelectionCornerRadius(iconSize));
+        Assert.Equal(expected, DesktopItemVisualStyle.HighlightCornerRadius(configuredRadius));
     }
 }

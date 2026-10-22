@@ -387,8 +387,8 @@ public sealed class DesktopRefreshSortTests
 
         // Showing the native ListView so Explorer would build its popup painted
         // the real desktop icons on top of the replacement layer for as long as
-        // the menu was open. The forwarding path must stay invisible: it only
-        // posts the message and never changes the ListView's visibility.
+        // the menu was open. The forwarding path must keep it hidden, including
+        // repairing a native layer that Explorer has made visible again.
         Assert.DoesNotContain("EnsureDesktopIconViewVisible", method, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowWindow", method, StringComparison.Ordinal);
         Assert.Contains("NativeMethods.PostMessage", method, StringComparison.Ordinal);

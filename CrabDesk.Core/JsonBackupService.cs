@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrabDesk.Core;
 
@@ -34,7 +35,8 @@ public sealed record LayoutBackupInfo(
         }
     }
     public bool HasDesktopPreview => !string.IsNullOrWhiteSpace(DesktopPreviewPath);
-    public string PreviewSummaryText => HasDesktopPreview
+    public bool HasCompleteDesktopPreview => HasDesktopPreview && !Snapshot.NeedsBoxOverlay;
+    public string PreviewSummaryText => HasCompleteDesktopPreview
         ? "真实桌面快照"
         : IconCount > 0 ? $"{IconCount} 个图标" : "布局预览";
 }
@@ -44,12 +46,18 @@ public sealed record LayoutBackupSnapshot(
     IReadOnlyList<LayoutBackupBoxSnapshot> Boxes,
     IReadOnlyList<DesktopIconPositionSnapshot>? IconPositions = null,
     string WallpaperPath = "",
-    string DesktopPreviewFileName = "");
+    string DesktopPreviewFileName = "",
+    bool DesktopPreviewIncludesBoxes = false)
+{
+    [JsonIgnore]
+    public bool NeedsBoxOverlay => Boxes.Count > 0 && !DesktopPreviewIncludesBoxes;
+}
 
 public sealed record DesktopBackupCapture(
     IReadOnlyList<DesktopIconPositionSnapshot> IconPositions,
     string WallpaperPath,
-    byte[]? DesktopPreviewPng = null);
+    byte[]? DesktopPreviewPng = null,
+    bool DesktopPreviewIncludesBoxes = false);
 
 public sealed record LayoutBackupDocument(
     CrabDeskState State,
@@ -302,7 +310,8 @@ public sealed class JsonBackupService : IBackupService
             snapshotBoxes,
             positions.ToArray(),
             desktopCapture?.WallpaperPath ?? string.Empty,
-            desktopPreviewFileName);
+            desktopPreviewFileName,
+            desktopCapture?.DesktopPreviewIncludesBoxes ?? false);
     }
 
     private static string GetPreviewPath(string backupPath) =>

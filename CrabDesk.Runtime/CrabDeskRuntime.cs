@@ -492,6 +492,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private DesktopIconViewState ReadInitialDesktopShellState()
     {
+        _iconProvider.RefreshRecycleBinState();
         var viewState = DesktopIconPositionService.GetDesktopViewState();
         const int spacingAttempts = 3;
         for (var attempt = 0; attempt < spacingAttempts; attempt++)
@@ -689,6 +690,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     internal void ClearDesktopBoxSelection() => _surfaceManager?.ClearBoxSelection();
 
+    internal bool IsDesktopSurfacePoint(System.Drawing.Point point) =>
+        DesktopWindowTools.IsDesktopSurfaceAtPoint(_desktopHost.DesktopListView, point);
+
     internal void ActivateDesktopKeyboardInput()
     {
         if (_disposed || IsPaused ||
@@ -877,11 +881,16 @@ public sealed partial class CrabDeskRuntime : IDisposable
         .Where(item => State.Assignments.ContainsKey(item.Key.ToString()))
         .ToArray();
 
-    public bool ReorderBoxItems(Guid boxId, IReadOnlyCollection<string> movingKeys, string? beforeKey)
+    public bool ReorderBoxItems(Guid boxId, IReadOnlyCollection<string> movingKeys, string? beforeKey,
+        Guid? targetTabId = null, bool updateTabAssignment = false)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
+        if (updateTabAssignment && (box.IsMappedFolder ||
+            (targetTabId is { } tabId && !box.ManualTabs.Any(tab => tab.Id == tabId)))) return false;
         var currentKeys = GetItemsForBox(boxId).Select(item => item.Key.ToString()).ToArray();
-        if (!LayoutCoordinator.ReorderItems(box, currentKeys, movingKeys, beforeKey))
+        var tabsChanged = updateTabAssignment && MoveItemsToManualTabCore(box, movingKeys, targetTabId) > 0;
+        var reordered = LayoutCoordinator.ReorderItems(box, currentKeys, movingKeys, beforeKey);
+        if (!reordered && !tabsChanged)
         {
             return false;
         }
@@ -1110,6 +1119,13 @@ public sealed partial class CrabDeskRuntime : IDisposable
     public int MoveItemsToManualTab(Guid boxId, IEnumerable<string> itemKeys, Guid? tabId)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
+        var changed = MoveItemsToManualTabCore(box, itemKeys, tabId);
+        if (changed > 0) NotifyBoxItemsChanged(boxId);
+        return changed;
+    }
+
+    private int MoveItemsToManualTabCore(DesktopBox box, IEnumerable<string> itemKeys, Guid? tabId)
+    {
         if (box.IsMappedFolder ||
             (tabId is { } id && !box.ManualTabs.Any(tab => tab.Id == id)))
         {
@@ -1120,7 +1136,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         foreach (var itemKey in itemKeys
                      .Where(key => !string.IsNullOrWhiteSpace(key))
                      .Distinct(StringComparer.OrdinalIgnoreCase)
-                     .Where(key => State.Assignments.TryGetValue(key, out var assignedBoxId) && assignedBoxId == boxId))
+                     .Where(key => State.Assignments.TryGetValue(key, out var assignedBoxId) && assignedBoxId == box.Id))
         {
             if (tabId is { } targetTabId)
             {
@@ -1137,26 +1153,39 @@ public sealed partial class CrabDeskRuntime : IDisposable
             changed++;
         }
 
-        if (changed > 0)
-        {
-            NotifyBoxItemsChanged(boxId);
-        }
         return changed;
+    }
+
+    internal bool ReorderManualTab(Guid boxId, Guid tabId, int insertionIndex)
+    {
+        var box = State.Boxes.FirstOrDefault(candidate => candidate.Id == boxId);
+        if (box is null || box.IsMappedFolder || insertionIndex < 0 || insertionIndex > box.ManualTabs.Count)
+            return false;
+        var sourceIndex = box.ManualTabs.FindIndex(tab => tab.Id == tabId);
+        if (sourceIndex < 0) return false;
+        var targetIndex = insertionIndex > sourceIndex ? insertionIndex - 1 : insertionIndex;
+        if (targetIndex == sourceIndex) return false;
+        var moving = box.ManualTabs[sourceIndex];
+        box.ManualTabs.RemoveAt(sourceIndex);
+        box.ManualTabs.Insert(targetIndex, moving);
+        NotifyBoxWorkspaceChanged(boxId);
+        return true;
     }
 
     public void DeleteBox(DesktopBox box)
     {
-        if (!box.IsMappedFolder && State.Boxes.Count(candidate => !candidate.IsMappedFolder) <= 1)
+        var currentBox = State.Boxes.FirstOrDefault(candidate => candidate.Id == box.Id);
+        if (currentBox is null)
         {
             return;
         }
 
-        foreach (var key in State.Assignments.Where(pair => pair.Value == box.Id).Select(pair => pair.Key).ToArray())
+        foreach (var key in State.Assignments.Where(pair => pair.Value == currentBox.Id).Select(pair => pair.Key).ToArray())
         {
             UnassignItemCore(key);
         }
-        State.Boxes.Remove(box);
-        _mappedFolderSnapshots.Remove(box.Id);
+        State.Boxes.Remove(currentBox);
+        _mappedFolderSnapshots.Remove(currentBox.Id);
         ConfigureMappedFolderWatchers();
         NotifyWorkspaceChanged(true);
     }
@@ -1920,12 +1949,13 @@ public sealed partial class CrabDeskRuntime : IDisposable
         return imported;
     }
 
-    public async Task<FileImportBatchResult> ImportFilesToBoxAsync(IEnumerable<string> paths, Guid boxId, bool move)
+    public async Task<FileImportBatchResult> ImportFilesToBoxAsync(IEnumerable<string> paths, Guid boxId, bool move,
+        Guid? targetTabId = null)
     {
         var box = State.Boxes.First(candidate => candidate.Id == boxId);
         if (!box.IsMappedFolder)
         {
-            return await ImportFilesAsync(paths, boxId, move);
+            return await ImportFilesAsync(paths, boxId, move, targetTabId);
         }
         if (box.MappedFolder!.IsReadOnly)
         {
@@ -2016,14 +2046,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             var movedSources = result.SuccessfulItems
                 .Select(item => Path.GetFullPath(item.SourcePath))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var movedItemKeys = items
-                .Where(item => item.FileSystemPath is not null &&
-                    movedSources.Contains(Path.GetFullPath(item.FileSystemPath)))
-                .Select(item => item.Key.ToString())
                 .ToArray();
-            await RefreshItemsCoreAsync(refreshSurfaces: false);
-            _surfaceManager?.RefreshDesktopItemsRemoved(movedItemKeys);
+            await RefreshAfterDesktopItemsDeletedAsync(movedSources);
             Changed?.Invoke(this, EventArgs.Empty);
             ScheduleSave();
         }
@@ -2033,18 +2057,25 @@ public sealed partial class CrabDeskRuntime : IDisposable
     internal async Task ReconcileExternalDesktopMoveAsync(
         IReadOnlyList<DesktopItemRef> items)
     {
-        var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var movedPaths = items
-            .Select(item => item.FileSystemPath)
-            .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path))
-            .Select(path => path!)
-            .ToArray();
-        if (movedPaths.Length > 0)
+        try
         {
-            await RefreshItemsCoreAsync(refreshSurfaces: false);
-            _surfaceManager?.RefreshDesktopItemsRemoved(movedPaths);
-            Changed?.Invoke(this, EventArgs.Empty);
-            ScheduleSave();
+            var movedPaths = items
+                .Select(item => item.FileSystemPath)
+                .Where(path => !string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path))
+                .Select(path => path!)
+                .ToArray();
+            if (movedPaths.Length > 0)
+            {
+                // The deletion refresh resolves stable keys before enumeration and
+                // refreshes both ordinary and mapped source boxes as well as icons.
+                await RefreshAfterDesktopItemsDeletedAsync(movedPaths);
+                Changed?.Invoke(this, EventArgs.Empty);
+                ScheduleSave();
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("External file drag source refresh failed", exception);
         }
     }
 
@@ -2052,7 +2083,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         Guid sourceBoxId,
         IEnumerable<string> itemKeys,
         Guid targetBoxId,
-        bool move)
+        bool move,
+        Guid? targetTabId = null,
+        string? beforeKey = null)
     {
         if (sourceBoxId == targetBoxId)
         {
@@ -2060,6 +2093,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
         var source = State.Boxes.First(candidate => candidate.Id == sourceBoxId);
         var target = State.Boxes.First(candidate => candidate.Id == targetBoxId);
+        if (targetTabId is { } tabId && !target.ManualTabs.Any(tab => tab.Id == tabId))
+            return FileImportBatchResult.Empty;
         var keys = itemKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var items = GetItemsForBox(sourceBoxId).Where(item => keys.Contains(item.Key.ToString())).ToArray();
         if (items.Length == 0)
@@ -2081,7 +2116,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
             {
                 var itemKey = item.Key.ToString();
                 State.Assignments[itemKey] = targetBoxId;
-                MoveItemOrderKey(itemKey, targetBoxId);
+                target.ItemTabAssignments.Remove(itemKey);
+                MoveItemOrderKey(itemKey, targetBoxId, beforeKey, targetTabId);
             }
             NotifyBoxesItemsChanged([sourceBoxId, targetBoxId]);
             return FileImportBatchResult.Empty;
@@ -2092,7 +2128,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             return FileImportBatchResult.Empty;
         }
-        var imported = await ImportFilesToBoxAsync(paths, targetBoxId, move);
+        var imported = await ImportFilesToBoxAsync(paths, targetBoxId, move, targetTabId);
         var sourceItemsChanged = false;
         if (move && !source.IsMappedFolder)
         {
@@ -2879,6 +2915,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
     public void SetHoverFeedback(bool enabled)
     {
         State.Settings.Appearance.HoverFeedback = enabled;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconHoverCornerRadius(double value)
+    {
+        State.Settings.Appearance.IconHoverCornerRadius = Math.Clamp(value, 0, 20);
         NotifyWorkspaceChanged(true);
     }
 
@@ -4040,13 +4082,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
         _mappedFolderProvider.Dispose();
         _hotkeyService.Pressed -= OnGlobalHotkeyPressed;
         _hotkeyService.Dispose();
-        try
-        {
-            _desktopContextMenu.SetEnabled(false, string.Empty);
-        }
-        catch
-        {
-        }
+        // Keep the desktop verbs registered across ordinary exits. Deleting
+        // and recreating them invalidates Explorer's cached registry handles,
+        // so the entry disappears after a restart. The uninstaller removes
+        // the registration; commands can also launch the app when it is closed.
         if (_desktopInputMonitor is not null)
         {
             _desktopInputMonitor.IconZoomRequested -= OnDesktopIconZoomRequested;
@@ -4617,10 +4656,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 var host = DesktopHostService.Probe();
                 var systemIconVisibilitySignature =
                     DesktopItemProvider.GetSystemDesktopIconVisibilitySignature();
+                var recycleBinChanged = _iconProvider.RefreshRecycleBinState();
                 var monitors = _monitorService.GetMonitors();
                 return (
                     Host: host,
                     SystemIconVisibilitySignature: systemIconVisibilitySignature,
+                    RecycleBinChanged: recycleBinChanged,
                     Monitors: monitors,
                     NativeMs: nativeProbe.ElapsedMilliseconds);
             });
@@ -4637,6 +4678,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
             // handles together on the UI thread so surfaces never observe a
             // partially updated Explorer host.
             var hostChanged = _desktopHost.Apply(healthSnapshot.Host);
+            if (healthSnapshot.RecycleBinChanged)
+            {
+                _surfaceManager?.RefreshRecycleBinIcons();
+            }
             if (hostChanged)
             {
                 DiagnosticLog.Info(
@@ -5443,14 +5488,18 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private DesktopBackupCapture CaptureDesktopBackup()
     {
-        var preview = DesktopPreviewCapture.TryCapturePng(_desktopHost.DesktopParent);
+        Action<Graphics, LayoutRect>? renderOverlay = _surfaceManager is { } surfaces
+            ? surfaces.RenderBackupOverlay
+            : null;
+        var preview = DesktopPreviewCapture.TryCapturePng(_desktopHost.DesktopParent, renderOverlay);
         DiagnosticLog.Info(preview is null
             ? "Desktop backup preview capture was unavailable."
             : $"Desktop backup preview captured bytes={preview.Length}");
         return new DesktopBackupCapture(
             [],
             DesktopWallpaperService.GetCurrentWallpaperPath(),
-            preview);
+            preview,
+            DesktopPreviewIncludesBoxes: _surfaceManager is not null);
     }
 
     private void RestoreDesktopBackup(LayoutBackupSnapshot snapshot)

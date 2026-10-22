@@ -41,6 +41,7 @@ public sealed class PersistenceTests : IDisposable
         state.Settings.DesktopBehavior.ExpandBoxOnHover = true;
         state.Settings.DesktopBehavior.RefreshAfterRename = false;
         state.Settings.Appearance.HoverFeedback = false;
+        state.Settings.Appearance.IconHoverCornerRadius = 18;
         state.Settings.Appearance.ShowBoxScrollBar = false;
         state.Settings.Appearance.AnimationEnabled = false;
         state.Settings.Appearance.BorderWidth = 4;
@@ -91,6 +92,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(loaded.Settings.DesktopBehavior.ExpandBoxOnHover);
         Assert.False(loaded.Settings.DesktopBehavior.RefreshAfterRename);
         Assert.False(loaded.Settings.Appearance.HoverFeedback);
+        Assert.Equal(18, loaded.Settings.Appearance.IconHoverCornerRadius);
         Assert.False(loaded.Settings.Appearance.ShowBoxScrollBar);
         Assert.False(loaded.Settings.Appearance.AnimationEnabled);
         Assert.Equal(4, loaded.Settings.Appearance.BorderWidth);
@@ -108,6 +110,23 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal("文档", customRule.Title);
         Assert.Equal([".pdf"], customRule.Extensions);
         Assert.True(File.Exists(store.StatePath));
+    }
+
+    [Theory]
+    [InlineData(-10, 0)]
+    [InlineData(0, 0)]
+    [InlineData(12, 12)]
+    [InlineData(42, 20)]
+    public async Task IconHoverRadiusIsSavedWithinItsSupportedRange(double requested, double expected)
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        state.Settings.Appearance.IconHoverCornerRadius = requested;
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(expected, loaded.Settings.Appearance.IconHoverCornerRadius);
     }
 
     [Fact]
