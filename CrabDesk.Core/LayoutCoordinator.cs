@@ -117,6 +117,7 @@ public static class LayoutCoordinator
 {
     public static void NormalizeForMonitors(CrabDeskState state, IReadOnlyList<MonitorLayout> monitors)
     {
+        DesktopWidgets.NormalizeForMonitors(state, monitors);
         if (monitors.Count == 0)
         {
             return;

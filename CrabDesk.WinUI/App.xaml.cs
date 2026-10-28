@@ -1,5 +1,6 @@
 using System.Threading;
 using CrabDesk.Core;
+using CrabDesk.Core;
 using CrabDesk.Native;
 using CrabDesk.Runtime;
 using CrabDesk.WinUI.Services;
@@ -25,9 +26,11 @@ public partial class App : Application
     private EventWaitHandle? _reconnectEvent;
     private EventWaitHandle? _refreshDesktopEvent;
     private EventWaitHandle? _settingsEvent;
+    private EventWaitHandle? _widgetsEvent;
     private EventWaitHandle? _undoOrganizationEvent;
     private MainWindow? _window;
     private AiOrganizationWindow? _aiOrganizationWindow;
+    private WeatherDetailsWindow? _weatherDetailsWindow;
     private CrabDeskRuntime? _runtime;
     private int _runtimeDisposed;
 
@@ -84,6 +87,7 @@ public partial class App : Application
         var refreshDesktop = commandLine.Any(argument => string.Equals(argument, "--refresh-desktop", StringComparison.OrdinalIgnoreCase));
         var undoOrganization = commandLine.Any(argument => string.Equals(argument, "--undo-organization", StringComparison.OrdinalIgnoreCase));
         var showSettings = commandLine.Any(argument => string.Equals(argument, "--show-settings", StringComparison.OrdinalIgnoreCase));
+        var showWidgets = commandLine.Any(argument => string.Equals(argument, "--show-widgets", StringComparison.OrdinalIgnoreCase));
         var validationPage = GetArgumentValue(commandLine, "--validation-page");
         var validationTheme = GetArgumentValue(commandLine, "--validation-theme");
         var validationScale = GetArgumentValue(commandLine, "--validation-scale");
@@ -94,7 +98,7 @@ public partial class App : Application
         _ownsSingleInstanceMutex = createdNew;
         if (!createdNew)
         {
-            SignalExistingInstance(GetCommandEventName(
+            SignalExistingInstance(showWidgets ? @"Local\CrabDesk.Widgets" : GetCommandEventName(
                 exit,
                 organize,
                 aiOrganize,
@@ -121,6 +125,7 @@ public partial class App : Application
         _reconnectEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Reconnect");
         _refreshDesktopEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.RefreshDesktop");
         _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Settings");
+        _widgetsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.Widgets");
         _undoOrganizationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\CrabDesk.UndoOrganization");
 
         var runtime = GetService<CrabDeskRuntime>();
@@ -130,6 +135,7 @@ public partial class App : Application
         GetService<IThemeService>().Apply(runtime.State.Settings.ThemeMode);
 
         _window = GetService<MainWindow>();
+        if (showWidgets) _window.NavigateTo("widgets");
         AppDiagnostic.Info("MainWindow created");
         if (Enum.TryParse<ApplicationThemeMode>(validationTheme, true, out var requestedTheme))
         {
@@ -184,6 +190,17 @@ public partial class App : Application
             });
             return completion.Task;
         };
+        void ShowWeather(DesktopWidget widget, bool locations)
+        {
+            _weatherDetailsWindow?.Close();
+            var details = new WeatherDetailsWindow(runtime, widget, locationsOnly: locations);
+            _weatherDetailsWindow = details;
+            details.Closed += (_, _) => { if (ReferenceEquals(_weatherDetailsWindow, details)) _weatherDetailsWindow = null; };
+            details.Activate();
+            if (!locations) _ = runtime.RefreshWidgetWeatherAsync(widget, force: widget.Weather?.Hourly.Count == 0);
+        }
+        runtime.WidgetWeatherDetailsRequested += widget => ShowWeather(widget, false);
+        runtime.WidgetWeatherLocationsRequested += widget => ShowWeather(widget, true);
         runtime.ExitRequested += (_, _) => Shutdown();
         StartCommandListeners(runtime, _window.DispatcherQueue);
         // A context-menu invocation may start CrabDesk as the first instance,
@@ -201,7 +218,7 @@ public partial class App : Application
 
         var background = refreshDesktop || commandLine.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
-        if (showSettings || (!background && !aiOrganize && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
+        if (showWidgets || showSettings || (!background && !aiOrganize && !runtime.State.Settings.DesktopBehavior.LaunchToTray))
         {
             if (showSettings)
             {
@@ -220,6 +237,7 @@ public partial class App : Application
 
     internal void Shutdown()
     {
+        _weatherDetailsWindow?.Close();
         _aiOrganizationWindow?.Close();
         _aiOrganizationWindow = null;
         TryDisposeRuntime("Shutdown");
@@ -283,6 +301,7 @@ public partial class App : Application
         StartListener(_reconnectEvent!, dispatcher, () => _ = runtime.ReconnectDesktopAsync());
         StartListener(_refreshDesktopEvent!, dispatcher, runtime.RequestDesktopRefresh);
         StartListener(_settingsEvent!, dispatcher, () => runtime.RequestShowSettings("general"));
+        StartListener(_widgetsEvent!, dispatcher, () => runtime.OpenWidgetEditor());
         StartListener(_undoOrganizationEvent!, dispatcher, runtime.UndoLastOrganization);
     }
 
@@ -383,6 +402,7 @@ public partial class App : Application
         _reconnectEvent?.Dispose();
         _refreshDesktopEvent?.Dispose();
         _settingsEvent?.Dispose();
+        _widgetsEvent?.Dispose();
         _undoOrganizationEvent?.Dispose();
         if (_ownsSingleInstanceMutex)
         {

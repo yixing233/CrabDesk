@@ -86,6 +86,82 @@ public sealed class DesktopAcrylicTests
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hwnd, int command);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DesktopPlacementResolvesItsAnchorAfterShowingTheHost(bool reordersDuringPlacement)
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var desktop = new System.Windows.Forms.Form();
+                using var shellWindow = new System.Windows.Forms.Form();
+                desktop.Show();
+                shellWindow.Show();
+                using var host = new ReorderingOnShowForm(hwnd =>
+                    Assert.True(SetWindowPos(shellWindow.Handle, hwnd, 0, 0, 0, 0, 0x0010 | 0x0002 | 0x0001 | 0x0200)), reordersDuringPlacement ? 1 : 0);
+                _ = host.Handle;
+                // Explorer can move another window below the host when the
+                // host first becomes visible. A pre-show anchor is then stale.
+                Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+                Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            }
+            catch (Exception exception) { error = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)));
+        if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+    }
+
+    private sealed class ReorderingOnShowForm(Action<IntPtr> onShow, int positionChange) : System.Windows.Forms.Form
+    {
+        private int _visiblePositionChanges;
+        protected override void WndProc(ref System.Windows.Forms.Message message)
+        {
+            base.WndProc(ref message);
+            if (message.Msg == 0x0047 && IsWindowVisible(Handle) && _visiblePositionChanges++ == positionChange)
+            {
+                onShow(Handle);
+            }
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DesktopReadinessIgnoresHiddenWindowsButRejectsVisibleWindowsBelowTheHost(bool interloperVisible)
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var desktop = new System.Windows.Forms.Form();
+                using var host = new System.Windows.Forms.Form();
+                using var interloper = new System.Windows.Forms.Form();
+                desktop.Show();
+                _ = host.Handle;
+                _ = interloper.Handle;
+                Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+                Assert.True(SetWindowPos(interloper.Handle, host.Handle, 0, 0, 0, 0,
+                    0x0010 | 0x0002 | 0x0001 | 0x0200 | (interloperVisible ? 0x0040u : 0u)));
+                Assert.Equal(interloperVisible, IsWindowVisible(interloper.Handle));
+                Assert.Equal(!interloperVisible, DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            }
+            catch (Exception exception) { error = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)));
+        if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+    }
+
     [Fact]
     public void BoxHandleCreationDefersPresentationUntilDesktopAttachment()
     {
@@ -364,8 +440,10 @@ public sealed class DesktopAcrylicTests
         if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
     }
 
-    [Fact]
-    public void OverlappingBoxBlursLowerTitleButKeepsItsOwnHeaderSharp()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OverlappingBoxBlursLowerTitleButKeepsItsOwnHeaderSharp(bool lowerIsWidget)
     {
         Exception? error = null;
         var thread = new Thread(() =>
@@ -375,10 +453,11 @@ public sealed class DesktopAcrylicTests
                 var runtime = (CrabDeskRuntime)RuntimeHelpers.GetUninitializedObject(typeof(CrabDeskRuntime));
                 var monitor = Monitor(0, 0, 1);
                 var state = new CrabDeskState();
-                state.Boxes.AddRange([
-                    new DesktopBox { Title = "LOWER BLUR THIS TEXT", MonitorId = monitor.Id, Bounds = new(30, 120, 320, 280) },
-                    new DesktopBox { Title = "UPPER KEEP SHARP", MonitorId = monitor.Id, Bounds = new(170, 60, 320, 280) }
-                ]);
+                if (lowerIsWidget)
+                    state.Widgets.Add(new DesktopWidget { Kind = DesktopWidgetKind.Note, Title = "LOWER BLUR THIS TEXT", MonitorId = monitor.Id, Bounds = new(30, 120, 320, 280) });
+                else
+                    state.Boxes.Add(new DesktopBox { Title = "LOWER BLUR THIS TEXT", MonitorId = monitor.Id, Bounds = new(30, 120, 320, 280) });
+                state.Boxes.Add(new DesktopBox { Title = "UPPER KEEP SHARP", MonitorId = monitor.Id, Bounds = new(170, 60, 320, 280) });
                 Set(runtime, "<State>k__BackingField", state);
                 Set(runtime, "<Items>k__BackingField", Array.Empty<DesktopItemRef>());
                 Set(runtime, "<Monitors>k__BackingField", new[] { monitor });

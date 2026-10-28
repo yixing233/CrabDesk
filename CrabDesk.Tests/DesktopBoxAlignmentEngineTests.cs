@@ -55,12 +55,30 @@ public sealed class DesktopBoxAlignmentEngineTests
     }
 
     [Fact]
-    public void RemotePeerOnSameInfiniteAlignmentLineDoesNotSnap()
+    public void AlignsToADistantVerticalEdgeAndSpansTheFullGap()
     {
         var moving = new LayoutRect(104, 100, 100, 100);
         var result = DesktopBoxAlignmentEngine.Calculate(moving, [new(100, 600, 160, 100)], WorkArea);
-        Assert.Equal(moving, result.Bounds);
-        Assert.Empty(result.Guides);
+        Assert.Equal(moving with { X = 100 }, result.Bounds);
+        Assert.Equal(new DesktopBoxAlignmentGuide(true, 100, 100, 700), Assert.Single(result.Guides));
+    }
+
+    [Fact]
+    public void AlignsToADistantHorizontalEdgeAndSpansTheFullGap()
+    {
+        var result = DesktopBoxAlignmentEngine.Calculate(new(100, 104, 100, 100),
+            [new(1000, 100, 100, 160)], WorkArea);
+        Assert.Equal(new LayoutRect(100, 100, 100, 100), result.Bounds);
+        Assert.Equal(new DesktopBoxAlignmentGuide(false, 100, 100, 1100), Assert.Single(result.Guides));
+    }
+
+    [Fact]
+    public void AlignsCenterLinesAcrossTheMonitor()
+    {
+        var result = DesktopBoxAlignmentEngine.Calculate(new(128, 100, 100, 100),
+            [new(100, 600, 160, 100)], WorkArea);
+        Assert.Equal(130, result.Bounds.X);
+        Assert.Equal(new DesktopBoxAlignmentGuide(true, 180, 100, 700), Assert.Single(result.Guides));
     }
 
     [Fact]
@@ -84,14 +102,15 @@ public sealed class DesktopBoxAlignmentEngineTests
     }
 
     [Theory]
-    [InlineData(248, true)]
-    [InlineData(248.01, false)]
-    public void OnlyPeersWithinTheProximityRadiusParticipate(double peerY, bool snaps)
+    [InlineData(248)]
+    [InlineData(248.01)]
+    [InlineData(650)]
+    public void AlignmentDoesNotDependOnTheGapBetweenCards(double peerY)
     {
         var result = DesktopBoxAlignmentEngine.Calculate(new(104, 100, 100, 100),
             [new(100, peerY, 160, 100)], WorkArea);
-        Assert.Equal(snaps ? 100 : 104, result.Bounds.X);
-        Assert.Equal(snaps, result.Guides.Count > 0);
+        Assert.Equal(100, result.Bounds.X);
+        Assert.NotEmpty(result.Guides);
     }
 
     [Fact]
@@ -117,12 +136,25 @@ public sealed class DesktopBoxAlignmentEngineTests
     }
 
     [Fact]
-    public void InvalidProximityReturnsOriginalBoundsWithoutGuides()
+    public void ChoosesTheClosestAlignmentLineEvenWhenItsCardIsFartherAway()
     {
-        var moving = new LayoutRect(-4, 705, 100, 100);
-        var result = DesktopBoxAlignmentEngine.Calculate(moving, [], WorkArea, proximity: double.NaN);
-        Assert.Equal(moving, result.Bounds);
-        Assert.Empty(result.Guides);
+        var result = DesktopBoxAlignmentEngine.Calculate(new(104, 100, 100, 100),
+            [new(101, 600, 100, 100), new(108, 230, 100, 100)], WorkArea);
+        Assert.Equal(101, result.Bounds.X);
+        Assert.Equal(700, Assert.Single(result.Guides).End);
+    }
+
+    [Fact]
+    public void EqualAlignmentDistancesPreferTheNearerCardAndStayStableAcrossStackOrder()
+    {
+        var moving = new LayoutRect(104, 100, 100, 100);
+        var peers = new[] { new LayoutRect(100, 600, 100, 100), new LayoutRect(108, 230, 100, 100) };
+        var first = DesktopBoxAlignmentEngine.Calculate(moving, peers, WorkArea);
+        var second = DesktopBoxAlignmentEngine.Calculate(moving, peers.Reverse(), WorkArea);
+        Assert.Equal(108, first.Bounds.X);
+        Assert.Equal(330, Assert.Single(first.Guides).End);
+        Assert.Equal(first.Bounds, second.Bounds);
+        Assert.Equal(first.Guides.ToArray(), second.Guides.ToArray());
     }
     [Fact]
     public void GuidesCannotDescribeAnAlignmentThatWouldBeClampedAway()

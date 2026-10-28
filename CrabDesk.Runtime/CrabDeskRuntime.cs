@@ -95,6 +95,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private readonly ConditionalWeakTable<System.Windows.Forms.ToolStripDropDown, object> _configuredSubmenus = new();
     private readonly FluentMenuRenderer _lightTrayRenderer = new(false);
     private readonly FluentMenuRenderer _darkTrayRenderer = new(true);
+    private CrabDeskTrayIcon? _trayIcon;
     private readonly System.Drawing.Font _menuFont = new("Segoe UI", 10, System.Drawing.FontStyle.Regular);
     private bool _disposed;
     private bool _hostCheckInProgress;
@@ -349,7 +350,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     internal bool TrayThemeMatchesCurrentTheme()
     {
-        return true;
+        return _trayIcon is not null && ReferenceEquals(_trayIcon.Menu.Renderer,
+            IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer);
     }
 
     public async Task InitializeAsync()
@@ -357,8 +359,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
         DiagnosticLog.Info("Runtime initialization started");
         State = await _layoutStore.LoadAsync();
         _itemProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
+        _mappedFolderProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
         State.Settings.AiClassification.ApiKey = AiApiKeyStore.Load(GetAiApiKeyPath());
         State.Settings.AiClassification.WebSearchApiKey = AiApiKeyStore.Load(GetAiWebSearchApiKeyPath());
+        LoadWidgetTranslationApiKey();
         MigrateGlobalHoverExpansionSetting();
         SynchronizeBoxStyles();
         DiagnosticLog.Info($"State loaded schema={State.SchemaVersion} takeover={State.Settings.TakeOverDesktop} boxes={State.Boxes.Count}");
@@ -418,6 +422,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
             cachedUpdate.CachedETag,
             cachedMessage);
         State.Settings.StartWithWindows = StartupRegistration.IsEnabled();
+        if (State.Settings.StartWithWindows) StartupRegistration.NormalizeLaunchCommand();
+        _trayIcon = new CrabDeskTrayIcon(() => RequestShowSettings(), () => RequestShowSettings("widgets"),
+            () => SetPaused(!IsPaused), RequestExit, () => IsPaused, ApplyContextMenuTheme);
         ApplyHotkeys();
         // Expose one desktop-level CrabDesk entry whose secondary commands are
         // handled by the application's single-instance command channel.
@@ -981,7 +988,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             Bounds = bounds,
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
-            Appearance = CloneAppearance(shared?.Appearance)
+            Appearance = CloneAppearance(shared?.Appearance ?? State.Settings.DefaultBoxAppearance)
         };
         State.Boxes.Add(box);
         return box;
@@ -1000,7 +1007,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             Bounds = FindAvailableBoxBounds(monitor, DefaultBoxWidth, DefaultBoxHeight),
             ViewMode = shared?.ViewMode ?? BoxViewMode.Grid,
             SortMode = shared?.SortMode ?? BoxSortMode.Name,
-            Appearance = CloneAppearance(shared?.Appearance),
+            Appearance = CloneAppearance(shared?.Appearance ?? State.Settings.DefaultBoxAppearance),
             MappedFolder = new MappedFolderSettings
             {
                 Path = normalizedPath,
@@ -2422,7 +2429,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         _allDesktopItems = items;
         Items = State.Settings.ShowSystemItems
             ? items
-            : items.Where(item => !item.IsSystem || State.Assignments.ContainsKey(item.Key.ToString())).ToArray();
+            : items.Where(item => !item.IsSystem).ToArray();
         var modelElapsed = diagnosticStarted.ElapsedMilliseconds - enumerateElapsed;
         await RefreshMappedFoldersAsync(false);
         var mappedElapsed = diagnosticStarted.ElapsedMilliseconds - enumerateElapsed - modelElapsed;
@@ -2490,7 +2497,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     public void SetPaused(bool paused)
     {
-        if (paused == IsPaused)
+        if (_disposed || (paused == IsPaused && !(paused && _pausedByTakeoverFailure)))
         {
             return;
         }
@@ -2500,6 +2507,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.TakeOverDesktop = !paused;
         if (paused)
         {
+            foreach (var widget in State.Widgets.Where(widget => widget.IsLocating).ToArray()) CancelWidgetRequest(widget.Id);
             // 用户主动暂停：接管失败不再自动重试。
             _pausedByTakeoverFailure = false;
             StopTakeoverRetryTimer();
@@ -2521,6 +2529,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
         else
         {
+            StopTakeoverRetryTimer();
+            _takeoverRetryAttempt = 0;
+            RefreshDesktopHost();
             ConfigureDesktopInputMonitor();
             AreDesktopItemsHidden = false;
             ActivateDesktopSurfaces("resume");
@@ -2547,6 +2558,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     {
         State.Settings.ShowHiddenFiles = enabled;
         _itemProvider.ShowHiddenFiles = enabled;
+        _mappedFolderProvider.ShowHiddenFiles = enabled;
         await RefreshItemsAsync();
     }
 
@@ -3966,6 +3978,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     public void ResetAppearance()
     {
         State.Settings.Appearance = new GlobalAppearanceSettings();
+        State.Settings.DefaultBoxAppearance = new BoxAppearance();
         foreach (var box in State.Boxes)
         {
             box.Appearance = new BoxAppearance();
@@ -4024,6 +4037,25 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     public async Task ReconnectDesktopAsync()
     {
+        if (_disposed) return;
+        RefreshDesktopHost();
+        // A failed activation pauses rendering without changing the user's
+        // takeover preference. Reconnect must retry that state as well.
+        if (!IsPaused || (_pausedByTakeoverFailure && State.Settings.TakeOverDesktop))
+        {
+            StopTakeoverRetryTimer();
+            _takeoverRetryAttempt = 0;
+            IsPaused = false;
+            AreDesktopItemsHidden = false;
+            ConfigureDesktopInputMonitor();
+            ActivateDesktopSurfaces("reconnect");
+        }
+        await RefreshItemsAsync(false);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RefreshDesktopHost()
+    {
         _desktopHost.Refresh();
         if (_desktopInputMonitor is not null)
         {
@@ -4031,12 +4063,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
         Monitors = _monitorService.GetMonitors();
         LayoutCoordinator.NormalizeForMonitors(State, Monitors);
-        if (!IsPaused)
-        {
-            ActivateDesktopSurfaces("reconnect");
-        }
-        await RefreshItemsAsync(false);
-        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     public void RequestShowSettings(string? page = null) =>
@@ -4054,7 +4080,11 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             return;
         }
+        _surfaceManager?.DismissWidgetInputs();
         _disposed = true;
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        DisposeWidgets();
         // Keep the caller stack so an unexpected shutdown can be traced back
         // to its trigger (settings change, window close, update, crash path).
         DiagnosticLog.Info(
@@ -4206,15 +4236,19 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void OnTakeoverRetryTick()
     {
-        RetryTakeoverAfterFailure($"auto retry {_takeoverRetryAttempt}");
+        if (RetryTakeoverAfterFailure($"auto retry {_takeoverRetryAttempt}"))
+        {
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private bool RetryTakeoverAfterFailure(string context)
     {
-        if (!_pausedByTakeoverFailure || !State.Settings.TakeOverDesktop)
+        if (_disposed || !_pausedByTakeoverFailure || !State.Settings.TakeOverDesktop)
         {
             return false;
         }
+        RefreshDesktopHost();
         IsPaused = false;
         AreDesktopItemsHidden = false;
         if (ActivateDesktopSurfaces(context))
@@ -4284,7 +4318,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     }
 
     private IEnumerable<DesktopBox> GetAppearanceTargets(Guid? boxId) => boxId is null
-        ? State.Boxes
+        ? State.Boxes.Append(new DesktopBox { Appearance = State.Settings.DefaultBoxAppearance })
         : State.Boxes.Where(box => box.Id == boxId.Value);
 
     private static BoxAppearance CloneAppearance(BoxAppearance? source)
@@ -4328,6 +4362,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private void SynchronizeBoxStyles()
     {
         if (State.Boxes.FirstOrDefault() is not { } source) return;
+        State.Settings.DefaultBoxAppearance = CloneAppearance(source.Appearance);
         foreach (var box in State.Boxes.Skip(1))
         {
             box.Appearance = CloneAppearance(source.Appearance);
@@ -5512,10 +5547,15 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private async Task ApplyLoadedStateAsync(CrabDeskState state)
     {
+        foreach (var id in _widgetRequests.Keys.ToArray()) CancelWidgetRequest(id);
+        _weatherRetryAt.Clear();
+        RequestedWidgetId = null;
+        _widgetNavigationPending = false;
         RestoreAssignedItemVisibility(true);
         var localAiSettings = AiClassificationImportPolicy.PreserveLocalProfile(
             State.Settings.AiClassification,
             state.Settings.AiClassification);
+        var localTranslationSettings = State.Settings.WidgetTranslation;
         try
         {
             _surfaceManager?.Dispose();
@@ -5526,7 +5566,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
             EnsureDesktopInput("state reload");
         }
         State = state;
+        _itemProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
+        _mappedFolderProvider.ShowHiddenFiles = State.Settings.ShowHiddenFiles;
         State.Settings.AiClassification = localAiSettings;
+        State.Settings.WidgetTranslation = localTranslationSettings;
         SynchronizeBoxStyles();
         _lastOrganizationAssignments = null;
         _lastOrganizationCreatedBoxes.Clear();
@@ -5921,17 +5964,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             return;
         }
-        // New and deleted items must always appear or disappear on the
-        // replacement desktop, even when the 'refresh after rename'
-        // preference is off. Only a rename honors that gate so a manual
-        // layout stays stable while the user is typing a new name.
-        var isRename = eventArgs is FileSystemEventArgs fileArgs &&
-            fileArgs.ChangeType == WatcherChangeTypes.Renamed;
+        // This preference controls external desktop watcher updates. Explicit
+        // refreshes and operations performed by CrabDesk update their results
+        // directly, while real-time organization has its own opt-in setting.
         DiagnosticLog.Info(
             $"Desktop change type={(eventArgs as FileSystemEventArgs)?.ChangeType}" +
             $"{(eventArgs is FileSystemEventArgs fe ? $" path={fe.FullPath}" : "")}");
         var realtimeOrganization = State.Organization.Enabled && State.Organization.RunOnDesktopChanges;
-        if (isRename && !State.Settings.DesktopBehavior.RefreshAfterRename && !realtimeOrganization)
+        if (!State.Settings.DesktopBehavior.RefreshAfterRename && !realtimeOrganization)
         {
             return;
         }

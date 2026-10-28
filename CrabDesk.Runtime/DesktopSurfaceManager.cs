@@ -247,6 +247,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
     // setting was adjusted). Failures are recorded instead of thrown: an
     // exception here would propagate through the settings setter into the
     // WinUI message loop and take the whole process down with it.
+    internal void RefreshWidgets()
+    {
+        foreach (var surface in _surfaces) surface.RefreshWidgets();
+    }
+
     internal void Refresh()
     {
         var anyFailure = false;
@@ -859,6 +864,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
         }
 
         return false;
+    }
+
+    internal void DismissWidgetInputs()
+    {
+        foreach (var surface in _surfaces) surface.DismissWidgetInputs();
     }
 
     internal bool TryScrollBoxAt(int x, int y, int delta)

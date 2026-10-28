@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window
         {
             RegisterFocusDismissalHandler(page);
         }
+        UpdateContentFrameLayout();
     }
 
     private void RegisterFocusDismissalHandler(UIElement element)
@@ -275,6 +276,7 @@ public sealed partial class MainWindow : Window
             "backup" => typeof(BackupPage),
             "smart-organization" or "organization" => typeof(OrganizationPage),
             "appearance" or "boxes" => typeof(DesktopBoxesPage),
+            "widgets" => typeof(WidgetsPage),
             "diagnostics" => typeof(DiagnosticsPage),
             "about" => typeof(AboutPage),
             _ => typeof(GeneralPage)
@@ -498,7 +500,7 @@ public sealed partial class MainWindow : Window
             var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1;
             navigationWidth = AppWindow.Size.Width / scale;
         }
-        var pageMaxWidth = (double)Application.Current.Resources["PageMaxWidth"];
+        var pageMaxWidth = ContentFrame.Content is WidgetsPage ? 1120d : (double)Application.Current.Resources["PageMaxWidth"];
         var availableWidth = Math.Max(0, navigationWidth - paneWidth);
         var targetMaxWidth = usesExpandedPane ? pageMaxWidth : double.PositiveInfinity;
         var targetWidth = usesExpandedPane ? Math.Min(pageMaxWidth, availableWidth) : availableWidth;

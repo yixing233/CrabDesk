@@ -23,15 +23,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // A click on the box surface while an inline rename is open commits
         // the edit (this window never activates, so Deactivate does not fire).
         _runtime.CommitActiveDesktopInlineRename();
+        _runtime.DismissDesktopWidgetInput();
         if (_editingBox is not null)
         {
             FinishTitleEdit(true);
         }
         // The keyboard hook requires the desktop foreground even though this
         // surface does not activate. The runtime queues activation off-thread.
-        _runtime.ActivateDesktopKeyboardInput();
-        RebuildGeometry();
         var point = ToDip(eventArgs.Location);
+        var pressedWidget = WidgetAt(point);
+        if (pressedWidget?.Kind != DesktopWidgetKind.Translation &&
+            (pressedWidget is null || !IsWeatherLocationPoint(pressedWidget, point))) _runtime.ActivateDesktopKeyboardInput();
+        RebuildGeometry();
+        if (HandleWidgetMouseDown(eventArgs, point)) return;
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
         if (eventArgs.Button == Forms.MouseButtons.Left &&
             box is not null &&
@@ -280,6 +284,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void OnMouseMove(object? sender, Forms.MouseEventArgs eventArgs)
     {
         var point = ToDip(eventArgs.Location);
+        if (_movingBox is null && _resizingBox is null && _pressedItem is null && _selectionBox is null && HandleWidgetMouseMove(point)) return;
         if (_manualTabDragActive) return;
         if (HandleManualTabMouseMove(point, eventArgs.Button)) return;
         if (_scrollBarDrag is not null)
@@ -592,6 +597,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseLeave(object? sender, EventArgs eventArgs)
     {
+        if (_hoveredWidgetId is not null && _pressedWidget is null)
+        {
+            _hoveredWidgetId = null; _hoveredWidgetMenuId = null; _hoveredWeatherLocationId = null;
+            _hoveredCalendarButton = RectangleF.Empty; _hoveredTodoTaskId = null; _hoveredTodoAddId = null;
+            RequestVisualLayerRender();
+        }
         if (HasActiveInlineRename)
         {
             DiagnosticLog.Verbose("Box hover leave retained while inline rename is active.");
@@ -646,6 +657,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var clientPoint = PointToClient(Forms.Cursor.Position);
         if (ClientRectangle.Contains(clientPoint))
         {
+            if (WidgetAt(ToDip(clientPoint)) is not null && HandleWidgetMouseMove(ToDip(clientPoint))) return;
             var previousHoveredBoxId = _hoveredBoxId;
             UpdateHoverState(ToDip(clientPoint));
             if (ShouldRestoreHeaderActionOverlay(
@@ -800,7 +812,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private bool IsInteractivePoint(PointF point)
     {
-        return DesktopBoxes.Any(box => new LayoutRect(
+        return DesktopWidgetItems.Any(widget => widget.Bounds.Contains(point.X, point.Y)) || DesktopBoxes.Any(box => new LayoutRect(
             box.Bounds.X,
             box.Bounds.Y,
             box.Bounds.Width,
@@ -1145,6 +1157,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseUp(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        if (HandleWidgetMouseUp(eventArgs, ToDip(eventArgs.Location))) return;
         if (eventArgs.Button == Forms.MouseButtons.Left && _pressedManualTab is not null)
         {
             _pressedManualTab = null;
@@ -1247,6 +1260,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return;
         }
+        if (_pressedWidget is not null) { FinishWidgetPress(true); return; }
         if (_scrollBarDrag is not null)
         {
             _scrollBarDrag = null;
@@ -1626,6 +1640,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseDoubleClick(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        if (WidgetAt(ToDip(eventArgs.Location)) is not null) return;
         if (eventArgs.Button != Forms.MouseButtons.Left)
         {
             return;
@@ -1672,7 +1687,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         EnsureGeometry();
-        TryScrollBox(ToDip(eventArgs.Location), eventArgs.Delta);
+        if (!TryScrollWidget(ToDip(eventArgs.Location), eventArgs.Delta)) TryScrollBox(ToDip(eventArgs.Location), eventArgs.Delta);
     }
 
     internal bool TryScrollBoxAt(Point screenPoint, int delta)
@@ -1683,7 +1698,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         EnsureGeometry();
-        return TryScrollBox(ToDip(PointToClient(screenPoint)), delta);
+        return TryScrollWidget(ToDip(PointToClient(screenPoint)), delta) || TryScrollBox(ToDip(PointToClient(screenPoint)), delta);
     }
 
     private bool TryScrollBox(PointF point, int delta)
@@ -1781,6 +1796,15 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // leaves the highlight at an obsolete item position.
         _scrollHoverResumeTimer.Stop();
         ClearItemHover();
+        if (!_runtime.State.Settings.Appearance.AnimationEnabled)
+        {
+            _scrollAnimationKey = null;
+            _dynamicVisualVersion++;
+            ApplyScrollOffset(key, to);
+            _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0);
+            _scrollHoverResumeTimer.Start();
+            return;
+        }
         var startsNewDynamicPass = !IsScrollAnimationActive || _scrollAnimationKey != key;
         _scrollAnimationKey = key;
         _scrollAnimationFrom = from;
@@ -1807,7 +1831,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             ScrollAnimationDurationMilliseconds);
         var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
         var offset = _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
-        var completed = progress >= 1;
+        var completed = !_runtime.State.Settings.Appearance.AnimationEnabled || progress >= 1;
         if (completed)
         {
             offset = _scrollAnimationTo;

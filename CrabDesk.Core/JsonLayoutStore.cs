@@ -43,12 +43,25 @@ public sealed class JsonLayoutStore : ILayoutStore
             await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        if (File.Exists(StatePath))
+        for (var attempt = 0; ; attempt++)
         {
-            File.Copy(StatePath, StatePath + ".bak", true);
+            try
+            {
+                if (File.Exists(StatePath))
+                {
+                    File.Copy(StatePath, StatePath + ".bak", true);
+                }
+                File.Move(tempPath, StatePath, true);
+                return;
+            }
+            catch (Exception exception) when (attempt < 3 && exception is IOException or UnauthorizedAccessException)
+            {
+                // Windows readers without FileShare.Delete can briefly block
+                // the atomic rename. Keep the completed temp file and retry
+                // asynchronously instead of losing this preference change.
+                await Task.Delay(TimeSpan.FromMilliseconds(40 * (1 << attempt)), cancellationToken).ConfigureAwait(false);
+            }
         }
-
-        File.Move(tempPath, StatePath, true);
     }
 
     public static CrabDeskState CreateDefaultState(string monitorId = "primary")
@@ -86,12 +99,14 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 23;
+        state.SchemaVersion = 24;
         state.Settings ??= new AppSettings();
+        DesktopWidgets.Normalize(state);
         state.LastKnownDesktopSortMode = state.LastKnownDesktopSortMode?.Trim() ?? string.Empty;
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
         state.Settings.DesktopBehavior ??= new DesktopBehaviorSettings();
         state.Settings.Appearance ??= new GlobalAppearanceSettings();
+        state.Settings.DefaultBoxAppearance ??= new BoxAppearance();
         state.Settings.Backup ??= new BackupSettings();
         state.Settings.AiClassification ??= new AiClassificationSettings();
         state.Settings.Hotkeys ??= new HotkeySettings();
@@ -121,6 +136,19 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.AiClassification.Model = state.Settings.AiClassification.Model?.Trim() ?? string.Empty;
         state.Settings.AiClassification.CategoryLabels ??= string.Empty;
         state.Settings.AiClassification.CustomPrompt ??= string.Empty;
+        if (previousVersion < 24)
+        {
+            state.Settings.WidgetTranslation = new WidgetTranslationSettings
+            {
+                BaseUrl = state.Settings.AiClassification.BaseUrl,
+                Model = state.Settings.AiClassification.Model,
+                MigratedFromSharedProfile = true
+            };
+        }
+        state.Settings.WidgetTranslation ??= new WidgetTranslationSettings();
+        state.Settings.WidgetTranslation.BaseUrl = state.Settings.WidgetTranslation.BaseUrl?.Trim() ?? string.Empty;
+        state.Settings.WidgetTranslation.Model = state.Settings.WidgetTranslation.Model?.Trim() ?? string.Empty;
+        state.Settings.WidgetTranslation.ApiKey ??= string.Empty;
         state.Settings.Hotkeys.ShowDesktop ??= new HotkeyBinding
         {
             Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,

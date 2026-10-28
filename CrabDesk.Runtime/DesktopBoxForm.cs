@@ -214,6 +214,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         _runtime = runtime;
         _monitor = monitor;
         _scale = monitor.DpiScale;
+        InitializeWidgets();
         Text = "CrabDesk Desktop Boxes";
         FormBorderStyle = Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -1175,10 +1176,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
 
         EnsureGeometry();
+        DrawWidgets(graphics, clipBounds);
         foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
         {
             DrawBox(graphics, box, clipBounds);
         }
+        if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
     }
 
     /// <summary>
@@ -1213,6 +1216,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             animatedBoxIds.Add(scrollKey.BoxId);
         }
+        DrawWidgets(graphics, clipBounds);
         foreach (var box in _boxes.Where(box =>
                      box.Bounds.IntersectsWith(clipBounds) &&
                      (!hasDynamicVisual ||
@@ -1232,6 +1236,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 suppressedHoverItemKeys: isSelectionBox ? _marqueeSelectionKeys : null,
                 includeItemHoverFeedback: _itemHoverOverlayUnavailable);
         }
+        if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
     }
 
     /// <summary>
@@ -1475,6 +1480,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     (float)(ClientSize.Width / _scale),
                     (float)(ClientSize.Height / _scale));
                 clipBounds.Inflate(8, 8);
+                DrawWidgets(graphics, clipBounds);
                 foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
                 {
                     DrawBox(graphics, box, clipBounds);
@@ -1577,7 +1583,17 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         if (disposing && !_resourcesDisposed)
         {
+            DismissWidgetTodoInput();
             _resourcesDisposed = true;
+            _widgetTimer?.Dispose();
+            _translationInput?.Dispose();
+            _translationInput = null;
+            _translationResultInput?.Dispose();
+            _translationResultInput = null;
+            _noteInput?.Dispose();
+            _noteInput = null;
+            _todoInput?.Dispose();
+            _todoInput = null;
             _iconLoadCancellation.Cancel();
             _animationFrameClock.Dispose();
             _hoverTimer.Stop();
@@ -1895,7 +1911,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     }
 
     internal bool IsPointOverBox(Point screenPoint) =>
-        GetBoxAtScreenPoint(screenPoint) is not null;
+        GetBoxAtScreenPoint(screenPoint) is not null || DesktopWidgetItems.Any(widget => widget.Bounds.Contains(
+            (screenPoint.X - _monitor.PixelBounds.X) / _scale, (screenPoint.Y - _monitor.PixelBounds.Y) / _scale));
 
     /// <summary>
     /// Scales the icons of the box under the pointer. Returns false when the
@@ -1925,7 +1942,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             box.Bounds.X,
             box.Bounds.Y,
             box.Bounds.Width,
-            GetInteractionBoxHeight(box))).ToArray();
+            GetInteractionBoxHeight(box))).Concat(DesktopWidgetItems.Select(widget => widget.Bounds)).ToArray();
         _lastWindowRegionRectangles = currentRectangles;
 
         // Desktop child windows are composed as siblings beneath

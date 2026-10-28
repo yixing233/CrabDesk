@@ -4,11 +4,10 @@ public readonly record struct DesktopBoxAlignmentGuide(bool IsVertical, double P
 
 public sealed record DesktopBoxAlignmentResult(LayoutRect Bounds, IReadOnlyList<DesktopBoxAlignmentGuide> Guides);
 
-/// <summary>Free movement with optional edge/center snapping to nearby boxes only.</summary>
+/// <summary>Free movement with edge/center snapping to alignment lines across the work area.</summary>
 public static class DesktopBoxAlignmentEngine
 {
     public const double DefaultThreshold = 8;
-    public const double DefaultProximity = 48;
 
     public static LayoutRect Align(LayoutRect moving, IEnumerable<LayoutRect> peers, LayoutRect workArea,
         double threshold = DefaultThreshold) => Calculate(moving, peers, workArea, threshold).Bounds;
@@ -17,11 +16,10 @@ public static class DesktopBoxAlignmentEngine
         LayoutRect moving,
         IEnumerable<LayoutRect> peers,
         LayoutRect workArea,
-        double threshold = DefaultThreshold,
-        double proximity = DefaultProximity)
+        double threshold = DefaultThreshold)
     {
         if (!IsValid(moving) || !IsValid(workArea) ||
-            !double.IsFinite(threshold) || threshold < 0 || !double.IsFinite(proximity) || proximity < 0)
+            !double.IsFinite(threshold) || threshold < 0)
             return new(moving, []);
 
         moving = moving with
@@ -29,12 +27,11 @@ public static class DesktopBoxAlignmentEngine
             X = ClampStart(moving.X, moving.Width, workArea.X, workArea.Width),
             Y = ClampStart(moving.Y, moving.Height, workArea.Y, workArea.Height)
         };
-        // A remote peer on the same infinite alignment line is not a neighbor.
-        var nearby = peers.Where(peer => IsValid(peer) &&
-            Gap(moving.X, moving.Width, peer.X, peer.Width) <= proximity &&
-            Gap(moving.Y, moving.Height, peer.Y, peer.Height) <= proximity).ToArray();
-        var x = FindAxis(moving, nearby, workArea, threshold, vertical: true);
-        var y = FindAxis(moving, nearby, workArea, threshold, vertical: false);
+        // Card separation does not affect alignment; only the distance to
+        // each edge or center line controls snapping.
+        var candidates = peers.Where(IsValid).ToArray();
+        var x = FindAxis(moving, candidates, workArea, threshold, vertical: true);
+        var y = FindAxis(moving, candidates, workArea, threshold, vertical: false);
         var aligned = moving with { X = x?.Start ?? moving.X, Y = y?.Start ?? moving.Y };
         var guides = new List<DesktopBoxAlignmentGuide>(2);
         if (x is { } horizontalSnap)

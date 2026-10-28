@@ -36,14 +36,15 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
     // after which every queued notification is discarded silently.
     private const int WatcherBufferSize = 64 * 1024;
 
-    public DesktopItemProvider()
+    public DesktopItemProvider() : this([
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)])
     {
-        _desktopDirectories =
-        [
-            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory)
-        ];
-        _desktopDirectories = _desktopDirectories
+    }
+
+    internal DesktopItemProvider(IEnumerable<string> desktopDirectories)
+    {
+        _desktopDirectories = desktopDirectories
             .Where(Directory.Exists)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -302,7 +303,7 @@ public sealed class DesktopItemProvider : IDesktopItemProvider
         StandardSystemItems.Select(item =>
             $"{item.Clsid}:{(DesktopSystemIconVisibility.IsVisible(item.Clsid) ? 1 : 0)}"));
 
-    private static bool IsDesktopMetadataFile(string path, bool showHiddenFiles)
+    internal static bool IsDesktopMetadataFile(string path, bool showHiddenFiles)
     {
         var fileName = Path.GetFileName(path);
         if (string.Equals(fileName, "desktop.ini", StringComparison.OrdinalIgnoreCase))

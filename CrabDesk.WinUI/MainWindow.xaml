@@ -45,6 +45,9 @@
                         <lucide:LucideIcon Icon="LayoutGrid" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="小组件" Tag="widgets" AutomationProperties.Name="桌面小组件">
+                    <NavigationViewItem.Icon><lucide:LucideIcon Icon="PanelsTopLeft" /></NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Content="智能整理" Tag="smart-organization" AutomationProperties.Name="智能整理">
                     <NavigationViewItem.Icon>
                         <lucide:LucideIcon Icon="Sparkles" />

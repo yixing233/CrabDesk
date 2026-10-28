@@ -37,6 +37,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             (float)(ClientSize.Width / _scale),
             (float)(ClientSize.Height / _scale));
         clipBounds.Inflate(8, 8);
+        DrawWidgets(graphics, clipBounds);
         foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
         {
             DrawBox(graphics, box, clipBounds);

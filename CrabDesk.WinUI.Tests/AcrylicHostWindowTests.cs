@@ -3,12 +3,254 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using CrabDesk.Native;
+using CrabDesk.Runtime;
+using CrabDesk.Core;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
 
 public sealed class AcrylicHostWindowTests
 {
+    [Fact]
+    public void DesktopOrderChangesRestoreTheHostWithoutWaitingForTheFallbackTimer()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var taskbar = TestWindow();
+            taskbar.TopMost = true;
+            desktop.Show(); taskbar.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+            Application.DoEvents(); // Drain initial-show recovery before testing desktop notifications.
+            var timer = (System.Windows.Forms.Timer)typeof(DesktopAcrylicHost)
+                .GetField("_orderTimer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .GetValue(host)!;
+            timer.Stop();
+            RaiseDesktopBelowTopmostBoundary(desktop.Handle, taskbar.Handle);
+            Assert.False(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+
+            NotifyWinEvent(0x8004, desktop.Handle, 0, 0); // EVENT_OBJECT_REORDER / OBJID_WINDOW
+            PumpMessagesUntil(() => DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle),
+                "Desktop reordering must be handled by its notification, without the 500 ms fallback timer.");
+
+            host.HideFromDesktop();
+            NotifyWinEvent(0x8004, desktop.Handle, 0, 0);
+            Application.DoEvents();
+            Assert.False(IsWindowVisible(host.Handle), "Desktop notifications must respect application-requested hiding.");
+        });
+    }
+
+    [Fact]
+    public void HiddenTopmostWindowsRemainAboveTheHostDuringDesktopPlacement()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var taskbar = TestWindow();
+            using var host = TestWindow();
+            taskbar.TopMost = true;
+            desktop.Show(); taskbar.Show(); host.Show();
+            RaiseDesktopBelowTopmostBoundary(desktop.Handle, taskbar.Handle);
+            ShowWindow(taskbar.Handle, SwHide);
+            using var observed = new OrderObserver(host.Handle, IntPtr.Zero);
+            Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+            Assert.Equal(0, observed.TopmostFrames);
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+        });
+    }
+
+    [Fact]
+    public void DesktopRaisedBelowTaskbarUsesTheTopmostBoundaryWithoutBecomingTopmost()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            using var taskbar = TestWindow();
+            taskbar.TopMost = true;
+            desktop.Show(); ordinary.Show(); taskbar.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+
+            // Show Desktop raises Explorer immediately below the topmost band.
+            RaiseDesktopBelowTopmostBoundary(desktop.Handle, taskbar.Handle);
+            Assert.False(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            var active = GetActiveWindow();
+            var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<WindowPosition>());
+            try
+            {
+                Marshal.StructureToPtr(new WindowPosition { Window = host.Handle, InsertAfter = new IntPtr(-1),
+                    Flags = SwpNoActivate | SwpNoMove | SwpNoSize }, pointer, false);
+                DesktopAcrylicWindowTools.ConstrainPositionChange(host.Handle, desktop.Handle, pointer);
+                Assert.Equal(taskbar.Handle, Marshal.PtrToStructure<WindowPosition>(pointer).InsertAfter);
+            }
+            finally { Marshal.FreeHGlobal(pointer); }
+
+            host.EnsureDesktopPlacement();
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            Assert.True(IsAbove(taskbar.Handle, host.Handle));
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+            Assert.Equal(active, GetActiveWindow());
+        });
+    }
+
+    [Fact]
+    public void TopmostHostIsDemotedBeforePlacementBelowATopmostDesktopBoundary()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var taskbar = TestWindow();
+            using var host = TestWindow();
+            taskbar.TopMost = true;
+            host.TopMost = true;
+            desktop.Show(); taskbar.Show(); host.Show();
+            RaiseDesktopBelowTopmostBoundary(desktop.Handle, taskbar.Handle);
+            Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+        });
+    }
+
+    [Fact]
+    public void DesktopHostNeverRisesAboveAnOrdinaryWindowWhenAnotherWindowRequestsARaise()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            desktop.Show(); ordinary.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            Assert.NotEqual(desktop.Handle, GetWindow(host.Handle, 4));
+            host.ShowAtDesktop();
+            Assert.True(IsAbove(ordinary.Handle, host.Handle));
+            var active = GetActiveWindow();
+            using var observed = new OrderObserver(host.Handle, ordinary.Handle);
+            foreach (var extraFlags in new uint[] { 0, 0x0400 }) // Include SWP_NOSENDCHANGING.
+            foreach (var after in new[] { IntPtr.Zero, new IntPtr(-1), ordinary.Handle })
+            {
+                Assert.True(SetWindowPos(host.Handle, after, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize | extraFlags));
+                Assert.True(IsAbove(ordinary.Handle, host.Handle), $"after=0x{after.ToInt64():X} extraFlags=0x{extraFlags:X} ordinaryAboveDesktop={IsAbove(ordinary.Handle, desktop.Handle)} " +
+                    DesktopAcrylicWindowTools.GetPlacementDiagnostics(host.Handle, desktop.Handle) + " events=" + string.Join(" | ", observed.Events));
+                Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+                Assert.Equal(active, GetActiveWindow());
+            }
+            Assert.Equal(0, observed.RaisedFrames);
+        });
+    }
+
+    [Fact]
+    public void OpeningNestedWidgetMenuDoesNotRaiseItsDesktopOwner()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            desktop.Show(); ordinary.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            using var source = new Panel { Bounds = new Rectangle(0, 0, 100, 100) };
+            host.Controls.Add(source);
+            host.ShowAtDesktop();
+            using var menu = new FluentContextMenuStrip { AnimationsEnabled = false };
+            using var sizes = new FluentToolStripMenuItem("尺寸");
+            sizes.DropDownItems.Add(new FluentToolStripMenuItem("紧凑"));
+            menu.Items.Add(sizes);
+            using var observed = new OrderObserver(host.Handle, ordinary.Handle);
+            menu.Show(source, new Point(10, 10));
+            sizes.ShowDropDown();
+            Application.DoEvents();
+            Assert.True(sizes.DropDown.Visible);
+            Assert.True(IsAbove(ordinary.Handle, host.Handle));
+            Assert.Equal(0, observed.RaisedFrames);
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+            sizes.HideDropDown(); menu.Close();
+        });
+    }
+
+    [Fact]
+    public void ClosingCaptureStyleOverlayDoesNotExposeDesktopAboveTheForegroundApp()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            desktop.Show(); ordinary.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+            using var observed = new OrderObserver(host.Handle, ordinary.Handle);
+            using var capture = TestWindow(); capture.TopMost = true;
+            capture.Show(ordinary); Application.DoEvents();
+            capture.Close(); Application.DoEvents();
+            Assert.True(IsAbove(ordinary.Handle, host.Handle));
+            Assert.Equal(0, observed.RaisedFrames);
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+        });
+    }
+
+    private static Form TestWindow() => new() { ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
+        Bounds = new Rectangle(-12000, -12000, 200, 120) };
+
+    private static void RaiseDesktopBelowTopmostBoundary(IntPtr desktop, IntPtr boundary)
+    {
+        // Explorer and the taskbar do not share WinForms' hidden owner.
+        SetWindowLongPtr(desktop, -8, IntPtr.Zero);
+        SetWindowLongPtr(boundary, -8, IntPtr.Zero);
+        // Keep the fake desktop non-topmost. Inserting it immediately after a
+        // topmost form while more topmost windows follow would promote it.
+        Assert.True(SetWindowPos(desktop, IntPtr.Zero, 0, 0, 0, 0,
+            SwpNoActivate | SwpNoMove | SwpNoSize));
+        var previous = GetWindow(desktop, GwHwndPrev);
+        while (previous != IntPtr.Zero && (GetWindowLongPtr(previous, GwlExStyle) & WsExTopmost) == IntPtr.Zero)
+            previous = GetWindow(previous, GwHwndPrev);
+        Assert.NotEqual(IntPtr.Zero, previous);
+        if (previous != boundary)
+            Assert.True(SetWindowPos(boundary, previous, 0, 0, 0, 0,
+                SwpNoActivate | SwpNoMove | SwpNoSize));
+        Assert.True(SetWindowPos(desktop, boundary, 0, 0, 0, 0,
+            SwpNoActivate | SwpNoMove | SwpNoSize));
+        Assert.Equal(boundary, GetWindow(desktop, GwHwndPrev));
+        Assert.Equal(IntPtr.Zero, GetWindowLongPtr(desktop, GwlExStyle) & WsExTopmost);
+        Assert.Equal(WsExTopmost, GetWindowLongPtr(boundary, GwlExStyle) & WsExTopmost);
+    }
+
+    private static MonitorLayout TestMonitor() => new() { Id = "ordering", DeviceName = "ordering", DpiScale = 1,
+        Bounds = new(0, 0, 800, 600), WorkArea = new(0, 0, 800, 600), PixelBounds = new(-12000, -12000, 800, 600), PixelWorkArea = new(-12000, -12000, 800, 600) };
+
+    private sealed class OrderObserver : NativeWindow, IDisposable
+    {
+        private readonly IntPtr _ordinary;
+        internal int RaisedFrames { get; private set; }
+        internal int TopmostFrames { get; private set; }
+        internal List<string> Events { get; } = [];
+        internal OrderObserver(IntPtr host, IntPtr ordinary) { _ordinary = ordinary; AssignHandle(host); }
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == 0x0046 || message.Msg == 0x0047)
+            {
+                var position = Marshal.PtrToStructure<WindowPosition>(message.LParam);
+                Events.Add($"before msg=0x{message.Msg:X} after=0x{position.InsertAfter.ToInt64():X} flags=0x{position.Flags:X} above={IsAbove(_ordinary, Handle)}");
+            }
+            base.WndProc(ref message);
+            if (message.Msg == 0x0047)
+            {
+                if ((GetWindowLongPtr(Handle, GwlExStyle) & WsExTopmost) != IntPtr.Zero) TopmostFrames++;
+                Events.Add($"after changed above={IsAbove(_ordinary, Handle)} topmost={(GetWindowLongPtr(Handle, GwlExStyle) & WsExTopmost) != IntPtr.Zero}");
+                if (IsWindowVisible(Handle) && !IsAbove(_ordinary, Handle)) RaisedFrames++;
+            }
+        }
+        public void Dispose() => ReleaseHandle();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPosition { public IntPtr Window, InsertAfter; public int X, Y, Width, Height; public uint Flags; }
+
     [Fact]
     public void HiddenHostIsRestoredAtDesktop()
     {
@@ -129,6 +371,16 @@ public sealed class AcrylicHostWindowTests
         return false;
     }
 
+    private static void PumpMessagesUntil(Func<bool> condition)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && clock.ElapsedMilliseconds < 200)
+        {
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+    }
+
     private static void RunInSta(Action action)
     {
         Exception? error = null;
@@ -151,6 +403,8 @@ public sealed class AcrylicHostWindowTests
     [DllImport("user32.dll")] private static extern IntPtr GetActiveWindow();
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern void NotifyWinEvent(uint eventType, IntPtr hwnd, int objectId, int childId);
 }

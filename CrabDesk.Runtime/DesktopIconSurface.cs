@@ -3300,6 +3300,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         // A click on the desktop while an inline rename is open commits the
         // edit (the surface never activates, so Deactivate does not fire).
         _runtime.CommitActiveDesktopInlineRename();
+        _runtime.DismissDesktopWidgetInput();
         // This no-activate surface must restore the desktop foreground for the
         // keyboard hook. The runtime queues activation off the UI thread.
         _runtime.ActivateDesktopKeyboardInput();
@@ -4630,6 +4631,8 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         };
 
         var crabDesk = CreateDesktopBackgroundMenuItem("CrabDesk", LucideRuntimeIcon.AppWindow);
+        crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
+            "桌面小组件", LucideRuntimeIcon.AppWindow, (_, _) => _runtime.OpenWidgetEditor()));
         // Land the new box where the desktop was right-clicked, on this
         // monitor, instead of the first free slot of the primary one.
         var boxAnchor = ToWorkAreaDip(location);

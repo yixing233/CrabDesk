@@ -6,6 +6,31 @@ public sealed class OrganizationRuleEngineTests
 {
     private readonly OrganizationRuleEngine _engine = new();
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OrganizingReusesASameNameSubtabAndRepairsAMissingBoxTarget(bool staleTarget)
+    {
+        var tab = new DesktopBoxTab { Title = " 图片 " };
+        var box = new DesktopBox { Title = "资料", ManualTabs = [tab] };
+        var rule = new OrganizationRule
+        {
+            Title = "图片", Extensions = ["png"],
+            TargetBoxId = staleTarget ? Guid.NewGuid() : null
+        };
+        var state = new CrabDeskState { Boxes = [box], OrganizationRules = [rule] };
+        var item = Item("photo.png", DesktopItemKind.File);
+
+        Assert.Same(box, OrganizationRuleEngine.ResolveTargetBox(state, rule));
+        var result = _engine.Apply(state, [item]);
+
+        Assert.Equal(1, result.Assigned);
+        Assert.Equal(0, result.InvalidTargets);
+        Assert.Equal(box.Id, state.Assignments[item.Key.ToString()]);
+        Assert.Equal(tab.Id, box.ItemTabAssignments[item.Key.ToString()]);
+        Assert.Equal(box.Id, Assert.Single(_engine.Preview(state, [item], true)).TargetBoxId);
+    }
+
     [Fact]
     public void LowerPriorityNumberWinsWhenRulesOverlap()
     {

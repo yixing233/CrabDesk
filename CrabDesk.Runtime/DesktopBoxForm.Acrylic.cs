@@ -26,6 +26,9 @@ internal sealed partial class DesktopBoxForm
         if (IsDisposed || _resourcesDisposed) yield break;
         EnsureGeometry();
         var transform = _movingBox ?? _resizingBox;
+        foreach (var widget in DesktopWidgetItems)
+            yield return CreateAcrylicRegion(widget.Id, WidgetRectangle(widget), _monitor,
+                (float)_runtime.State.Settings.Appearance.CornerRadius);
         foreach (var geometry in _boxes)
         {
             if (geometry.Box.Id == transform?.Id) continue;
@@ -60,6 +63,21 @@ internal sealed partial class DesktopBoxForm
             (float)(ClientSize.Width / _scale), (float)(ClientSize.Height / _scale));
         clipBounds.Inflate(8, 8);
         var behind = new List<RectangleF>();
+        foreach (var widget in DesktopWidgetItems.Where(widget => WidgetRectangle(widget).IntersectsWith(clipBounds)))
+        {
+            var bounds = WidgetRectangle(widget);
+            AcrylicOverlapBlur.Apply(bitmap, bounds,
+                (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.CompositingMode = CompositingMode.SourceOver;
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+                graphics.ScaleTransform((float)_scale, (float)_scale);
+                DrawWidget(graphics, widget);
+            }
+            behind.Add(bounds);
+        }
         foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
         {
             // No Graphics is open while the previous pixels are sampled.

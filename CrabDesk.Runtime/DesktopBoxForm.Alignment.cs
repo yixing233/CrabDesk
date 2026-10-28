@@ -16,7 +16,9 @@ internal sealed partial class DesktopBoxForm
         var height = GetVisualBoxHeight(box);
         var peers = _runtime.State.Boxes.Where(peer => peer.Id != box.Id &&
             string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase))
-            .Select(peer => peer.Bounds with { Height = GetVisualBoxHeight(peer) });
+            .Select(peer => peer.Bounds with { Height = GetVisualBoxHeight(peer) })
+            .Concat(_runtime.State.Widgets.Where(peer =>
+                string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase)).Select(peer => peer.Bounds));
         // Use the visible title strip for a collapsed box, but keep enough
         // room for its stored expanded height so committing cannot jump it up.
         var alignmentArea = area with { Height = Math.Max(height, area.Height - (bounds.Height - height)) };
@@ -26,6 +28,20 @@ internal sealed partial class DesktopBoxForm
         var moved = box.Bounds != next;
         ApplyBoxTransform(box, next);
         if (!moved && guidesChanged) RequestDragRender();
+    }
+
+    private void ApplyWidgetDragPosition(DesktopWidget widget, LayoutRect bounds, MonitorLayout monitor)
+    {
+        var peers = _runtime.State.Widgets.Where(peer => peer.Id != widget.Id &&
+                string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase)).Select(peer => peer.Bounds)
+            .Concat(_runtime.State.Boxes.Where(peer =>
+                string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase))
+                .Select(peer => peer.Bounds with { Height = GetVisualBoxHeight(peer) }));
+        var result = DesktopBoxAlignmentEngine.Calculate(bounds, peers, CrabDeskRuntime.WidgetWorkArea(monitor));
+        widget.MonitorId = monitor.Id;
+        widget.Bounds = result.Bounds;
+        SetBoxAlignmentGuides(result.Guides, monitor.Id);
+        _runtime.RefreshWidgetPosition(widget, save: false);
     }
 
     private bool SetBoxAlignmentGuides(IReadOnlyList<DesktopBoxAlignmentGuide> guides, string? monitorId)
@@ -62,7 +78,7 @@ internal sealed partial class DesktopBoxForm
 
     private void DrawBoxAlignmentGuides(Graphics graphics, string monitorId)
     {
-        if (_movingBox is null || _boxAlignmentGuides.Count == 0 ||
+        if ((_movingBox is null && !_widgetDragging) || _boxAlignmentGuides.Count == 0 ||
             !string.Equals(_boxAlignmentMonitorId, monitorId, StringComparison.OrdinalIgnoreCase)) return;
         var state = graphics.Save();
         try

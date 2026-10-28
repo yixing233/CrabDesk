@@ -50,7 +50,23 @@ internal enum LucideRuntimeIcon
     ToggleRight,
     Trash2,
     TriangleAlert,
-    X
+    X,
+    Sun,
+    CloudSun,
+    Cloud,
+    CloudRain,
+    CloudSnow,
+    CloudLightning,
+    CloudFog,
+    Haze,
+    CloudHail,
+    CloudOff,
+    Droplets,
+    Wind,
+    Thermometer,
+    Gauge,
+    ChevronLeft,
+    MapPin
 }
 
 internal static class LucideRuntimeIcons
@@ -74,6 +90,8 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.Check => "\uE06C",
         LucideRuntimeIcon.ChevronsUpDown => "\uE211",
         LucideRuntimeIcon.ChevronRight => "\uE06F",
+        LucideRuntimeIcon.ChevronLeft => "\uE06E",
+        LucideRuntimeIcon.MapPin => "\uE111",
         LucideRuntimeIcon.CircleAlert => "\uE077",
         LucideRuntimeIcon.ClipboardPaste => "\uE3E8",
         LucideRuntimeIcon.Cog => "\uE30B",
@@ -105,6 +123,20 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.Trash2 => "\uE18E",
         LucideRuntimeIcon.TriangleAlert => "\uE193",
         LucideRuntimeIcon.X => "\uE1B2",
+        LucideRuntimeIcon.Sun => "\uE178",
+        LucideRuntimeIcon.CloudSun => "\uE216",
+        LucideRuntimeIcon.Cloud => "\uE088",
+        LucideRuntimeIcon.CloudRain => "\uE08E",
+        LucideRuntimeIcon.CloudSnow => "\uE090",
+        LucideRuntimeIcon.CloudLightning => "\uE08C",
+        LucideRuntimeIcon.CloudFog => "\uE214",
+        LucideRuntimeIcon.Haze => "\uE0F0",
+        LucideRuntimeIcon.CloudHail => "\uE08B",
+        LucideRuntimeIcon.CloudOff => "\uE08D",
+        LucideRuntimeIcon.Droplets => "\uE0B5",
+        LucideRuntimeIcon.Wind => "\uE1B0",
+        LucideRuntimeIcon.Thermometer => "\uE186",
+        LucideRuntimeIcon.Gauge => "\uE1BF",
         _ => string.Empty
     };
 

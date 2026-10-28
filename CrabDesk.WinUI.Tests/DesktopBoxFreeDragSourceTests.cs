@@ -50,7 +50,7 @@ public sealed class DesktopBoxFreeDragSourceTests
     }
 
     [Fact]
-    public void RealBoxFormPreservesFreePositionUntilANearbyPeerCanSnap()
+    public void RealBoxFormPreservesFreePositionUntilAnAlignmentLineIsReached()
     {
         Exception? error = null;
         var thread = new Thread(() =>
@@ -77,10 +77,9 @@ public sealed class DesktopBoxFreeDragSourceTests
                 Assert.Equal(new LayoutRect(127.2, 103.2, 240, 180), moving.Bounds);
                 Assert.Empty(Guides(form));
 
-                remote.Bounds = new LayoutRect(100, 331.2, 240, 180);
                 Invoke(form, "ApplyBoxDragPosition", moving, new LayoutRect(104, 103.2, 240, 180), monitor);
                 Assert.Equal(100, moving.Bounds.X);
-                Assert.NotEmpty(Guides(form));
+                Assert.Equal(680, Assert.Single(Guides(form)).End);
 
                 Invoke(form, "ApplyBoxDragPosition", moving, new LayoutRect(108.1, 103.2, 240, 180), monitor);
                 Assert.Equal(108.1, moving.Bounds.X);

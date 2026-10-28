@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-material="acrylic" data-state="normal" data-wallpaper="landscape">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:,">
+  <title>CrabDesk · 桌面小组件设计预览</title>
+  <style>
+    :root { font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif; color: #e9edf5; background: #11151d;
+      --radius: 8px; --control-radius: 8px; --surface: 42,45,50; --alpha: .72;
+      --text: #fff; --secondary: #edf0f5; --accent: #4ea1d3; --selection: #4a5bb1;
+      --stroke: 149,150,152; --stroke-alpha: .288; --inset-surface: rgba(255,255,255,.06); }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, select, input { font: inherit; }
+    button, select { cursor: pointer; }
+    :focus-visible { outline: 2px solid #83cbff; outline-offset: 3px; }
+    a { color: #9ed9ff; text-underline-offset: 4px; }
+    .page { max-width: 1008px; margin: auto; padding: 36px 36px 24px; }
+    .top { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+    .eyebrow { margin: 0 0 8px; color: #91a8c7; letter-spacing: .14em; font-size: 11px; }
+    h1 { font-size: 28px; font-weight: 600; margin: 0 0 10px; }
+    .intro { color: #aab7ca; font-size: 13px; line-height: 1.8; margin: 0; }
+    .spec-link { font-size: 12px; flex-shrink: 0; margin-bottom: 3px; }
+    .layout { display: grid; grid-template-columns: 236px minmax(0,1fr); gap: 24px; align-items: start; }
+    .panel { border: 1px solid #2c3442; background: #191f29; border-radius: 12px; padding: 20px; }
+    .panel h2 { margin: 0 0 20px; font-size: 15px; font-weight: 600; }
+    .field { display: block; margin-bottom: 20px; }
+    .field-label { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 9px; }
+    select { width: 100%; color: #e9edf5; background: #242d3a; border: 1px solid #3b485b; border-radius: 6px; padding: 8px 10px; font-size: 12px; }
+    input[type=range] { display: block; width: 100%; margin: 12px 0 2px; accent-color: #83cbff; }
+    output { font-variant-numeric: tabular-nums; color: #9ed9ff; }
+    .field small, .panel-note { display: block; margin-top: 8px; font-size: 11px; line-height: 1.8; color: #aab7ca; }
+    .reset { width: 100%; padding: 8px; border: 1px solid #3b485b; background: transparent; border-radius: 6px; color: #e9edf5; font-size: 12px; }
+    .stage-wrap { min-width: 0; max-width: 676px; width: 100%; }
+    .stage-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; font-size: 12px; color: #b4c2d5; margin-bottom: 12px; }
+    .stage-scroll { overflow: auto; border: 1px solid #354153; border-radius: 14px; }
+    .desktop { position: relative; isolation: isolate; width: 676px; height: 612px; padding: 24px; overflow: hidden;
+      background: radial-gradient(ellipse at 15% 10%, #bfafbc 0%, transparent 44%),
+      radial-gradient(ellipse at 92% 17%, #bb7749 0%, transparent 42%),
+      radial-gradient(ellipse at 55% 110%, #6175a8 0%, transparent 60%), linear-gradient(145deg,#516b8a,#223c53 58%,#171c34); }
+    .desktop::before { content: ""; position: absolute; z-index: -1; inset: 0; opacity: .7;
+      background: linear-gradient(160deg, transparent 56%,#111c2e 56.3%,#22364e 68%,transparent 68.3%),
+      linear-gradient(23deg, #152e39 23%, transparent 23.3%), radial-gradient(ellipse at 42% 105%,#82a5b7,transparent 50%); }
+    [data-wallpaper=bright] .desktop { background: linear-gradient(135deg,#fff 15%,#f2da90 45%,#c5e8f9); }
+    [data-wallpaper=bright] .desktop::before { opacity: .18; }
+    [data-wallpaper=busy] .desktop { background: repeating-linear-gradient(35deg,#e4a376 0 22px,#15475b 22px 44px,#738aab 44px 66px,#202d4a 66px 88px); }
+    .cards { display: grid; grid-template-columns: 244px 180px 180px; grid-template-rows: repeat(6,84px); gap: 12px; }
+    .card { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: var(--radius);
+      color: var(--text); background: rgba(var(--surface),var(--alpha)); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+    .card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; border: 1px solid rgba(var(--stroke),var(--stroke-alpha)); pointer-events: none; }
+    [data-material=solid] .card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .card-header { position: relative; z-index: 1; height: 28px; min-height: 28px; display: flex; align-items: center; justify-content: center; padding: 0 38px;
+      font-size: 13.333px; font-weight: 600; line-height: 20px; }
+    .menu { position: absolute; right: 4px; top: 0; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--control-radius);
+      background: transparent; color: inherit; opacity: 0; font-size: 18px; transition: opacity 120ms,background 100ms; cursor: default; }
+    .card:hover .menu, .card:focus-within .menu { opacity: 1; }
+    .menu:hover { background: rgba(74,91,177,.44); }
+    .body { flex: 1; min-height: 0; padding: 8px; }
+    .reference { grid-column: 1; grid-row: 1 / span 3; width: 244px; height: 288px; }
+    .reference .card-header { height: 38px; min-height: 38px; }
+    .reference .menu { top: 5px; }
+    .reference .body { padding: 8px; }
+    .comparison-note { grid-column: 1; grid-row: 4 / span 3; padding: 16px 4px 0; color: #fff; font-size: 12px; line-height: 1.9; }
+    .comparison-note p { margin: 0 0 12px; }
+    .comparison-note strong { display: block; font-size: 13px; }
+    .compact .card-header { height: 0; min-height: 0; padding: 0; }
+    .compact .header-title { display: none; }
+    .compact .menu { top: 4px; }
+    .clock { grid-column: 2; grid-row: 1; }
+    .calendar { grid-column: 2; grid-row: 2 / span 2; }
+    .resource { grid-column: 3; grid-row: 1; }
+    .note { grid-column: 2 / span 2; grid-row: 4 / span 2; }
+    .todo { grid-column: 3; grid-row: 2 / span 2; }
+    .resource-wide { grid-column: 2 / span 2; grid-row: 6; }
+    .file-grid { display: grid; grid-template-columns: repeat(3,1fr); grid-auto-rows: 80px; }
+    .file { display: flex; flex-direction: column; align-items: center; justify-content: start; gap: 6px; padding: 6px 2px; border-radius: var(--control-radius); font-size: 11.333px; }
+    .file svg { width: 42px; height: 42px; }
+    .file.selected { background: rgba(74,91,177,.439); }
+    .file:hover { background: rgba(74,91,177,.612); }
+    .clock .body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+    .time { font-size: 32px; line-height: 38px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+    .secondary { color: var(--secondary); font-size: 11.333px; line-height: 16px; }
+    .calendar .body { padding-top: 8px; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7,1fr); grid-template-rows: 14px repeat(6,20px); gap: 0; text-align: center; align-items: center; font-size: 12px; }
+    .calendar-grid > span { display: grid; place-items: center; height: 20px; }
+    .calendar-grid .week { height: 14px; font-size: 11px; color: var(--secondary); }
+    .calendar-grid .muted { color: var(--secondary); opacity: .7; }
+    .calendar-grid .today { width: 20px; justify-self: center; border-radius: var(--control-radius); color: #fff; background: #4a5bb1; font-weight: 600; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: center; }
+    .wide-stats { grid-template-columns: repeat(3,1fr); }
+    .stat-number { font-size: 26px; line-height: 34px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat-number small { font-size: 12px; font-weight: 400; }
+    .progress { height: 3px; margin-top: 5px; background: var(--inset-surface); border-radius: 2px; overflow: hidden; }
+    .progress span { height: 100%; display: block; background: var(--accent); }
+    .note .body { position: relative; display: flex; flex-direction: column; }
+    .note-content { display: flex; flex-direction: column; height: 100%; }
+    .note-kicker { margin: 0 0 6px; font-size: 16px; line-height: 24px; font-weight: 600; }
+    .note p { font-size: 12px; line-height: 18px; margin: 0 0 6px; }
+    .note .updated { margin-top: auto; }
+    .state-message { display: none; height: 100%; flex-direction: column; justify-content: center; align-items: center; gap: 8px; text-align: center; }
+    .state-message strong { font-size: 14px; font-weight: 600; }
+    .state-message p { margin: 0; }
+    .state-message button { color: var(--text); border: 1px solid currentColor; border-radius: var(--control-radius); background: transparent; padding: 5px 12px; font-size: 12px; cursor: default; }
+    [data-state=hover] .note .menu { opacity: 1; background: rgba(74,91,177,.44); }
+    [data-state=focus] .note { outline: 2px solid var(--text); outline-offset: -3px; }
+    [data-state=empty] .note-content, [data-state=loading] .note-content { display: none; }
+    [data-state=empty] .message-empty, [data-state=error] .message-error, [data-state=loading] .message-loading { display: flex; }
+    [data-state=error] .note-content { height: auto; flex: 1; min-height: 0; }
+    .state-message.message-error { height: 34px; flex-shrink: 0; flex-direction: row; justify-content: space-between;
+      gap: 8px; margin-top: 8px; padding: 5px 8px; border-radius: min(6px,var(--radius)); background: var(--inset-surface); }
+    .message-error strong { font-size: 12px; }
+    .message-error button { padding: 2px 8px; }
+    .skeleton { width: 100%; height: 12px; border-radius: min(6px,var(--radius)); background: var(--inset-surface); }
+    .skeleton:nth-child(2) { width: 86%; }
+    .skeleton:nth-child(3) { width: 66%; }
+    .message-loading { align-items: start; gap: 14px; }
+    .todo-row { display: flex; align-items: start; gap: 8px; min-height: 28px; font-size: 12px; line-height: 18px; padding: 5px 0; }
+    .check { width: 14px; height: 14px; border: 1px solid currentColor; border-radius: min(3px,var(--radius)); margin-top: 2px; flex-shrink: 0; }
+    .done { text-decoration: line-through; }
+    .done .check { background: var(--selection); }
+    .todo .secondary { margin-bottom: 6px; }
+    .stage-caption { display: flex; flex-wrap: wrap; gap: 8px 20px; color: #9caec6; font-size: 11px; margin: 12px 0 0; line-height: 1.8; }
+    .swatches { margin-top: 22px; display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .swatch { display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid #2c3442; border-radius: 8px; font-size: 11px; color: #aab7ca; }
+    .chip { width: 24px; height: 24px; border: 1px solid #62718a; border-radius: 6px; flex-shrink: 0; }
+    .swatch strong { display: block; margin-bottom: 4px; font-size: 12px; color: #e9edf5; font-weight: 500; }
+    footer { margin-top: 24px; font-size: 11px; color: #9caec6; line-height: 1.8; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } .panel { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px 24px; } .panel h2 { grid-column: 1 / -1; margin-bottom: 0; } .field { margin: 0; } .panel-note { grid-column: 1 / -1; } .reset { align-self: end; } }
+    @media (max-width: 620px) { .page { padding: 24px 16px; } .top { display: block; } .spec-link { display: inline-block; margin-top: 12px; } .panel { grid-template-columns: 1fr 1fr; padding: 16px; } .swatches { grid-template-columns: 1fr 1fr; } h1 { font-size: 22px; } }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    @media (forced-colors: active) { .card { background: Canvas; color: CanvasText; backdrop-filter: none; } .card::after { border-color: CanvasText; } .secondary { color: CanvasText; } }
+  </style>
+</head>
+<body>
+  <svg class="sr-only" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="folder" viewBox="0 0 48 48"><path fill="#E9AE38" d="M4 10h15l4 5h21v25H4z"/><path fill="#F6CA63" d="M4 17h40v23H4z"/></symbol>
+    <symbol id="document" viewBox="0 0 48 48"><path fill="#DFE8F3" d="M11 4h18l9 9v31H11z"/><path fill="#AFBDCD" d="M29 4v10h9"/><path stroke="#889BAF" stroke-width="2" d="M17 23h15M17 29h15M17 35h10"/></symbol>
+    <symbol id="picture" viewBox="0 0 48 48"><rect x="5" y="6" width="38" height="36" rx="4" fill="#A9C9DC"/><path d="m8 37 11-17 8 10 6-7 8 14" fill="#4C8D92"/><circle cx="34" cy="15" r="4" fill="#FFF2BC"/></symbol>
+  </defs></svg>
+  <main class="page">
+    <header class="top"><div><p class="eyebrow">CRABDESK / DESIGN SPEC 0.2</p><h1>轻巧的桌面卡片</h1><p class="intro">标准卡 180 × 180 DIP，小卡 180 × 84 DIP。<br>设计预览 · 非运行组件 · 数据为固定示例</p></div><a class="spec-link" href="desktop-widgets.md">查看完整设计规范 ↗</a></header>
+    <div class="layout">
+      <aside class="panel" aria-label="设计预览设置">
+        <h2>外观变量</h2>
+        <label class="field"><span class="field-label">卡片主题</span><select id="theme"><option value="dark">默认深色</option><option value="light">建议浅色预设</option></select></label>
+        <label class="field"><span class="field-label">背景材质</span><select id="material"><option value="acrylic">毛玻璃 / 亚克力</option><option value="solid">普通背景</option></select><small>预览先展示毛玻璃。产品默认跟随盒子的材质开关。</small></label>
+        <label class="field" for="radius"><span class="field-label">外壳圆角 <output id="radius-value" for="radius">8 DIP</output></span><input id="radius" type="range" min="0" max="20" step="1" value="8"><small>盒子与组件同步，全部尺寸同值。</small></label>
+        <label class="field" for="tint"><span class="field-label"><span id="tint-label">染色强度</span><output id="tint-value" for="tint">100%</output></span><input id="tint" type="range" min="35" max="100" step="1" value="100"><small id="effective">有效染色 Alpha：72%</small></label>
+        <label class="field"><span class="field-label">壁纸测试</span><select id="wallpaper"><option value="landscape">柔和风景色块</option><option value="bright">明亮背景</option><option value="busy">高细节纹理</option></select></label>
+        <label class="field"><span class="field-label">便签状态</span><select id="state"><option value="normal">常态</option><option value="hover">悬停</option><option value="focus">键盘焦点</option><option value="loading">首次加载</option><option value="empty">空状态</option><option value="error">加载失败</option></select></label>
+        <button class="reset" id="reset" type="button">恢复预览默认值</button>
+        <p class="panel-note">1 CSS px 表示 1 设计 DIP。毛玻璃使用浏览器近似效果，非 Windows 系统材质；不用于验证实际模糊强度。状态切换只作用于便签示例。</p>
+      </aside>
+      <section class="stage-wrap" aria-label="桌面卡片设计画板">
+        <div class="stage-top"><span>紧凑标题 28 · 正文留白 8 · 间隔 12 DIP</span><span id="live-summary" aria-live="polite">8 DIP 圆角 / 毛玻璃</span></div>
+        <div class="stage-scroll" tabindex="0" aria-label="可横向滚动的尺寸画板">
+          <div class="desktop"><div class="cards">
+            <article class="card reference" aria-label="现有盒子参照，244 × 288 DIP"><div class="card-header">桌面盒子 · 参照<span class="menu" aria-hidden="true">···</span></div><div class="body"><div class="file-grid">
+              <div class="file"><svg aria-hidden="true"><use href="#folder"/></svg><span>项目资料</span></div>
+              <div class="file selected"><svg aria-hidden="true"><use href="#document"/></svg><span>工作记录</span></div>
+              <div class="file"><svg aria-hidden="true"><use href="#picture"/></svg><span>设计参考</span></div>
+              <div class="file"><svg aria-hidden="true"><use href="#folder"/></svg><span>归档</span></div>
+              <div class="file"><svg aria-hidden="true"><use href="#document"/></svg><span>项目说明</span></div>
+              <div class="file"><svg aria-hidden="true"><use href="#picture"/></svg><span>壁纸</span></div>
+            </div></div></article>
+            <div class="comparison-note"><strong>尺寸参照</strong><p>左侧盒子：244 × 288 DIP<br>右侧标准卡：180 × 180 DIP</p><p>圆角、描边和毛玻璃材质共用，<br>组件按内容选择紧凑布局。</p></div>
+            <article class="card clock compact" aria-label="S 时钟示例，180 × 84 DIP"><div class="card-header"><span class="header-title">时钟</span><span class="menu" aria-hidden="true">···</span></div><div class="body"><div class="time">18:30</div><div class="secondary">10 月 22 日 · 星期四</div></div></article>
+            <article class="card calendar" aria-label="M 月历示例，180 × 180 DIP"><div class="card-header">2026 年 10 月<span class="menu" aria-hidden="true">···</span></div><div class="body"><div class="calendar-grid" id="calendar"></div></div></article>
+            <article class="card resource compact" aria-label="S 资源概览示例，180 × 84 DIP"><div class="card-header"><span class="header-title">资源概览</span><span class="menu" aria-hidden="true">···</span></div><div class="body stats"><div><div class="secondary">CPU</div><div class="stat-number">18<small> %</small></div><div class="progress"><span style="width:18%"></span></div></div><div><div class="secondary">内存</div><div class="stat-number">42<small> %</small></div><div class="progress"><span style="width:42%"></span></div></div></div></article>
+            <article class="card note" id="note" aria-label="L 便签示例，372 × 180 DIP"><div class="card-header">便签<span class="menu" aria-hidden="true">···</span></div><div class="body">
+              <div class="note-content"><h2 class="note-kicker">记下今天的重点</h2><p>卡片保持轻巧，信息一眼可见。</p><p>圆角、配色与毛玻璃跟随桌面盒子。</p><div class="secondary updated">设计示例 · 372 × 180 DIP</div></div>
+              <div class="state-message message-loading" role="status"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span><p class="secondary">正在读取便签…</p></div>
+              <div class="state-message message-empty"><strong>还没有便签内容</strong><p class="secondary">写下第一条记录</p><button type="button" aria-disabled="true">添加内容</button></div>
+              <div class="state-message message-error"><strong>暂时无法读取内容</strong><p class="secondary">保留上次记录</p><button type="button" aria-disabled="true">重试</button></div>
+            </div></article>
+            <article class="card todo" aria-label="M 待办示例，180 × 180 DIP"><div class="card-header">待办<span class="menu" aria-hidden="true">···</span></div><div class="body"><div class="secondary">3 项待办 · 1 项已完成</div><div class="todo-row done"><span class="check" aria-hidden="true"></span><span>整理现有盒子设计变量</span></div><div class="todo-row"><span class="check" aria-hidden="true"></span><span>确定卡片尺寸与材质</span></div><div class="todo-row"><span class="check" aria-hidden="true"></span><span>检查明暗壁纸上的文字</span></div><div class="todo-row"><span class="check" aria-hidden="true"></span><span>验证圆角、焦点与空状态</span></div></div></article>
+            <article class="card resource-wide compact" aria-label="W 资源概览示例，372 × 84 DIP"><div class="card-header"><span class="header-title">资源概览</span><span class="menu" aria-hidden="true">···</span></div><div class="body stats wide-stats"><div><div class="secondary">CPU</div><div class="stat-number">18<small> %</small></div><div class="progress"><span style="width:18%"></span></div></div><div><div class="secondary">内存</div><div class="stat-number">42<small> %</small></div><div class="progress"><span style="width:42%"></span></div></div><div><div class="secondary">磁盘</div><div class="stat-number">27<small> %</small></div><div class="progress"><span style="width:27%"></span></div></div></div></article>
+          </div></div>
+        </div>
+        <p class="stage-caption"><span>S 180 × 84</span><span>M 180 × 180</span><span>W 372 × 84</span><span>L 372 × 180</span><span>全部为 DIP</span></p>
+        <div class="swatches"><div class="swatch"><span class="chip" id="surface-chip" style="background:#2a2d32"></span><span><strong>背景基色</strong><span id="surface-label">#2A2D32</span></span></div><div class="swatch"><span class="chip" style="background:#4ea1d3"></span><span><strong>强调色</strong>#4EA1D3</span></div><div class="swatch"><span class="chip" style="background:#4a5bb1"></span><span><strong>选中颜色</strong>#4A5BB1</span></div><div class="swatch"><span class="chip" id="text-chip" style="background:#fff"></span><span><strong>主要文字</strong><span id="text-label">#FFFFFF</span></span></div></div>
+      </section>
+    </div>
+    <footer>设计说明：本画板不读取或修改 CrabDesk 配置，不连接数据源，不执行组件操作。时钟、日历、便签与资源概览只用于比较布局；正式组件需完成桌面层级、DPI、命中、毛玻璃降级及可读性验收。</footer>
+  </main>
+  <script>
+    const root = document.documentElement;
+    const fields = Object.fromEntries(['theme','material','radius','tint','wallpaper','state'].map(id => [id, document.getElementById(id)]));
+    function update() {
+      const light = fields.theme.value === 'light';
+      const acrylic = fields.material.value === 'acrylic';
+      const p = Number(fields.tint.value) / 100;
+      const alpha = p * (acrylic ? .72 : 1);
+      root.dataset.theme = fields.theme.value;
+      root.dataset.material = fields.material.value;
+      root.dataset.wallpaper = fields.wallpaper.value;
+      root.dataset.state = fields.state.value;
+      root.style.setProperty('--radius', fields.radius.value + 'px');
+      root.style.setProperty('--surface', light ? '240,242,246' : '42,45,50');
+      root.style.setProperty('--text', light ? '#1f2329' : '#ffffff');
+      root.style.setProperty('--secondary', light ? '#343b45' : '#edf0f5');
+      root.style.setProperty('--inset-surface', light ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.06)');
+      root.style.setProperty('--stroke', light ? '129,132,137' : '149,150,152');
+      root.style.setProperty('--stroke-alpha', String(.4 * alpha));
+      root.style.setProperty('--alpha', String(alpha));
+      document.getElementById('radius-value').textContent = fields.radius.value + ' DIP';
+      document.getElementById('tint-value').textContent = fields.tint.value + '%';
+      document.getElementById('tint-label').textContent = acrylic ? '染色强度' : '不透明度';
+      document.getElementById('effective').textContent = (acrylic ? '有效染色 Alpha：' : '有效背景 Alpha：') + Math.round(alpha * 1000) / 10 + '%';
+      document.getElementById('live-summary').textContent = fields.radius.value + ' DIP 圆角 / ' + (acrylic ? '毛玻璃' : '普通背景');
+      const base = light ? '#F0F2F6' : '#2A2D32';
+      document.getElementById('surface-chip').style.background = base;
+      document.getElementById('surface-label').textContent = base;
+      document.getElementById('text-chip').style.background = light ? '#1F2329' : '#FFFFFF';
+      document.getElementById('text-label').textContent = light ? '#1F2329' : '#FFFFFF';
+    }
+    Object.values(fields).forEach(field => field.addEventListener('input', update));
+    document.getElementById('reset').addEventListener('click', () => {
+      Object.entries({theme:'dark',material:'acrylic',radius:'8',tint:'100',wallpaper:'landscape',state:'normal'}).forEach(([key,value]) => fields[key].value = value);
+      update();
+    });
+    const calendar = document.getElementById('calendar');
+    const week = ['一','二','三','四','五','六','日'];
+    week.forEach(day => { const span = document.createElement('span'); span.className = 'week'; span.textContent = day; calendar.append(span); });
+    for (let cell = 0; cell < 42; cell++) {
+      const day = cell - 2;
+      const span = document.createElement('span');
+      span.textContent = day < 1 ? String(day + 30) : day > 31 ? String(day - 31) : String(day);
+      if (day < 1 || day > 31) span.className = 'muted';
+      if (day === 22) { span.className = 'today'; span.setAttribute('aria-label','示例选中日期：10 月 22 日'); }
+      calendar.append(span);
+    }
+    update();
+  </script>
+</body>
+</html>

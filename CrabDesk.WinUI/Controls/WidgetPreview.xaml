@@ -1,0 +1,26 @@
+<UserControl
+    x:Class="CrabDesk.WinUI.Controls.WidgetPreview"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsHitTestVisible="False">
+    <Border CornerRadius="8" Padding="12">
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#FF344B5A" Offset="0" />
+                <GradientStop Color="#FF738C94" Offset="0.55" />
+                <GradientStop Color="#FF4E596D" Offset="1" />
+            </LinearGradientBrush>
+        </Border.Background>
+        <Viewbox Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border x:Name="CardSurface" Width="180" Height="180" CornerRadius="8">
+                <Grid x:Name="CardLayout">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="CardTitle" Height="28" Margin="28,0" FontSize="13.333" FontWeight="SemiBold"
+                               FontFamily="Microsoft YaHei UI" TextAlignment="Center" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <Grid x:Name="CardBody" Grid.Row="1" Margin="8" />
+                </Grid>
+            </Border>
+        </Viewbox>
+    </Border>
+</UserControl>

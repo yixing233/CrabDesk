@@ -40,6 +40,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     private bool _restoreQueued;
     private bool _restoring;
     private bool _restoreFailed;
+    private long _lastElevationLog;
+    private DesktopOrderMonitor? _desktopOrderMonitor;
 
     internal static bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
     internal IntPtr AnchorHandle => _anchor.Handle;
@@ -70,8 +72,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         Region = region;
         _orderTimer.Tick += (_, _) =>
         {
-            // Explorer may hide owned top-level windows during Win+D. Actual
-            // HWND visibility is not the application's requested visibility.
+            // Fallback for missing shell notifications and external hiding.
+            // Actual HWND visibility is not the requested desktop visibility.
             if (_desktopDisplayRequested) TryRestoreDesktopPlacement();
             var enabled = _uiSettings.AdvancedEffectsEnabled && !Forms.SystemInformation.HighContrast;
             if (enabled == _effectsEnabled) return;
@@ -164,6 +166,7 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     internal void ShowAtDesktop()
     {
         _desktopDisplayRequested = true;
+        _desktopOrderMonitor ??= new DesktopOrderMonitor(_desktopView, OnDesktopOrderChanged);
         Show();
         _orderTimer.Start();
         EnsureDesktopPlacement();
@@ -228,11 +231,20 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             var restored = DesktopAcrylicWindowTools.PlaceAtDesktop(Handle, _desktopView);
             if (!restored && !_restoreFailed)
                 DiagnosticLog.Error("Acrylic desktop placement failed",
-                    new InvalidOperationException("The desktop host is hidden, minimized, or no longer attached to Explorer."));
+                    new InvalidOperationException(DesktopAcrylicWindowTools.GetPlacementDiagnostics(Handle, _desktopView)));
             _restoreFailed = !restored;
             return restored;
         }
         finally { _restoring = false; }
+    }
+
+    private void OnDesktopOrderChanged()
+    {
+        if (!_desktopDisplayRequested || _restoring || IsDisposed || Disposing || !IsHandleCreated ||
+            DesktopAcrylicWindowTools.IsReadyAtDesktop(Handle, _desktopView)) return;
+        // Never let exceptions escape a native WinEvent callback.
+        try { TryRestoreDesktopPlacement(); }
+        catch (Exception exception) { DiagnosticLog.Error("Desktop order notification recovery failed", exception); }
     }
 
     private void QueueDesktopRestore()
@@ -269,8 +281,23 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         // thread. It does not reach an OLE drag from another process; those
         // arrive through the drop target registered in SetDropForwarding.
         if (message.Msg == 0x0084) { message.Result = new IntPtr(-1); return; }
+        if (message.Msg == 0x0046 && _desktopDisplayRequested &&
+            DesktopAcrylicWindowTools.ConstrainPositionChange(Handle, _desktopView, message.LParam))
+        {
+            var now = Environment.TickCount64;
+            if (now - _lastElevationLog >= 2000)
+            {
+                _lastElevationLog = now;
+                DiagnosticLog.Info("Acrylic desktop elevation prevented before window placement");
+            }
+        }
         base.WndProc(ref message);
-        if (message.Msg is 0x0018 or 0x0047) QueueDesktopRestore();
+        // Some external window managers suppress WINDOWPOSCHANGING. Repair
+        // that path synchronously, before returning to the compositor.
+        if (message.Msg == 0x0047 && _desktopDisplayRequested && !_restoring &&
+            DesktopAcrylicWindowTools.IsVisibleAndRestored(Handle) &&
+            !DesktopAcrylicWindowTools.IsReadyAtDesktop(Handle, _desktopView)) TryRestoreDesktopPlacement();
+        if (message.Msg == 0x0018) QueueDesktopRestore();
     }
 
     protected override void Dispose(bool disposing)
@@ -278,6 +305,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         if (disposing)
         {
             _desktopDisplayRequested = false;
+            _desktopOrderMonitor?.Dispose();
+            _desktopOrderMonitor = null;
             _dropForwarder = null;
             _orderTimer.Dispose();
             EffectsChanged = null;

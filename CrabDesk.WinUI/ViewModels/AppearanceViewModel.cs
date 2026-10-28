@@ -29,7 +29,7 @@ public partial class AppearanceViewModel : ObservableObject
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();
     public IReadOnlyList<string> FontFamilies { get; }
-    private DesktopBox CurrentBox => _service.Boxes.First();
+    private DesktopBox CurrentBox => _service.Boxes.FirstOrDefault() ?? new DesktopBox { Appearance = _service.State.Settings.DefaultBoxAppearance };
 
     public string Background { get => CurrentBox.Appearance.Background; set { if (IsColor(value)) _service.SetBoxBackground(null, value); } }
     public string Accent { get => CurrentBox.Appearance.Accent; set { if (IsColor(value)) _service.SetBoxAccent(null, value); } }

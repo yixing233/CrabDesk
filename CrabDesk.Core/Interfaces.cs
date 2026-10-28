@@ -14,6 +14,7 @@ public interface IDesktopItemProvider : IDisposable
 
 public interface IMappedFolderProvider : IDisposable
 {
+    bool ShowHiddenFiles { get; set; }
     event EventHandler? ItemsChanged;
     Task<MappedFolderSnapshot> EnumerateAsync(string path, CancellationToken cancellationToken = default);
     void SetWatchedFolders(IEnumerable<string> paths);

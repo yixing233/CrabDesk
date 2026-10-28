@@ -575,8 +575,10 @@ public sealed class AppSettings
     public string WindowBackdrop { get; set; } = "Mica";
     public DesktopBehaviorSettings DesktopBehavior { get; set; } = new();
     public GlobalAppearanceSettings Appearance { get; set; } = new();
+    public BoxAppearance DefaultBoxAppearance { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
     public AiClassificationSettings AiClassification { get; set; } = new();
+    public WidgetTranslationSettings WidgetTranslation { get; set; } = new();
     public HotkeySettings Hotkeys { get; set; } = new();
     public UpdateSettings Updates { get; set; } = new();
     public string Language { get; set; } = "zh-CN";
@@ -773,9 +775,10 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 23;
+    public int SchemaVersion { get; set; } = 24;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
+    public List<DesktopWidget> Widgets { get; set; } = [];
     public Dictionary<string, Guid> Assignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DesktopIconPlacement> DesktopIconPositions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, DesktopIconLayoutSnapshot> DesktopIconLayout { get; set; } = new(StringComparer.OrdinalIgnoreCase);

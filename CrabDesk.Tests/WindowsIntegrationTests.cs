@@ -61,6 +61,7 @@ public sealed class WindowsIntegrationTests
             using var submenuKey = Registry.CurrentUser.OpenSubKey(submenuKeyPath);
             using var rootCommand = key?.OpenSubKey("command");
             using var createBoxCommand = submenuKey?.OpenSubKey(@"shell\01CreateBox\command");
+            using var widgetsCommand = submenuKey?.OpenSubKey(@"shell\00Widgets\command");
             using var settingsCommand = submenuKey?.OpenSubKey(@"shell\02Settings\command");
             using var organizeCommand = submenuKey?.OpenSubKey(@"shell\03RuleOrganize\command");
             using var aiOrganizeCommand = submenuKey?.OpenSubKey(@"shell\04AiOrganize\command");
@@ -73,6 +74,7 @@ public sealed class WindowsIntegrationTests
             Assert.Equal(submenuClassName, key?.GetValue("ExtendedSubCommandsKey"));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", rootCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --create-box", createBoxCommand?.GetValue(null));
+            Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-widgets", widgetsCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --show-settings", settingsCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --organize", organizeCommand?.GetValue(null));
             Assert.Equal($"\"{Path.GetFullPath(executable)}\" --ai-organize", aiOrganizeCommand?.GetValue(null));

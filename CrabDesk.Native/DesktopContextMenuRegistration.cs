@@ -91,6 +91,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         using var submenu = _root.CreateSubKey(_submenuKeyPath, true)
             ?? throw new InvalidOperationException("Unable to create the CrabDesk submenu command store.");
         var iconDirectory = EnsureMenuIconDirectory();
+        WriteCommand(submenu, "00Widgets", "桌面小组件", normalizedExecutable, "--show-widgets",
+            GetMenuIconPath(iconDirectory, "create-box.ico", DrawCreateBoxIcon));
         WriteCommand(
             submenu,
             "01CreateBox",

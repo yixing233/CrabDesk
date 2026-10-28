@@ -18,9 +18,8 @@ public sealed class DesktopWatcherCoalescingTests
     [Fact]
     public void ACreateFollowedByARenameIsReportedAsAChangeOnTheFinalPath()
     {
-        // Save flows that write a temporary file and rename it into place would
-        // otherwise collapse to a bare rename, which the runtime may skip when
-        // "refresh after rename" is off; the new file must always show up.
+        // A temporary-file save is a content change on the final path, even
+        // when its last notification happens to be a rename.
         var rename = new RenamedEventArgs(WatcherChangeTypes.Renamed, @"C:\Desktop", "report.docx", "~tmp1.docx");
 
         var reported = DesktopItemProvider.DescribeBurst(rename, burstHadNonRename: true);

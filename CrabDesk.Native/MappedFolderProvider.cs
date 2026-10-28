@@ -5,6 +5,7 @@ namespace CrabDesk.Native;
 
 public sealed class MappedFolderProvider : IMappedFolderProvider
 {
+    public bool ShowHiddenFiles { get; set; }
     private readonly object _sync = new();
     private readonly Dictionary<string, FileSystemWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Threading.Timer _changeTimer;
@@ -21,7 +22,8 @@ public sealed class MappedFolderProvider : IMappedFolderProvider
         string path,
         CancellationToken cancellationToken = default)
     {
-        return Task.Run(() => Enumerate(path, cancellationToken), cancellationToken);
+        var showHiddenFiles = ShowHiddenFiles;
+        return Task.Run(() => Enumerate(path, showHiddenFiles, cancellationToken), cancellationToken);
     }
 
     public void SetWatchedFolders(IEnumerable<string> paths)
@@ -67,7 +69,7 @@ public sealed class MappedFolderProvider : IMappedFolderProvider
         }
     }
 
-    private static MappedFolderSnapshot Enumerate(string path, CancellationToken cancellationToken)
+    private static MappedFolderSnapshot Enumerate(string path, bool showHiddenFiles, CancellationToken cancellationToken)
     {
         var normalized = TryNormalizePath(path);
         if (normalized is null)
@@ -99,6 +101,7 @@ public sealed class MappedFolderProvider : IMappedFolderProvider
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
+                    if (DesktopItemProvider.IsDesktopMetadataFile(entry, showHiddenFiles)) continue;
                     var fullPath = Path.GetFullPath(entry);
                     var attributes = File.GetAttributes(fullPath);
                     var isDirectory = attributes.HasFlag(FileAttributes.Directory);
