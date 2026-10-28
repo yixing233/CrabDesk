@@ -282,18 +282,30 @@ public partial class OrganizationViewModel : ObservableObject
             .Select((box, index) => (box.Id, Index: index))
             .ToDictionary(entry => entry.Id, entry => entry.Index);
 
+        // Group by box *and* child tab: an item filed into a tab belongs to a
+        // different destination than one joining the box's unfiltered view, and
+        // the preview has to say which so the user sees no box is being added
+        // for a name that already exists as a tab.
         var assignable = decisions
             .Where(decision =>
                 decision.Action == OrganizationRuleAction.AssignToBox &&
                 decision.TargetBoxId is { } target &&
                 boxes.ContainsKey(target))
-            .GroupBy(decision => decision.TargetBoxId!.Value)
-            .OrderBy(group => boxOrder.GetValueOrDefault(group.Key, int.MaxValue))
+            .GroupBy(decision => (BoxId: decision.TargetBoxId!.Value, decision.TargetTabId))
+            .OrderBy(group => boxOrder.GetValueOrDefault(group.Key.BoxId, int.MaxValue))
+            .ThenBy(group => group.Key.TargetTabId is null ? 0 : 1)
             .ToArray();
+        var tabTitles = _service.Boxes
+            .Where(box => !box.IsMappedFolder)
+            .SelectMany(box => box.ManualTabs)
+            .GroupBy(tab => tab.Id)
+            .ToDictionary(group => group.Key, group => group.First().Title);
         foreach (var group in assignable)
         {
             PreviewSections.Add(new OrganizationPreviewSection(
-                $"放入「{boxes[group.Key]}」",
+                DescribeDestination(
+                    boxes[group.Key.BoxId],
+                    group.Key.TargetTabId is { } tabId ? tabTitles.GetValueOrDefault(tabId) : null),
                 group.Select(decision => new OrganizationPreviewItem(decision.ItemName, decision.RuleTitle)).ToArray()));
         }
 
@@ -348,6 +360,10 @@ public partial class OrganizationViewModel : ObservableObject
         }
         PreviewSummaryText = string.Join(" · ", parts);
     }
+
+    private static string DescribeDestination(string boxTitle, string? tabTitle) => tabTitle is null
+        ? $"放入「{boxTitle}」"
+        : $"放入「{boxTitle}」· {tabTitle}";
 
     private string BuildOrganizationPreview(IReadOnlyList<OrganizationDecision> decisions)
     {

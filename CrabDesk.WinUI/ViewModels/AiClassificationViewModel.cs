@@ -977,14 +977,12 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                 ItemName = names.GetValueOrDefault(assignment.ItemKey, assignment.ItemName)
             })
             .ToArray();
-        var existingBoxes = _service.Boxes
-            .Where(box => !box.IsMappedFolder)
-            .Select(box => box.Title.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A label that already names a box or a child tab of one is reused, so
+        // only genuinely new labels count as boxes this run will create.
         var newBoxLabels = namedAssignments
             .Select(assignment => assignment.Label)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(label => !existingBoxes.Contains(label))
+            .Where(label => BoxCategoryResolver.Resolve(_service.Boxes, label) is null)
             .ToArray();
         return preview with
         {

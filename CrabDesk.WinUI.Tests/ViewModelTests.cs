@@ -928,6 +928,59 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public async Task AiClassificationViewModelTreatsALabelThatNamesAChildTabAsReusable()
+    {
+        // The label "图片" already exists as a child tab of "资料", so applying
+        // the preview must not report a new box or create a duplicate.
+        var state = CreateState();
+        state.Boxes.Clear();
+        var tab = new DesktopBoxTab { Title = "图片" };
+        state.Boxes.Add(new DesktopBox
+        {
+            Id = Guid.NewGuid(), Title = "资料", MonitorId = "DISPLAY1",
+            Bounds = new LayoutRect(40, 40, 420, 310), ManualTabs = [tab]
+        });
+        state.Settings.AiClassification.CategoryLabels = "图片";
+        var service = CreateService(state);
+        service.Setup(item => item.GetAiClassificationWorkspace()).Returns(new AiClassificationWorkspace(
+            7,
+            [new AiClassificationWorkspaceItem("one", "photo.png", DesktopItemKind.File, "C:\\photo.png")]));
+        service.Setup(item => item.PreviewAiClassificationAsync(
+                It.IsAny<long>(),
+                It.IsAny<IReadOnlyCollection<string>>(),
+                It.IsAny<IProgress<AiClassificationProgress>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<IProgress<string>?>(),
+                It.IsAny<IProgress<AiClassificationModelStreamUpdate>?>(),
+                It.IsAny<IProgress<AiClassificationUsageProgress>?>(),
+                It.IsAny<IProgress<AiClassificationTransportProgress>?>(),
+                It.IsAny<IProgress<AiWebSearchProgress>?>(),
+                It.IsAny<IProgress<AiClassificationActivity>?>()))
+            .ReturnsAsync(new AiClassificationPreview(
+                7, 1,
+                [new AiClassificationAssignment("one", "photo.png", "图片")],
+                [])
+            { RequestedItemKeys = ["one"] });
+        AiClassificationPreview? applied = null;
+        service.Setup(item => item.ApplyAiClassificationPreviewAsync(
+                It.IsAny<AiClassificationPreview>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AiClassificationPreview, CancellationToken>((preview, _) => applied = preview)
+            .ReturnsAsync(new AiClassificationApplyResult(1, 1, 1, 0, 0, []));
+        var viewModel = new AiClassificationViewModel(
+            service.Object,
+            Mock.Of<IInfoBarService>(),
+            Mock.Of<IDialogService>());
+
+        await viewModel.ClassifyCommand.ExecuteAsync(null);
+        await viewModel.ApplyCommand.ExecuteAsync(null);
+
+        Assert.NotNull(applied);
+        Assert.Empty(applied!.NewBoxLabels);
+        Assert.Single(state.Boxes);
+    }
+
+    [Fact]
     public void AiClassificationViewModelSwitchesCardAndJsonViewModes()
     {
         var viewModel = new AiClassificationViewModel(
