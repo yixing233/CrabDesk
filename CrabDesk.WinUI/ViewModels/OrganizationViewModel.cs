@@ -88,10 +88,10 @@ public sealed class OrganizationRuleListItem : INotifyPropertyChanged
         {
             return "忽略，不整理";
         }
-        if (rule.TargetBoxId is { } target)
+        if (BoxCategoryResolver.ResolveRule(boxes, rule) is { } target)
         {
-            var box = boxes.FirstOrDefault(candidate => candidate.Id == target);
-            return box is null ? "目标盒子已不存在" : $"放入「{box.Title}」";
+            var tab = target.Box.ManualTabs.FirstOrDefault(tab => tab.Id == target.TabId);
+            return tab is null ? $"放入「{target.Box.Title}」" : $"放入「{target.Box.Title}」· {tab.Title}";
         }
         return $"整理时创建「{rule.Title}」";
     }
@@ -369,7 +369,7 @@ public partial class OrganizationViewModel : ObservableObject
     {
         var boxes = _service.Boxes
             .Where(box => !box.IsMappedFolder)
-            .ToDictionary(box => box.Id, box => box.Title);
+            .ToDictionary(box => box.Id);
         var assignable = decisions.Where(decision =>
             decision.Action == OrganizationRuleAction.AssignToBox &&
             decision.TargetBoxId is { } target &&
@@ -389,9 +389,11 @@ public partial class OrganizationViewModel : ObservableObject
         if (assignable.Length > 0)
         {
             lines.Add($"分配到盒子: {assignable.Length} 项");
-            foreach (var group in assignable.GroupBy(decision => decision.TargetBoxId!.Value))
+            foreach (var group in assignable.GroupBy(decision => (BoxId: decision.TargetBoxId!.Value, decision.TargetTabId)))
             {
-                lines.Add($"  {boxes[group.Key]}: {group.Count()} 项");
+                var box = boxes[group.Key.BoxId];
+                var tab = box.ManualTabs.FirstOrDefault(tab => tab.Id == group.Key.TargetTabId);
+                lines.Add($"  {DescribeDestination(box.Title, tab?.Title)}: {group.Count()} 项");
             }
         }
         if (keepUnassigned.Length > 0)
@@ -422,10 +424,10 @@ public partial class OrganizationViewModel : ObservableObject
 
     private static string DescribeDecision(
         OrganizationDecision decision,
-        IReadOnlyDictionary<Guid, string> boxes) => decision.Action switch
+        IReadOnlyDictionary<Guid, DesktopBox> boxes) => decision.Action switch
     {
-        OrganizationRuleAction.AssignToBox when decision.TargetBoxId is { } target && boxes.TryGetValue(target, out var title) =>
-            $"放入“{title}”",
+        OrganizationRuleAction.AssignToBox when decision.TargetBoxId is { } target && boxes.TryGetValue(target, out var box) =>
+            DescribeDestination(box.Title, box.ManualTabs.FirstOrDefault(tab => tab.Id == decision.TargetTabId)?.Title),
         OrganizationRuleAction.AssignToBox => "目标盒子不可用",
         OrganizationRuleAction.KeepUnassigned => "保留在桌面",
         OrganizationRuleAction.Ignore => "忽略",

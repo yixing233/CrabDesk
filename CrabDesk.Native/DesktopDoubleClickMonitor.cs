@@ -9,6 +9,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     private const int WhMouseLl = 14;
     private const int WhKeyboardLl = 13;
     private const int WmLButtonDown = 0x0201;
+    private const int WmLButtonUp = 0x0202;
     private const int WmRButtonDown = 0x0204;
     private const int WmMouseWheel = 0x020A;
     private const int WmKeyDown = 0x0100;
@@ -172,7 +173,7 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     {
         var hook = _mouseHook;
         var msg = message.ToInt32();
-        // WH_MOUSE_LL also reports every pointer move. Only the three handled
+        // WH_MOUSE_LL also reports every pointer move. Only the four handled
         // messages need window hit testing, so a move costs this test alone.
         if (code >= 0 && Enabled && DesktopListView != IntPtr.Zero && IsHandledMouseMessage(msg))
         {
@@ -194,10 +195,25 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
     }
 
     private static bool IsHandledMouseMessage(int message) =>
-        message is WmLButtonDown or WmRButtonDown or WmMouseWheel;
+        message is WmLButtonDown or WmLButtonUp or WmRButtonDown or WmMouseWheel;
+
+    private static bool IsShowDesktopCorner(IntPtr target, NativePoint point)
+    {
+        var root = GetAncestor(target, 2);
+        if (DesktopHostService.GetWindowClass(root) is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd") ||
+            !NativeMethods.GetWindowRect(root, out var bounds)) return false;
+        var width = Math.Max(1, (int)Math.Ceiling(8 * NativeMethods.GetDpiForWindow(root) / 96d));
+        return point.X >= bounds.Right - width && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom;
+    }
 
     private bool HandleMouseMessage(int message, LowLevelMouseHookStruct mouse)
     {
+        if (message == WmLButtonUp)
+        {
+            if (IsShowDesktopCorner(WindowFromPoint(mouse.Point), mouse.Point))
+                DesktopAcrylicWindowTools.PrepareForShowDesktop();
+            return false;
+        }
         var isDesktopSurface = IsDesktopSurfacePoint(mouse.Point);
         var targetWindow = WindowFromPoint(mouse.Point);
         // Composition menu hosts can be skipped by WindowFromPoint, so check
@@ -342,6 +358,10 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         {
             return false;
         }
+
+        if (keyboard.VirtualKeyCode == 0x44 && (GetAsyncKeyState(0x5B) < 0 || GetAsyncKeyState(0x5C) < 0) &&
+            GetAsyncKeyState(VkControl) >= 0 && GetAsyncKeyState(0x10) >= 0 && GetAsyncKeyState(0x12) >= 0)
+            DesktopAcrylicWindowTools.PrepareForShowDesktop();
 
         if (_interceptedKeyboardKeys.Contains(keyboard.VirtualKeyCode))
         {
@@ -506,13 +526,11 @@ public sealed class DesktopInputMonitor : IDesktopInputMonitor
         return IsDesktopSurfaceWindow(WindowFromPoint(screenPoint));
     }
 
-    private bool IsDesktopForeground()
-    {
-        var window = GetForegroundWindow();
-        return window != IntPtr.Zero &&
-            !IsCurrentProcessWindow(window) &&
-            IsDesktopSurfaceWindow(window);
-    }
+    private bool IsDesktopForeground() => IsDesktopForegroundWindow(GetForegroundWindow());
+
+    internal bool IsDesktopForegroundWindow(IntPtr window) => window != IntPtr.Zero &&
+            (DesktopInputProxy.IsHiddenEditor(window) ||
+             !IsCurrentProcessWindow(window) && IsDesktopSurfaceWindow(window));
 
     private bool IsDesktopSurfaceWindow(IntPtr window)
     {

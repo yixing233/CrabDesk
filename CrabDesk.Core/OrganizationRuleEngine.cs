@@ -57,7 +57,7 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
             // alone: a category may name a child tab of an existing box, and
             // the decision has to carry that tab so applying it files the item
             // into the right group instead of the box's unfiltered view.
-            var target = BoxCategoryResolver.Resolve(state, rule.Title, rule.TargetBoxId);
+            var target = BoxCategoryResolver.ResolveRule(state, rule);
             decisions.Add(new OrganizationDecision(
                 key,
                 item.DisplayName,
@@ -75,7 +75,7 @@ public sealed class OrganizationRuleEngine : IOrganizationRuleEngine
     // classifier and the settings list can never disagree about where a
     // category lives; see that type for the precedence rules.
     public static DesktopBox? ResolveTargetBox(CrabDeskState state, OrganizationRule rule) =>
-        BoxCategoryResolver.Resolve(state, rule.Title, rule.TargetBoxId)?.Box;
+        BoxCategoryResolver.ResolveRule(state, rule)?.Box;
 
     // Whether an organize pass may delete a box it found empty. Only boxes the
     // pass generated itself qualify: a box the user created by hand is never

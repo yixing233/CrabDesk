@@ -149,6 +149,10 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.WidgetTranslation.BaseUrl = state.Settings.WidgetTranslation.BaseUrl?.Trim() ?? string.Empty;
         state.Settings.WidgetTranslation.Model = state.Settings.WidgetTranslation.Model?.Trim() ?? string.Empty;
         state.Settings.WidgetTranslation.ApiKey ??= string.Empty;
+        state.Settings.WidgetTranslation.PromptTemplate ??= WidgetTranslationSettings.DefaultPromptTemplate;
+        if (state.Settings.WidgetTranslation.PromptTemplate == WidgetTranslationSettings.PreviousDefaultPromptTemplate)
+            state.Settings.WidgetTranslation.PromptTemplate = WidgetTranslationSettings.DefaultPromptTemplate;
+        state.Settings.WidgetTranslation.ConversationIdleMinutes = Math.Clamp(state.Settings.WidgetTranslation.ConversationIdleMinutes, 1, 1440);
         state.Settings.Hotkeys.ShowDesktop ??= new HotkeyBinding
         {
             Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
@@ -342,6 +346,7 @@ public sealed class JsonLayoutStore : ILayoutStore
                 rule.NamePattern ?? string.Empty,
                 rule.Action,
                 rule.TargetBoxId?.ToString() ?? string.Empty,
+                rule.TargetBoxIsExplicit?.ToString() ?? string.Empty,
                 string.Join(",", rule.ItemKinds.Select(kind => kind.ToString()).OrderBy(kind => kind)),
                 string.Join(",", rule.Extensions.OrderBy(extension => extension, StringComparer.OrdinalIgnoreCase)));
             if (!seenRuleShapes.Add(shape))

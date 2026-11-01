@@ -24,7 +24,8 @@ internal sealed partial class DesktopBoxForm
 
     private void InitializeWidgets()
     {
-        VisibleChanged += (_, _) => { if (!Visible) DismissWidgetInputs(); };
+        _calendarToolTipTimer.Tick += ShowCalendarToolTip;
+        VisibleChanged += (_, _) => { if (!Visible) { DismissWidgetInputs(); HideCalendarHover(); } };
         _widgetTimer = new Forms.Timer { Interval = 1000 };
         _widgetTimer.Tick += (_, _) =>
         {
@@ -47,6 +48,7 @@ internal sealed partial class DesktopBoxForm
     internal void RefreshWidgets()
     {
         if (IsDisposed || _resourcesDisposed) return;
+        if (_runtime.IsPaused || _calendarToolTipWidgetId is { } hovered && !DesktopWidgetItems.Any(w => w.Id == hovered)) HideCalendarHover();
         RefreshWidgetTranslationInput();
         RefreshWidgetNoteInput();
         RefreshWidgetTodoInput();
@@ -55,6 +57,7 @@ internal sealed partial class DesktopBoxForm
         foreach (var id in _widgetScroll.Keys.Where(id => !ids.Contains(id)).ToArray()) _widgetScroll.Remove(id);
         foreach (var id in _translationSourceScroll.Keys.Where(id => !ids.Contains(id)).ToArray()) _translationSourceScroll.Remove(id);
         foreach (var id in _widgetMonths.Keys.Where(id => !ids.Contains(id)).ToArray()) _widgetMonths.Remove(id);
+        _expandedTodoWidgets.RemoveWhere(id => !_runtime.State.Widgets.Any(widget => widget.Id == id && widget.Tasks.Any(task => task.IsCompleted)));
         UpdateWindowRegion();
         RequestLayerRender();
     }
@@ -68,6 +71,7 @@ internal sealed partial class DesktopBoxForm
 
     private bool HandleWidgetMouseDown(Forms.MouseEventArgs args, PointF point)
     {
+        HideCalendarHover();
         var widget = WidgetAt(point);
         if (widget is null) return false;
         ClearHoverState();
@@ -81,7 +85,10 @@ internal sealed partial class DesktopBoxForm
         _widgetCanDrag = !widget.IsLocked && !IsWeatherLocationPoint(widget, point) && !IsCalendarNavigationPoint(widget, point) &&
             !(widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point)) &&
             !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget).Contains(point)) &&
-            (widget.Kind == DesktopWidgetKind.Clock || point.Y < widget.Bounds.Y + 28);
+            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget).Contains(point)) &&
+            (widget.Kind == DesktopWidgetKind.Clock || point.Y < widget.Bounds.Y + 28 ||
+             widget.Kind == DesktopWidgetKind.Weather &&
+             (GetWeatherLayout(widget).Temperature.Contains(point) || GetWeatherLayout(widget).Icon.Contains(point)));
         Capture = true;
         return true;
     }
@@ -102,14 +109,22 @@ internal sealed partial class DesktopBoxForm
         }
         var widget = WidgetAt(point);
         var menuId = widget is not null && WidgetMenuRectangle(widget).Contains(point) ? widget.Id : (Guid?)null;
+        UpdateCalendarHover(widget, point);
         var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget).Contains(point) ? widget.Id : (Guid?)null;
         var calendarButton = RectangleF.Empty;
-        Guid? todoTaskId = null, todoAddId = null;
+        var translationButton = RectangleF.Empty;
+        if (widget?.Kind == DesktopWidgetKind.Translation)
+        {
+            var layout = GetTranslationLayout(widget);
+            translationButton = new[] { layout.Clear, layout.Copy, layout.Translate }.FirstOrDefault(button => button.Contains(point));
+        }
+        Guid? todoTaskId = null, todoAddId = null, todoGroupId = null;
         if (widget?.Kind == DesktopWidgetKind.Todo)
         {
             var layout = GetTodoLayout(widget);
             if (layout.Add.Contains(point)) todoAddId = widget.Id;
             todoTaskId = TodoTaskAtPoint(widget, point);
+            if (TodoCompletedHeaderRectangle(widget).Contains(point)) todoGroupId = widget.Id;
         }
         if (widget?.Kind == DesktopWidgetKind.Calendar)
         {
@@ -117,13 +132,16 @@ internal sealed partial class DesktopBoxForm
             calendarButton = new[] { header.Previous, header.Today, header.Next }.FirstOrDefault(button => button.Contains(point));
         }
         if (_hoveredWidgetId != widget?.Id || _hoveredWidgetMenuId != menuId || _hoveredWeatherLocationId != locationId ||
-            _hoveredCalendarButton != calendarButton || _hoveredTodoTaskId != todoTaskId || _hoveredTodoAddId != todoAddId)
+            _hoveredCalendarButton != calendarButton || _hoveredTranslationButton != translationButton ||
+            _hoveredTodoTaskId != todoTaskId || _hoveredTodoAddId != todoAddId || _hoveredTodoGroupId != todoGroupId)
         {
             _hoveredWidgetId = widget?.Id;
             _hoveredWidgetMenuId = menuId;
             _hoveredWeatherLocationId = locationId;
             _hoveredCalendarButton = calendarButton;
+            _hoveredTranslationButton = translationButton;
             _hoveredTodoTaskId = todoTaskId; _hoveredTodoAddId = todoAddId;
+            _hoveredTodoGroupId = todoGroupId;
             RequestVisualLayerRender();
         }
         if (widget is null) return false;
@@ -137,6 +155,7 @@ internal sealed partial class DesktopBoxForm
         Cursor = WidgetMenuRectangle(widget).Contains(point) || IsWeatherLocationPoint(widget, point) || IsCalendarNavigationPoint(widget, point) ||
             widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point) || WidgetBodyRectangle(widget).Contains(point)
             || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget).Contains(point)
+            || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget).Contains(point)
             ? Forms.Cursors.Hand : !widget.IsLocked ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
         return true;
     }
@@ -209,6 +228,7 @@ internal sealed partial class DesktopBoxForm
             else if (header.Today.Contains(point)) month = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
             else return;
             _widgetMonths[widget.Id] = month;
+            HideCalendarHover();
             RequestVisualLayerRender();
             return;
         }
@@ -233,8 +253,10 @@ internal sealed partial class DesktopBoxForm
             _widgetScroll[widget.Id] = Math.Max(0, _widgetScroll.GetValueOrDefault(widget.Id) + (delta > 0 ? -step : step));
             if (widget.Kind == DesktopWidgetKind.Todo)
             {
+                DismissWidgetTodoInput();
                 _widgetScroll[widget.Id] = WidgetTodoStart(widget);
                 _hoveredTodoTaskId = TodoTaskAtPoint(widget, point);
+                _hoveredTodoGroupId = TodoCompletedHeaderRectangle(widget).Contains(point) ? widget.Id : null;
             }
             RequestVisualLayerRender();
         }
@@ -262,7 +284,7 @@ internal sealed partial class DesktopBoxForm
         if (widget.Kind == DesktopWidgetKind.Translation)
             menu.Items.Add("配置 AI 接口", null, (_, _) => _runtime.OpenWidgetEditor(widget.Id));
         if (widget.Kind == DesktopWidgetKind.Calendar) menu.Items.Add("回到本月", null, (_, _) =>
-        { _widgetMonths.Remove(widget.Id); RequestVisualLayerRender(); });
+        { _widgetMonths.Remove(widget.Id); HideCalendarHover(); RequestVisualLayerRender(); });
         if (widget.Kind == DesktopWidgetKind.Weather)
         {
             menu.Items.Add("位置管理", null, (_, _) => _runtime.OpenWidgetWeatherLocations(widget));

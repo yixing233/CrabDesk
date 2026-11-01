@@ -771,6 +771,9 @@ public sealed class OrganizationRule
     public List<string> Extensions { get; set; } = [];
     public OrganizationRuleAction Action { get; set; } = OrganizationRuleAction.AssignToBox;
     public Guid? TargetBoxId { get; set; }
+    // Null preserves legacy targets, whose origin was not recorded. False is
+    // an automatic binding; true is a target chosen in the rule editor.
+    public bool? TargetBoxIsExplicit { get; set; }
 }
 
 public sealed class CrabDeskState

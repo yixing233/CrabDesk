@@ -99,7 +99,13 @@ public static class DesktopWindowTools
         {
             return false;
         }
-        if (NativeMethods.GetForegroundWindow() == root)
+        var foreground = NativeMethods.GetForegroundWindow();
+        // A desktop click dismisses the editor before reaching this method.
+        // Keyboard commands can route through its hidden HWND until another
+        // application activates, without raising Explorer over the desktop host.
+        // A queued request may also arrive after a different editor opened;
+        // leave that visible editor's focus alone.
+        if (foreground == root || DesktopInputProxy.IsEditor(foreground))
         {
             return true;
         }
@@ -108,6 +114,7 @@ public static class DesktopWindowTools
 
     public static void ToggleDesktop()
     {
+        DesktopAcrylicWindowTools.PrepareForShowDesktop();
         var shellType = Type.GetTypeFromProgID("Shell.Application");
         var shell = shellType is null ? null : Activator.CreateInstance(shellType);
         if (shell is null)

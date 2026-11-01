@@ -3250,14 +3250,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             Trimming = StringTrimming.EllipsisCharacter,
             FormatFlags = StringFormatFlags.LineLimit
         };
-        var measured = graphics.MeasureString(displayName, font, textBounds.Size, format);
-        var width = Math.Min(textBounds.Width, Math.Max(font.Size, measured.Width));
-        var height = Math.Min(textBounds.Height, Math.Max(0, measured.Height));
-        return new RectangleF(
-            textBounds.X + (textBounds.Width - width) / 2,
-            textBounds.Y,
-            width,
-            height);
+        return DesktopItemVisualStyle.MeasureLabelBounds(graphics, displayName, textBounds, font, format);
     }
 
     private static float MeasureFullLabelHeight(
@@ -4541,13 +4534,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
     }
 
     private RectangleF GetItemVisualBounds(RectangleF iconBounds, RectangleF textBounds)
-    {
-        var contentBounds = textBounds.IsEmpty
-            ? iconBounds
-            : RectangleF.Union(iconBounds, textBounds);
-        var padding = DesktopItemVisualStyle.SelectionPadding(_iconSize);
-        return RectangleF.Inflate(contentBounds, padding, padding);
-    }
+        => DesktopItemVisualStyle.HighlightBounds(iconBounds, textBounds, _iconSize);
 
     private bool IsRaisedVisual(string itemKey, IReadOnlySet<string>? selectedItemKeys = null) =>
         (selectedItemKeys ?? _selection).Contains(itemKey) ||

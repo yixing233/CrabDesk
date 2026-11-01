@@ -13,8 +13,27 @@ internal sealed partial class DesktopBoxForm
 
     internal static RectangleF WeatherCityButtonRectangle(DesktopWidget widget)
     {
+        var bounds = WidgetRectangle(widget);
+        return new(bounds.X + 34, bounds.Y + 2, Math.Min(148, bounds.Width - 98), 24);
+    }
+
+    internal readonly record struct WeatherLayout(RectangleF Temperature, RectangleF Icon, RectangleF Forecast,
+        RectangleF FeelsLike, RectangleF Humidity, RectangleF Wind, RectangleF Status);
+
+    internal static WeatherLayout GetWeatherLayout(DesktopWidget widget)
+    {
         var body = WidgetBodyRectangle(widget);
-        return new(body.X, body.Y, body.Width - (widget.Weather?.FeelsLike.HasValue == true ? 60 : 0), 18);
+        var wide = body.Width >= 300;
+        var overview = Math.Min(body.Width, 164);
+        var column = (body.Width - 20) / 2;
+        return new(new(body.X + 4, body.Y - 2, overview - 56, 48),
+            new(body.X + overview - 48, body.Y + 2, 44, 44),
+            new(body.X + 4, body.Y + 48, overview - 64, 18),
+            new(body.X + overview - 56, body.Y + 48, 52, 18),
+            wide ? new(body.Right - 132, body.Y + 2, 128, 24) : new(body.X + 4, body.Y + 68, column, 18),
+            wide ? new(body.Right - 132, body.Y + 34, 128, 24) : new(body.X + column + 16, body.Y + 68, column, 18),
+            new(body.X + 4, body.Bottom - (widget.Cities.Count > 1 ? 48 : 32), body.Width - 8,
+                widget.Cities.Count > 1 ? 24 : 28));
     }
 
     private FluentContextMenuStrip ShowWeatherCityMenu(DesktopWidget widget)
@@ -75,6 +94,16 @@ internal sealed partial class DesktopBoxForm
         graphics.DrawLine(pen, x, y - 8, x, y - 4.5f);
         graphics.DrawLine(pen, x, y + 4.5f, x, y + 8);
         LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MapPin, WeatherLocationsButtonRectangle(widget), accent, 14);
+        var city = WeatherCityButtonRectangle(widget);
+        WidgetText(graphics, widget.Location?.Name ?? widget.DisplayTitle,
+            new(city.X, city.Y, city.Width - 14, city.Height), text, 12, bold: true);
+        if (widget.Location is not null)
+        {
+            using var font = new Font(BoxAppearance.DefaultFontFamily, 12, FontStyle.Bold, GraphicsUnit.Pixel);
+            var arrowX = Math.Min(city.Right - 12, city.X + graphics.MeasureString(widget.Location.Name, font).Width + 2);
+            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronsUpDown,
+                new(arrowX, city.Y, 12, city.Height), text, 10);
+        }
     }
 
     private static void DrawWeatherMetric(Graphics graphics, LucideRuntimeIcon icon, string value, RectangleF bounds, Color color)

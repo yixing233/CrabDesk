@@ -45,7 +45,7 @@ internal sealed partial class DesktopBoxForm
         graphics.FillPath(fill, path);
         var state = graphics.Save();
         graphics.SetClip(path, CombineMode.Intersect);
-        if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo))
+        if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather))
         {
             var titleMargin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? 60 : 32;
             WidgetText(graphics, widget.DisplayTitle, new(bounds.X + titleMargin, bounds.Y, bounds.Width - titleMargin * 2, 28), text, 13.333f, true, true);
@@ -54,11 +54,11 @@ internal sealed partial class DesktopBoxForm
         var body = WidgetBodyRectangle(widget);
         switch (widget.Kind)
         {
-            case DesktopWidgetKind.Clock: DrawClockWidget(graphics, widget, body, text, muted); break;
+            case DesktopWidgetKind.Clock: DrawClockWidget(graphics, widget, body, text, muted, DateTime.Now); break;
             case DesktopWidgetKind.Calendar: DrawCalendarWidget(graphics, widget, body, text, muted, accent); break;
             case DesktopWidgetKind.Note: DrawTextWidget(graphics, widget, body, text, muted); break;
             case DesktopWidgetKind.Todo: DrawTodoWidget(graphics, widget, body, text, muted, accent); break;
-            case DesktopWidgetKind.Translation: DrawTranslationWidget(graphics, widget, body, text, muted, accent); break;
+            case DesktopWidgetKind.Translation: DrawTranslationWidget(graphics, widget, body, text); break;
             case DesktopWidgetKind.Weather: DrawWeatherWidget(graphics, widget, body, text, muted); break;
         }
         if (_hoveredWidgetId == widget.Id)
@@ -104,18 +104,6 @@ internal sealed partial class DesktopBoxForm
         graphics.DrawString(value, font, brush, bounds, format);
     }
 
-    private static void DrawClockWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted)
-    {
-        var now = DateTime.Now;
-        var format = widget.Use24HourClock ? "HH:mm" : "hh:mm";
-        if (widget.ShowSeconds) format += ":ss";
-        var value = now.ToString(format, CultureInfo.InvariantCulture);
-        WidgetText(graphics, value, new(body.X, body.Y + 2, body.Width, 40), text, widget.ShowSeconds && body.Width < 200 ? 26 : 32, true, true);
-        var date = now.ToString("M 月 d 日 · dddd", CultureInfo.GetCultureInfo("zh-CN"));
-        if (!widget.Use24HourClock) date = (now.Hour < 12 ? "上午 · " : "下午 · ") + date;
-        WidgetText(graphics, date, new(body.X, body.Y + 46, body.Width, 18), muted, 11.333f, centered: true);
-    }
-
     private DateOnly WidgetMonth(DesktopWidget widget) => _widgetMonths.GetValueOrDefault(widget.Id,
         new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1));
 
@@ -124,6 +112,7 @@ internal sealed partial class DesktopBoxForm
     internal static CalendarHeaderLayout GetCalendarHeaderLayout(DesktopWidget widget)
     {
         var bounds = WidgetRectangle(widget);
+        bounds.Width = Math.Min(bounds.Width, 180);
         var next = new RectangleF(WidgetMenuRectangle(bounds).Left - 24, bounds.Y + 2, 20, 24);
         var today = new RectangleF(next.Left - 26, next.Y, 24, 24);
         var previous = new RectangleF(today.Left - 22, next.Y, 20, 24);
@@ -139,6 +128,7 @@ internal sealed partial class DesktopBoxForm
 
     private void DrawCalendarWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted, Color accent)
     {
+        body = CalendarBodyRectangle(widget);
         var month = WidgetMonth(widget);
         var header = GetCalendarHeaderLayout(widget);
         WidgetText(graphics, month.ToString("yyyy.MM", CultureInfo.InvariantCulture), header.Title, text, 12.5f, true);
@@ -162,8 +152,14 @@ internal sealed partial class DesktopBoxForm
         for (var col = 0; col < 7; col++) WidgetText(graphics, labels[col], new(body.X + col * width, body.Y, width, 14), muted, 11, centered: true);
         for (var index = 0; index < days.Count; index++)
         {
-            var cell = new RectangleF(body.X + index % 7 * width, body.Y + 14 + index / 7 * height, width, height);
+            var cell = CalendarDayRectangle(widget, index);
             var selected = days[index] == today;
+            if (_calendarToolTipWidgetId == widget.Id && _hoveredCalendarDate == days[index])
+            {
+                using var hoverPath = RoundedRectangle(RectangleF.Inflate(cell, -1, -1), (float)Math.Min(4, _runtime.State.Settings.Appearance.CornerRadius));
+                using var hoverFill = new SolidBrush(Color.FromArgb(24, text));
+                graphics.FillPath(hoverFill, hoverPath);
+            }
             if (selected)
             {
                 using var brush = new SolidBrush(accent);
@@ -173,6 +169,7 @@ internal sealed partial class DesktopBoxForm
             var color = selected ? ResolveAutoTextColor(accent) : days[index].Month == month.Month ? text : Color.FromArgb(140, muted);
             WidgetText(graphics, days[index].Day.ToString(CultureInfo.InvariantCulture), cell, color, 11.5f, selected, true);
         }
+        DrawCalendarUpcomingEvents(graphics, widget, text, muted, accent);
     }
 
     private void DrawTextWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted)
@@ -180,15 +177,9 @@ internal sealed partial class DesktopBoxForm
         var value = DesktopWidgets.NormalizeText(widget.Text);
         var footer = "点击编辑 · 自动保存";
         if (string.IsNullOrWhiteSpace(value)) value = "点击这里，写下第一条记录…";
-        var region = NoteTextRectangle(widget);
-        var saved = graphics.Save();
-        graphics.SetClip(region, CombineMode.Intersect);
-        using var font = new Font(BoxAppearance.DefaultFontFamily, 13, FontStyle.Regular, GraphicsUnit.Pixel);
-        var totalHeight = graphics.MeasureString(value, font, (int)region.Width).Height;
-        var offset = Math.Clamp(_widgetScroll.GetValueOrDefault(widget.Id), 0, Math.Max(0, totalHeight - region.Height));
-        _widgetScroll[widget.Id] = offset;
-        WidgetText(graphics, value, new(region.X, region.Y - offset, region.Width, Math.Max(region.Height, totalHeight + 4)), text, 13, multiline: true);
-        graphics.Restore(saved);
+        if (!_noteTextVisuals.TryGetValue(widget.Id, out var visual)) _noteTextVisuals[widget.Id] = visual = new();
+        _widgetScroll[widget.Id] = visual.Draw(graphics, value, NoteFieldRectangle(widget), text,
+            _widgetScroll.GetValueOrDefault(widget.Id), insets: new System.Windows.Thickness(8, 6, 8, 6));
         WidgetText(graphics, footer, new(body.X, body.Bottom - 18, body.Width, 18), muted, 11.333f);
     }
 
@@ -208,42 +199,44 @@ internal sealed partial class DesktopBoxForm
         }
         else
         {
-            var cityButton = WeatherCityButtonRectangle(widget);
-            WidgetText(graphics, widget.Location.Name, new(cityButton.X, cityButton.Y, cityButton.Width - 14, cityButton.Height), text);
-            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronsUpDown, new(cityButton.Right - 12, cityButton.Y, 12, 18), muted, 10);
+            var layout = GetWeatherLayout(widget);
             if (widget.Weather is { } weather)
             {
-                WidgetText(graphics, $"{weather.Temperature:0.#}°", new(body.X, body.Y + 18, body.Width - 52, 38), text, 30, true);
+                WidgetText(graphics, $"{weather.Temperature:0.#}°", layout.Temperature, text, 36, true);
                 var icon = Enum.Parse<LucideRuntimeIcon>(DesktopWidgets.WeatherIconName(weather));
                 var lightText = text.GetBrightness() > .5;
                 var iconColor = icon is LucideRuntimeIcon.Sun or LucideRuntimeIcon.CloudSun or LucideRuntimeIcon.CloudLightning
                     ? lightText ? Color.FromArgb(242, 184, 75) : Color.FromArgb(156, 97, 0)
                     : icon is LucideRuntimeIcon.CloudRain or LucideRuntimeIcon.CloudSnow or LucideRuntimeIcon.CloudHail
                         ? lightText ? Color.FromArgb(104, 193, 226) : Color.FromArgb(29, 106, 150) : muted;
-                LucideRuntimeIcons.Draw(graphics, icon, new(body.Right - 46, body.Y + 18, 44, 38), iconColor, 36);
+                LucideRuntimeIcons.Draw(graphics, icon, layout.Icon, iconColor, 40);
                 if (weather.FeelsLike is { } feelsLike)
-                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Thermometer, $"{feelsLike:0}°", new(body.Right - 56, body.Y, 56, 18), muted);
-                WidgetText(graphics, $"{weather.Description} · {weather.Minimum:0}° / {weather.Maximum:0}°", new(body.X, body.Y + 56, body.Width, 18), muted, 11);
-                var metricWidth = (body.Width - 8) / 2;
+                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Thermometer, $"{feelsLike:0}°", layout.FeelsLike, muted);
+                WidgetText(graphics, $"{weather.Description} · {weather.Minimum:0}° / {weather.Maximum:0}°", layout.Forecast, muted, 10.5f);
                 if (weather.Humidity is { } humidity)
-                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Droplets, $"{humidity:0}%", new(body.X, body.Y + 76, metricWidth, 18), muted);
+                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Droplets, $"{(body.Width >= 300 ? "湿度 " : "")}{humidity:0}%", layout.Humidity, muted);
                 if (weather.WindSpeed is { } wind)
-                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Wind, $"{wind:0} km/h", new(body.X + metricWidth + 8, body.Y + 76, metricWidth, 18), muted);
+                    DrawWeatherMetric(graphics, LucideRuntimeIcon.Wind, $"{(body.Width >= 300 ? "风速 " : "")}{wind:0} km/h", layout.Wind, muted);
             }
             else WidgetText(graphics, widget.IsLoading ? "正在获取天气…" : "暂无天气数据", new(body.X, body.Y + 28, body.Width, 40), muted);
             var status = widget.IsLocating ? "正在定位当前位置…" : widget.IsLoading ? "正在更新…" : widget.LocationAccessDenied ? "定位未授权，请开启位置服务" :
-                !string.IsNullOrEmpty(widget.Error) ? widget.Error : widget.Weather?.AirQuality is { } aqi ? $"AQI {aqi:0} · 查看详情" : "查看天气详情";
+                !string.IsNullOrEmpty(widget.Error) ? widget.Error : widget.Weather?.AirQuality is { } aqi ? $"AQI {aqi:0}" : "查看天气详情";
             var statusIcon = widget.IsLocating || widget.IsLoading ? LucideRuntimeIcon.RefreshCw : widget.LocationAccessDenied || !string.IsNullOrEmpty(widget.Error)
                 ? LucideRuntimeIcon.CircleAlert : widget.Weather?.AirQuality is not null ? LucideRuntimeIcon.Gauge : LucideRuntimeIcon.ChevronRight;
-            DrawWeatherMetric(graphics, statusIcon, status, new(body.X, body.Bottom - 36, body.Width, 18), muted);
+            using var statusPath = RoundedRectangle(layout.Status, 8);
+            using var statusFill = new SolidBrush(Color.FromArgb(14, text));
+            graphics.FillPath(statusFill, statusPath);
+            DrawWeatherMetric(graphics, statusIcon, status,
+                new(layout.Status.X + 8, layout.Status.Y, layout.Status.Width - 32, layout.Status.Height), muted);
+            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronRight,
+                new(layout.Status.Right - 20, layout.Status.Y, 12, layout.Status.Height), muted, 12);
         }
         if (widget.Cities.Count > 1)
         {
             WidgetText(graphics, "‹", new(body.X, body.Bottom - 20, 28, 20), text, 18, centered: true);
             WidgetText(graphics, "›", new(body.Right - 28, body.Bottom - 20, 28, 20), text, 18, centered: true);
             var index = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId) + 1;
-            WidgetText(graphics, $"{widget.Weather?.Provider ?? WidgetWeatherService.ProviderName} · {index}/{widget.Cities.Count}", new(body.X + 28, body.Bottom - 16, body.Width - 56, 16), muted, 10, centered: true);
+            WidgetText(graphics, $"{index}/{widget.Cities.Count}", new(body.X + 28, body.Bottom - 16, body.Width - 56, 16), muted, 10, centered: true);
         }
-        else WidgetText(graphics, "天气数据：" + (widget.Weather?.Provider ?? WidgetWeatherService.ProviderName), new(body.X, body.Bottom - 16, body.Width, 16), muted, 10);
     }
 }

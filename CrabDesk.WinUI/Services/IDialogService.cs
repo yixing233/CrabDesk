@@ -102,9 +102,9 @@ public sealed class DialogService : IDialogService
             SelectedItem = actionOptions.First(option => option.Value == source.Action),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        // "自动创建同名盒子" is represented by Guid.Empty; picking it leaves
-        // TargetBoxId null so organization creates a box from the rule title.
-        var autoCreate = new DesktopBox { Id = Guid.Empty, Title = "自动创建同名盒子" };
+        // Automatic resolution reuses an existing box or child tab before
+        // creating a box. An automatic pin must stay automatic when edited.
+        var autoCreate = new DesktopBox { Id = Guid.Empty, Title = "自动匹配盒子或子标签" };
         var target = new ComboBox
         {
             Header = "目标盒子",
@@ -112,7 +112,7 @@ public sealed class DialogService : IDialogService
                 .Concat(boxes.Where(box => !box.IsMappedFolder))
                 .ToArray(),
             DisplayMemberPath = nameof(DesktopBox.Title),
-            SelectedItem = source.TargetBoxId is { } targetId
+            SelectedItem = source.TargetBoxIsExplicit != false && source.TargetBoxId is { } targetId
                 ? boxes.FirstOrDefault(box => box.Id == targetId) ?? autoCreate
                 : autoCreate,
             HorizontalAlignment = HorizontalAlignment.Stretch
@@ -165,7 +165,9 @@ public sealed class DialogService : IDialogService
                 ? (target.SelectedItem as DesktopBox)?.Id is { } selectedId && selectedId != Guid.Empty
                     ? selectedId
                     : null
-                : null
+                : null,
+            TargetBoxIsExplicit = selectedAction == OrganizationRuleAction.AssignToBox &&
+                target.SelectedItem is DesktopBox selectedBox && selectedBox.Id != Guid.Empty
         };
     }
 
@@ -197,6 +199,7 @@ public sealed class DialogService : IDialogService
         NamePattern = source.NamePattern,
         Extensions = source.Extensions.ToList(),
         Action = source.Action,
-        TargetBoxId = source.TargetBoxId
+        TargetBoxId = source.TargetBoxId,
+        TargetBoxIsExplicit = source.TargetBoxIsExplicit
     };
 }

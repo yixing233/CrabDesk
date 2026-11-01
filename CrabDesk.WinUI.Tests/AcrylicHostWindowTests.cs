@@ -9,8 +9,92 @@ using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
 
+[Collection("desktop-probe")]
 public sealed class AcrylicHostWindowTests
 {
+    [Fact]
+    public void ZeroSizeVisibleUtilityDoesNotObstructDesktopPlacement()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            using var utility = new ZeroSizeUtilityWindow();
+            using var host = TestWindow();
+            desktop.Show(); ordinary.Show(); host.Show();
+            // Explorer and the external utility do not share WinForms' hidden
+            // owner. Match those independent native window groups here.
+            foreach (var window in new[] { desktop, ordinary, host }) SetWindowLongPtr(window.Handle, -8, IntPtr.Zero);
+            Assert.True(SetWindowPos(utility.Handle, desktop.Handle, 0, 0, 0, 0, SwpNoActivate | SwpNoMove));
+            Assert.True(IsWindowVisible(utility.Handle));
+            Assert.Equal(Size.Empty, GetBounds(utility.Handle).Size);
+            Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+            // Put the empty helper immediately between the host and desktop.
+            Assert.True(SetWindowPos(utility.Handle, host.Handle, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize));
+            Assert.True(IsAbove(host.Handle, utility.Handle));
+            Assert.True(IsAbove(utility.Handle, desktop.Handle));
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            Assert.True(DesktopAcrylicWindowTools.PlaceAtDesktop(host.Handle, desktop.Handle));
+            Assert.True(IsAbove(ordinary.Handle, host.Handle));
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+        });
+    }
+
+    // WinForms clamps even a borderless Form to at least 2 × 2; use a native
+    // popup to reproduce the system utility's actual zero-size window.
+    private sealed class ZeroSizeUtilityWindow : NativeWindow, IDisposable
+    {
+        public ZeroSizeUtilityWindow() => CreateHandle(new CreateParams
+        {
+            Caption = "CrabDesk zero-size utility test", X = -12000, Y = -12000,
+            Width = 0, Height = 0, Style = unchecked((int)0x90000000)
+        });
+        public void Dispose() => DestroyHandle();
+    }
+
+    [Fact]
+    public void ExplicitShowDesktopGroupsTheHostForTheTransitionAndRestoresItsIndependentOwner()
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            desktop.Show(); ordinary.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop(); Application.DoEvents();
+            var previousOwner = GetWindow(host.Handle, 4);
+            DesktopAcrylicWindowTools.PrepareForShowDesktop();
+            Assert.Equal(desktop.Handle, GetWindow(host.Handle, 4));
+            // No message pumping or WinEvent callback between Explorer's move
+            // and this check: both HWNDs must have moved in the same operation.
+            Assert.True(SetWindowPos(desktop.Handle, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize));
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            DesktopAcrylicWindowTools.FinishShowDesktopTransition(host.Handle, force: true);
+            Assert.Equal(previousOwner, GetWindow(host.Handle, 4));
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+            // A disabled/consumed shell command must also release the group.
+            DesktopAcrylicWindowTools.PrepareForShowDesktop();
+            Thread.Sleep(1600);
+            host.EnsureDesktopPlacement();
+            Assert.Equal(previousOwner, GetWindow(host.Handle, 4));
+            // Once the explicit switch is over, external overlay/menu raises
+            // must not drag Explorer over an ordinary application again.
+            Assert.True(SetWindowPos(ordinary.Handle, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize));
+            host.EnsureDesktopPlacement();
+            foreach (var extraFlags in new uint[] { 0, 0x0400 })
+            {
+                Assert.True(SetWindowPos(host.Handle, new IntPtr(-1), 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize | extraFlags));
+                Assert.True(IsAbove(ordinary.Handle, host.Handle));
+                Assert.True(IsAbove(ordinary.Handle, desktop.Handle));
+            }
+            DesktopAcrylicWindowTools.PrepareForShowDesktop();
+            host.HideFromDesktop();
+            Assert.Equal(previousOwner, GetWindow(host.Handle, 4));
+            Assert.False(IsWindowVisible(host.Handle));
+        });
+    }
+
     [Fact]
     public void DesktopOrderChangesRestoreTheHostWithoutWaitingForTheFallbackTimer()
     {
@@ -381,6 +465,76 @@ public sealed class AcrylicHostWindowTests
         }
     }
 
+    [Theory]
+    [InlineData("便签", false)]
+    [InlineData("翻译", false)]
+    [InlineData("待办", true)]
+    public void DismissingWidgetInputDoesNotRaiseTheDesktopOverItsHost(string name, bool singleLine)
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            desktop.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+            using var input = new DesktopWidgetTextInput(name);
+            for (var cycle = 0; cycle < 3; cycle++)
+            {
+                var dismissals = 0;
+                input.Present(new(-12000, -12000, 220, 100), "测试内容", Color.Black, Color.White, Color.Blue,
+                    _ => { }, dismissed: _ => dismissals++, cornerRadius: 8, singleLine: singleLine);
+                Assert.True(input.Visible);
+                Assert.False(DesktopInputProxy.IsHiddenEditor(input.Handle));
+                // Off-screen STA test windows do not always obtain global
+                // foreground rights. Exercise activation when this field owns it.
+                if (GetForegroundWindow() == input.Handle)
+                    Assert.True(DesktopWindowTools.TryActivateDesktopInput(desktop.Handle));
+                Assert.True(input.Visible);
+                Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+                input.HandleKey(System.Windows.Input.Key.Escape, System.Windows.Input.ModifierKeys.None);
+                Assert.False(input.Visible);
+                Assert.False(IsWindowVisible(input.Handle));
+                Assert.False(input.InputBox.IsKeyboardFocusWithin);
+                Assert.Equal(1, dismissals);
+                // The mouse-down handlers request desktop keyboard input after
+                // dismissing the field. This second step caused the residual flash.
+                Assert.True(DesktopInputProxy.IsHiddenEditor(input.Handle));
+                if (GetForegroundWindow() == input.Handle)
+                    Assert.True(DesktopWindowTools.TryActivateDesktopInput(desktop.Handle));
+                Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+                Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+                input.Dismiss();
+                Assert.Equal(1, dismissals);
+            }
+            using var monitor = new DesktopInputMonitor();
+            Assert.True(monitor.IsDesktopForegroundWindow(input.Handle));
+            using var unrelated = TestWindow();
+            _ = unrelated.Handle;
+            Assert.False(DesktopInputProxy.IsHiddenEditor(unrelated.Handle));
+            Assert.False(monitor.IsDesktopForegroundWindow(unrelated.Handle));
+            var editorHandle = input.Handle;
+            input.Dispose();
+            Assert.False(DesktopInputProxy.IsHiddenEditor(editorHandle));
+        });
+    }
+
+    [Fact]
+    public void DismissingWidgetInputPreservesTheWindowTheUserActivated()
+    {
+        RunInSta(() =>
+        {
+            using var ordinary = TestWindow();
+            using var input = new DesktopWidgetTextInput("退出检测");
+            ordinary.Show();
+            input.Present(new(-12000, -12000, 220, 100), "测试内容", Color.Black, Color.White, Color.Blue, _ => { }, cornerRadius: 8);
+            ordinary.Activate();
+            input.Dismiss();
+            Assert.Equal(ordinary.Handle, GetActiveWindow());
+            Assert.False(input.Visible);
+        });
+    }
+
     private static void RunInSta(Action action)
     {
         Exception? error = null;
@@ -401,6 +555,7 @@ public sealed class AcrylicHostWindowTests
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern IntPtr GetActiveWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);

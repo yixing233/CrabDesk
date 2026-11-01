@@ -1182,6 +1182,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             DrawBox(graphics, box, clipBounds);
         }
         if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        DrawCalendarToolTip(graphics);
     }
 
     /// <summary>
@@ -1237,6 +1238,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 includeItemHoverFeedback: _itemHoverOverlayUnavailable);
         }
         if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        DrawCalendarToolTip(graphics);
     }
 
     /// <summary>
@@ -1486,6 +1488,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     DrawBox(graphics, box, clipBounds);
                 }
                 DrawBoxAlignmentGuides(graphics, _monitor.Id);
+                DrawCalendarToolTip(graphics);
                 graphics.ResetTransform();
             }
 
@@ -1583,17 +1586,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         if (disposing && !_resourcesDisposed)
         {
+            _todoDeleteMenu?.Dispose();
+            _todoDeleteMenu = null; _todoDeleteCard = null; _todoDeletion = null;
             DismissWidgetTodoInput();
             _resourcesDisposed = true;
             _widgetTimer?.Dispose();
+            _calendarToolTipBitmap?.Dispose();
+            _calendarToolTipBitmap = null;
+            _calendarToolTipTimer.Dispose();
             _translationInput?.Dispose();
             _translationInput = null;
             _translationResultInput?.Dispose();
             _translationResultInput = null;
+            foreach (var visual in _translationTextVisuals.Values) visual.Dispose();
+            _translationTextVisuals.Clear();
             _noteInput?.Dispose();
             _noteInput = null;
+            foreach (var visual in _noteTextVisuals.Values) visual.Dispose();
+            _noteTextVisuals.Clear();
             _todoInput?.Dispose();
             _todoInput = null;
+            foreach (var visual in _todoTextVisuals.Values) visual.Dispose();
+            _todoTextVisuals.Clear();
             _iconLoadCancellation.Cancel();
             _animationFrameClock.Dispose();
             _hoverTimer.Stop();
@@ -1999,6 +2013,38 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         DiagnosticLog.Error(
             $"Desktop surface region verification failed monitor={_monitor.Id}: {diagnostic}",
             new InvalidOperationException(diagnostic));
+        // SetWindowRgn/verification can fail transiently during a shell drag.
+        // Recover after the current input/geometry update has unwound, rather
+        // than leaving the live compositor displaying an inert last frame.
+        if (IsHandleCreated && !Disposing)
+            BeginInvoke((Action)RecoverAfterRegionFailure);
+    }
+
+    private void RecoverAfterRegionFailure()
+    {
+        if (IsDisposed || Disposing || _resourcesDisposed || _runtime.IsPaused) return;
+        try
+        {
+            // Keep the failure guard set while retrying so another failure
+            // cannot enqueue an unbounded chain of self-recovery callbacks.
+            if (UpdateInteractionRegion() && IsLayerReady && ValidateWindowRegion())
+            {
+                Show();
+                if (ValidateWindowRegion())
+                {
+                    _regionFailureHandled = false;
+                    RequestLayerRender();
+                    DiagnosticLog.Info($"Desktop surface region recovered monitor={_monitor.Id}");
+                    return;
+                }
+                Hide();
+            }
+        }
+        catch (Exception exception)
+        {
+            DiagnosticLog.Error("Desktop surface local region recovery failed", exception);
+        }
+        _runtime.RecoverDesktopSurfacesAfterRegionFailure();
     }
 
     private static RectangleF RectangleFromPoints(PointF first, PointF second) => new(

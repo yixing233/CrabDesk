@@ -9,7 +9,7 @@ using Media = System.Windows.Media;
 namespace CrabDesk.Runtime;
 
 /// <summary>Activatable native text input positioned inside a desktop widget.</summary>
-internal sealed class DesktopWidgetTextInput : Forms.Form
+internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
 {
     private readonly System.Windows.Forms.Integration.ElementHost _host;
     internal WpfControls.TextBox InputBox { get; }
@@ -57,14 +57,10 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
         Deactivate += (_, _) => Dismiss();
     }
 
-    protected override Forms.CreateParams CreateParams
-    {
-        get { var parameters = base.CreateParams; parameters.ExStyle |= 0x80; return parameters; }
-    }
-
     internal void Present(Rectangle bounds, string text, Color background, Color foreground, Color accent,
         Action<string> changed, Action? submit = null, Action<double>? dismissed = null, double? verticalOffset = null,
-        double? cornerRadius = null, bool readOnly = false, PointF? caretPoint = null, bool singleLine = false, Action? cancelled = null)
+        double? cornerRadius = null, bool readOnly = false, PointF? caretPoint = null, bool singleLine = false, Action? cancelled = null,
+        Wpf.Thickness? contentPadding = null, bool showFocusBorder = true, double? borderThickness = null)
     {
         _changed = null;
         var sameText = DesktopWidgets.NormalizeText(InputBox.Text) == DesktopWidgets.NormalizeText(text);
@@ -84,7 +80,9 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
         InputBox.BorderBrush = Brush(accent);
         InputBox.SelectionBrush = Brush(accent);
         InputBox.SelectionOpacity = .4;
-        if (cornerRadius is { } radius) ConfigureRoundedField(radius, background, foreground, accent);
+        if (cornerRadius is { } radius) ConfigureRoundedField(radius, background, foreground, accent, showFocusBorder);
+        if (_frame is not null && borderThickness is { } thickness) _frame.BorderThickness = new Wpf.Thickness(thickness);
+        if (contentPadding is { } padding) InputBox.Padding = padding;
         if (singleLine)
         {
             // Match the painted row's text origin; the frame already supplies
@@ -113,10 +111,7 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
         InputBox.UpdateLayout();
         if (verticalOffset is { } offset) InputBox.ScrollToVerticalOffset(offset);
         if (caretPoint is { } point)
-        {
-            var index = InputBox.GetCharacterIndexFromPoint(new Wpf.Point(point.X, point.Y), true);
-            InputBox.Select(Math.Max(0, index), 0);
-        }
+            PlaceCaretAtPoint(point);
         var revision = ++_presentationRevision;
         // Keyboard focus and selection queue a later BringIntoView. Restore
         // the viewport after that work, unless the user has already interacted.
@@ -127,8 +122,32 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
                 InputBox.ScrollToVerticalOffset(restoredOffset);
                 InputBox.UpdateLayout();
                 if (caretPoint is { } restoredPoint)
-                    InputBox.Select(Math.Max(0, InputBox.GetCharacterIndexFromPoint(new Wpf.Point(restoredPoint.X, restoredPoint.Y), true)), 0);
+                    PlaceCaretAtPoint(restoredPoint);
             }));
+    }
+
+    private void PlaceCaretAtPoint(PointF point)
+    {
+        var position = new Wpf.Point(point.X, point.Y);
+        if (_frame is not null) position = _frame.TranslatePoint(position, InputBox);
+        var index = InputBox.GetCharacterIndexFromPoint(position, true);
+        if (index >= 0 && index < InputBox.Text.Length)
+        {
+            // Hit testing returns a character, rather than an insertion point.
+            // Compare its caret edges, including RTL runs and wrapped lines.
+            var leading = InputBox.GetRectFromCharacterIndex(index, false);
+            var trailing = InputBox.GetRectFromCharacterIndex(index, true);
+            if (!leading.IsEmpty && !trailing.IsEmpty && DistanceToCaret(position, trailing) < DistanceToCaret(position, leading))
+                index++;
+        }
+        InputBox.Select(Math.Clamp(index, 0, InputBox.Text.Length), 0);
+
+        static double DistanceToCaret(Wpf.Point point, Wpf.Rect caret)
+        {
+            var dx = point.X - caret.X;
+            var dy = point.Y < caret.Top ? caret.Top - point.Y : point.Y > caret.Bottom ? point.Y - caret.Bottom : 0;
+            return dx * dx + dy * dy;
+        }
     }
 
     internal bool HandleKey(Input.Key key, Input.ModifierKeys modifiers)
@@ -152,13 +171,18 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
         var dismissed = _dismissed;
         _dismissed = null;
         var offset = InputBox.VerticalOffset;
-        Hide();
+        // ShowWindow(SW_HIDE), used by Form.Hide(), activates the next window.
+        // When that is Explorer, it raises the desktop over the acrylic host
+        // for a frame. Hide natively without activating/reordering anything,
+        // then synchronize WinForms' managed visibility with the hidden HWND.
+        HideWithoutActivation();
         dismissed?.Invoke(offset);
     }
 
     private static Media.SolidColorBrush Brush(Color color) => new(Media.Color.FromRgb(color.R, color.G, color.B));
 
-    private void ConfigureRoundedField(double radius, Color background, Color foreground, Color accent)
+
+    private void ConfigureRoundedField(double radius, Color background, Color foreground, Color accent, bool showFocusBorder)
     {
         if (_frame is null)
         {
@@ -199,9 +223,9 @@ internal sealed class DesktopWidgetTextInput : Forms.Form
         InputBox.Background = Media.Brushes.Transparent;
         InputBox.Resources["ScrollThumbBrush"] = new Media.SolidColorBrush(Media.Color.FromArgb(110, foreground.R, foreground.G, foreground.B));
         _frame.Background = Brush(background);
-        _frame.BorderBrush = InputBox.IsReadOnly
-            ? new Media.SolidColorBrush(Media.Color.FromArgb(70, foreground.R, foreground.G, foreground.B)) : Brush(accent);
-        _frame.BorderThickness = new Wpf.Thickness(InputBox.IsReadOnly ? 1 : 1.5);
+        _frame.BorderBrush = !showFocusBorder || InputBox.IsReadOnly
+            ? new Media.SolidColorBrush(Media.Color.FromArgb((byte)(showFocusBorder ? 70 : 50), foreground.R, foreground.G, foreground.B)) : Brush(accent);
+        _frame.BorderThickness = new Wpf.Thickness(!showFocusBorder || InputBox.IsReadOnly ? 1 : 1.5);
         _frame.CornerRadius = new Wpf.CornerRadius(radius);
     }
 

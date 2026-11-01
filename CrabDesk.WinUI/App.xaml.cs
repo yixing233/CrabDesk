@@ -31,6 +31,7 @@ public partial class App : Application
     private MainWindow? _window;
     private AiOrganizationWindow? _aiOrganizationWindow;
     private WeatherDetailsWindow? _weatherDetailsWindow;
+    private TodoDatesWindow? _todoDatesWindow;
     private CrabDeskRuntime? _runtime;
     private int _runtimeDisposed;
 
@@ -201,6 +202,16 @@ public partial class App : Application
         }
         runtime.WidgetWeatherDetailsRequested += widget => ShowWeather(widget, false);
         runtime.WidgetWeatherLocationsRequested += widget => ShowWeather(widget, true);
+        runtime.WidgetTodoDatesRequested += (widget, task) =>
+        {
+            if (_todoDatesWindow is null)
+            {
+                var dates = new TodoDatesWindow(runtime);
+                _todoDatesWindow = dates;
+                dates.Closed += (_, _) => { if (ReferenceEquals(_todoDatesWindow, dates)) _todoDatesWindow = null; };
+            }
+            _todoDatesWindow.Present(widget, task);
+        };
         runtime.ExitRequested += (_, _) => Shutdown();
         StartCommandListeners(runtime, _window.DispatcherQueue);
         // A context-menu invocation may start CrabDesk as the first instance,
@@ -237,6 +248,7 @@ public partial class App : Application
 
     internal void Shutdown()
     {
+        _todoDatesWindow?.Close();
         _weatherDetailsWindow?.Close();
         _aiOrganizationWindow?.Close();
         _aiOrganizationWindow = null;

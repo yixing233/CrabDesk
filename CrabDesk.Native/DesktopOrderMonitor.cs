@@ -34,7 +34,7 @@ public sealed class DesktopOrderMonitor : IDisposable
     private void OnWinEvent(IntPtr hook, uint eventType, IntPtr hwnd, int objectId, int childId, uint threadId, uint time)
     {
         if (_disposed || hwnd == IntPtr.Zero || childId != 0) return;
-        if (eventType == 3 && hwnd == _desktopRoot ||
+        if (eventType == 3 ||
             eventType == 0x8004 && objectId is 0 or -4 &&
             (hwnd == _desktopRoot || hwnd == GetDesktopWindow()))
             _changed();

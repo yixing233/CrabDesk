@@ -211,6 +211,7 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     internal void HideFromDesktop()
     {
         _desktopDisplayRequested = false;
+        DesktopAcrylicWindowTools.FinishShowDesktopTransition(Handle, force: true);
         _orderTimer.Stop();
         Hide();
     }
@@ -235,11 +236,16 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             _restoreFailed = !restored;
             return restored;
         }
-        finally { _restoring = false; }
+        finally
+        {
+            DesktopAcrylicWindowTools.FinishShowDesktopTransition(Handle);
+            _restoring = false;
+        }
     }
 
     private void OnDesktopOrderChanged()
     {
+        if (IsHandleCreated) DesktopAcrylicWindowTools.FinishShowDesktopTransition(Handle);
         if (!_desktopDisplayRequested || _restoring || IsDisposed || Disposing || !IsHandleCreated ||
             DesktopAcrylicWindowTools.IsReadyAtDesktop(Handle, _desktopView)) return;
         // Never let exceptions escape a native WinEvent callback.

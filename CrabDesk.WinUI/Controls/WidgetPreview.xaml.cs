@@ -23,7 +23,11 @@ public sealed partial class WidgetPreview : UserControl
     private SolidColorBrush _text = new(Colors.White);
     private SolidColorBrush _secondary = new(Colors.White);
     private SolidColorBrush _accent = new(Colors.CornflowerBlue);
-    private readonly Grid _calendarHeader = new() { Height = 28, Margin = new Thickness(8, 0, 36, 0), ColumnSpacing = 2, Visibility = Visibility.Collapsed };
+    private readonly Grid _calendarHeader = new() { Height = 28, Width = 136, HorizontalAlignment = HorizontalAlignment.Left,
+        Margin = new Thickness(8, 0, 0, 0), ColumnSpacing = 2, Visibility = Visibility.Collapsed };
+    private readonly TextBlock _calendarUpcomingTitle = new() { Text = "近期节日 · 节气", Margin = new Thickness(192, 0, 36, 0),
+        FontSize = 11.5, FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily(BoxAppearance.DefaultFontFamily),
+        VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
     private readonly LucideIcon _todoAdd = new() { Icon = LucideIconName.Plus, FontSize = 14, Width = 24, Height = 24,
         Margin = new Thickness(0, 4, 40, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
     private readonly Grid _todoHeader = new() { Height = 24, Margin = new Thickness(12, 4, 76, 0), ColumnSpacing = 8, Visibility = Visibility.Collapsed };
@@ -46,8 +50,9 @@ public sealed partial class WidgetPreview : UserControl
         _calendarHeader.ColumnDefinitions.Add(new() { Width = new GridLength(24) });
         _calendarHeader.ColumnDefinitions.Add(new() { Width = new GridLength(20) });
         CardLayout.Children.Add(_calendarHeader);
+        CardLayout.Children.Add(_calendarUpcomingTitle);
         CardLayout.Children.Add(_todoAdd);
-        _todoHeader.ColumnDefinitions.Add(new());
+        _todoHeader.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         _todoHeader.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         _todoHeader.Children.Add(_todoTitle); _todoHeader.Children.Add(_todoSummary); Grid.SetColumn(_todoSummary, 1);
         CardLayout.Children.Add(_todoHeader);
@@ -79,23 +84,33 @@ public sealed partial class WidgetPreview : UserControl
         CardSurface.Height = height;
         CardTitle.Visibility = widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo ? Visibility.Collapsed : Visibility.Visible;
         _calendarHeader.Visibility = widget.Kind == DesktopWidgetKind.Calendar ? Visibility.Visible : Visibility.Collapsed;
+        _calendarUpcomingTitle.Visibility = widget.Kind == DesktopWidgetKind.Calendar && width >= 300 ? Visibility.Visible : Visibility.Collapsed;
+        _calendarUpcomingTitle.Foreground = _secondary;
         _todoAdd.Visibility = widget.Kind == DesktopWidgetKind.Todo ? Visibility.Visible : Visibility.Collapsed;
         _todoAdd.Foreground = _accent;
         _todoHeader.Visibility = widget.Kind == DesktopWidgetKind.Todo ? Visibility.Visible : Visibility.Collapsed;
         _todoTitle.Text = widget.DisplayTitle; _todoTitle.Foreground = _text;
-        _todoSummary.Text = $"{widget.Tasks.Count(task => !task.IsCompleted)} · {widget.Tasks.Count(task => task.IsCompleted)} 完成";
-        _todoSummary.Foreground = _secondary; _todoSummary.MaxWidth = Math.Max(0, width - 128);
+        _todoTitle.MaxWidth = Math.Max(0, width - 128);
+        _todoSummary.Text = $"· {widget.Tasks.Count(task => !task.IsCompleted)}";
+        _todoSummary.Foreground = _secondary;
         _weatherLocations.Visibility = widget.Kind == DesktopWidgetKind.Weather ? Visibility.Visible : Visibility.Collapsed;
         _weatherLocations.Foreground = _accent;
         CardTitle.Margin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? new Thickness(60, 0, 60, 0) : new Thickness(28, 0, 28, 0);
         CardTitle.Text = widget.Kind == DesktopWidgetKind.Calendar ? DateTime.Today.ToString("yyyy.MM") : widget.DisplayTitle;
+        CardTitle.TextAlignment = widget.Kind == DesktopWidgetKind.Weather ? TextAlignment.Left : TextAlignment.Center;
+        CardTitle.FontSize = widget.Kind == DesktopWidgetKind.Weather ? 12 : 13.333;
+        if (widget.Kind == DesktopWidgetKind.Weather)
+        {
+            CardTitle.Margin = new Thickness(34, 0, 64, 0);
+            CardTitle.Text = widget.Location is { } city ? $"{city.Name}  ⌄" : widget.DisplayTitle;
+        }
         CardTitle.Foreground = _text;
         CardBody.Margin = widget.Kind == DesktopWidgetKind.Todo ? new Thickness(8, 4, 8, 8) : new Thickness(8);
         CardBody.Children.Clear();
         switch (widget.Kind)
         {
             case DesktopWidgetKind.Clock: Clock(widget); break;
-            case DesktopWidgetKind.Calendar: Calendar(); break;
+            case DesktopWidgetKind.Calendar: Calendar(widget); break;
             case DesktopWidgetKind.Note: TextCard(widget.Text, "写下第一条记录", "便签"); break;
             case DesktopWidgetKind.Todo: Todo(widget); break;
             case DesktopWidgetKind.Translation: TranslationPreview(widget); break;
@@ -112,17 +127,62 @@ public sealed partial class WidgetPreview : UserControl
 
     private void Clock(DesktopWidget widget)
     {
-        var panel = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        var format = widget.Use24HourClock ? "HH:mm" : "hh:mm";
-        var time = Text(DateTime.Now.ToString(format + (widget.ShowSeconds ? ":ss" : "")), widget.ShowSeconds ? 26 : 32, bold: true);
-        time.TextAlignment = TextAlignment.Center;
-        var date = Text(DateTime.Today.ToString("M 月 d 日 · dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN")), 11.333, true);
-        date.TextAlignment = TextAlignment.Center;
-        panel.Children.Add(time); panel.Children.Add(date);
+        var panel = new Canvas();
+        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget.Size);
+        var width = cardWidth - 16; var height = cardHeight - 16;
+        var face = WidgetClockPresentation.Face(width, height);
+        if (face.Width <= 0) return;
+        var now = DateTime.Now;
+        SolidColorBrush Ink(byte alpha) { var color = _text.Color; color.A = alpha; return new(color); }
+        void Place(FrameworkElement element, double x, double y, double w, double h)
+        { element.Width = w; element.Height = h; Canvas.SetLeft(element, x); Canvas.SetTop(element, y); panel.Children.Add(element); }
+        void Stroke(double angle, double from, double to, SolidColorBrush color, double thickness)
+        {
+            var start = WidgetClockPresentation.PointOnFace(face, angle, from);
+            var end = WidgetClockPresentation.PointOnFace(face, angle, to);
+            panel.Children.Add(new Microsoft.UI.Xaml.Shapes.Line { X1 = start.X, Y1 = start.Y, X2 = end.X, Y2 = end.Y,
+                Stroke = color, StrokeThickness = thickness, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+        }
+        var faceFill = _text.Color.R > 128 ? Color.FromArgb(255, 26, 26, 26) : Color.FromArgb(255, 250, 250, 250);
+        Place(new Microsoft.UI.Xaml.Shapes.Ellipse { Fill = new SolidColorBrush(faceFill), Stroke = Ink(35), StrokeThickness = 1 }, face.X, face.Y, face.Width, face.Height);
+        for (var tick = 0; tick < 60; tick++) Stroke(tick * 6, tick % 5 == 0 ? .79 : .85, .9, Ink((byte)(tick % 5 == 0 ? 150 : 65)), tick % 5 == 0 ? 1.5 : .8);
+        var boxSize = face.Width * .2;
+        foreach (var hour in new[] { 12, 3, 6, 9 })
+        {
+            var point = WidgetClockPresentation.PointOnFace(face, hour * 30, .62);
+            var label = Text(hour.ToString(), Math.Clamp(face.Width * .085, 8, 12));
+            label.Foreground = Ink(210); label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center;
+            // A centered grid matches the painted dial's centered text box.
+            var cell = new Grid(); cell.Children.Add(label);
+            Place(cell, point.X - boxSize / 2, point.Y - boxSize / 2, boxSize, boxSize);
+        }
+        var hands = WidgetClockPresentation.Hands(now);
+        Stroke(hands.Hour, 0, .46, _text, Math.Clamp(face.Width * .027, 2.2, 4));
+        Stroke(hands.Minute, 0, .72, Ink(230), Math.Clamp(face.Width * .018, 1.6, 2.8));
+        if (widget.ShowSeconds) Stroke(hands.Second, -.17, .82, Ink(160), 1.1);
+        var center = WidgetClockPresentation.PointOnFace(face, 0, 0);
+        var pivot = Math.Clamp(face.Width * .024, 2.2, 3.5);
+        Place(new Microsoft.UI.Xaml.Shapes.Ellipse { Fill = _text }, center.X - pivot, center.Y - pivot, pivot * 2, pivot * 2);
+        var pivotColor = _text.Color.R > 128 ? Color.FromArgb(255, 31, 35, 41) : Colors.White;
+        Place(new Microsoft.UI.Xaml.Shapes.Ellipse { Fill = new SolidColorBrush(pivotColor) }, center.X - 1, center.Y - 1, 2, 2);
+        var culture = System.Globalization.CultureInfo.GetCultureInfo("zh-CN");
+        if (WidgetClockPresentation.IsLandscape(width, height))
+        {
+            var left = face.X + face.Width + 18; var available = width - left;
+            var time = Text(now.ToString(widget.ShowSeconds ? "HH:mm:ss" : "HH:mm", culture), 26, bold: true); time.VerticalAlignment = VerticalAlignment.Center;
+            var date = Text(now.ToString("M月d日 · ddd", culture), 10.5, true); date.VerticalAlignment = VerticalAlignment.Center;
+            Place(time, left, height / 2 - 29, available, 34);
+            Place(date, left, height / 2 + 12, available, 20);
+        }
+        else
+        {
+            var date = Text(now.ToString("M月d日 · ddd", culture), 10.5, true); date.TextAlignment = TextAlignment.Center; date.VerticalAlignment = VerticalAlignment.Center;
+            Place(date, 0, face.Y + face.Height + 4, width, 18);
+        }
         CardBody.Children.Add(panel);
     }
 
-    private void Calendar()
+    private void Calendar(DesktopWidget widget)
     {
         _calendarHeader.Children.Clear();
         var month = Text(DateTime.Today.ToString("yyyy.MM"), 12.5, bold: true);
@@ -137,7 +197,7 @@ public sealed partial class WidgetPreview : UserControl
         _calendarHeader.Children.Add(previous); Grid.SetColumn(previous, 1);
         _calendarHeader.Children.Add(todayButton); Grid.SetColumn(todayButton, 2);
         _calendarHeader.Children.Add(next); Grid.SetColumn(next, 3);
-        var grid = new Grid();
+        var grid = new Grid { Width = 164, HorizontalAlignment = HorizontalAlignment.Left };
         for (var i = 0; i < 7; i++) grid.ColumnDefinitions.Add(new ColumnDefinition());
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(16) });
         for (var i = 0; i < 6; i++) grid.RowDefinitions.Add(new RowDefinition());
@@ -159,7 +219,40 @@ public sealed partial class WidgetPreview : UserControl
             if (date.Month != today.Month) label.Opacity = .55;
             grid.Children.Add(cell); Grid.SetColumn(cell, i % 7); Grid.SetRow(cell, i / 7 + 1);
         }
-        CardBody.Children.Add(grid);
+        if (DesktopWidgets.Dimensions(widget.Size).Width < 300) { CardBody.Children.Add(grid); return; }
+        var layout = new Grid { ColumnSpacing = 20 };
+        layout.ColumnDefinitions.Add(new() { Width = new GridLength(164) });
+        layout.ColumnDefinitions.Add(new());
+        layout.Children.Add(grid);
+        var line = _text.Color; line.A = 24;
+        var divider = new Border { Background = new SolidColorBrush(line), Width = 1, Margin = new Thickness(-8, 2, 0, 2), HorizontalAlignment = HorizontalAlignment.Left };
+        layout.Children.Add(divider); Grid.SetColumn(divider, 1);
+        var upcoming = new StackPanel { Spacing = 2 };
+        foreach (var item in CalendarDateDetails.GetUpcomingEvents(today))
+        {
+            var row = new Grid { Height = 32, ColumnSpacing = 6 };
+            row.ColumnDefinitions.Add(new()); row.ColumnDefinitions.Add(new() { Width = new GridLength(40) });
+            var labels = new StackPanel();
+            labels.Children.Add(Text(item.Name, 12));
+            labels.Children.Add(Text(item.DateLabel + " · " + item.KindLabel, 9.5, true));
+            row.Children.Add(labels);
+            if (item.DaysRemaining == 0)
+            {
+                var current = Text("今天", 12, bold: true); current.Foreground = _accent; current.TextAlignment = TextAlignment.Center;
+                row.Children.Add(current); Grid.SetColumn(current, 1);
+            }
+            else
+            {
+                var count = new StackPanel();
+                var number = Text(item.DaysRemaining.ToString(), 18, bold: true); number.Foreground = _accent; number.TextAlignment = TextAlignment.Center; number.Height = 20;
+                var unit = Text("天后", 9, true); unit.TextAlignment = TextAlignment.Center; unit.Height = 12;
+                count.Children.Add(number); count.Children.Add(unit);
+                row.Children.Add(count); Grid.SetColumn(count, 1);
+            }
+            upcoming.Children.Add(row);
+        }
+        layout.Children.Add(upcoming); Grid.SetColumn(upcoming, 1);
+        CardBody.Children.Add(layout);
     }
 
     private void TextCard(string value, string empty, string footer)
@@ -184,26 +277,37 @@ public sealed partial class WidgetPreview : UserControl
             element.Width = elementWidth; element.Height = height;
             Canvas.SetLeft(element, x); Canvas.SetTop(element, y); panel.Children.Add(element);
         }
-        var rowIndex = 0;
-        var rows = Math.Max(1, (int)((DesktopWidgets.Dimensions(widget.Size).Height - 40) / 28));
-        foreach (var task in widget.Tasks.Take(rows))
+        var rowTop = 0d;
+        foreach (var item in WidgetTodoPresentation.Rows(widget))
         {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new() { Width = new GridLength(24) });
-            row.ColumnDefinitions.Add(new());
-            var check = new Border { Width = 14, Height = 14, Margin = new Thickness(4, 0, 0, 0), HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Center, CornerRadius = new CornerRadius(3), BorderBrush = _secondary, BorderThickness = new Thickness(1) };
-            if (task.IsCompleted)
+            var rowHeight = item.Height;
+            if (rowTop + rowHeight > DesktopWidgets.Dimensions(widget.Size).Height - 40) break;
+            if (item.IsCompletedHeader)
             {
-                check.Background = _accent; check.BorderBrush = _accent;
-                check.Child = new LucideIcon { Icon = LucideIconName.Check, FontSize = 10, Foreground = new SolidColorBrush(Colors.White) };
+                if (rowTop > 0)
+                {
+                    var line = _text.Color; line.A = 20;
+                    Place(new Border { Background = new SolidColorBrush(line) }, 4, rowTop, width - 10, 1);
+                }
+                Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, 4, rowTop + 6, 16, 16);
+                var caption = Text($"已完成 · {widget.Tasks.Count(task => task.IsCompleted)}", 11, true); caption.VerticalAlignment = VerticalAlignment.Center;
+                Place(caption, 28, rowTop + 2, width - 36, 24);
             }
-            var title = Text(task.Text, 12); title.VerticalAlignment = VerticalAlignment.Center; title.Margin = new Thickness(0, 0, 32, 0);
-            if (task.IsCompleted) { title.Opacity = .65; title.TextDecorations = global::Windows.UI.Text.TextDecorations.Strikethrough; }
-            row.Children.Add(check); row.Children.Add(title); Grid.SetColumn(title, 1);
-            var rowColor = _text.Color; rowColor.A = (byte)(task.IsCompleted ? 5 : 10);
-            var surface = new Border { Child = row, CornerRadius = new CornerRadius(Math.Min(6, PreviewAppearance?.Settings.CornerRadius ?? 6)), Background = new SolidColorBrush(rowColor) };
-            Place(surface, 0, 2 + rowIndex++ * 28, width, 24);
+            else if (item.Task is { } task)
+            {
+                var check = new Border { CornerRadius = new CornerRadius(Math.Min(5, PreviewAppearance?.Settings.CornerRadius ?? 5)),
+                    BorderBrush = _secondary, BorderThickness = new Thickness(1.1), Opacity = .65 };
+                Place(check, 5, rowTop + 7.5, 15, 15);
+                var title = Text(task.Text, 12.5); title.VerticalAlignment = VerticalAlignment.Center;
+                Place(title, 28, rowTop + 2, width - 36, 26);
+                if (task.HasDateRange)
+                {
+                    var dates = Text(WidgetTodoPresentation.DateLabel(task, DateTime.Today.Year), 10.5, true);
+                    dates.Opacity = .7; dates.VerticalAlignment = VerticalAlignment.Center;
+                    Place(dates, 28, rowTop + 28, width - 36, 14);
+                }
+            }
+            rowTop += rowHeight;
         }
         if (widget.Tasks.Count == 0)
         {
@@ -215,30 +319,49 @@ public sealed partial class WidgetPreview : UserControl
 
     private void TranslationPreview(DesktopWidget widget)
     {
-        var grid = new Grid { ColumnSpacing = 10, RowSpacing = 5 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition());
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(18) });
-        grid.RowDefinitions.Add(new RowDefinition());
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
-        grid.Children.Add(Text("原文", 11, true));
-        var language = Text(widget.TargetLanguage + " ▾", 11); grid.Children.Add(language); Grid.SetColumn(language, 1);
+        var panel = new Canvas();
+        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget.Size);
+        var width = cardWidth - 16; var height = cardHeight - 44;
+        var fieldWidth = (width - 10) / 2;
+        var dark = _text.Color.R > 128;
+        var ink = new SolidColorBrush(dark ? Colors.White : Color.FromArgb(255, 31, 31, 31));
+        var muted = new SolidColorBrush(dark ? Color.FromArgb(255, 205, 205, 205) : Color.FromArgb(255, 90, 90, 90));
+        var disabled = new SolidColorBrush(dark ? Color.FromArgb(255, 155, 155, 155) : Color.FromArgb(255, 115, 115, 115));
+        void Place(FrameworkElement element, double x, double y, double elementWidth, double elementHeight)
+        { element.Width = elementWidth; element.Height = elementHeight; Canvas.SetLeft(element, x); Canvas.SetTop(element, y); panel.Children.Add(element); }
         foreach (var column in new[] { 0, 1 })
         {
+            var left = column * (fieldWidth + 10);
+            var header = Text(column == 0 ? "原文" : widget.TargetLanguage + " ▾", 11);
+            header.Foreground = ink; header.VerticalAlignment = VerticalAlignment.Center;
+            Place(header, left, -4, fieldWidth - 36, 28);
+            var enabled = column == 0 ? !string.IsNullOrEmpty(widget.Text) : !string.IsNullOrWhiteSpace(widget.Translation);
+            Place(new LucideIcon { Icon = column == 0 ? LucideIconName.Eraser : LucideIconName.Copy, FontSize = 16,
+                Foreground = enabled ? ink : disabled }, left + fieldWidth - 28, -4, 28, 28);
             var value = column == 0 ? widget.Text : widget.Translation;
             var empty = string.IsNullOrWhiteSpace(value);
-            var content = Text(empty ? column == 0 ? "输入要翻译的文字…" : "译文将在这里显示" : value[..Math.Min(value.Length, 250)], 13);
-            content.Opacity = empty ? .6 : 1;
+            var content = Text(empty ? column == 0 ? "输入要翻译的文字…" : widget.IsLoading ? "正在翻译…" : "译文将在这里显示" : value[..Math.Min(value.Length, 250)], 13);
+            content.Foreground = empty ? muted : ink;
             content.TextWrapping = TextWrapping.Wrap; content.MaxLines = 4;
-            var stroke = _text.Color; stroke.A = 28;
-            var fill = _text.Color; fill.A = (byte)(column == 0 ? 10 : 6);
+            var stroke = ink.Color; stroke.A = 50;
             var field = new Border { Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(Math.Min(8, PreviewAppearance?.Settings.CornerRadius ?? 8)),
-                BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(stroke), Child = content, Background = new SolidColorBrush(fill) };
-            grid.Children.Add(field); Grid.SetRow(field, 1); Grid.SetColumn(field, column);
+                BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(stroke), Child = content,
+                Background = new SolidColorBrush(dark ? Color.FromArgb(255, 32, 32, 32) : Color.FromArgb(255, 250, 250, 250)) };
+            Place(field, left, 26, fieldWidth, height - 58);
         }
-        var hint = Text("Ctrl+Enter 翻译", 10, true); grid.Children.Add(hint); Grid.SetRow(hint, 2);
-        var action = Text(widget.IsLoading ? "取消       复制" : "翻译       复制", 12); action.Foreground = _accent;
-        grid.Children.Add(action); Grid.SetRow(action, 2); Grid.SetColumn(action, 1);
-        CardBody.Children.Add(grid);
+        var hint = Text(widget.IsLoading ? "正在翻译…" : !string.IsNullOrEmpty(widget.Error) ? widget.Error : "Ctrl+Enter 翻译", 10.5);
+        hint.Foreground = muted; hint.VerticalAlignment = VerticalAlignment.Center;
+        Place(hint, 0, height - 28, width - 84, 28);
+        var canTranslate = widget.IsLoading || !string.IsNullOrWhiteSpace(widget.Text);
+        var translate = Text(widget.IsLoading ? "取消" : "翻译", 12);
+        translate.Foreground = canTranslate ? ink : new SolidColorBrush(dark ? Color.FromArgb(255, 170, 170, 170) : Color.FromArgb(255, 110, 110, 110));
+        translate.TextAlignment = TextAlignment.Center; translate.VerticalAlignment = VerticalAlignment.Center;
+        var buttonFill = ink.Color; buttonFill.A = (byte)(canTranslate ? 24 : 10);
+        var buttonStroke = ink.Color; buttonStroke.A = (byte)(canTranslate ? 32 : 14);
+        Place(new Border { Child = translate, CornerRadius = new CornerRadius(Math.Min(6, PreviewAppearance?.Settings.CornerRadius ?? 6)),
+            BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(buttonStroke),
+            Background = new SolidColorBrush(buttonFill) }, width - 72, height - 28, 72, 28);
+        CardBody.Children.Add(panel);
     }
 
     private void Weather(DesktopWidget widget)
@@ -250,15 +373,13 @@ public sealed partial class WidgetPreview : UserControl
             element.Width = elementWidth; element.Height = height;
             Canvas.SetLeft(element, x); Canvas.SetTop(element, y); panel.Children.Add(element);
         }
-        void Metric(LucideIconName icon, string value, double x, double y, double metricWidth)
+        void Metric(LucideIconName icon, string value, double x, double y, double metricWidth, double height = 18)
         {
-            Place(new LucideIcon { Icon = icon, FontSize = 12, Foreground = _secondary }, x, y, 14, 18);
-            Place(Text(value, 10.5, true), x + 19, y, metricWidth - 19, 18);
+            Place(new LucideIcon { Icon = icon, FontSize = 12, Foreground = _secondary }, x, y, 14, height);
+            Place(Text(value, 10.5, true), x + 19, y + (height - 18) / 2, metricWidth - 19, 18);
         }
-        var cityWidth = width - (widget.Weather?.FeelsLike.HasValue == true ? 60 : 0);
-        Place(Text(widget.Location?.Name ?? "选择城市", 12), 0, 0, cityWidth - 14, 18);
-        Place(new LucideIcon { Icon = LucideIconName.ChevronsUpDown, FontSize = 10, Foreground = _secondary }, cityWidth - 12, 0, 12, 18);
-        Place(Text(widget.Weather is { } weather ? $"{weather.Temperature:0.#}°" : "—°", 30, bold: true), 0, 18, width - 52, 38);
+        var overview = Math.Min(width, 164);
+        Place(Text(widget.Weather is { } weather ? $"{weather.Temperature:0.#}°" : "—°", 36, bold: true), 4, -2, overview - 56, 48);
         if (widget.Weather is { } forecast)
         {
             var name = DesktopWidgets.WeatherIconName(forecast);
@@ -267,20 +388,36 @@ public sealed partial class WidgetPreview : UserControl
                 ? dark ? Color.FromArgb(255, 242, 184, 75) : Color.FromArgb(255, 156, 97, 0)
                 : name is "CloudRain" or "CloudSnow" or "CloudHail"
                     ? dark ? Color.FromArgb(255, 104, 193, 226) : Color.FromArgb(255, 29, 106, 150) : _secondary.Color;
-            Place(new LucideIcon { Icon = Enum.Parse<LucideIconName>(name), FontSize = 36, Foreground = new SolidColorBrush(color) }, width - 46, 18, 44, 38);
-            if (forecast.FeelsLike is { } feelsLike) Metric(LucideIconName.Thermometer, $"{feelsLike:0}°", width - 56, 0, 56);
-            Place(Text($"{forecast.Description} · {forecast.Minimum:0}° / {forecast.Maximum:0}°", 11, true), 0, 56, width, 18);
-            var metricWidth = (width - 8) / 2;
-            if (forecast.Humidity is { } humidity) Metric(LucideIconName.Droplets, $"{humidity:0}%", 0, 76, metricWidth);
-            if (forecast.WindSpeed is { } wind) Metric(LucideIconName.Wind, $"{wind:0} km/h", metricWidth + 8, 76, metricWidth);
+            Place(new LucideIcon { Icon = Enum.Parse<LucideIconName>(name), FontSize = 40, Foreground = new SolidColorBrush(color) }, overview - 48, 2, 44, 44);
+            if (forecast.FeelsLike is { } feelsLike) Metric(LucideIconName.Thermometer, $"{feelsLike:0}°", overview - 56, 48, 52);
+            Place(Text($"{forecast.Description} · {forecast.Minimum:0}° / {forecast.Maximum:0}°", 10.5, true), 4, 48, overview - 64, 18);
+            var metricWidth = (width - 20) / 2;
+            if (forecast.Humidity is { } humidity)
+            {
+                if (width >= 300) Metric(LucideIconName.Droplets, $"湿度 {humidity:0}%", width - 132, 2, 128, 24);
+                else Metric(LucideIconName.Droplets, $"{humidity:0}%", 4, 68, metricWidth);
+            }
+            if (forecast.WindSpeed is { } wind)
+            {
+                if (width >= 300) Metric(LucideIconName.Wind, $"风速 {wind:0} km/h", width - 132, 34, 128, 24);
+                else Metric(LucideIconName.Wind, $"{wind:0} km/h", metricWidth + 16, 68, metricWidth);
+            }
+            var statusTop = widget.Cities.Count > 1 ? 88 : 104;
+            var statusHeight = widget.Cities.Count > 1 ? 24 : 28;
+            var statusFill = _text.Color; statusFill.A = 14;
+            Place(new Border { Background = new SolidColorBrush(statusFill), CornerRadius = new CornerRadius(8) }, 4, statusTop, width - 8, statusHeight);
             Metric(forecast.AirQuality is not null ? LucideIconName.Gauge : LucideIconName.ChevronRight,
-                forecast.AirQuality is { } air ? $"AQI {air:0} · 查看详情" : "查看天气详情", 0, 100, width);
+                widget.IsLoading ? "正在更新…" : !string.IsNullOrEmpty(widget.Error) ? widget.Error :
+                forecast.AirQuality is { } air ? $"AQI {air:0}" : "查看天气详情", 12, statusTop + (statusHeight - 18) / 2, width - 40);
+            Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, width - 28, statusTop, 12, statusHeight);
         }
         else Place(Text("搜索所在城市查看天气", 11, true), 0, 56, width, 18);
         var cityIndex = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId) + 1;
-        var provider = widget.Weather?.Provider ?? WidgetWeatherService.ProviderName;
-        Place(Text(widget.IsLoading ? "正在更新…" : !string.IsNullOrEmpty(widget.Error) ? "更新失败 · 保留上次数据" :
-            widget.Cities.Count > 1 ? $"‹  {provider} · {cityIndex}/{widget.Cities.Count}  ›" : provider, 10, true), 0, 120, width, 16);
+        if (widget.Cities.Count > 1)
+        {
+            var counter = Text($"‹     {cityIndex}/{widget.Cities.Count}     ›", 10, true); counter.TextAlignment = TextAlignment.Center;
+            Place(counter, 0, 120, width, 16);
+        }
         CardBody.Children.Add(panel);
     }
 

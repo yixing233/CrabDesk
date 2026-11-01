@@ -146,7 +146,8 @@ public sealed class DesktopUiThreadStallTests
             ReadNativeSource("DesktopWindowTools.cs"),
             "public static bool TryActivateDesktopInput(IntPtr root)",
             "public static void ToggleDesktop()");
-        Assert.Contains("GetForegroundWindow() == root", native, StringComparison.Ordinal);
+        Assert.Contains("var foreground = NativeMethods.GetForegroundWindow();", native, StringComparison.Ordinal);
+        Assert.Contains("foreground == root || DesktopInputProxy.IsEditor(foreground)", native, StringComparison.Ordinal);
 
         var mouseDown = ExtractMethod(
             ReadRuntimeSource("DesktopIconSurface.cs"),

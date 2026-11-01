@@ -66,7 +66,9 @@ internal enum LucideRuntimeIcon
     Thermometer,
     Gauge,
     ChevronLeft,
-    MapPin
+    MapPin,
+    Copy,
+    Eraser
 }
 
 internal static class LucideRuntimeIcons
@@ -92,6 +94,8 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.ChevronRight => "\uE06F",
         LucideRuntimeIcon.ChevronLeft => "\uE06E",
         LucideRuntimeIcon.MapPin => "\uE111",
+        LucideRuntimeIcon.Copy => "\uE09E",
+        LucideRuntimeIcon.Eraser => "\uE28F",
         LucideRuntimeIcon.CircleAlert => "\uE077",
         LucideRuntimeIcon.ClipboardPaste => "\uE3E8",
         LucideRuntimeIcon.Cog => "\uE30B",

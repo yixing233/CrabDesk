@@ -153,17 +153,13 @@
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" ZoomMode="Disabled">
                 <StackPanel Spacing="20">
                     <StackPanel x:Name="ClockEditor" Visibility="Collapsed" Spacing="16">
-                        <TextBlock Text="时间显示" FontWeight="SemiBold" />
+                        <TextBlock Text="表盘显示" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock Text="24 小时制" VerticalAlignment="Center" />
-                            <ToggleSwitch x:Name="Use24Hour" Grid.Column="1" OnContent="" OffContent="" MinWidth="0" Toggled="ClockOption_Toggled" AutomationProperties.Name="24 小时制" />
-                        </Grid>
-                        <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                            <TextBlock Text="显示秒" VerticalAlignment="Center" />
-                            <ToggleSwitch x:Name="Seconds" Grid.Column="1" OnContent="" OffContent="" MinWidth="0" Toggled="ClockOption_Toggled" AutomationProperties.Name="显示秒" />
+                            <TextBlock Text="显示秒针" VerticalAlignment="Center" />
+                            <ToggleSwitch x:Name="Seconds" Grid.Column="1" OnContent="" OffContent="" MinWidth="0" Toggled="ClockOption_Toggled" AutomationProperties.Name="显示秒针" />
                         </Grid>
                     </StackPanel>
-                    <TextBlock x:Name="CalendarHelp" Visibility="Collapsed" Text="在桌面月历中使用左右箭头切换月份，点击“今”返回本月。日期以周一开始，今天会高亮显示。" Style="{StaticResource SecondaryBodyStyle}" />
+                    <TextBlock x:Name="CalendarHelp" Visibility="Collapsed" Text="在桌面月历中使用左右箭头切换月份，点击“今”返回本月。悬停日期可查看农历、节日和节气。大尺寸在右侧显示最近的节日与节气倒数，以今天为基准，每天自动更新。" Style="{StaticResource SecondaryBodyStyle}" />
                     <TextBlock x:Name="NoteHelp" Visibility="Collapsed" Text="点击桌面便签正文即可编辑，内容自动保存。Enter 换行，Esc 或点击其他区域结束编辑；滚动可阅读长便签。" Style="{StaticResource SecondaryBodyStyle}" />
                     <StackPanel x:Name="TodoEditor" Visibility="Collapsed" Spacing="10">
                         <TextBlock Text="待办清单" FontWeight="SemiBold" />
@@ -179,6 +175,28 @@
                         <TextBox x:Name="TranslationBaseUrl" Header="接口地址" PlaceholderText="https://api.example.com/v1" TextChanged="TranslationSettings_TextChanged" />
                         <PasswordBox x:Name="TranslationApiKey" Header="API Key" PlaceholderText="本地模型可留空" PasswordChanged="TranslationApiKey_PasswordChanged" />
                         <TextBox x:Name="TranslationModel" Header="模型" PlaceholderText="输入模型名称" TextChanged="TranslationSettings_TextChanged" />
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="翻译会话" FontWeight="SemiBold" />
+                            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <TextBlock Text="复用会话" VerticalAlignment="Center" />
+                                <ToggleSwitch x:Name="TranslationReuseConversation" Grid.Column="1" OnContent="" OffContent="" MinWidth="0"
+                                              Toggled="TranslationReuseConversation_Toggled" AutomationProperties.Name="复用翻译会话" />
+                            </Grid>
+                            <TextBlock Text="连续翻译时保留上下文，保持术语和表达一致。" Style="{StaticResource SecondaryBodyStyle}" />
+                            <NumberBox x:Name="TranslationConversationIdle" Header="闲置后新建会话（分钟）" Minimum="1" Maximum="1440"
+                                       SmallChange="1" SpinButtonPlacementMode="Inline" ValidationMode="InvalidInputOverwritten"
+                                       ValueChanged="TranslationConversationIdle_ValueChanged" AutomationProperties.Name="翻译会话闲置分钟数" />
+                            <TextBlock Text="达到闲置时间后，下次翻译将新建会话。会话仅在本次运行中保留；更换翻译配置、目标语言或会话过长时也会自动新建。"
+                                       Style="{StaticResource SecondaryBodyStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="8">
+                            <TextBox x:Name="TranslationPrompt" Header="翻译提示词" AcceptsReturn="True" TextWrapping="Wrap"
+                                     MinHeight="144" MaxHeight="240" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     PlaceholderText="留空使用默认翻译提示词" TextChanged="TranslationSettings_TextChanged" />
+                            <TextBlock Text="使用 {targetLanguage} 代表组件中选择的目标语言。修改后自动保存；留空使用默认提示词。"
+                                       Style="{StaticResource SecondaryBodyStyle}" />
+                            <Button Content="恢复默认提示词" HorizontalAlignment="Left" Click="ResetTranslationPrompt_Click" />
+                        </StackPanel>
                         <TextBlock Text="支持 OpenAI 兼容接口。点击桌面卡片输入原文，选择目标语言后点击“翻译”或按 Ctrl+Enter。" Style="{StaticResource SecondaryBodyStyle}" />
                     </StackPanel>
                     <StackPanel x:Name="WeatherEditor" Visibility="Collapsed" Spacing="20">

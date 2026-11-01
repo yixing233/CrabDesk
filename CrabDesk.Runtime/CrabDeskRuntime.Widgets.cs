@@ -12,6 +12,7 @@ public sealed partial class CrabDeskRuntime
     private bool _widgetNavigationPending;
     public event Action<DesktopWidget>? WidgetWeatherDetailsRequested;
     public event Action<DesktopWidget>? WidgetWeatherLocationsRequested;
+    public event Action<DesktopWidget, WidgetTodoItem>? WidgetTodoDatesRequested;
 
     public void OpenWidgetWeatherLocations(DesktopWidget widget)
     {
@@ -41,22 +42,31 @@ public sealed partial class CrabDeskRuntime
         else settings.ApiKey = AiApiKeyStore.Load(path);
     }
 
-    public void ConfigureWidgetTranslation(string baseUrl, string apiKey, string model)
+    public void ConfigureWidgetTranslation(string baseUrl, string apiKey, string model, string? promptTemplate = null,
+        bool? reuseConversation = null, int? conversationIdleMinutes = null)
     {
         if (_disposed) return;
         var settings = State.Settings.WidgetTranslation;
         baseUrl = baseUrl?.Trim() ?? string.Empty;
         apiKey ??= string.Empty;
         model = model?.Trim() ?? string.Empty;
-        if (settings.BaseUrl == baseUrl && settings.ApiKey == apiKey && settings.Model == model) return;
+        promptTemplate ??= settings.PromptTemplate;
+        var reuse = reuseConversation ?? settings.ReuseConversation;
+        var idleMinutes = Math.Clamp(conversationIdleMinutes ?? settings.ConversationIdleMinutes, 1, 1440);
+        if (settings.BaseUrl == baseUrl && settings.ApiKey == apiKey && settings.Model == model && settings.PromptTemplate == promptTemplate &&
+            settings.ReuseConversation == reuse && settings.ConversationIdleMinutes == idleMinutes) return;
         // Persist the credential before updating the live profile, so a failed
         // write cannot silently leave the UI using an unsaved replacement key.
         if (settings.ApiKey != apiKey) AiApiKeyStore.Save(GetWidgetTranslationApiKeyPath(), apiKey);
         foreach (var widget in State.Widgets.Where(widget => widget.Kind == DesktopWidgetKind.Translation))
             CancelWidgetRequest(widget.Id);
+        _widgetTranslationService?.ResetConversation();
         settings.BaseUrl = baseUrl;
         settings.ApiKey = apiKey;
         settings.Model = model;
+        settings.PromptTemplate = promptTemplate;
+        settings.ReuseConversation = reuse;
+        settings.ConversationIdleMinutes = idleMinutes;
         _surfaceManager?.RefreshWidgets();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
@@ -115,6 +125,7 @@ public sealed partial class CrabDeskRuntime
     {
         if (!State.Widgets.Remove(widget)) return;
         CancelWidgetRequest(widget.Id);
+        if (widget.Kind == DesktopWidgetKind.Translation) _widgetTranslationService?.ResetConversation();
         _weatherRetryAt.Remove(widget.Id);
         if (RequestedWidgetId == widget.Id) RequestedWidgetId = null;
         _surfaceManager?.RefreshWidgets();
@@ -185,11 +196,41 @@ public sealed partial class CrabDeskRuntime
         return task;
     }
 
+    public bool RemoveWidgetTask(DesktopWidget widget, Guid taskId)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.Todo || !State.Widgets.Contains(widget) ||
+            widget.Tasks.FirstOrDefault(task => task.Id == taskId) is not { } task) return false;
+        widget.Tasks.Remove(task);
+        WidgetChanged(widget);
+        return true;
+    }
+
     internal void RefreshWidgetPosition(DesktopWidget widget, bool save)
     {
         if (_disposed || !State.Widgets.Contains(widget)) return;
         _surfaceManager?.RefreshWidgets();
         if (save) { Changed?.Invoke(this, EventArgs.Empty); ScheduleSave(); }
+    }
+
+    public bool SetWidgetTaskDates(DesktopWidget widget, Guid taskId, DateOnly? start, DateOnly? end)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.Todo || !State.Widgets.Contains(widget) ||
+            widget.Tasks.FirstOrDefault(task => task.Id == taskId) is not { } task) return false;
+        if (start is { } first && end is { } last && first > last)
+            throw new ArgumentException("截止日期不能早于开始日期。");
+        if (task.StartDate == start && task.EndDate == end) return false;
+        task.StartDate = start;
+        task.EndDate = end;
+        WidgetChanged(widget);
+        return true;
+    }
+
+    public void EditWidgetTaskDates(DesktopWidget widget, Guid taskId)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.Todo || !State.Widgets.Contains(widget) ||
+            widget.Tasks.FirstOrDefault(task => task.Id == taskId) is not { } task) return;
+        DismissDesktopWidgetInput();
+        WidgetTodoDatesRequested?.Invoke(widget, task);
     }
 
     public Task<IReadOnlyList<WeatherLocation>> SearchWidgetCitiesAsync(string city, CancellationToken cancellationToken = default) =>
@@ -287,6 +328,7 @@ public sealed partial class CrabDeskRuntime
         if (_disposed || widget.Kind != DesktopWidgetKind.Translation || !State.Widgets.Contains(widget) ||
             string.IsNullOrWhiteSpace(language) || widget.TargetLanguage == language) return;
         CancelWidgetRequest(widget.Id);
+        _widgetTranslationService?.ResetConversation();
         widget.TargetLanguage = language;
         widget.Translation = string.Empty;
         widget.Error = string.Empty;

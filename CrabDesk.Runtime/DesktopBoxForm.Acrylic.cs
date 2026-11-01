@@ -100,6 +100,7 @@ internal sealed partial class DesktopBoxForm
         {
             graphics.ScaleTransform((float)_scale, (float)_scale);
             DrawBoxAlignmentGuides(graphics, _monitor.Id);
+            DrawCalendarToolTip(graphics);
         }
     }
     internal static double ResolveBoxTintOpacity(double opacity, bool acrylic) =>

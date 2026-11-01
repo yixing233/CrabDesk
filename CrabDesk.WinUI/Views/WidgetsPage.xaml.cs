@@ -22,6 +22,7 @@ public sealed partial class WidgetsPage : Page
     private bool _galleryIsCatalog;
     private readonly ObservableCollection<WidgetGalleryItem> _galleryItems = [];
     private readonly Dictionary<Guid, CheckBox> _taskChecks = [];
+    private readonly Dictionary<Guid, TextBlock> _taskDateLabels = [];
 
     public WidgetsPage()
     {
@@ -88,7 +89,7 @@ public sealed partial class WidgetsPage : Page
             var item = _galleryItems.FirstOrDefault(entry => ReferenceEquals(entry.Widget, widget));
             var caption = catalog ? widget.Kind switch
             {
-                DesktopWidgetKind.Clock => "时间、日期与星期", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
+                DesktopWidgetKind.Clock => "圆形表盘、日期与星期", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
                 DesktopWidgetKind.Note => "随手记下灵感", DesktopWidgetKind.Todo => "记录并完成每一件事",
                 DesktopWidgetKind.Translation => "随时翻译一段文字", _ => "关心城市的阴晴冷暖"
             } : DesktopWidgets.SizeLabel(widget.Size) + (widget.IsLocked ? " · 已锁定" : "");
@@ -199,12 +200,15 @@ public sealed partial class WidgetsPage : Page
         MonitorPicker.ItemsSource = _runtime.Monitors.Select((monitor, index) => new MonitorChoice(monitor.Id, $"显示器 {index + 1}" + (monitor.IsPrimary ? "（主显示器）" : ""))).ToArray();
         MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
         PositionLock.IsOn = widget.IsLocked;
-        Use24Hour.IsOn = widget.Use24HourClock;
         Seconds.IsOn = widget.ShowSeconds;
         var translation = _runtime.State.Settings.WidgetTranslation;
         TranslationBaseUrl.Text = translation.BaseUrl;
         TranslationApiKey.Password = translation.ApiKey;
         TranslationModel.Text = translation.Model;
+        TranslationPrompt.Text = translation.PromptTemplate;
+        TranslationReuseConversation.IsOn = translation.ReuseConversation;
+        TranslationConversationIdle.Value = translation.ConversationIdleMinutes;
+        TranslationConversationIdle.IsEnabled = translation.ReuseConversation;
         NewTaskInput.Text = string.Empty;
         CityQuery.Text = string.Empty;
         CityQuery.ItemsSource = null;
@@ -243,7 +247,7 @@ public sealed partial class WidgetsPage : Page
     { if (_selected?.Title != TitleInput.Text) Save(w => w.Title = TitleInput.Text); }
     private void PositionLock_Toggled(object sender, RoutedEventArgs args) => Save(w => w.IsLocked = PositionLock.IsOn);
     private void ClockOption_Toggled(object sender, RoutedEventArgs args)
-    { if (_selected?.Kind == DesktopWidgetKind.Clock) Save(w => { w.Use24HourClock = Use24Hour.IsOn; w.ShowSeconds = Seconds.IsOn; }); }
+    { if (_selected?.Kind == DesktopWidgetKind.Clock) Save(w => w.ShowSeconds = Seconds.IsOn); }
 
     private void SizePicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
@@ -271,6 +275,7 @@ public sealed partial class WidgetsPage : Page
     {
         TaskRows.Children.Clear();
         _taskChecks.Clear();
+        _taskDateLabels.Clear();
         if (_selected is not { Kind: DesktopWidgetKind.Todo } widget) return;
         foreach (var task in widget.Tasks)
         {
@@ -287,22 +292,53 @@ public sealed partial class WidgetsPage : Page
             input.TextChanged += (_, _) => Save(w => { if (w == widget) task.Text = input.Text; });
             var remove = new Button { Content = "删除" };
             remove.Click += (_, _) => { Save(w => { if (w == widget) w.Tasks.Remove(task); }); RenderTasks(); };
-            row.Children.Add(check); row.Children.Add(input); row.Children.Add(remove);
-            Grid.SetColumn(input, 1); Grid.SetColumn(remove, 2);
+            var content = new StackPanel { Spacing = 4 };
+            content.Children.Add(input);
+            var dateLabel = new TextBlock { Text = task.DateRangeText, FontSize = 12, Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SecondaryTextBrush"], TextWrapping = TextWrapping.Wrap,
+                Visibility = task.HasDateRange ? Visibility.Visible : Visibility.Collapsed };
+            _taskDateLabels[task.Id] = dateLabel; content.Children.Add(dateLabel);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+            var dates = new Button { Content = new FontIcon { Glyph = "\uE787", FontSize = 14 } };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dates, "设置日期范围：" + task.Text);
+            ToolTipService.SetToolTip(dates, "日期范围（可选）");
+            dates.Click += (_, _) => _runtime.EditWidgetTaskDates(widget, task.Id);
+            actions.Children.Add(dates); actions.Children.Add(remove);
+            row.Children.Add(check); row.Children.Add(content); row.Children.Add(actions);
+            Grid.SetColumn(content, 1); Grid.SetColumn(actions, 2);
             TaskRows.Children.Add(row);
         }
     }
 
     private void TranslationSettings_TextChanged(object sender, TextChangedEventArgs args) => SaveTranslationSettings();
     private void TranslationApiKey_PasswordChanged(object sender, RoutedEventArgs args) => SaveTranslationSettings();
+    private void TranslationReuseConversation_Toggled(object sender, RoutedEventArgs args)
+    {
+        TranslationConversationIdle.IsEnabled = TranslationReuseConversation.IsOn;
+        SaveTranslationSettings();
+    }
+    private void TranslationConversationIdle_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => SaveTranslationSettings();
     private void SaveTranslationSettings()
     {
         if (_loading || _selected?.Kind != DesktopWidgetKind.Translation) return;
         _saving = true;
-        try { _runtime.ConfigureWidgetTranslation(TranslationBaseUrl.Text, TranslationApiKey.Password, TranslationModel.Text); }
+        try
+        {
+            var idle = TranslationConversationIdle.Value;
+            _runtime.ConfigureWidgetTranslation(TranslationBaseUrl.Text, TranslationApiKey.Password, TranslationModel.Text, TranslationPrompt.Text,
+                TranslationReuseConversation.IsOn, double.IsFinite(idle) ? (int)Math.Clamp(Math.Round(idle), 1, 1440) : null);
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         { Error("无法保存翻译接口配置，请检查本机配置目录的访问权限。"); }
         finally { _saving = false; }
+    }
+
+    private async void ResetTranslationPrompt_Click(object sender, RoutedEventArgs args)
+    {
+        if (_selected is not { Kind: DesktopWidgetKind.Translation } widget || TranslationPrompt.Text == WidgetTranslationSettings.DefaultPromptTemplate) return;
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "恢复默认提示词？", Content = "当前自定义提示词将替换为默认翻译提示词。",
+            PrimaryButtonText = "恢复默认", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || !IsLoaded || _selected != widget || !_runtime.State.Widgets.Contains(widget)) return;
+        TranslationPrompt.Text = WidgetTranslationSettings.DefaultPromptTemplate;
     }
 
     private void CityQuery_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -413,7 +449,14 @@ public sealed partial class WidgetsPage : Page
         SizePicker.SelectedItem = SizePicker.Items.OfType<SizeChoice>().FirstOrDefault(s => s.Size == widget.Size);
         MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
         foreach (var task in widget.Tasks)
+        {
             if (_taskChecks.TryGetValue(task.Id, out var check)) check.IsChecked = task.IsCompleted;
+            if (_taskDateLabels.TryGetValue(task.Id, out var label))
+            {
+                label.Text = task.DateRangeText;
+                label.Visibility = task.HasDateRange ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
         if (widget.Kind == DesktopWidgetKind.Weather)
         {
             DesktopWidgets.NormalizeWeatherCities(widget);

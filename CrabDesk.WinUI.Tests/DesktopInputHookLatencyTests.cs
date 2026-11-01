@@ -71,8 +71,8 @@ public sealed class DesktopInputHookLatencyTests
     [InlineData(0x0204, true)]
     [InlineData(0x020A, true)]
     [InlineData(0x0200, false)]
-    [InlineData(0x0202, false)]
-    public void OnlyButtonDownAndWheelMessagesReachTheMouseHandler(int message, bool expected)
+    [InlineData(0x0202, true)]
+    public void OnlyButtonAndWheelMessagesReachTheMouseHandler(int message, bool expected)
     {
         var method = typeof(DesktopInputMonitor).GetMethod(
             "IsHandledMouseMessage",

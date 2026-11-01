@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
 
 namespace CrabDesk.Native;
 
@@ -6,6 +7,7 @@ namespace CrabDesk.Native;
 public static class DesktopAcrylicWindowTools
 {
     private const string HostProperty = "CrabDesk.AcrylicDesktopHost";
+    private static readonly ConcurrentDictionary<IntPtr, DesktopTransition> Transitions = new();
 
     public static void Initialize(IntPtr hwnd, IntPtr desktopView)
     {
@@ -18,6 +20,7 @@ public static class DesktopAcrylicWindowTools
         Marshal.ThrowExceptionForHR(DwmExtendFrameIntoClientArea(hwnd, ref margins));
         if (!SetProp(hwnd, HostProperty, new IntPtr(1)))
             throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        Transitions.TryAdd(hwnd, new(NativeMethods.GetAncestor(desktopView, 2)));
         // Keep WinForms' private tool-window owner. Owning this top-level host
         // by Explorer lets popup/overlay reordering lift Explorer along with
         // the host, invalidating the desktop insertion anchor itself.
@@ -30,7 +33,66 @@ public static class DesktopAcrylicWindowTools
         return processId == Environment.ProcessId && GetProp(root, HostProperty) != IntPtr.Zero;
     }
 
-    public static void Release(IntPtr hwnd) => RemoveProp(hwnd, HostProperty);
+    public static void Release(IntPtr hwnd)
+    {
+        FinishShowDesktopTransition(hwnd, force: true);
+        Transitions.TryRemove(hwnd, out _);
+        RemoveProp(hwnd, HostProperty);
+    }
+
+    // Called before forwarding the user's native Show Desktop input. Explorer
+    // and the acrylic host then move in one native owner-group transaction,
+    // rather than presenting Explorer one frame before an async repair.
+    internal static void PrepareForShowDesktop()
+    {
+        foreach (var (hwnd, transition) in Transitions)
+        {
+            lock (transition)
+            {
+                if (transition.ExpiresAt != 0 || !IsVisibleAndRestored(hwnd) ||
+                    !NativeMethods.IsWindow(transition.DesktopRoot)) continue;
+                transition.PreviousOwner = NativeMethods.GetWindow(hwnd, 4);
+                transition.ReturningToDesktop = NativeMethods.GetForegroundWindow() != transition.DesktopRoot;
+                transition.DesktopActivatedAt = 0;
+                transition.ExpiresAt = Environment.TickCount64 + 1500;
+                NativeMethods.SetWindowLongPtr(hwnd, -8, transition.DesktopRoot);
+            }
+        }
+    }
+
+    public static void FinishShowDesktopTransition(IntPtr hwnd, bool force = false)
+    {
+        if (!Transitions.TryGetValue(hwnd, out var transition)) return;
+        lock (transition)
+        {
+            if (transition.ExpiresAt == 0) return;
+            var now = Environment.TickCount64;
+            var foreground = NativeMethods.GetForegroundWindow();
+            var ordinaryForeground = foreground != IntPtr.Zero && foreground != hwnd && foreground != transition.DesktopRoot &&
+                DesktopHostService.GetWindowClass(foreground) is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd");
+            if (foreground == transition.DesktopRoot && transition.DesktopActivatedAt == 0)
+                transition.DesktopActivatedAt = now;
+            // Foreground arrives before Explorer's final animated reorder. Keep
+            // the group through that tail, but detach immediately when a normal
+            // application takes focus. An abandoned command has a bounded expiry.
+            var completed = transition.ReturningToDesktop
+                ? transition.DesktopActivatedAt != 0 && (ordinaryForeground || now - transition.DesktopActivatedAt >= 200)
+                : ordinaryForeground;
+            if (!force && !completed && now < transition.ExpiresAt) return;
+            if (NativeMethods.IsWindow(hwnd) && NativeMethods.GetWindow(hwnd, 4) == transition.DesktopRoot)
+                NativeMethods.SetWindowLongPtr(hwnd, -8, transition.PreviousOwner);
+            transition.ExpiresAt = 0;
+        }
+    }
+
+    private sealed class DesktopTransition(IntPtr desktopRoot)
+    {
+        internal readonly IntPtr DesktopRoot = desktopRoot;
+        internal IntPtr PreviousOwner;
+        internal long ExpiresAt;
+        internal long DesktopActivatedAt;
+        internal bool ReturningToDesktop;
+    }
 
     public static string GetPlacementDiagnostics(IntPtr hwnd, IntPtr desktopView)
     {
@@ -111,7 +173,7 @@ public static class DesktopAcrylicWindowTools
             // Even hidden topmost windows belong to the topmost band. Using
             // a visible window above them would temporarily promote the host.
             var topmost = IsTopmost(previous);
-            if (!topmost && (!NativeMethods.IsWindowVisible(previous) || IsIconic(previous))) continue;
+            if (!topmost && (!NativeMethods.IsWindowVisible(previous) || IsIconic(previous) || !HasWindowArea(previous))) continue;
             var owner = NativeMethods.GetWindow(previous, 4);
             while (owner != IntPtr.Zero && owner != hwnd) owner = NativeMethods.GetWindow(owner, 4);
             if (owner == hwnd) continue;
@@ -137,9 +199,14 @@ public static class DesktopAcrylicWindowTools
         // They also cannot visually obscure a correctly placed desktop host.
         for (var previous = NativeMethods.GetWindow(hwnd, 3); previous != IntPtr.Zero;
              previous = NativeMethods.GetWindow(previous, 3)) // GW_HWNDPREV
-            if (NativeMethods.IsWindowVisible(previous) && !IsIconic(previous)) return previous;
+            if (NativeMethods.IsWindowVisible(previous) && !IsIconic(previous) && HasWindowArea(previous)) return previous;
         return IntPtr.Zero;
     }
+
+    // Some system utilities expose a visible, zero-size HWND. It cannot cover
+    // desktop content, and its process may reject insertion beside it (error 5).
+    private static bool HasWindowArea(IntPtr hwnd) => NativeMethods.GetWindowRect(hwnd, out var bounds) &&
+        bounds.Right > bounds.Left && bounds.Bottom > bounds.Top;
 
     private static bool TryGetDesktopRoot(IntPtr hwnd, IntPtr desktopView, out IntPtr desktopRoot)
     {

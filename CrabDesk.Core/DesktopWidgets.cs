@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace CrabDesk.Core;
 
 public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather }
-public enum DesktopWidgetSize { Small, Medium, Wide, Large }
+public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape }
 
 public sealed class DesktopWidget
 {
@@ -57,6 +57,18 @@ public sealed class WidgetTodoItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Text { get; set; } = string.Empty;
     public bool IsCompleted { get; set; }
+    public DateOnly? StartDate { get; set; }
+    public DateOnly? EndDate { get; set; }
+    [JsonIgnore]
+    public bool HasDateRange => StartDate.HasValue || EndDate.HasValue;
+    [JsonIgnore]
+    public string DateRangeText => (StartDate, EndDate) switch
+    {
+        ({ } start, { } end) => start == end ? start.ToString("yyyy/MM/dd") : $"{start:yyyy/MM/dd} – {end:yyyy/MM/dd}",
+        ({ } start, null) => $"开始 {start:yyyy/MM/dd}",
+        (null, { } end) => $"截止 {end:yyyy/MM/dd}",
+        _ => string.Empty
+    };
 }
 
 public sealed record WeatherLocation(string Name, string Region, string Country, double Latitude, double Longitude)
@@ -169,14 +181,14 @@ public static class DesktopWidgets
 
     public static DesktopWidgetSize DefaultSize(DesktopWidgetKind kind) => kind switch
     {
-        DesktopWidgetKind.Clock => DesktopWidgetSize.Small,
+        DesktopWidgetKind.Clock => DesktopWidgetSize.Medium,
         DesktopWidgetKind.Note or DesktopWidgetKind.Translation => DesktopWidgetSize.Large,
         _ => DesktopWidgetSize.Medium
     };
 
     public static IReadOnlyList<DesktopWidgetSize> SupportedSizes(DesktopWidgetKind kind) => kind switch
     {
-        DesktopWidgetKind.Clock => [DesktopWidgetSize.Small, DesktopWidgetSize.Wide],
+        DesktopWidgetKind.Clock => [DesktopWidgetSize.Medium, DesktopWidgetSize.Landscape],
         DesktopWidgetKind.Calendar => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
         DesktopWidgetKind.Translation => [DesktopWidgetSize.Large],
         _ => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large]
@@ -184,6 +196,8 @@ public static class DesktopWidgets
 
     public static (double Width, double Height) Dimensions(DesktopWidgetSize size) => size switch
     {
+        DesktopWidgetSize.Compact => (144, 144),
+        DesktopWidgetSize.Landscape => (288, 120),
         DesktopWidgetSize.Small => (180, 84), DesktopWidgetSize.Wide => (372, 84),
         DesktopWidgetSize.Large => (372, 180), _ => (180, 180)
     };
@@ -223,6 +237,8 @@ public static class DesktopWidgets
                 task.Text ??= string.Empty;
                 if (task.Id == Guid.Empty || !taskIds.Add(task.Id)) { task.Id = Guid.NewGuid(); taskIds.Add(task.Id); }
             }
+            if (widget.Kind == DesktopWidgetKind.Clock && widget.Size is DesktopWidgetSize.Small or DesktopWidgetSize.Wide)
+                widget.Size = DesktopWidgetSize.Landscape;
             if (!SupportedSizes(widget.Kind).Contains(widget.Size)) widget.Size = DefaultSize(widget.Kind);
             var (width, height) = Dimensions(widget.Size);
             widget.Bounds = new LayoutRect(double.IsFinite(widget.Bounds.X) ? widget.Bounds.X : 32,

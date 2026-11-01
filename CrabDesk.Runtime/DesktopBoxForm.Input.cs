@@ -597,10 +597,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseLeave(object? sender, EventArgs eventArgs)
     {
+        HideCalendarHover();
         if (_hoveredWidgetId is not null && _pressedWidget is null)
         {
             _hoveredWidgetId = null; _hoveredWidgetMenuId = null; _hoveredWeatherLocationId = null;
             _hoveredCalendarButton = RectangleF.Empty; _hoveredTodoTaskId = null; _hoveredTodoAddId = null;
+            _hoveredTranslationButton = RectangleF.Empty;
             RequestVisualLayerRender();
         }
         if (HasActiveInlineRename)

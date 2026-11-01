@@ -58,7 +58,8 @@ public sealed class PersistenceTests : IDisposable
         {
             Title = "  文档  ",
             Extensions = ["PDF", ".pdf"],
-            TargetBoxId = state.Boxes[0].Id
+            TargetBoxId = state.Boxes[0].Id,
+            TargetBoxIsExplicit = true
         });
 
         await store.SaveAsync(state);
@@ -108,6 +109,7 @@ public sealed class PersistenceTests : IDisposable
         var customRule = Assert.Single(loaded.OrganizationRules.Where(rule =>
             string.IsNullOrEmpty(rule.BuiltInId)));
         Assert.Equal("文档", customRule.Title);
+        Assert.True(customRule.TargetBoxIsExplicit);
         Assert.Equal([".pdf"], customRule.Extensions);
         Assert.True(File.Exists(store.StatePath));
     }

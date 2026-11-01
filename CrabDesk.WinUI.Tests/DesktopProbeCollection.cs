@@ -3,9 +3,9 @@ using Xunit;
 namespace CrabDesk.WinUI.Tests;
 
 /// <summary>
-/// Serializes the tests that write probe files to the real desktop and
-/// Documents folders. They each measure how Explorer reacts to a new file, so
-/// running two at once would have them react to each other's probe.
+/// Serializes live desktop probes and native window ordering tests. Explorer
+/// reactions, foreground focus and the global Z-order must not be changed by
+/// another test while a probe or window-order assertion is running.
 /// </summary>
 [CollectionDefinition("desktop-probe", DisableParallelization = true)]
 public sealed class DesktopProbeCollection

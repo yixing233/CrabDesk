@@ -89,6 +89,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private DateTimeOffset _targetedDesktopRefreshExpiresAt;
     private IReadOnlyList<DesktopItemRef> _allDesktopItems = [];
     private Dictionary<string, Guid>? _lastOrganizationAssignments;
+    private Dictionary<Guid, Dictionary<string, Guid>>? _lastOrganizationTabAssignments;
     private HashSet<Guid> _lastOrganizationCreatedBoxes = [];
     private long _workspaceRevision;
     private DesktopSurfaceManager? _surfaceManager;
@@ -3112,6 +3113,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         var primary = Monitors.FirstOrDefault(monitor => monitor.IsPrimary) ?? Monitors.FirstOrDefault();
         var disabledRules = LayoutCoordinator.ResetLayout(State, primary?.Id ?? "primary");
         _lastOrganizationAssignments = null;
+        _lastOrganizationTabAssignments = null;
         _lastOrganizationCreatedBoxes.Clear();
         _mappedFolderSnapshots.Clear();
         ConfigureMappedFolderWatchers();
@@ -3606,9 +3608,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
         // Applying a confirmed preview is deliberately atomic: cancellation is
         // observed before state mutation, not between individual assignments.
-        _lastOrganizationAssignments = new Dictionary<string, Guid>(
-            State.Assignments,
-            StringComparer.OrdinalIgnoreCase);
+        CaptureOrganizationUndo();
         _lastOrganizationCreatedBoxes = [];
         // Resolve through BoxCategoryResolver rather than a title table: the
         // label may name a child tab of an existing box, and a same-name box
@@ -3720,9 +3720,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         var validBoxes = State.Boxes.Where(box => !box.IsMappedFolder).Select(box => box.Id).ToHashSet();
         if (decisions.Count > 0)
         {
-            _lastOrganizationAssignments = new Dictionary<string, Guid>(
-                State.Assignments,
-                StringComparer.OrdinalIgnoreCase);
+            CaptureOrganizationUndo();
             // Boxes this run created go with the undo; restoring the old
             // assignments alone would leave them behind empty.
             _lastOrganizationCreatedBoxes = createdBoxIds;
@@ -3806,6 +3804,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
             return;
         }
         _lastOrganizationAssignments = null;
+        var previousTabs = _lastOrganizationTabAssignments;
+        _lastOrganizationTabAssignments = null;
         var createdBoxIds = _lastOrganizationCreatedBoxes;
         _lastOrganizationCreatedBoxes = [];
 
@@ -3816,10 +3816,6 @@ public sealed partial class CrabDeskRuntime : IDisposable
         var validBoxes = State.Boxes.Where(box => !box.IsMappedFolder).Select(box => box.Id).ToHashSet();
         foreach (var (key, target) in previous)
         {
-            if (State.Assignments.TryGetValue(key, out var current) && current == target)
-            {
-                continue;
-            }
             if (!validBoxes.Contains(target))
             {
                 // The target box was deleted since the organization run.
@@ -3828,8 +3824,26 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 UnassignItemCore(key);
                 continue;
             }
-            State.Assignments[key] = target;
-            MoveItemOrderKey(key, target);
+            if (!State.Assignments.TryGetValue(key, out var current) || current != target)
+            {
+                State.Assignments[key] = target;
+                MoveItemOrderKey(key, target);
+            }
+            if (previousTabs is not null)
+            {
+                var box = State.Boxes.First(box => box.Id == target);
+                if (previousTabs.TryGetValue(target, out var tabs) &&
+                    tabs.TryGetValue(key, out var tabId) && box.ManualTabs.Any(tab => tab.Id == tabId))
+                {
+                    box.ItemTabAssignments[key] = tabId;
+                }
+                else
+                {
+                    // The item previously belonged to the whole box, or its
+                    // original tab has since been deleted.
+                    box.ItemTabAssignments.Remove(key);
+                }
+            }
         }
         foreach (var box in State.Boxes.Where(box => createdBoxIds.Contains(box.Id)).ToArray())
         {
@@ -3841,10 +3855,19 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 foreach (var rule in State.OrganizationRules.Where(rule => rule.TargetBoxId == box.Id))
                 {
                     rule.TargetBoxId = null;
+                    rule.TargetBoxIsExplicit = false;
                 }
             }
         }
         NotifyWorkspaceChanged(true);
+    }
+
+    private void CaptureOrganizationUndo()
+    {
+        _lastOrganizationAssignments = new Dictionary<string, Guid>(State.Assignments, StringComparer.OrdinalIgnoreCase);
+        _lastOrganizationTabAssignments = State.Boxes.ToDictionary(
+            box => box.Id,
+            box => new Dictionary<string, Guid>(box.ItemTabAssignments, StringComparer.OrdinalIgnoreCase));
     }
 
     public void InstallDefaultOrganizationRules()
@@ -3893,6 +3916,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             .ToList();
         existing.Action = editedRule.Action;
         existing.TargetBoxId = editedRule.TargetBoxId;
+        existing.TargetBoxIsExplicit = editedRule.TargetBoxIsExplicit;
         NormalizeRulePriorities();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
@@ -4049,6 +4073,13 @@ public sealed partial class CrabDeskRuntime : IDisposable
             ActivateDesktopSurfaces("reconnect");
         }
         await RefreshItemsAsync(false);
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    internal void RecoverDesktopSurfacesAfterRegionFailure()
+    {
+        if (_disposed || IsPaused || !State.Settings.TakeOverDesktop) return;
+        ActivateDesktopSurfaces("window region recovery");
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -4394,7 +4425,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             // Resolve the whole destination: a rule whose title names a child
             // tab files into that tab of the box that owns it instead of
             // creating a second box beside it.
-            var target = BoxCategoryResolver.Resolve(State, rule.Title, rule.TargetBoxId);
+            var target = BoxCategoryResolver.ResolveRule(State, rule);
             var box = target?.Box;
             var itemCount = rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox
                 ? OrganizationRuleEngine.CountProjectedItems(decisions, State.Assignments, rule.Id, box?.Id, liveItemKeys)
@@ -4406,6 +4437,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 {
                     State.Boxes.Remove(box);
                     rule.TargetBoxId = null;
+                    rule.TargetBoxIsExplicit = false;
                 }
                 continue;
             }
@@ -4426,7 +4458,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             // Only a box this pass generated keeps the rule's title. A box the
             // user grouped the category into as a child tab must keep its own
             // title; renaming it made the tab look like the box name.
-            if (box.IsAutoGenerated && target?.Match != BoxCategoryMatch.SubTab)
+            if (box.IsAutoGenerated && target?.Match != BoxCategoryMatch.SubTab && rule.TargetBoxIsExplicit != true)
             {
                 box.Title = rule.Title;
                 if (createdBoxIds.Contains(box.Id))
@@ -4435,6 +4467,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 }
             }
 
+            if (rule.TargetBoxId != box.Id)
+            {
+                rule.TargetBoxIsExplicit = false;
+            }
             rule.TargetBoxId = box.Id;
             if (box.IsAutoGenerated)
             {
@@ -4446,7 +4482,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                      rule.Enabled && rule.Action == OrganizationRuleAction.AssignToBox &&
                      string.IsNullOrWhiteSpace(rule.BuiltInId)).ToArray())
         {
-            var target = BoxCategoryResolver.Resolve(State, rule.Title, rule.TargetBoxId);
+            var target = BoxCategoryResolver.ResolveRule(State, rule);
             var box = target?.Box;
             var itemCount = OrganizationRuleEngine.CountProjectedItems(
                 decisions,
@@ -4464,6 +4500,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 {
                     State.Boxes.Remove(box);
                     rule.TargetBoxId = null;
+                    rule.TargetBoxIsExplicit = false;
                 }
                 continue;
             }
@@ -4482,6 +4519,10 @@ public sealed partial class CrabDeskRuntime : IDisposable
             }
             // Always pin the rule to its box (created or reused) so preview
             // decisions carry a valid target.
+            if (rule.TargetBoxId != box.Id)
+            {
+                rule.TargetBoxIsExplicit = false;
+            }
             rule.TargetBoxId = box.Id;
             if (box.IsAutoGenerated && active.All(entry => entry.Box.Id != box.Id))
             {
@@ -4571,7 +4612,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         NamePattern = source.NamePattern,
         Extensions = source.Extensions.ToList(),
         Action = source.Action,
-        TargetBoxId = source.TargetBoxId
+        TargetBoxId = source.TargetBoxId,
+        TargetBoxIsExplicit = source.TargetBoxIsExplicit
     };
 
     private static string NormalizeRuleExtension(string value)
@@ -5578,6 +5620,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.WidgetTranslation = localTranslationSettings;
         SynchronizeBoxStyles();
         _lastOrganizationAssignments = null;
+        _lastOrganizationTabAssignments = null;
         _lastOrganizationCreatedBoxes.Clear();
         _workspaceRevision++;
         LastUpdateCheck = new UpdateCheckResult(

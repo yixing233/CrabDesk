@@ -30,6 +30,22 @@ public static class DesktopItemVisualStyle
     /// <summary>Configured corner radius shared by hover and selection highlights.</summary>
     public static float HighlightCornerRadius(double configuredRadius) => (float)Math.Clamp(configuredRadius, 0, 20);
 
+    internal static RectangleF HighlightBounds(RectangleF iconBounds, RectangleF labelBounds, float iconSize)
+    {
+        var content = labelBounds.IsEmpty ? iconBounds : RectangleF.Union(iconBounds, labelBounds);
+        var padding = SelectionPadding(iconSize);
+        return RectangleF.Inflate(content, padding, padding);
+    }
+
+    internal static RectangleF MeasureLabelBounds(Graphics graphics, string displayName, RectangleF layout, Font font, StringFormat format)
+    {
+        if (layout.Width <= 0 || layout.Height <= 0 || string.IsNullOrWhiteSpace(displayName)) return RectangleF.Empty;
+        var measured = graphics.MeasureString(displayName, font, layout.Size, format);
+        var width = Math.Min(layout.Width, Math.Max(font.Size, measured.Width));
+        var height = Math.Min(layout.Height, Math.Max(0, measured.Height));
+        return new(layout.X + (layout.Width - width) / 2, layout.Y, width, height);
+    }
+
     /// <summary>Blends <paramref name="color"/> towards white for the hover treatment.</summary>
     public static Color Brighten(Color color, float amount = HoverBrightness)
     {

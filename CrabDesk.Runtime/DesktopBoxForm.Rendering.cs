@@ -43,6 +43,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             DrawBox(graphics, box, clipBounds);
         }
         DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        DrawCalendarToolTip(graphics);
         graphics.ResetTransform();
     }
 
@@ -902,6 +903,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var visualBounds = textBounds.IsEmpty
             ? item.Bounds
             : RectangleF.Union(item.Bounds, textBounds);
+        var highlightBounds = isSelected || isHovered || isFolderDropTarget
+            ? GetItemHighlightBounds(graphics, item, iconBounds, textBounds, labelFont,
+                showsFullLabel && item.Box.ViewMode == BoxViewMode.Grid ? selectedGridItemFormat : labelFormat)
+            : RectangleF.Empty;
         var visualKey = (item.Box.Id, itemKey);
         if (isSelected || isHovered || isFolderDropTarget)
         {
@@ -920,7 +925,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
             using var folderFill = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, configuredSelection));
             using var folderBorder = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, configuredSelection), 1.5f);
-            using var folderPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
+            using var folderPath = RoundedRectangle(highlightBounds, cornerRadius);
             graphics.FillPath(folderFill, folderPath);
             graphics.DrawPath(folderBorder, folderPath);
         }
@@ -933,7 +938,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             using var hovered = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.HoverFillAlpha, hoverColor));
             using var hoverBorder = new Pen(Color.FromArgb(DesktopItemVisualStyle.HoverBorderAlpha, hoverColor), 1);
             using var hoveredPath = RoundedRectangle(
-                RectangleF.Inflate(visualBounds, -2, -2),
+                highlightBounds,
                 cornerRadius);
             graphics.FillPath(hovered, hoveredPath);
             graphics.DrawPath(hoverBorder, hoveredPath);
@@ -942,7 +947,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             var configuredSelection = ParseOpaqueColor(_runtime.State.Settings.Appearance.SelectionColor);
             using var selected = new SolidBrush(Color.FromArgb(DesktopItemVisualStyle.SelectedFillAlpha, configuredSelection));
-            using var selectedPath = RoundedRectangle(RectangleF.Inflate(visualBounds, -2, -2), cornerRadius);
+            using var selectedPath = RoundedRectangle(highlightBounds, cornerRadius);
             graphics.FillPath(selected, selectedPath);
         }
 
@@ -1001,6 +1006,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 item.Bounds.Y + 5,
                 iconSize,
                 iconSize);
+    }
+
+    private static RectangleF GetItemHighlightBounds(Graphics graphics, ItemGeometry item, RectangleF iconBounds,
+        RectangleF textBounds, Font? labelFont, StringFormat? labelFormat)
+    {
+        if (item.Box.ViewMode == BoxViewMode.List) return RectangleF.Inflate(item.Bounds, -2, -2);
+        var labelBounds = labelFont is not null && labelFormat is not null
+            ? DesktopItemVisualStyle.MeasureLabelBounds(graphics, item.Item.DisplayName, textBounds, labelFont, labelFormat)
+            : RectangleF.Empty;
+        return DesktopItemVisualStyle.HighlightBounds(iconBounds, labelBounds, (float)item.Box.Appearance.IconSize);
     }
 
     private static RectangleF GetItemTextBounds(
@@ -1219,7 +1234,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var iconBounds = GetItemIconBounds(item);
         if (!item.Box.Appearance.ShowItemLabels)
         {
-            return item.Bounds;
+            return RectangleF.Union(item.Bounds, GetItemHighlightBounds(graphics, item, iconBounds, RectangleF.Empty, null, null));
         }
 
         var isSelected = _selection.Contains(item.Item.Key.ToString());
@@ -1235,9 +1250,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             labelFont,
             DesktopIconLabelDisplayPolicy.ShowsFullLabel(isSelected, isHovered: true),
             contentBounds);
-        return textBounds.IsEmpty
+        var visualBounds = textBounds.IsEmpty
             ? item.Bounds
             : RectangleF.Union(item.Bounds, textBounds);
+        using var format = item.Box.ViewMode == BoxViewMode.Grid ? CreateSelectedGridItemTextFormat() : CreateItemTextFormat(item.Box.ViewMode);
+        return RectangleF.Union(visualBounds, GetItemHighlightBounds(graphics, item, iconBounds, textBounds, labelFont, format));
     }
 
     private static void DrawMenuButton(
