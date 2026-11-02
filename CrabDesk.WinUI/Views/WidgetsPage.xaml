@@ -199,6 +199,22 @@
                         </StackPanel>
                         <TextBlock Text="支持 OpenAI 兼容接口。点击桌面卡片输入原文，选择目标语言后点击“翻译”或按 Ctrl+Enter。" Style="{StaticResource SecondaryBodyStyle}" />
                     </StackPanel>
+                    <StackPanel x:Name="PerformanceEditor" Visibility="Collapsed" Spacing="12">
+                        <TextBlock Text="系统性能" FontWeight="SemiBold" />
+                        <TextBlock Text="每秒更新整台电脑的 CPU、GPU、内存和磁盘状态。首轮采样、设备不支持或暂时无法读取的指标显示 —。GPU 显示最繁忙图形引擎的占用率，磁盘显示系统物理磁盘的活动比例。" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock x:Name="PerformanceSummary" Style="{StaticResource SecondaryBodyStyle}" />
+                    </StackPanel>
+                    <StackPanel x:Name="NetworkEditor" Visibility="Collapsed" Spacing="12">
+                        <TextBlock Text="网络设置" FontWeight="SemiBold" />
+                        <ComboBox x:Name="NetworkDisplayModePicker" Header="显示样式" HorizontalAlignment="Stretch" SelectionChanged="NetworkDisplayModePicker_SelectionChanged" />
+                        <ComboBox x:Name="NetworkAdapterPicker" Header="网络适配器" HorizontalAlignment="Stretch" SelectionChanged="NetworkAdapterPicker_SelectionChanged" />
+                        <TextBox x:Name="NetworkLatencyInput" Header="延迟测量目标" PlaceholderText="IP 或主机名；留空使用默认网关" MaxLength="253" LostFocus="NetworkLatencyInput_LostFocus" KeyDown="NetworkLatencyInput_KeyDown" />
+                        <TextBlock Text="按 Enter 或离开输入框时保存。网速为所选适配器的实时流量。延迟通过 ICMP 按系统路由测量，不绑定所选适配器；目标不响应时显示超时。" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock x:Name="NetworkSummary" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock x:Name="NetworkPublicIpStatus" Style="{StaticResource SecondaryBodyStyle}" />
+                        <Button x:Name="QueryPublicIpButton" Content="查询公网 IP" Click="QueryPublicIp_Click" HorizontalAlignment="Left" />
+                        <TextBlock Text="公网 IP 仅在点击查询时通过外部服务按系统路由获取，不绑定所选适配器，可能与其出口不同。" Style="{StaticResource SecondaryBodyStyle}" />
+                    </StackPanel>
                     <StackPanel x:Name="WeatherEditor" Visibility="Collapsed" Spacing="20">
                         <StackPanel Spacing="12">
                             <TextBlock Text="城市管理" FontWeight="SemiBold" />
@@ -237,6 +253,15 @@
                         <StackPanel Spacing="12">
                             <TextBox x:Name="TitleInput" Header="卡片名称" PlaceholderText="使用组件默认名称" MaxLength="80" TextChanged="TitleInput_TextChanged" />
                             <ComboBox x:Name="SizePicker" Header="尺寸" SelectionChanged="SizePicker_SelectionChanged" HorizontalAlignment="Stretch" AutomationProperties.Name="组件尺寸" />
+                            <StackPanel x:Name="CustomSizeSettings" Spacing="8" Visibility="Collapsed">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <NumberBox x:Name="WidgetWidth" Header="宽（DIP）" Minimum="180" SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" AutomationProperties.Name="组件宽度" />
+                                    <NumberBox x:Name="WidgetHeight" Grid.Column="1" Header="高（DIP）" Minimum="120" SmallChange="1" LargeChange="10" SpinButtonPlacementMode="Compact" AutomationProperties.Name="组件高度" />
+                                </Grid>
+                                <Button Content="应用尺寸" Click="ApplyCustomSize_Click" HorizontalAlignment="Left" />
+                                <TextBlock Text="也可拖动桌面卡片的边缘或角落调整。锁定位置后禁止拖拽调整尺寸。" Style="{StaticResource SecondaryBodyStyle}" />
+                            </StackPanel>
                             <ComboBox x:Name="MonitorPicker" Header="显示器" DisplayMemberPath="Label" SelectionChanged="MonitorPicker_SelectionChanged" HorizontalAlignment="Stretch" />
                             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="锁定位置" VerticalAlignment="Center" />

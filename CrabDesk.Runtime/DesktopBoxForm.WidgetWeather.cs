@@ -5,35 +5,30 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
-    internal static RectangleF WeatherLocationButtonRectangle(DesktopWidget widget) =>
-        new((float)widget.Bounds.X + 4, (float)widget.Bounds.Y + 2, 24, 24);
+    private static WidgetWeatherPresentation.Layout WeatherPresentation(DesktopWidget widget, double radius) =>
+        WidgetWeatherPresentation.Arrange(widget.Bounds.Width, widget.Bounds.Height, radius, widget.Cities.Count > 1);
 
-    internal static RectangleF WeatherLocationsButtonRectangle(DesktopWidget widget) =>
-        new((float)widget.Bounds.X + (float)widget.Bounds.Width - 60, (float)widget.Bounds.Y + 2, 24, 24);
+    private static RectangleF WeatherRectangle(DesktopWidget widget, LayoutRect rect) => new(
+        (float)(widget.Bounds.X + rect.X), (float)(widget.Bounds.Y + rect.Y), (float)rect.Width, (float)rect.Height);
 
-    internal static RectangleF WeatherCityButtonRectangle(DesktopWidget widget)
-    {
-        var bounds = WidgetRectangle(widget);
-        return new(bounds.X + 34, bounds.Y + 2, Math.Min(148, bounds.Width - 98), 24);
-    }
+    internal static RectangleF WeatherLocationButtonRectangle(DesktopWidget widget, double radius = 8) =>
+        WeatherRectangle(widget, WeatherPresentation(widget, radius).Location);
+
+    internal static RectangleF WeatherLocationsButtonRectangle(DesktopWidget widget, double radius = 8) =>
+        WeatherRectangle(widget, WeatherPresentation(widget, radius).Locations);
+
+    internal static RectangleF WeatherCityButtonRectangle(DesktopWidget widget, double radius = 8) =>
+        WeatherRectangle(widget, WeatherPresentation(widget, radius).City);
 
     internal readonly record struct WeatherLayout(RectangleF Temperature, RectangleF Icon, RectangleF Forecast,
         RectangleF FeelsLike, RectangleF Humidity, RectangleF Wind, RectangleF Status);
 
-    internal static WeatherLayout GetWeatherLayout(DesktopWidget widget)
+    internal static WeatherLayout GetWeatherLayout(DesktopWidget widget, double radius = 8)
     {
-        var body = WidgetBodyRectangle(widget);
-        var wide = body.Width >= 300;
-        var overview = Math.Min(body.Width, 164);
-        var column = (body.Width - 20) / 2;
-        return new(new(body.X + 4, body.Y - 2, overview - 56, 48),
-            new(body.X + overview - 48, body.Y + 2, 44, 44),
-            new(body.X + 4, body.Y + 48, overview - 64, 18),
-            new(body.X + overview - 56, body.Y + 48, 52, 18),
-            wide ? new(body.Right - 132, body.Y + 2, 128, 24) : new(body.X + 4, body.Y + 68, column, 18),
-            wide ? new(body.Right - 132, body.Y + 34, 128, 24) : new(body.X + column + 16, body.Y + 68, column, 18),
-            new(body.X + 4, body.Bottom - (widget.Cities.Count > 1 ? 48 : 32), body.Width - 8,
-                widget.Cities.Count > 1 ? 24 : 28));
+        var layout = WeatherPresentation(widget, radius);
+        return new(WeatherRectangle(widget, layout.Temperature), WeatherRectangle(widget, layout.Icon),
+            WeatherRectangle(widget, layout.Forecast), WeatherRectangle(widget, layout.FeelsLike),
+            WeatherRectangle(widget, layout.Humidity), WeatherRectangle(widget, layout.Wind), WeatherRectangle(widget, layout.Status));
     }
 
     private FluentContextMenuStrip ShowWeatherCityMenu(DesktopWidget widget)
@@ -49,19 +44,20 @@ internal sealed partial class DesktopBoxForm
         }
         if (widget.Cities.Count > 0) menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("添加 / 管理位置", null, (_, _) => _runtime.OpenWidgetWeatherLocations(widget));
-        var anchor = WeatherCityButtonRectangle(widget);
+        var anchor = WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius);
         menu.Show(this, new Point(ToPixel(anchor.X), ToPixel(anchor.Bottom)));
         return menu;
     }
 
-    internal static RectangleF WeatherEmptyLocationRectangle(DesktopWidget widget)
+    internal static RectangleF WeatherEmptyLocationRectangle(DesktopWidget widget, double radius = 8)
     {
-        var body = WidgetBodyRectangle(widget);
+        var body = WeatherRectangle(widget, WeatherPresentation(widget, radius).Body);
         return new(body.X + 8, body.Y + 40, body.Width - 16, 28);
     }
 
-    private static bool IsWeatherLocationPoint(DesktopWidget widget, PointF point) => widget.Kind == DesktopWidgetKind.Weather &&
-        (WeatherLocationButtonRectangle(widget).Contains(point) || widget.Location is null && WeatherEmptyLocationRectangle(widget).Contains(point));
+    private bool IsWeatherLocationPoint(DesktopWidget widget, PointF point) => widget.Kind == DesktopWidgetKind.Weather &&
+        (WeatherLocationButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ||
+         widget.Location is null && WeatherEmptyLocationRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point));
 
     private void LocateWeatherFromCard(DesktopWidget widget)
     {
@@ -76,7 +72,8 @@ internal sealed partial class DesktopBoxForm
 
     private void DrawWeatherLocationButton(Graphics graphics, DesktopWidget widget, Color text, Color accent)
     {
-        var button = WeatherLocationButtonRectangle(widget);
+        var radius = _runtime.State.Settings.Appearance.CornerRadius;
+        var button = WeatherLocationButtonRectangle(widget, radius);
         var hovered = _hoveredWeatherLocationId == widget.Id;
         if (hovered)
         {
@@ -93,13 +90,13 @@ internal sealed partial class DesktopBoxForm
         graphics.DrawLine(pen, x + 4.5f, y, x + 8, y);
         graphics.DrawLine(pen, x, y - 8, x, y - 4.5f);
         graphics.DrawLine(pen, x, y + 4.5f, x, y + 8);
-        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MapPin, WeatherLocationsButtonRectangle(widget), accent, 14);
-        var city = WeatherCityButtonRectangle(widget);
+        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MapPin, WeatherLocationsButtonRectangle(widget, radius), accent, 15);
+        var city = WeatherCityButtonRectangle(widget, radius);
         WidgetText(graphics, widget.Location?.Name ?? widget.DisplayTitle,
-            new(city.X, city.Y, city.Width - 14, city.Height), text, 12, bold: true);
+            new(city.X, city.Y, city.Width - 14, city.Height), text, 13, bold: true);
         if (widget.Location is not null)
         {
-            using var font = new Font(BoxAppearance.DefaultFontFamily, 12, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var font = new Font(BoxAppearance.DefaultFontFamily, 13, FontStyle.Bold, GraphicsUnit.Pixel);
             var arrowX = Math.Min(city.Right - 12, city.X + graphics.MeasureString(widget.Location.Name, font).Width + 2);
             LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronsUpDown,
                 new(arrowX, city.Y, 12, city.Height), text, 10);
@@ -108,7 +105,7 @@ internal sealed partial class DesktopBoxForm
 
     private static void DrawWeatherMetric(Graphics graphics, LucideRuntimeIcon icon, string value, RectangleF bounds, Color color)
     {
-        LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), color, 12);
-        WidgetText(graphics, value, new(bounds.X + 19, bounds.Y, bounds.Width - 19, bounds.Height), color, 10.5f);
+        LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), color, 13);
+        WidgetText(graphics, value, new(bounds.X + 19, bounds.Y, bounds.Width - 19, bounds.Height), color, 12.5f);
     }
 }

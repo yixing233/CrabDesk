@@ -61,6 +61,5 @@ internal sealed partial class DesktopBoxForm
             WidgetText(graphics, now.ToString("M月d日 · ddd", culture),
                 new(left, body.Y + body.Height / 2 + 12, available, 20), muted, 10.5f);
         }
-        else WidgetText(graphics, now.ToString("M月d日 · ddd", culture), new(body.X, (float)(face.Y + face.Height + 4), body.Width, 18), muted, 10.5f, centered: true);
     }
 }

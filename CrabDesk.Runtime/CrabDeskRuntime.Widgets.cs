@@ -107,6 +107,7 @@ public sealed partial class CrabDeskRuntime
         var widget = new DesktopWidget { Kind = kind, Size = size, MonitorId = monitor.Id, Bounds = bounds };
         State.Widgets.Add(widget);
         WidgetChanged(widget);
+        if (_surfaceManager is not null && (kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network)) _ = RefreshMonitorWidgetsAsync(true);
         return widget;
     }
 
@@ -124,6 +125,9 @@ public sealed partial class CrabDeskRuntime
     public void RemoveWidget(DesktopWidget widget)
     {
         if (!State.Widgets.Remove(widget)) return;
+        CancelPublicIpRequest(widget.Id);
+        widget.IsPublicIpLoading = false;
+        if (widget.Kind == DesktopWidgetKind.Network) _monitorPingCancellation?.Cancel();
         CancelWidgetRequest(widget.Id);
         if (widget.Kind == DesktopWidgetKind.Translation) _widgetTranslationService?.ResetConversation();
         _weatherRetryAt.Remove(widget.Id);
@@ -135,7 +139,8 @@ public sealed partial class CrabDeskRuntime
 
     public void ResizeWidget(DesktopWidget widget, DesktopWidgetSize size)
     {
-        if (!DesktopWidgets.SupportedSizes(widget.Kind).Contains(size)) return;
+        if (_disposed || !State.Widgets.Contains(widget) || !DesktopWidgets.SupportedSizes(widget).Contains(size)) return;
+        if (size == DesktopWidgetSize.Custom) { ResizeWidget(widget, widget.Bounds.Width, widget.Bounds.Height); return; }
         var monitor = Monitors.FirstOrDefault(m => m.Id == widget.MonitorId);
         if (monitor is null) return;
         var (width, height) = DesktopWidgets.Dimensions(size);
@@ -143,6 +148,23 @@ public sealed partial class CrabDeskRuntime
         if (area.Width < width || area.Height < height) throw new InvalidOperationException("当前显示器工作区无法容纳此尺寸。");
         widget.Size = size;
         widget.Bounds = new LayoutRect(widget.Bounds.X, widget.Bounds.Y, width, height).Clamp(area, width, height);
+        WidgetChanged(widget);
+    }
+
+    public void ResizeWidget(DesktopWidget widget, double width, double height)
+    {
+        if (_disposed || !State.Widgets.Contains(widget) || !DesktopWidgets.SupportsFreeResize(widget.Kind)) return;
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 0 || height <= 0)
+            throw new InvalidOperationException("请输入有效的组件宽度和高度。");
+        var monitor = Monitors.FirstOrDefault(m => m.Id == widget.MonitorId);
+        if (monitor is null) return;
+        var area = WidgetWorkArea(monitor);
+        if (area.Width < WidgetSizing.MinimumWidth || area.Height < WidgetSizing.MinimumHeight)
+            throw new InvalidOperationException("当前显示器工作区无法容纳此组件。");
+        var bounds = new LayoutRect(widget.Bounds.X, widget.Bounds.Y, width, height)
+            .Clamp(area, WidgetSizing.MinimumWidth, WidgetSizing.MinimumHeight);
+        if (widget.Size == DesktopWidgetSize.Custom && widget.Bounds == bounds) return;
+        widget.Size = DesktopWidgetSize.Custom; widget.Bounds = bounds;
         WidgetChanged(widget);
     }
 
@@ -394,6 +416,7 @@ public sealed partial class CrabDeskRuntime
 
     private void DisposeWidgets()
     {
+        DisposeMonitoring();
         foreach (var id in _widgetRequests.Keys.ToArray()) CancelWidgetRequest(id);
         _widgetWeatherService.Dispose();
         _widgetTranslationService.Dispose();

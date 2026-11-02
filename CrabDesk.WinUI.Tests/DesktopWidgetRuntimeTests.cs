@@ -11,6 +11,65 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopWidgetRuntimeTests
 {
     [Theory]
+    [InlineData(DesktopWidgetKind.Note)] [InlineData(DesktopWidgetKind.Todo)]
+    public void FreeSizingValidatesChangesPreservesContentAndCanReturnToPreset(DesktopWidgetKind kind)
+    {
+        var (runtime, monitor) = Fixture();
+        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = new DesktopWidget { Kind = kind, MonitorId = monitor.Id, Text = "保留便签", Tasks = [new() { Text = "保留待办" }] };
+        runtime.State.Widgets.Add(widget); var changes = 0; runtime.Changed += (_, _) => changes++;
+        runtime.ResizeWidget(widget, 321.6, 425.2);
+        Assert.Equal(DesktopWidgetSize.Custom, widget.Size); Assert.Equal((321.6, 425.2), DesktopWidgets.Dimensions(widget));
+        runtime.ResizeWidget(widget, 321.6, 425.2); Assert.Equal(1, changes);
+        Assert.Throws<InvalidOperationException>(() => runtime.ResizeWidget(widget, double.NaN, 200));
+        Assert.Equal((321.6, 425.2), DesktopWidgets.Dimensions(widget));
+        runtime.ResizeWidget(widget, 5000, 5000); Assert.Equal(new LayoutRect(0, 0, 1000, 700), widget.Bounds);
+        runtime.ResizeWidget(widget, DesktopWidgetSize.Medium); Assert.Equal((180d, 180d), DesktopWidgets.Dimensions(widget));
+        Assert.Equal("保留便签", widget.Text); Assert.Equal("保留待办", Assert.Single(widget.Tasks).Text);
+    }
+
+    [Theory]
+    [InlineData(DesktopWidgetKind.Note, 1)] [InlineData(DesktopWidgetKind.Note, 1.25)]
+    [InlineData(DesktopWidgetKind.Todo, 2)]
+    public void WidgetCornerResizeUsesFinalReleasePositionAndSavesOnce(DesktopWidgetKind kind, double scale) => OnSta(() =>
+    {
+        var (runtime, monitor) = Fixture(scale);
+        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = new DesktopWidget { Kind = kind, MonitorId = monitor.Id, Bounds = new(40, 50, 372, 180), Size = DesktopWidgetSize.Large };
+        runtime.State.Widgets.Add(widget); var changes = 0; runtime.Changed += (_, _) => changes++;
+        using var surface = new DesktopBoxForm(runtime, monitor); _ = surface.Handle;
+        var start = new PointF(405, 223);
+        var mouse = new System.Windows.Forms.MouseEventArgs(System.Windows.Forms.MouseButtons.Left, 1, 405, 223, 0);
+        Assert.True((bool)Call(surface, "HandleWidgetMouseDown", mouse, start)!);
+        Call(surface, "HandleWidgetMouseMove", new PointF(445, 263));
+        Assert.Equal(new LayoutRect(40, 50, 412, 220), widget.Bounds); Assert.Equal(0, changes);
+        Call(surface, "HandleWidgetMouseUp", mouse, new PointF(465, 283));
+        Assert.Equal(new LayoutRect(40, 50, 432, 240), widget.Bounds); Assert.Equal(1, changes);
+        Assert.Equal(DesktopWidgetSize.Custom, widget.Size); Assert.False(surface.Capture);
+        Assert.Null(typeof(DesktopBoxForm).GetField(kind == DesktopWidgetKind.Note ? "_noteEditingWidget" : "_todoEditingWidget", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(surface));
+    });
+
+    [Fact]
+    public void ResizeCaptureLossCommitsAndLockedBordersRemainNonResizable() => OnSta(() =>
+    {
+        var (runtime, monitor) = Fixture();
+        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Note, MonitorId = monitor.Id, Bounds = new(40, 50, 372, 180), Size = DesktopWidgetSize.Large };
+        runtime.State.Widgets.Add(widget); var changes = 0; runtime.Changed += (_, _) => changes++;
+        using var surface = new DesktopBoxForm(runtime, monitor); _ = surface.Handle;
+        var mouse = new System.Windows.Forms.MouseEventArgs(System.Windows.Forms.MouseButtons.Left, 1, 405, 223, 0);
+        Call(surface, "HandleWidgetMouseDown", mouse, new PointF(405, 223));
+        Call(surface, "HandleWidgetMouseMove", new PointF(435, 253));
+        surface.Capture = false;
+        Assert.Equal(1, changes); Assert.Equal(new LayoutRect(40, 50, 402, 210), widget.Bounds);
+        widget.IsLocked = true;
+        Call(surface, "HandleWidgetMouseDown", mouse, new PointF(435, 253));
+        Call(surface, "HandleWidgetMouseMove", new PointF(485, 303));
+        Assert.Equal(new LayoutRect(40, 50, 402, 210), widget.Bounds);
+        Call(surface, "FinishWidgetPress", false);
+    });
+
+    [Theory]
     [InlineData(DesktopWidgetSize.Medium, false, 1)]
     [InlineData(DesktopWidgetSize.Medium, false, 1.25)]
     [InlineData(DesktopWidgetSize.Medium, true, 2)]
@@ -1069,7 +1128,7 @@ public sealed class DesktopWidgetRuntimeTests
     [InlineData(0, 1)]
     [InlineData(8, 1.25)]
     [InlineData(20, 2)]
-    public void SixWidgetKindsRenderAtSupportedDpiWithoutPaintingOutsideTheirCards(double radius, double scale) => OnSta(() =>
+    public void AllWidgetKindsRenderAtSupportedDpiWithoutPaintingOutsideTheirCards(double radius, double scale) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture(scale);
         runtime.State.Settings.Appearance.CornerRadius = radius;
@@ -1085,11 +1144,12 @@ public sealed class DesktopWidgetRuntimeTests
             runtime.State.Widgets.Add(widget);
         }
         using var surface = new DesktopBoxForm(runtime, monitor);
-        using var bitmap = new Bitmap((int)(820 * scale), (int)(620 * scale));
+        var canvasHeight = (int)Math.Ceiling(kinds.Length / 2d) * 200 + 20;
+        using var bitmap = new Bitmap((int)(820 * scale), (int)(canvasHeight * scale));
         using var graphics = Graphics.FromImage(bitmap);
         graphics.Clear(Color.Magenta);
         graphics.ScaleTransform((float)scale, (float)scale);
-        surface.RenderOnIconLayer(graphics, new RectangleF(0, 0, 820, 620));
+        surface.RenderOnIconLayer(graphics, new RectangleF(0, 0, 820, canvasHeight));
         foreach (var widget in runtime.State.Widgets)
         {
             Assert.NotEqual(Color.Magenta.ToArgb(), bitmap.GetPixel((int)((widget.Bounds.X + 10) * scale), (int)((widget.Bounds.Y + 40) * scale)).ToArgb());
@@ -1456,12 +1516,15 @@ public sealed class DesktopWidgetRuntimeTests
     [InlineData(1.25d, 372)]
     [InlineData(1.5d, 372)]
     [InlineData(2d, 372)]
+    [InlineData(1.25d, 318)]
+    [InlineData(2d, 506)]
     public void NoteEditorAndDisplayKeepTextOriginsAndLineSpacingAligned(double scale, int cardWidth) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture(scale);
         var widget = new DesktopWidget
         {
-            Kind = DesktopWidgetKind.Note, MonitorId = monitor.Id, Bounds = new(20, 20, cardWidth, 180),
+            Kind = DesktopWidgetKind.Note, MonitorId = monitor.Id, Bounds = new(20, 20, cardWidth, cardWidth == 318 ? 420 : 180),
+            Size = cardWidth is 180 or 372 ? DesktopWidgetSize.Medium : DesktopWidgetSize.Custom,
             Text = "便签 Text alignment\n第二行中文与 123\n第三行文字"
         };
         runtime.State.Widgets.Add(widget);
@@ -1489,13 +1552,16 @@ public sealed class DesktopWidgetRuntimeTests
     [InlineData(1.25d, 372)]
     [InlineData(1.5d, 372)]
     [InlineData(2d, 372)]
+    [InlineData(1.25d, 318)]
+    [InlineData(2d, 506)]
     public void TodoEditorAndDisplayKeepTextOriginsAligned(double scale, int cardWidth) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture(scale);
         using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
         var task = new WidgetTodoItem { Text = "待办 Text 123", EndDate = new(2026, 11, 3) };
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.Todo, MonitorId = monitor.Id,
-            Bounds = new(20, 20, cardWidth, 180), Tasks = [task] };
+            Size = cardWidth is 180 or 372 ? DesktopWidgetSize.Medium : DesktopWidgetSize.Custom,
+            Bounds = new(20, 20, cardWidth, cardWidth == 318 ? 420 : 180), Tasks = [task] };
         runtime.State.Widgets.Add(widget);
         using var surface = new DesktopBoxForm(runtime, monitor);
         surface.Location = new(-12000, -12000); _ = surface.Handle;
@@ -1668,13 +1734,18 @@ public sealed class DesktopWidgetRuntimeTests
     }
 
     [Theory]
-    [InlineData(180, false)]
-    [InlineData(180, true)]
-    [InlineData(372, false)]
-    [InlineData(372, true)]
-    public void WeatherLayoutFitsSingleAndMultipleCitiesWithoutOverlappingContent(int width, bool multipleCities) => OnSta(() =>
+    [InlineData(180, false, 0)]
+    [InlineData(180, true, 0)]
+    [InlineData(372, false, 8)]
+    [InlineData(372, true, 8)]
+    [InlineData(180, false, 20)]
+    [InlineData(180, true, 20)]
+    [InlineData(372, false, 20)]
+    [InlineData(372, true, 20)]
+    public void WeatherLayoutFitsSingleAndMultipleCitiesWithoutOverlappingContent(int width, bool multipleCities, double radius) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture();
+        runtime.State.Settings.Appearance.CornerRadius = radius;
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.Weather, MonitorId = monitor.Id, Bounds = new(20, 20, width, 180) };
         var city = DesktopWidgets.AddWeatherCity(widget, new("长安区", "西安", "中国", 34, 108));
         city.Weather = new(16, 6, 20, 0, DateTimeOffset.Now) { FeelsLike = 19, Humidity = 45, WindSpeed = 7, AirQuality = 127 };
@@ -1682,11 +1753,11 @@ public sealed class DesktopWidgetRuntimeTests
         widget.ActiveCityId = city.Id;
         runtime.State.Widgets.Add(widget);
         var card = DesktopBoxForm.WidgetRectangle(widget);
-        var layout = DesktopBoxForm.GetWeatherLayout(widget);
-        var header = DesktopBoxForm.WeatherCityButtonRectangle(widget);
+        var layout = DesktopBoxForm.GetWeatherLayout(widget, radius);
+        var header = DesktopBoxForm.WeatherCityButtonRectangle(widget, radius);
         Assert.True(card.Contains(header));
-        Assert.False(header.IntersectsWith(DesktopBoxForm.WeatherLocationButtonRectangle(widget)));
-        Assert.False(header.IntersectsWith(DesktopBoxForm.WeatherLocationsButtonRectangle(widget)));
+        Assert.False(header.IntersectsWith(DesktopBoxForm.WeatherLocationButtonRectangle(widget, radius)));
+        Assert.False(header.IntersectsWith(DesktopBoxForm.WeatherLocationsButtonRectangle(widget, radius)));
         var regions = new[] { layout.Temperature, layout.Icon, layout.Forecast, layout.FeelsLike, layout.Humidity, layout.Wind, layout.Status };
         foreach (var region in regions) Assert.True(card.Contains(region));
         for (var i = 0; i < regions.Length; i++)
@@ -1701,7 +1772,7 @@ public sealed class DesktopWidgetRuntimeTests
         Assert.True((bool)typeof(DesktopBoxForm).GetField("_widgetCanDrag", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!);
         using var bitmap = new Bitmap(width + 40, 220);
         using (var graphics = Graphics.FromImage(bitmap)) Call(surface, "DrawWidget", graphics, widget);
-        bitmap.Save(Path.Combine(AppContext.BaseDirectory, $"weather-layout-{width}-{multipleCities}.png"));
+        bitmap.Save(Path.Combine(AppContext.BaseDirectory, $"weather-layout-{width}-{multipleCities}-{radius}.png"));
     });
 
     [Fact]

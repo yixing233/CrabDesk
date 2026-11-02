@@ -2,8 +2,9 @@ using System.Text.Json.Serialization;
 
 namespace CrabDesk.Core;
 
-public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather }
-public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape }
+public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network }
+public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape, Custom }
+public enum NetworkWidgetDisplayMode { Details, Speeds, Chart }
 
 public sealed class DesktopWidget
 {
@@ -20,6 +21,16 @@ public sealed class DesktopWidget
     public List<WidgetTodoItem> Tasks { get; set; } = [];
     public string TargetLanguage { get; set; } = "简体中文";
     public string Translation { get; set; } = string.Empty;
+    public string NetworkAdapterId { get; set; } = string.Empty;
+    public string NetworkLatencyTarget { get; set; } = "1.1.1.1";
+    public NetworkWidgetDisplayMode NetworkDisplayMode { get; set; }
+    [JsonIgnore] public List<WidgetNetworkRatePoint> NetworkHistory { get; } = [];
+    [JsonIgnore] public WidgetPerformanceSnapshot? Performance { get; set; }
+    [JsonIgnore] public WidgetNetworkSnapshot? Network { get; set; }
+    [JsonIgnore] public string MonitorError { get; set; } = string.Empty;
+    [JsonIgnore] public string PublicIp { get; set; } = string.Empty;
+    [JsonIgnore] public string PublicIpError { get; set; } = string.Empty;
+    [JsonIgnore] public bool IsPublicIpLoading { get; set; }
     private WeatherLocation? _legacyLocation;
     private WidgetWeatherSnapshot? _legacyWeather;
     // Retain the original JSON properties so existing single-city widgets migrate on load.
@@ -176,13 +187,14 @@ public static class DesktopWidgets
     public static string GetName(DesktopWidgetKind kind) => kind switch
     {
         DesktopWidgetKind.Clock => "时钟", DesktopWidgetKind.Calendar => "月历", DesktopWidgetKind.Note => "便签",
-        DesktopWidgetKind.Todo => "待办", DesktopWidgetKind.Translation => "翻译", DesktopWidgetKind.Weather => "天气", _ => "小组件"
+        DesktopWidgetKind.Todo => "待办", DesktopWidgetKind.Translation => "翻译", DesktopWidgetKind.Weather => "天气",
+        DesktopWidgetKind.Performance => "性能监控", DesktopWidgetKind.Network => "网络监控", _ => "小组件"
     };
 
     public static DesktopWidgetSize DefaultSize(DesktopWidgetKind kind) => kind switch
     {
         DesktopWidgetKind.Clock => DesktopWidgetSize.Medium,
-        DesktopWidgetKind.Note or DesktopWidgetKind.Translation => DesktopWidgetSize.Large,
+        DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Network => DesktopWidgetSize.Large,
         _ => DesktopWidgetSize.Medium
     };
 
@@ -190,8 +202,24 @@ public static class DesktopWidgets
     {
         DesktopWidgetKind.Clock => [DesktopWidgetSize.Medium, DesktopWidgetSize.Landscape],
         DesktopWidgetKind.Calendar => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
-        DesktopWidgetKind.Translation => [DesktopWidgetSize.Large],
+        DesktopWidgetKind.Note or DesktopWidgetKind.Todo => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large, DesktopWidgetSize.Custom],
+        DesktopWidgetKind.Translation or DesktopWidgetKind.Network => [DesktopWidgetSize.Large],
         _ => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large]
+    };
+
+    public static IReadOnlyList<DesktopWidgetSize> SupportedSizes(DesktopWidget widget) =>
+        widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds
+            ? [DesktopWidgetSize.Small, DesktopWidgetSize.Wide] : SupportedSizes(widget.Kind);
+
+    public static DesktopWidgetSize DefaultSize(DesktopWidget widget) =>
+        widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds
+            ? DesktopWidgetSize.Small : DefaultSize(widget.Kind);
+
+    public static string NetworkDisplayName(NetworkWidgetDisplayMode mode) => mode switch
+    {
+        NetworkWidgetDisplayMode.Speeds => "仅上下行速度",
+        NetworkWidgetDisplayMode.Chart => "上下行曲线图",
+        _ => "完整信息"
     };
 
     public static (double Width, double Height) Dimensions(DesktopWidgetSize size) => size switch
@@ -202,10 +230,28 @@ public static class DesktopWidgets
         DesktopWidgetSize.Large => (372, 180), _ => (180, 180)
     };
 
+    public static bool SupportsFreeResize(DesktopWidgetKind kind) => kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo;
+
+    public static (double Width, double Height) Dimensions(DesktopWidget widget)
+    {
+        var preset = Dimensions(widget.Size);
+        return widget.Size == DesktopWidgetSize.Custom && SupportsFreeResize(widget.Kind)
+            ? (double.IsFinite(widget.Bounds.Width) && widget.Bounds.Width > 0 ? widget.Bounds.Width : preset.Width,
+               double.IsFinite(widget.Bounds.Height) && widget.Bounds.Height > 0 ? widget.Bounds.Height : preset.Height)
+            : preset;
+    }
+
     public static string SizeLabel(DesktopWidgetSize size)
     {
+        if (size == DesktopWidgetSize.Custom) return "自定义尺寸";
         var (width, height) = Dimensions(size);
         return $"{width} × {height} DIP";
+    }
+
+    public static string SizeLabel(DesktopWidget widget)
+    {
+        var (width, height) = Dimensions(widget);
+        return widget.Size == DesktopWidgetSize.Custom ? $"{width:0.#} × {height:0.#} DIP · 自定义" : SizeLabel(widget.Size);
     }
 
     public static IReadOnlyList<DateOnly> CalendarDays(DateOnly month)
@@ -227,6 +273,10 @@ public static class DesktopWidgets
             widget.Text = NormalizeText(widget.Text);
             widget.Translation = NormalizeText(widget.Translation);
             widget.MonitorId ??= string.Empty;
+            widget.NetworkAdapterId ??= string.Empty;
+            if (!Enum.IsDefined(widget.NetworkDisplayMode)) widget.NetworkDisplayMode = NetworkWidgetDisplayMode.Details;
+            widget.NetworkLatencyTarget = (widget.NetworkLatencyTarget ?? "1.1.1.1").Trim();
+            if (!WidgetMonitorMetrics.IsValidLatencyTarget(widget.NetworkLatencyTarget)) widget.NetworkLatencyTarget = "1.1.1.1";
             if (string.IsNullOrWhiteSpace(widget.TargetLanguage)) widget.TargetLanguage = "简体中文";
             widget.Tasks ??= [];
             NormalizeWeatherCities(widget);
@@ -239,8 +289,10 @@ public static class DesktopWidgets
             }
             if (widget.Kind == DesktopWidgetKind.Clock && widget.Size is DesktopWidgetSize.Small or DesktopWidgetSize.Wide)
                 widget.Size = DesktopWidgetSize.Landscape;
-            if (!SupportedSizes(widget.Kind).Contains(widget.Size)) widget.Size = DefaultSize(widget.Kind);
-            var (width, height) = Dimensions(widget.Size);
+            if (!SupportedSizes(widget).Contains(widget.Size)) widget.Size = DefaultSize(widget);
+            var (width, height) = Dimensions(widget);
+            if (widget.Size == DesktopWidgetSize.Custom)
+            { width = Math.Max(WidgetSizing.MinimumWidth, width); height = Math.Max(WidgetSizing.MinimumHeight, height); }
             widget.Bounds = new LayoutRect(double.IsFinite(widget.Bounds.X) ? widget.Bounds.X : 32,
                 double.IsFinite(widget.Bounds.Y) ? widget.Bounds.Y : 32, width, height);
         }
@@ -256,7 +308,9 @@ public static class DesktopWidgets
             widget.MonitorId = monitor.Id;
             var local = new LayoutRect(monitor.WorkArea.X - monitor.Bounds.X, monitor.WorkArea.Y - monitor.Bounds.Y,
                 monitor.WorkArea.Width, monitor.WorkArea.Height);
-            widget.Bounds = widget.Bounds.Clamp(local, widget.Bounds.Width, widget.Bounds.Height);
+            widget.Bounds = widget.Size == DesktopWidgetSize.Custom && SupportsFreeResize(widget.Kind)
+                ? widget.Bounds.Clamp(local, Math.Min(WidgetSizing.MinimumWidth, local.Width), Math.Min(WidgetSizing.MinimumHeight, local.Height))
+                : widget.Bounds.Clamp(local, widget.Bounds.Width, widget.Bounds.Height);
         }
     }
 }

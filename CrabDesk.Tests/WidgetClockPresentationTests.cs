@@ -65,7 +65,9 @@ public sealed class WidgetClockPresentationTests
         {
             Assert.False(WidgetClockPresentation.IsLandscape(width, height));
             Assert.Equal(width, height);
-            Assert.True(face.Y + face.Height + 22 <= height);
+            Assert.Equal((width - face.Width) / 2, face.X);
+            Assert.Equal((height - face.Height) / 2, face.Y);
+            Assert.Equal(width - 4, face.Width);
         }
     }
 

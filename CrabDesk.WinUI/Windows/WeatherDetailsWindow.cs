@@ -112,11 +112,11 @@ public sealed partial class WeatherDetailsWindow : Window
                 var stroke = BoxBorderStyle.ResolveStroke(System.Drawing.Color.FromArgb(color.R, color.G, color.B), isDark, settings.BorderColor, settings.BorderOpacity);
                 color.A = settings.UseAcrylicBoxes ? (byte)(255 * Math.Clamp(appearance.Opacity * .8, .35, .9)) : (byte)255;
                 _locationsShell!.Background = new SolidColorBrush(color);
-                _locationsShell.CornerRadius = new CornerRadius(settings.CornerRadius);
+                _locationsShell.CornerRadius = new CornerRadius(WindowCornerRadius(settings.CornerRadius));
                 _locationsShell.BorderThickness = new Thickness(settings.ShowBorder ? Math.Clamp(settings.BorderWidth, 1, 6) : 0);
                 _locationsShell.BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
             }
-            else View.Update(_widget, appearance, settings);
+            else View.Update(_widget, appearance, settings, WindowCornerRadius(settings.CornerRadius));
             UpdateLocations();
             if (_acrylic != settings.UseAcrylicBoxes)
             {
@@ -156,12 +156,19 @@ public sealed partial class WeatherDetailsWindow : Window
         var size = AppWindow.Size;
         if (size.Width <= 0 || size.Height <= 0) return;
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96.0;
-        var radius = (int)Math.Round(Math.Clamp(_runtime.State.Settings.Appearance.CornerRadius * scale,
+        var radius = (int)Math.Round(Math.Clamp(WindowCornerRadius(_runtime.State.Settings.Appearance.CornerRadius) * scale,
             0, Math.Min(size.Width, size.Height) / 2.0));
         var shape = (size.Width, size.Height, radius);
         if (_shape == shape) return;
-        // DWM offers fixed corner sizes. Clip the entire acrylic window to the
-        // configured card radius, including the backdrop outside the XAML shell.
+        // Window regions disable DWM's antialiased corners. Let Windows 11
+        // round the entire backdrop, and match the XAML shell to that radius.
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            _ = SetWindowRgn(hwnd, IntPtr.Zero, true);
+            _shape = shape;
+            return;
+        }
+        // Retain the configured outline on systems without native rounding.
         if (radius == 0)
         {
             if (SetWindowRgn(hwnd, IntPtr.Zero, true) != 0) _shape = shape;
@@ -172,6 +179,9 @@ public sealed partial class WeatherDetailsWindow : Window
         if (SetWindowRgn(hwnd, region, true) != 0) _shape = shape; // Windows owns the applied region.
         else DeleteObject(region);
     }
+
+    private static double WindowCornerRadius(double configured) => configured <= 0 ? 0 :
+        OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000) ? 8 : Math.Clamp(configured, 0, 20);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);

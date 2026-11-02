@@ -35,8 +35,7 @@ public sealed partial class WidgetPreview : UserControl
         FontFamily = new FontFamily(BoxAppearance.DefaultFontFamily), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock _todoSummary = new() { FontSize = 10.5,
         FontFamily = new FontFamily(BoxAppearance.DefaultFontFamily), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
-    private readonly LucideIcon _weatherLocations = new() { Icon = LucideIconName.MapPin, FontSize = 14, Width = 24, Height = 24,
-        Margin = new Thickness(0, 2, 36, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
+    private readonly Canvas _weatherHeader = new() { Height = 36, Visibility = Visibility.Collapsed };
 
     public DesktopWidget? Widget { get => (DesktopWidget?)GetValue(WidgetProperty); set => SetValue(WidgetProperty, value); }
     public WidgetPreviewAppearance? PreviewAppearance { get => (WidgetPreviewAppearance?)GetValue(PreviewAppearanceProperty); set => SetValue(PreviewAppearanceProperty, value); }
@@ -56,7 +55,7 @@ public sealed partial class WidgetPreview : UserControl
         _todoHeader.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         _todoHeader.Children.Add(_todoTitle); _todoHeader.Children.Add(_todoSummary); Grid.SetColumn(_todoSummary, 1);
         CardLayout.Children.Add(_todoHeader);
-        CardLayout.Children.Add(_weatherLocations);
+        CardLayout.Children.Add(_weatherHeader);
         Loaded += (_, _) => Refresh();
     }
 
@@ -79,10 +78,11 @@ public sealed partial class WidgetPreview : UserControl
             dark, appearance.Settings.BorderColor, appearance.Settings.BorderOpacity), alpha);
         CardSurface.BorderBrush = new SolidColorBrush(Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
         CardSurface.BorderThickness = new Thickness(appearance.Settings.ShowBorder ? Math.Clamp(appearance.Settings.BorderWidth, 1, 6) : 0);
-        var (width, height) = DesktopWidgets.Dimensions(widget.Size);
+        var (width, height) = DesktopWidgets.Dimensions(widget);
         CardSurface.Width = width;
         CardSurface.Height = height;
-        CardTitle.Visibility = widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo ? Visibility.Collapsed : Visibility.Visible;
+        var networkSpeeds = widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds;
+        CardTitle.Visibility = networkSpeeds || widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? Visibility.Collapsed : Visibility.Visible;
         _calendarHeader.Visibility = widget.Kind == DesktopWidgetKind.Calendar ? Visibility.Visible : Visibility.Collapsed;
         _calendarUpcomingTitle.Visibility = widget.Kind == DesktopWidgetKind.Calendar && width >= 300 ? Visibility.Visible : Visibility.Collapsed;
         _calendarUpcomingTitle.Foreground = _secondary;
@@ -93,8 +93,8 @@ public sealed partial class WidgetPreview : UserControl
         _todoTitle.MaxWidth = Math.Max(0, width - 128);
         _todoSummary.Text = $"· {widget.Tasks.Count(task => !task.IsCompleted)}";
         _todoSummary.Foreground = _secondary;
-        _weatherLocations.Visibility = widget.Kind == DesktopWidgetKind.Weather ? Visibility.Visible : Visibility.Collapsed;
-        _weatherLocations.Foreground = _accent;
+        _weatherHeader.Visibility = widget.Kind == DesktopWidgetKind.Weather ? Visibility.Visible : Visibility.Collapsed;
+        _weatherHeader.Children.Clear();
         CardTitle.Margin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? new Thickness(60, 0, 60, 0) : new Thickness(28, 0, 28, 0);
         CardTitle.Text = widget.Kind == DesktopWidgetKind.Calendar ? DateTime.Today.ToString("yyyy.MM") : widget.DisplayTitle;
         CardTitle.TextAlignment = widget.Kind == DesktopWidgetKind.Weather ? TextAlignment.Left : TextAlignment.Center;
@@ -105,7 +105,10 @@ public sealed partial class WidgetPreview : UserControl
             CardTitle.Text = widget.Location is { } city ? $"{city.Name}  ⌄" : widget.DisplayTitle;
         }
         CardTitle.Foreground = _text;
-        CardBody.Margin = widget.Kind == DesktopWidgetKind.Todo ? new Thickness(8, 4, 8, 8) : new Thickness(8);
+        Grid.SetRow(CardBody, networkSpeeds ? 0 : 1);
+        Grid.SetRowSpan(CardBody, networkSpeeds ? 2 : 1);
+        CardBody.Margin = networkSpeeds || widget.Kind == DesktopWidgetKind.Weather ? new Thickness(0) :
+            widget.Kind == DesktopWidgetKind.Todo ? new Thickness(8, 4, 8, 8) : new Thickness(8);
         CardBody.Children.Clear();
         switch (widget.Kind)
         {
@@ -115,6 +118,8 @@ public sealed partial class WidgetPreview : UserControl
             case DesktopWidgetKind.Todo: Todo(widget); break;
             case DesktopWidgetKind.Translation: TranslationPreview(widget); break;
             case DesktopWidgetKind.Weather: Weather(widget); break;
+            case DesktopWidgetKind.Performance: Performance(widget); break;
+            case DesktopWidgetKind.Network: Network(widget); break;
         }
     }
 
@@ -128,7 +133,7 @@ public sealed partial class WidgetPreview : UserControl
     private void Clock(DesktopWidget widget)
     {
         var panel = new Canvas();
-        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget.Size);
+        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget);
         var width = cardWidth - 16; var height = cardHeight - 16;
         var face = WidgetClockPresentation.Face(width, height);
         if (face.Width <= 0) return;
@@ -174,11 +179,6 @@ public sealed partial class WidgetPreview : UserControl
             Place(time, left, height / 2 - 29, available, 34);
             Place(date, left, height / 2 + 12, available, 20);
         }
-        else
-        {
-            var date = Text(now.ToString("M月d日 · ddd", culture), 10.5, true); date.TextAlignment = TextAlignment.Center; date.VerticalAlignment = VerticalAlignment.Center;
-            Place(date, 0, face.Y + face.Height + 4, width, 18);
-        }
         CardBody.Children.Add(panel);
     }
 
@@ -219,7 +219,7 @@ public sealed partial class WidgetPreview : UserControl
             if (date.Month != today.Month) label.Opacity = .55;
             grid.Children.Add(cell); Grid.SetColumn(cell, i % 7); Grid.SetRow(cell, i / 7 + 1);
         }
-        if (DesktopWidgets.Dimensions(widget.Size).Width < 300) { CardBody.Children.Add(grid); return; }
+        if (DesktopWidgets.Dimensions(widget).Width < 300) { CardBody.Children.Add(grid); return; }
         var layout = new Grid { ColumnSpacing = 20 };
         layout.ColumnDefinitions.Add(new() { Width = new GridLength(164) });
         layout.ColumnDefinitions.Add(new());
@@ -262,7 +262,7 @@ public sealed partial class WidgetPreview : UserControl
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) });
         value = DesktopWidgets.NormalizeText(value);
         var content = Text(string.IsNullOrWhiteSpace(value) ? empty : value[..Math.Min(value.Length, 400)], 13);
-        content.TextWrapping = TextWrapping.Wrap; content.MaxLines = 6;
+        content.TextWrapping = TextWrapping.Wrap; content.MaxLines = Math.Max(1, (int)((CardSurface.Height - 76) / 18));
         grid.Children.Add(content);
         var caption = Text(footer, 11, true); grid.Children.Add(caption); Grid.SetRow(caption, 1);
         CardBody.Children.Add(grid);
@@ -271,7 +271,7 @@ public sealed partial class WidgetPreview : UserControl
     private void Todo(DesktopWidget widget)
     {
         var panel = new Canvas();
-        var width = DesktopWidgets.Dimensions(widget.Size).Width - 16;
+        var width = DesktopWidgets.Dimensions(widget).Width - 16;
         void Place(FrameworkElement element, double x, double y, double elementWidth, double height)
         {
             element.Width = elementWidth; element.Height = height;
@@ -281,7 +281,7 @@ public sealed partial class WidgetPreview : UserControl
         foreach (var item in WidgetTodoPresentation.Rows(widget))
         {
             var rowHeight = item.Height;
-            if (rowTop + rowHeight > DesktopWidgets.Dimensions(widget.Size).Height - 40) break;
+            if (rowTop + rowHeight > DesktopWidgets.Dimensions(widget).Height - 40) break;
             if (item.IsCompletedHeader)
             {
                 if (rowTop > 0)
@@ -320,7 +320,7 @@ public sealed partial class WidgetPreview : UserControl
     private void TranslationPreview(DesktopWidget widget)
     {
         var panel = new Canvas();
-        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget.Size);
+        var (cardWidth, cardHeight) = DesktopWidgets.Dimensions(widget);
         var width = cardWidth - 16; var height = cardHeight - 44;
         var fieldWidth = (width - 10) / 2;
         var dark = _text.Color.R > 128;
@@ -367,19 +367,29 @@ public sealed partial class WidgetPreview : UserControl
     private void Weather(DesktopWidget widget)
     {
         var panel = new Canvas();
-        var width = DesktopWidgets.Dimensions(widget.Size).Width - 16;
-        void Place(FrameworkElement element, double x, double y, double elementWidth, double height)
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var layout = WidgetWeatherPresentation.Arrange(width, height, PreviewAppearance?.Settings.CornerRadius ?? 8, widget.Cities.Count > 1);
+        void Place(FrameworkElement element, LayoutRect bounds, bool header = false)
         {
-            element.Width = elementWidth; element.Height = height;
-            Canvas.SetLeft(element, x); Canvas.SetTop(element, y); panel.Children.Add(element);
+            element.Width = bounds.Width; element.Height = bounds.Height;
+            Canvas.SetLeft(element, bounds.X); Canvas.SetTop(element, bounds.Y - (header ? 0 : 36));
+            (header ? _weatherHeader : panel).Children.Add(element);
         }
-        void Metric(LucideIconName icon, string value, double x, double y, double metricWidth, double height = 18)
+        void Label(string value, double fontSize, LayoutRect bounds, bool secondary = false, bool bold = false)
         {
-            Place(new LucideIcon { Icon = icon, FontSize = 12, Foreground = _secondary }, x, y, 14, height);
-            Place(Text(value, 10.5, true), x + 19, y + (height - 18) / 2, metricWidth - 19, 18);
+            var text = Text(value, fontSize, secondary, bold); text.VerticalAlignment = VerticalAlignment.Center;
+            Place(text, bounds);
         }
-        var overview = Math.Min(width, 164);
-        Place(Text(widget.Weather is { } weather ? $"{weather.Temperature:0.#}°" : "—°", 36, bold: true), 4, -2, overview - 56, 48);
+        void Metric(LucideIconName icon, string value, LayoutRect bounds)
+        {
+            Place(new LucideIcon { Icon = icon, FontSize = 13, Foreground = _secondary }, bounds with { Width = 14 });
+            Label(value, 12.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19 }, true);
+        }
+        Place(new LucideIcon { Icon = LucideIconName.Locate, FontSize = 16, Foreground = _text }, layout.Location, true);
+        var cityText = Text(widget.Location is { } city ? $"{city.Name} ⌄" : widget.DisplayTitle, 13, bold: true);
+        cityText.VerticalAlignment = VerticalAlignment.Center; Place(cityText, layout.City, true);
+        Place(new LucideIcon { Icon = LucideIconName.MapPin, FontSize = 15, Foreground = _accent }, layout.Locations, true);
+        Label(widget.Weather is { } weather ? $"{weather.Temperature:0.#}°" : "—°", widget.Cities.Count > 1 && width < 300 ? 38 : 40, layout.Temperature, bold: true);
         if (widget.Weather is { } forecast)
         {
             var name = DesktopWidgets.WeatherIconName(forecast);
@@ -388,36 +398,176 @@ public sealed partial class WidgetPreview : UserControl
                 ? dark ? Color.FromArgb(255, 242, 184, 75) : Color.FromArgb(255, 156, 97, 0)
                 : name is "CloudRain" or "CloudSnow" or "CloudHail"
                     ? dark ? Color.FromArgb(255, 104, 193, 226) : Color.FromArgb(255, 29, 106, 150) : _secondary.Color;
-            Place(new LucideIcon { Icon = Enum.Parse<LucideIconName>(name), FontSize = 40, Foreground = new SolidColorBrush(color) }, overview - 48, 2, 44, 44);
-            if (forecast.FeelsLike is { } feelsLike) Metric(LucideIconName.Thermometer, $"{feelsLike:0}°", overview - 56, 48, 52);
-            Place(Text($"{forecast.Description} · {forecast.Minimum:0}° / {forecast.Maximum:0}°", 10.5, true), 4, 48, overview - 64, 18);
-            var metricWidth = (width - 20) / 2;
+            Place(new LucideIcon { Icon = Enum.Parse<LucideIconName>(name), FontSize = 40, Foreground = new SolidColorBrush(color) }, layout.Icon);
+            if (forecast.FeelsLike is { } feelsLike) Metric(LucideIconName.Thermometer, $"{feelsLike:0}°", layout.FeelsLike);
+            Label($"{forecast.Description} · {forecast.Minimum:0}° / {forecast.Maximum:0}°", 12, layout.Forecast, true);
             if (forecast.Humidity is { } humidity)
             {
-                if (width >= 300) Metric(LucideIconName.Droplets, $"湿度 {humidity:0}%", width - 132, 2, 128, 24);
-                else Metric(LucideIconName.Droplets, $"{humidity:0}%", 4, 68, metricWidth);
+                Metric(LucideIconName.Droplets, $"{(width >= 300 ? "湿度 " : "")}{humidity:0}%", layout.Humidity);
             }
             if (forecast.WindSpeed is { } wind)
             {
-                if (width >= 300) Metric(LucideIconName.Wind, $"风速 {wind:0} km/h", width - 132, 34, 128, 24);
-                else Metric(LucideIconName.Wind, $"{wind:0} km/h", metricWidth + 16, 68, metricWidth);
+                Metric(LucideIconName.Wind, $"{(width >= 300 ? "风速 " : "")}{wind:0} km/h", layout.Wind);
             }
-            var statusTop = widget.Cities.Count > 1 ? 88 : 104;
-            var statusHeight = widget.Cities.Count > 1 ? 24 : 28;
             var statusFill = _text.Color; statusFill.A = 14;
-            Place(new Border { Background = new SolidColorBrush(statusFill), CornerRadius = new CornerRadius(8) }, 4, statusTop, width - 8, statusHeight);
+            Place(new Border { Background = new SolidColorBrush(statusFill), CornerRadius = new CornerRadius(8) }, layout.Status);
             Metric(forecast.AirQuality is not null ? LucideIconName.Gauge : LucideIconName.ChevronRight,
                 widget.IsLoading ? "正在更新…" : !string.IsNullOrEmpty(widget.Error) ? widget.Error :
-                forecast.AirQuality is { } air ? $"AQI {air:0}" : "查看天气详情", 12, statusTop + (statusHeight - 18) / 2, width - 40);
-            Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, width - 28, statusTop, 12, statusHeight);
+                forecast.AirQuality is { } air ? $"AQI {air:0}" : "查看天气详情", layout.Status with { X = layout.Status.X + 8, Width = layout.Status.Width - 32 });
+            Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, layout.Status with { X = layout.Status.X + layout.Status.Width - 20, Width = 12 });
         }
-        else Place(Text("搜索所在城市查看天气", 11, true), 0, 56, width, 18);
+        else Label("搜索所在城市查看天气", 12, layout.Forecast, true);
         var cityIndex = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId) + 1;
         if (widget.Cities.Count > 1)
         {
-            var counter = Text($"‹     {cityIndex}/{widget.Cities.Count}     ›", 10, true); counter.TextAlignment = TextAlignment.Center;
-            Place(counter, 0, 120, width, 16);
+            var counter = Text($"{cityIndex}/{widget.Cities.Count}", 11, true); counter.TextAlignment = TextAlignment.Center;
+            counter.VerticalAlignment = VerticalAlignment.Center; Place(counter, layout.Counter);
+            foreach (var (label, bounds) in new[] { ("‹", layout.Previous), ("›", layout.Next) })
+            { var arrow = Text(label, 18); arrow.TextAlignment = TextAlignment.Center; arrow.VerticalAlignment = VerticalAlignment.Center; Place(arrow, bounds); }
         }
+        CardBody.Children.Add(panel);
+    }
+
+    private void Performance(DesktopWidget widget)
+    {
+        var panel = new Canvas();
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var radius = PreviewAppearance?.Settings.CornerRadius ?? 8;
+        var body = WidgetMonitorPresentation.Body(width, height, radius);
+        var metrics = WidgetMonitorPresentation.PerformanceMetrics(widget.Performance);
+        void Place(FrameworkElement element, LayoutRect bounds)
+        {
+            if (element is TextBlock label)
+            {
+                label.VerticalAlignment = VerticalAlignment.Center;
+                var cell = new Grid(); cell.Children.Add(label); element = cell;
+            }
+            element.Width = bounds.Width; element.Height = bounds.Height;
+            Canvas.SetLeft(element, bounds.X - 8); Canvas.SetTop(element, bounds.Y - 36); panel.Children.Add(element);
+        }
+        for (var index = 0; index < metrics.Length; index++)
+        {
+            var cell = WidgetMonitorPresentation.PerformanceCell(body, index); var metric = metrics[index];
+            var wide = body.Width >= 300;
+            Place(Text(metric.Label, 12, true), cell with { Width = cell.Width - 52, Height = 20 });
+            var value = Text(metric.Value, 13.5, bold: true); value.TextAlignment = TextAlignment.Center;
+            Place(value, cell with { X = cell.X + cell.Width - 52, Width = 52, Height = 20 });
+            if (wide) Place(Text(metric.Detail, 10.5, true), cell with { Y = cell.Y + 24, Height = 20 });
+            var track = cell with { Y = cell.Y + cell.Height - (wide ? 4 : 7), Height = 3 };
+            var trackColor = _text.Color; trackColor.A = 25;
+            Place(new Border { Background = new SolidColorBrush(trackColor), CornerRadius = new CornerRadius(Math.Min(1.5, radius)) }, track);
+            if (metric.Percentage is { } percentage && double.IsFinite(percentage) && percentage > 0)
+                Place(new Border { Background = _accent, CornerRadius = new CornerRadius(Math.Min(1.5, radius)) },
+                    track with { Width = track.Width * Math.Clamp(percentage, 0, 100) / 100 });
+        }
+        CardBody.Children.Add(panel);
+    }
+
+    private void Network(DesktopWidget widget)
+    {
+        var panel = new Canvas();
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var radius = PreviewAppearance?.Settings.CornerRadius ?? 8;
+        var fields = WidgetMonitorPresentation.NetworkFields(WidgetMonitorPresentation.Body(width, height, radius));
+        var network = widget.Network;
+        var speedsOnly = widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds;
+        var uploadInk = new SolidColorBrush(_text.Color.R > 128 ? Color.FromArgb(255, 88, 211, 187) : Color.FromArgb(255, 0, 116, 100));
+        void Place(FrameworkElement element, LayoutRect bounds)
+        {
+            if (element is TextBlock label)
+            {
+                label.VerticalAlignment = VerticalAlignment.Center;
+                var cell = new Grid(); cell.Children.Add(label); element = cell;
+            }
+            element.Width = bounds.Width; element.Height = bounds.Height;
+            Canvas.SetLeft(element, bounds.X - (speedsOnly ? 0 : 8));
+            Canvas.SetTop(element, bounds.Y - (speedsOnly ? 0 : 36)); panel.Children.Add(element);
+        }
+        void Label(string value, double size, LayoutRect bounds, bool secondary = false, bool bold = false)
+        {
+            var label = Text(value, size, secondary, bold); label.VerticalAlignment = VerticalAlignment.Center;
+            Place(label, bounds);
+        }
+        void Speed(LucideIconName direction, string caption, double? speed, LayoutRect bounds, SolidColorBrush? ink = null, bool compact = false)
+        {
+            if (compact)
+            {
+                Place(new LucideIcon { Icon = direction, FontSize = 14, Foreground = ink ?? _accent }, bounds with { Width = 14 });
+                Label(WidgetMonitorMetrics.Speed(speed), 18, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, bold: true);
+                return;
+            }
+            Place(new LucideIcon { Icon = direction, FontSize = 12, Foreground = ink ?? _accent }, bounds with { Width = 14, Height = 14 });
+            Label(caption, 10.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19, Height = 14 }, true);
+            Label(WidgetMonitorMetrics.Speed(speed), 21, bounds with { Y = bounds.Y + 14, Height = 26 }, bold: true);
+        }
+        if (speedsOnly)
+        {
+            var speeds = WidgetNetworkGraph.SpeedLayout(width, height, radius);
+            Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, speeds.Download, _accent, width < 300);
+            Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, speeds.Upload, uploadInk, width < 300);
+            CardBody.Children.Add(panel);
+            return;
+        }
+        if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Chart)
+        {
+            var layout = WidgetNetworkGraph.ChartLayout(width, height, radius);
+            Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
+            Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
+            var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
+            var plot = new Canvas();
+            var gridColor = _text.Color; gridColor.A = 24;
+            for (var row = 0; row <= 2; row++)
+            {
+                var y = layout.Plot.Height * row / 2;
+                plot.Children.Add(new Microsoft.UI.Xaml.Shapes.Line { X1 = 0, X2 = layout.Plot.Width, Y1 = y, Y2 = y,
+                    Stroke = new SolidColorBrush(gridColor), StrokeThickness = 1, StrokeDashArray = new DoubleCollection { 3, 3 } });
+            }
+            void Series(IReadOnlyList<WidgetNetworkGraph.Point[]> segments, SolidColorBrush ink)
+            {
+                foreach (var segment in segments)
+                {
+                    if (segment.Length == 1)
+                    {
+                        var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 4, Height = 4, Fill = ink };
+                        Canvas.SetLeft(dot, segment[0].X - layout.Plot.X - 2); Canvas.SetTop(dot, segment[0].Y - layout.Plot.Y - 2);
+                        plot.Children.Add(dot);
+                    }
+                    else if (segment.Length > 1)
+                    {
+                        var points = new PointCollection();
+                        foreach (var point in segment) points.Add(new global::Windows.Foundation.Point(point.X - layout.Plot.X, point.Y - layout.Plot.Y));
+                        plot.Children.Add(new Microsoft.UI.Xaml.Shapes.Polyline { Points = points, Stroke = ink, StrokeThickness = 2,
+                            StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
+                    }
+                }
+            }
+            Series(graph.Download, _accent); Series(graph.Upload, uploadInk);
+            Place(plot, layout.Plot);
+            if (graph.Download.Count == 0 && graph.Upload.Count == 0)
+            {
+                var hint = Text(network is { IsConnected: false } ? "未连接网络" : "正在积累数据…", 11, true);
+                hint.TextAlignment = TextAlignment.Center; Place(hint, layout.Plot);
+            }
+            Label("最近 60 秒", 10, layout.Footer with { Width = layout.Footer.Width / 2 }, true);
+            var maximum = Text("上限 " + WidgetMonitorMetrics.Speed(graph.Maximum), 10, true);
+            maximum.TextAlignment = TextAlignment.Right;
+            Place(maximum, layout.Footer with { X = layout.Footer.X + layout.Footer.Width / 2, Width = layout.Footer.Width / 2 });
+            CardBody.Children.Add(panel);
+            return;
+        }
+        Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, fields.Download);
+        Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, fields.Upload);
+        Label(WidgetMonitorPresentation.ConnectionText(network), 11.5, fields.Connection, true);
+        Label(network?.LatencyMilliseconds is { } latency ? "延迟 " + latency + " ms" : "延迟 " + (network?.LatencyStatus ?? "等待测量"), 11, fields.Latency, true);
+        Label("IPv4  " + (string.IsNullOrEmpty(network?.IPv4) ? "—" : network.IPv4), 11.5, fields.IPv4);
+        Label("IPv6  " + (string.IsNullOrEmpty(network?.IPv6) ? "—" : network.IPv6), 11, fields.IPv6, true);
+        var fill = _text.Color; fill.A = 14;
+        Place(new Border { Background = new SolidColorBrush(fill), CornerRadius = new CornerRadius(Math.Min(6, radius)) }, fields.PublicIp);
+        var publicIp = widget.IsPublicIpLoading ? "查询中…" : !string.IsNullOrEmpty(widget.PublicIpError) ? widget.PublicIpError :
+            !string.IsNullOrEmpty(widget.PublicIp) ? widget.PublicIp : "点击查询";
+        Label("公网 IP  " + publicIp, 11.5, fields.PublicIp with { X = fields.PublicIp.X + 8, Width = fields.PublicIp.Width - 34 }, true);
+        Place(new LucideIcon { Icon = LucideIconName.RefreshCw, FontSize = 12, Foreground = widget.IsPublicIpLoading ? _secondary : _accent },
+            fields.PublicIp with { X = fields.PublicIp.X + fields.PublicIp.Width - 24, Width = 18 });
         CardBody.Children.Add(panel);
     }
 

@@ -2508,6 +2508,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.TakeOverDesktop = !paused;
         if (paused)
         {
+            PauseMonitorSampling();
             foreach (var widget in State.Widgets.Where(widget => widget.IsLocating).ToArray()) CancelWidgetRequest(widget.Id);
             // 用户主动暂停：接管失败不再自动重试。
             _pausedByTakeoverFailure = false;

@@ -32,6 +32,8 @@ internal sealed partial class DesktopBoxForm
             if (_resourcesDisposed || _runtime.IsPaused || !Visible) return;
             var items = DesktopWidgetItems.ToArray();
             if (items.Length == 0) return;
+            if (items.Any(widget => widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network))
+                _ = _runtime.RefreshMonitorWidgetsAsync();
             var now = DateTime.Now;
             var tick = now.ToString(items.Any(w => w.Kind == DesktopWidgetKind.Clock && w.ShowSeconds) ? "yyyyMMddHHmmss" : "yyyyMMddHHmm");
             if (_lastWidgetClockTick != tick)
@@ -43,6 +45,12 @@ internal sealed partial class DesktopBoxForm
             }
         };
         _widgetTimer.Start();
+    }
+
+    internal void RefreshMonitorVisuals()
+    {
+        if (!_resourcesDisposed && !IsDisposed && !_runtime.IsPaused &&
+            DesktopWidgetItems.Any(widget => widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network)) RequestVisualLayerRender();
     }
 
     internal void RefreshWidgets()
@@ -77,18 +85,20 @@ internal sealed partial class DesktopBoxForm
         ClearHoverState();
         if (args.Button == Forms.MouseButtons.Right) { ShowWidgetMenu(widget, args.Location); return true; }
         if (args.Button != Forms.MouseButtons.Left) return true;
-        if (WidgetMenuRectangle(widget).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
+        _widgetResizeEdges = WidgetSizing.HitTest(widget, point.X, point.Y);
+        if (_widgetResizeEdges == WidgetResizeEdges.None && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
         _pressedWidget = widget;
         _widgetPressPoint = point;
         _widgetStartBounds = widget.Bounds;
         _widgetDragging = false;
-        _widgetCanDrag = !widget.IsLocked && !IsWeatherLocationPoint(widget, point) && !IsCalendarNavigationPoint(widget, point) &&
+        _widgetResizing = false;
+        _widgetCanDrag = _widgetResizeEdges == WidgetResizeEdges.None && !widget.IsLocked && !IsWeatherLocationPoint(widget, point) && !IsCalendarNavigationPoint(widget, point) &&
             !(widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget).Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget).Contains(point)) &&
-            (widget.Kind == DesktopWidgetKind.Clock || point.Y < widget.Bounds.Y + 28 ||
+            !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
+            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
+            (widget.Kind == DesktopWidgetKind.Clock || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds || point.Y < widget.Bounds.Y + 28 ||
              widget.Kind == DesktopWidgetKind.Weather &&
-             (GetWeatherLayout(widget).Temperature.Contains(point) || GetWeatherLayout(widget).Icon.Contains(point)));
+             (GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Icon.Contains(point)));
         Capture = true;
         return true;
     }
@@ -97,6 +107,12 @@ internal sealed partial class DesktopBoxForm
     {
         if (_pressedWidget is { } pressed)
         {
+            if (_widgetResizeEdges != WidgetResizeEdges.None)
+            {
+                UpdateWidgetResize(pressed, point);
+                Cursor = WidgetResizeCursor(_widgetResizeEdges);
+                return true;
+            }
             if (_widgetCanDrag && (Math.Abs(point.X - _widgetPressPoint.X) > 4 || Math.Abs(point.Y - _widgetPressPoint.Y) > 4)) _widgetDragging = true;
             if (_widgetDragging)
             {
@@ -108,9 +124,9 @@ internal sealed partial class DesktopBoxForm
             return true;
         }
         var widget = WidgetAt(point);
-        var menuId = widget is not null && WidgetMenuRectangle(widget).Contains(point) ? widget.Id : (Guid?)null;
+        var menuId = widget is not null && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         UpdateCalendarHover(widget, point);
-        var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget).Contains(point) ? widget.Id : (Guid?)null;
+        var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         var calendarButton = RectangleF.Empty;
         var translationButton = RectangleF.Empty;
         if (widget?.Kind == DesktopWidgetKind.Translation)
@@ -146,16 +162,19 @@ internal sealed partial class DesktopBoxForm
         }
         if (widget is null) return false;
         ClearHoverState();
+        var resizeEdges = WidgetSizing.HitTest(widget, point.X, point.Y);
+        if (resizeEdges != WidgetResizeEdges.None) { Cursor = WidgetResizeCursor(resizeEdges); return true; }
         if (widget.Kind == DesktopWidgetKind.Translation)
         {
             var layout = GetTranslationLayout(widget);
             if (layout.Source.Contains(point) || layout.Result.Contains(point) && !string.IsNullOrEmpty(widget.Translation))
             { Cursor = Forms.Cursors.IBeam; return true; }
         }
-        Cursor = WidgetMenuRectangle(widget).Contains(point) || IsWeatherLocationPoint(widget, point) || IsCalendarNavigationPoint(widget, point) ||
+        Cursor = WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) || IsWeatherLocationPoint(widget, point) || IsCalendarNavigationPoint(widget, point) ||
+            widget.Kind == DesktopWidgetKind.Network && NetworkPublicIpRectangle(widget).Contains(point) ||
             widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point) || WidgetBodyRectangle(widget).Contains(point)
-            || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget).Contains(point)
-            || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget).Contains(point)
+            || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)
+            || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)
             ? Forms.Cursors.Hand : !widget.IsLocked ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
         return true;
     }
@@ -163,6 +182,13 @@ internal sealed partial class DesktopBoxForm
     private bool HandleWidgetMouseUp(Forms.MouseEventArgs args, PointF point)
     {
         if (_pressedWidget is not { } widget || args.Button != Forms.MouseButtons.Left) return false;
+        if (_widgetResizeEdges != WidgetResizeEdges.None)
+        {
+            UpdateWidgetResize(widget, point);
+            FinishWidgetPress(_widgetResizing);
+            Cursor = Forms.Cursors.Default;
+            return true;
+        }
         var dragged = _widgetDragging;
         if (dragged)
         {
@@ -184,9 +210,13 @@ internal sealed partial class DesktopBoxForm
     private void FinishWidgetPress(bool save)
     {
         var widget = _pressedWidget;
+        save &= _widgetResizeEdges == WidgetResizeEdges.None || _widgetResizing;
         ClearBoxAlignmentGuides();
         _pressedWidget = null;
         _widgetDragging = false;
+        _widgetResizing = false;
+        _widgetResizeEdges = WidgetResizeEdges.None;
+        _widgetCanDrag = false;
         Capture = false;
         if (widget is not null)
         {
@@ -199,20 +229,22 @@ internal sealed partial class DesktopBoxForm
     {
         var bounds = WidgetRectangle(widget);
         if (IsWeatherLocationPoint(widget, point)) { LocateWeatherFromCard(widget); return; }
-        if (widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget).Contains(point))
+        if (widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point))
         { _runtime.OpenWidgetWeatherLocations(widget); return; }
-        if (widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget).Contains(point))
+        if (widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point))
         { ShowWeatherCityMenu(widget); return; }
         if (widget.Kind == DesktopWidgetKind.Note && WidgetBodyRectangle(widget).Contains(point))
         { BeginWidgetNoteInput(widget); return; }
         if (widget.Kind == DesktopWidgetKind.Translation) { HandleTranslationWidgetClick(widget, point); return; }
         if (widget.Kind == DesktopWidgetKind.Weather && widget.Cities.Count > 1)
         {
-            var body = WidgetBodyRectangle(widget);
-            if (point.Y >= body.Bottom - 20 && (point.X < body.X + 28 || point.X > body.Right - 28))
+            var layout = WeatherPresentation(widget, _runtime.State.Settings.Appearance.CornerRadius);
+            var previous = WeatherRectangle(widget, layout.Previous);
+            var next = WeatherRectangle(widget, layout.Next);
+            if (previous.Contains(point) || next.Contains(point))
             {
                 var index = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId);
-                var step = point.X < body.X + 28 ? -1 : 1;
+                var step = previous.Contains(point) ? -1 : 1;
                 var city = widget.Cities[(index + step + widget.Cities.Count) % widget.Cities.Count];
                 _runtime.SelectWidgetCity(widget, city.Id);
                 _ = _runtime.RefreshWidgetWeatherAsync(widget, force: false);
@@ -233,6 +265,8 @@ internal sealed partial class DesktopBoxForm
             return;
         }
         if (widget.Kind == DesktopWidgetKind.Todo) { HandleTodoWidgetClick(widget, point); return; }
+        if (widget.Kind == DesktopWidgetKind.Network && NetworkPublicIpRectangle(widget).Contains(point))
+        { _ = _runtime.QueryWidgetPublicIpAsync(widget); return; }
         if (widget.Kind == DesktopWidgetKind.Weather && WidgetBodyRectangle(widget).Contains(point))
             _runtime.OpenWidgetWeatherDetails(widget);
     }
@@ -272,13 +306,18 @@ internal sealed partial class DesktopBoxForm
         menu.Items.Add(new FluentToolStripMenuItem("锁定位置") { Checked = widget.IsLocked });
         menu.Items[1].Click += (_, _) => { widget.IsLocked = !widget.IsLocked; _runtime.WidgetChanged(widget); };
         var sizes = new FluentToolStripMenuItem("尺寸");
-        foreach (var size in DesktopWidgets.SupportedSizes(widget.Kind))
+        foreach (var size in DesktopWidgets.SupportedSizes(widget))
         {
             var item = new FluentToolStripMenuItem(DesktopWidgets.SizeLabel(size)) { Checked = widget.Size == size };
-            item.Click += (_, _) => TryAction(() => _runtime.ResizeWidget(widget, size));
+            item.Click += (_, _) => TryAction(() =>
+            {
+                _runtime.ResizeWidget(widget, size);
+                if (size == DesktopWidgetSize.Custom) _runtime.OpenWidgetEditor(widget.Id);
+            });
             sizes.DropDownItems.Add(item);
         }
         menu.Items.Add(sizes);
+        if (widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network) AddMonitorContextMenu(menu, widget);
         if (widget.Kind == DesktopWidgetKind.Note)
             menu.Items.Add("编辑便签", null, (_, _) => BeginWidgetNoteInput(widget));
         if (widget.Kind == DesktopWidgetKind.Translation)

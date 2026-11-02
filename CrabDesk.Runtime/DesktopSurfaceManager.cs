@@ -252,6 +252,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
         foreach (var surface in _surfaces) surface.RefreshWidgets();
     }
 
+    internal void RefreshMonitorVisuals()
+    {
+        foreach (var surface in _surfaces) surface.RefreshMonitorVisuals();
+    }
+
     internal void Refresh()
     {
         var anyFailure = false;

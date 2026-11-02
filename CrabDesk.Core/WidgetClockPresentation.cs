@@ -7,8 +7,9 @@ public static class WidgetClockPresentation
     public static LayoutRect Face(double width, double height)
     {
         var landscape = IsLandscape(width, height);
-        var diameter = Math.Max(0, Math.Min(width, height - (landscape ? 4 : 26)));
-        return new(landscape ? 2 : (width - diameter) / 2, 2, diameter, diameter);
+        var diameter = Math.Max(0, Math.Min(width, height) - 4);
+        return new(landscape ? 2 : (width - diameter) / 2,
+            landscape ? 2 : (height - diameter) / 2, diameter, diameter);
     }
 
     public static (double Hour, double Minute, double Second) Hands(DateTime time)

@@ -10,11 +10,13 @@ internal sealed partial class DesktopBoxForm
     internal static RectangleF WidgetRectangle(DesktopWidget widget) => new((float)widget.Bounds.X, (float)widget.Bounds.Y,
         (float)widget.Bounds.Width, (float)widget.Bounds.Height);
     private static RectangleF WidgetMenuRectangle(RectangleF bounds) => new(bounds.Right - 32, bounds.Top, 28, 28);
-    private static RectangleF WidgetMenuRectangle(DesktopWidget widget)
+    private static RectangleF WidgetMenuRectangle(DesktopWidget widget, double radius = 8)
     {
         var bounds = WidgetRectangle(widget);
         return widget.Kind == DesktopWidgetKind.Todo
             ? new(bounds.Right - 36, bounds.Y + 4, 24, 24)
+            : widget.Kind == DesktopWidgetKind.Weather
+                ? WeatherRectangle(widget, WeatherPresentation(widget, radius).Menu)
             : WidgetMenuRectangle(bounds);
     }
     private static RectangleF WidgetBodyRectangle(DesktopWidget widget)
@@ -45,7 +47,8 @@ internal sealed partial class DesktopBoxForm
         graphics.FillPath(fill, path);
         var state = graphics.Save();
         graphics.SetClip(path, CombineMode.Intersect);
-        if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather))
+        if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather) &&
+            !(widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds))
         {
             var titleMargin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? 60 : 32;
             WidgetText(graphics, widget.DisplayTitle, new(bounds.X + titleMargin, bounds.Y, bounds.Width - titleMargin * 2, 28), text, 13.333f, true, true);
@@ -60,10 +63,12 @@ internal sealed partial class DesktopBoxForm
             case DesktopWidgetKind.Todo: DrawTodoWidget(graphics, widget, body, text, muted, accent); break;
             case DesktopWidgetKind.Translation: DrawTranslationWidget(graphics, widget, body, text); break;
             case DesktopWidgetKind.Weather: DrawWeatherWidget(graphics, widget, body, text, muted); break;
+            case DesktopWidgetKind.Performance: DrawPerformanceWidget(graphics, widget, text, muted, accent); break;
+            case DesktopWidgetKind.Network: DrawNetworkWidget(graphics, widget, text, muted, accent); break;
         }
         if (_hoveredWidgetId == widget.Id)
         {
-            var menu = WidgetMenuRectangle(widget);
+            var menu = WidgetMenuRectangle(widget, settings.CornerRadius);
             var hovered = _hoveredWidgetMenuId == widget.Id;
             if (hovered)
             {
@@ -88,7 +93,7 @@ internal sealed partial class DesktopBoxForm
     }
 
     private static void WidgetText(Graphics graphics, string value, RectangleF bounds, Color color, float size = 12,
-        bool bold = false, bool centered = false, bool multiline = false, bool strike = false)
+        bool bold = false, bool centered = false, bool multiline = false, bool strike = false, bool rightAligned = false)
     {
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
         using var font = new Font(BoxAppearance.DefaultFontFamily, size,
@@ -96,7 +101,7 @@ internal sealed partial class DesktopBoxForm
         using var brush = new SolidBrush(color);
         using var format = new StringFormat
         {
-            Alignment = centered ? StringAlignment.Center : StringAlignment.Near,
+            Alignment = rightAligned ? StringAlignment.Far : centered ? StringAlignment.Center : StringAlignment.Near,
             LineAlignment = multiline ? StringAlignment.Near : StringAlignment.Center,
             Trimming = StringTrimming.EllipsisCharacter,
             FormatFlags = multiline ? 0 : StringFormatFlags.NoWrap
@@ -183,12 +188,14 @@ internal sealed partial class DesktopBoxForm
         WidgetText(graphics, footer, new(body.X, body.Bottom - 18, body.Width, 18), muted, 11.333f);
     }
 
-    private static void DrawWeatherWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted)
+    private void DrawWeatherWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted)
     {
+        var presentation = WeatherPresentation(widget, _runtime.State.Settings.Appearance.CornerRadius);
+        body = WeatherRectangle(widget, presentation.Body);
         if (widget.Location is null)
         {
             WidgetText(graphics, "添加天气城市", new(body.X, body.Y + 6, body.Width, 26), text, 15, true, true);
-            var button = WeatherEmptyLocationRectangle(widget);
+            var button = WeatherEmptyLocationRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius);
             using var path = RoundedRectangle(button, 6);
             using var fill = new SolidBrush(Color.FromArgb(widget.IsLocating ? 12 : 25, text));
             graphics.FillPath(fill, path);
@@ -199,10 +206,10 @@ internal sealed partial class DesktopBoxForm
         }
         else
         {
-            var layout = GetWeatherLayout(widget);
+            var layout = GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius);
             if (widget.Weather is { } weather)
             {
-                WidgetText(graphics, $"{weather.Temperature:0.#}°", layout.Temperature, text, 36, true);
+                WidgetText(graphics, $"{weather.Temperature:0.#}°", layout.Temperature, text, widget.Cities.Count > 1 && body.Width < 300 ? 38 : 40, true);
                 var icon = Enum.Parse<LucideRuntimeIcon>(DesktopWidgets.WeatherIconName(weather));
                 var lightText = text.GetBrightness() > .5;
                 var iconColor = icon is LucideRuntimeIcon.Sun or LucideRuntimeIcon.CloudSun or LucideRuntimeIcon.CloudLightning
@@ -212,7 +219,7 @@ internal sealed partial class DesktopBoxForm
                 LucideRuntimeIcons.Draw(graphics, icon, layout.Icon, iconColor, 40);
                 if (weather.FeelsLike is { } feelsLike)
                     DrawWeatherMetric(graphics, LucideRuntimeIcon.Thermometer, $"{feelsLike:0}°", layout.FeelsLike, muted);
-                WidgetText(graphics, $"{weather.Description} · {weather.Minimum:0}° / {weather.Maximum:0}°", layout.Forecast, muted, 10.5f);
+                WidgetText(graphics, $"{weather.Description} · {weather.Minimum:0}° / {weather.Maximum:0}°", layout.Forecast, muted, 12);
                 if (weather.Humidity is { } humidity)
                     DrawWeatherMetric(graphics, LucideRuntimeIcon.Droplets, $"{(body.Width >= 300 ? "湿度 " : "")}{humidity:0}%", layout.Humidity, muted);
                 if (weather.WindSpeed is { } wind)
@@ -233,10 +240,10 @@ internal sealed partial class DesktopBoxForm
         }
         if (widget.Cities.Count > 1)
         {
-            WidgetText(graphics, "‹", new(body.X, body.Bottom - 20, 28, 20), text, 18, centered: true);
-            WidgetText(graphics, "›", new(body.Right - 28, body.Bottom - 20, 28, 20), text, 18, centered: true);
+            WidgetText(graphics, "‹", WeatherRectangle(widget, presentation.Previous), text, 18, centered: true);
+            WidgetText(graphics, "›", WeatherRectangle(widget, presentation.Next), text, 18, centered: true);
             var index = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId) + 1;
-            WidgetText(graphics, $"{index}/{widget.Cities.Count}", new(body.X + 28, body.Bottom - 16, body.Width - 56, 16), muted, 10, centered: true);
+            WidgetText(graphics, $"{index}/{widget.Cities.Count}", WeatherRectangle(widget, presentation.Counter), muted, 11, centered: true);
         }
     }
 }

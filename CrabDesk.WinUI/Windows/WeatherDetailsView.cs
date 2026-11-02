@@ -69,7 +69,7 @@ public sealed class WeatherDetailsView : UserControl
         ToolTipService.SetToolTip(LocationsButton, "添加和切换天气位置");
     }
 
-    public void Update(DesktopWidget widget, BoxAppearance appearance, GlobalAppearanceSettings settings)
+    public void Update(DesktopWidget widget, BoxAppearance appearance, GlobalAppearanceSettings settings, double? windowCornerRadius = null)
     {
         var color = CrabDesk.WinUI.Converters.HexColor.TryParse(appearance.Background, out var parsed) ? parsed : Color.FromArgb(255, 42, 45, 50);
         var dark = color.R * .299 + color.G * .587 + color.B * .114 < 150;
@@ -88,7 +88,7 @@ public sealed class WeatherDetailsView : UserControl
         var stroke = BoxBorderStyle.ResolveStroke(System.Drawing.Color.FromArgb(color.R, color.G, color.B), dark, settings.BorderColor, settings.BorderOpacity);
         color.A = settings.UseAcrylicBoxes ? (byte)(255 * Math.Clamp(appearance.Opacity * .8, .35, .9)) : (byte)255;
         _shell.Background = new SolidColorBrush(color);
-        _shell.CornerRadius = new CornerRadius(settings.CornerRadius);
+        _shell.CornerRadius = new CornerRadius(windowCornerRadius ?? settings.CornerRadius);
         _shell.BorderThickness = new Thickness(settings.ShowBorder ? Math.Clamp(settings.BorderWidth, 1, 6) : 0);
         _shell.BorderBrush = new SolidColorBrush(Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
         // Avoid replacing the selection while the user is interacting with the city picker.

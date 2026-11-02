@@ -32,11 +32,13 @@ public sealed partial class WidgetsPage : Page
         {
             _lifetime = new CancellationTokenSource();
             _runtime.Changed += Runtime_Changed;
+            _runtime.WidgetMonitorUpdated += Runtime_WidgetMonitorUpdated;
             ReloadInstances();
         };
         Unloaded += (_, _) =>
         {
             _runtime.Changed -= Runtime_Changed;
+            _runtime.WidgetMonitorUpdated -= Runtime_WidgetMonitorUpdated;
             _citySearch?.Cancel();
             _lifetime?.Cancel();
             _lifetime?.Dispose();
@@ -89,10 +91,11 @@ public sealed partial class WidgetsPage : Page
             var item = _galleryItems.FirstOrDefault(entry => ReferenceEquals(entry.Widget, widget));
             var caption = catalog ? widget.Kind switch
             {
-                DesktopWidgetKind.Clock => "圆形表盘、日期与星期", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
+                DesktopWidgetKind.Clock => "黑白表盘与可选秒针", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
                 DesktopWidgetKind.Note => "随手记下灵感", DesktopWidgetKind.Todo => "记录并完成每一件事",
-                DesktopWidgetKind.Translation => "随时翻译一段文字", _ => "关心城市的阴晴冷暖"
-            } : DesktopWidgets.SizeLabel(widget.Size) + (widget.IsLocked ? " · 已锁定" : "");
+                DesktopWidgetKind.Translation => "随时翻译一段文字", DesktopWidgetKind.Weather => "关心城市的阴晴冷暖",
+                DesktopWidgetKind.Performance => "实时查看 CPU、GPU、内存与磁盘", _ => "完整信息、仅速度或实时曲线"
+            } : (widget.Kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " : "") + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
             var count = catalog ? _runtime.State.Widgets.Count(existing => existing.Kind == widget.Kind) : 0;
             if (item is null)
             {
@@ -120,14 +123,29 @@ public sealed partial class WidgetsPage : Page
         WidgetGallery.SelectedItem = _galleryItems.FirstOrDefault(item => item.IsSelected);
     }
 
-    private static DesktopWidget CreateSample(DesktopWidgetKind kind) => new()
+    private static DesktopWidget CreateSample(DesktopWidgetKind kind)
     {
-        Kind = kind, Size = DesktopWidgets.DefaultSize(kind),
-        Text = "今天的灵感\n把重要的事记下来。\n留一点时间给自己。",
-        Tasks = [new() { Text = "整理桌面", IsCompleted = true }, new() { Text = "记下今天的计划" }, new() { Text = "读完一本好书" }],
-        Translation = "你好，世界。\n让沟通更简单。", TargetLanguage = "简体中文",
-        Location = new("北京", "北京市", "中国", 39.9, 116.4), Weather = new(22, 16, 25, 2, DateTimeOffset.Now) { Provider = WidgetWeatherService.ProviderName }
-    };
+        var sample = new DesktopWidget
+        {
+            Kind = kind, Size = DesktopWidgets.DefaultSize(kind),
+            Text = "今天的灵感\n把重要的事记下来。\n留一点时间给自己。",
+            Tasks = [new() { Text = "整理桌面", IsCompleted = true }, new() { Text = "记下今天的计划" }, new() { Text = "读完一本好书" }],
+            Translation = "你好，世界。\n让沟通更简单。", TargetLanguage = "简体中文",
+            Location = new("北京", "北京市", "中国", 39.9, 116.4), Weather = new(22, 16, 25, 2, DateTimeOffset.Now) { Provider = WidgetWeatherService.ProviderName },
+            Performance = kind == DesktopWidgetKind.Performance ? new(DateTimeOffset.Now, 24, 12, 9L << 30, 16L << 30, 8, 2.4 * (1 << 20), 384 * 1024, 240L << 30, 512L << 30) : null,
+            Network = kind == DesktopWidgetKind.Network ? new(DateTimeOffset.Now) { IsConnected = true, InterfaceName = "以太网", NetworkType = "以太网", DownloadBytesPerSecond = 2.4 * (1 << 20), UploadBytesPerSecond = 384 * 1024, IPv4 = "192.168.1.100", IPv6 = "2001:db8::10", LatencyMilliseconds = 18, LatencyTarget = "1.1.1.1", LatencyStatus = "" } : null,
+            PublicIp = kind == DesktopWidgetKind.Network ? "203.0.113.24" : ""
+        };
+        if (kind == DesktopWidgetKind.Network)
+        {
+            var now = DateTimeOffset.Now;
+            sample.NetworkHistory.AddRange(Enumerable.Range(0, 61).Select(index =>
+                new WidgetNetworkRatePoint(now.AddSeconds(index - 60),
+                    (1.4 + Math.Sin(index * .24) * .7 + Math.Sin(index * .73) * .25) * (1 << 20),
+                    (240 + Math.Sin(index * .18) * 110 + Math.Cos(index * .51) * 45) * 1024)));
+        }
+        return sample;
+    }
 
     private void CloseEditor()
     {
@@ -190,11 +208,11 @@ public sealed partial class WidgetsPage : Page
         EditorView.Visibility = Visibility.Visible;
         EditorHost.IsPaneOpen = true;
         EditorName.Text = widget.DisplayTitle;
-        CardSettings.IsExpanded = widget.Kind == DesktopWidgetKind.Note;
+        CardSettings.IsExpanded = DesktopWidgets.SupportsFreeResize(widget.Kind);
         Notice.IsOpen = false;
         _loading = true;
         TitleInput.Text = widget.Title;
-        SizePicker.ItemsSource = DesktopWidgets.SupportedSizes(widget.Kind).Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(size))).ToArray();
+        SizePicker.ItemsSource = DesktopWidgets.SupportedSizes(widget).Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(size))).ToArray();
         SizePicker.DisplayMemberPath = nameof(SizeChoice.Label);
         SizePicker.SelectedItem = SizePicker.Items.Cast<SizeChoice>().First(s => s.Size == widget.Size);
         MonitorPicker.ItemsSource = _runtime.Monitors.Select((monitor, index) => new MonitorChoice(monitor.Id, $"显示器 {index + 1}" + (monitor.IsPrimary ? "（主显示器）" : ""))).ToArray();
@@ -221,6 +239,9 @@ public sealed partial class WidgetsPage : Page
         TodoEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Todo);
         TranslationEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Translation);
         WeatherEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Weather);
+        PerformanceEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Performance);
+        NetworkEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Network);
+        LoadMonitorSettings(widget);
         _loading = false;
         RenderTasks();
         UpdateOnlineStatus();
@@ -444,9 +465,12 @@ public sealed partial class WidgetsPage : Page
     private void UpdateOnlineStatus()
     {
         if (_selected is not { } widget) return;
+        UpdateMonitorStatus();
         _loading = true;
         PositionLock.IsOn = widget.IsLocked;
-        SizePicker.SelectedItem = SizePicker.Items.OfType<SizeChoice>().FirstOrDefault(s => s.Size == widget.Size);
+        SyncSizeChoices(widget);
+        SyncCustomSizeSettings(widget);
+        SyncNetworkDisplaySettings(widget);
         MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
         foreach (var task in widget.Tasks)
         {
