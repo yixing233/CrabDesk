@@ -103,7 +103,33 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.False(widget.IsPublicIpLoading); Assert.NotEmpty(widget.PublicIpError); Assert.Empty(widget.PublicIp);
     }
 
-        // The model names are the reason the submenu exists; they have to reach it.
+        // Every style must be offered in the menu, and switching to the curve-only
+    // style has to land on the large card, which is what its layout assumes.
+    [Fact]
+    public void CurveOnlyStyleIsOfferedAndSwitchesToALargeCard()
+    {
+        var runtime = Fixture(); using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Network, MonitorId = "test", Size = DesktopWidgetSize.Small,
+            Bounds = new(100, 100, 180, 84), Network = new(DateTimeOffset.Now) { IsConnected = true } };
+        runtime.State.Widgets.Add(widget);
+
+        using (var menu = DesktopBoxForm.BuildMonitorContextMenu(widget))
+        {
+            var styles = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "显示样式");
+            var labels = styles.DropDownItems.OfType<ToolStripMenuItem>().Select(item => item.Text).ToArray();
+            Assert.Contains("仅上下行曲线", labels);
+            Assert.Equal(Enum.GetValues<NetworkWidgetDisplayMode>().Length, labels.Length);
+        }
+
+        runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Curve);
+
+        Assert.Equal(NetworkWidgetDisplayMode.Curve, widget.NetworkDisplayMode);
+        Assert.Equal(DesktopWidgetSize.Large, widget.Size);
+        Assert.Equal(372, widget.Bounds.Width);
+        Assert.Equal(180, widget.Bounds.Height);
+    }
+
+    // The model names are the reason the submenu exists; they have to reach it.    // The model names are the reason the submenu exists; they have to reach it.
     [Fact]
     public void HardwareSubmenuListsTheModelNamesItKnows()
     {

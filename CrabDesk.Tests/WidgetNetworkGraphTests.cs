@@ -9,6 +9,7 @@ public sealed class WidgetNetworkGraphTests
     [InlineData(NetworkWidgetDisplayMode.Details, DesktopWidgetSize.Large)]
     [InlineData(NetworkWidgetDisplayMode.Speeds, DesktopWidgetSize.Small)]
     [InlineData(NetworkWidgetDisplayMode.Chart, DesktopWidgetSize.Large)]
+    [InlineData(NetworkWidgetDisplayMode.Curve, DesktopWidgetSize.Large)]
     public void DisplayPreferencePersistsAndNormalizesSizeWithoutPersistingSamples(NetworkWidgetDisplayMode mode, DesktopWidgetSize size)
     {
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = mode, Size = DesktopWidgetSize.Medium };
@@ -18,6 +19,39 @@ public sealed class WidgetNetworkGraphTests
         Assert.Equal(mode, loaded.NetworkDisplayMode); Assert.Equal(size, loaded.Size);
         Assert.Empty(loaded.NetworkHistory);
         Assert.Contains(size, DesktopWidgets.SupportedSizes(loaded));
+    }
+
+    [Fact]
+    public void CurveOnlyStyleReclaimsTheTitleRowForThePlot()
+    {
+        // Chart spends its top rows on two speed figures; the curve-only style
+        // has neither a title nor figures and must not leave that space blank.
+        const double width = 372, height = 180, radius = 8;
+        var chart = WidgetNetworkGraph.ChartLayout(width, height, radius);
+        var curve = WidgetNetworkGraph.CurveLayout(width, height, radius);
+
+        Assert.True(curve.Plot.Height > chart.Plot.Height);
+        Assert.True(curve.Plot.Y < chart.Plot.Y);
+        // Same card, so the plot stays inside it with the footer beneath.
+        Assert.True(curve.Plot.Y >= 0);
+        Assert.True(curve.Footer.Y >= curve.Plot.Y + curve.Plot.Height);
+        Assert.True(curve.Footer.Y + curve.Footer.Height <= height);
+        // No headline figures in this style.
+        Assert.Equal(curve.Plot, curve.Download);
+        Assert.Equal(curve.Plot, curve.Upload);
+    }
+
+    [Fact]
+    public void CurveOnlyStyleIsRecognisedAndNamed()
+    {
+        var curve = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Curve };
+        var chart = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Chart };
+        var speeds = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds };
+
+        Assert.True(DesktopWidgets.IsNetworkCurveOnly(curve));
+        Assert.True(DesktopWidgets.IsNetworkCurveOnly(chart));
+        Assert.False(DesktopWidgets.IsNetworkCurveOnly(speeds));
+        Assert.Equal("仅上下行曲线", DesktopWidgets.NetworkDisplayName(NetworkWidgetDisplayMode.Curve));
     }
 
     [Fact]

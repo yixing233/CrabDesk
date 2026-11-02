@@ -4,7 +4,7 @@ namespace CrabDesk.Core;
 
 public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network }
 public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape, Custom }
-public enum NetworkWidgetDisplayMode { Details, Speeds, Chart }
+public enum NetworkWidgetDisplayMode { Details, Speeds, Chart, Curve }
 
 public sealed class DesktopWidget
 {
@@ -215,10 +215,20 @@ public static class DesktopWidgets
         widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds
             ? DesktopWidgetSize.Small : DefaultSize(widget.Kind);
 
+    /// <summary>
+    /// True for the network styles that render nothing but the two speed curves.
+    /// Both drop the card title and the speed figures, so the curve gets the
+    /// whole card.
+    /// </summary>
+    public static bool IsNetworkCurveOnly(DesktopWidget widget) =>
+        widget.Kind == DesktopWidgetKind.Network &&
+        widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Chart or NetworkWidgetDisplayMode.Curve;
+
     public static string NetworkDisplayName(NetworkWidgetDisplayMode mode) => mode switch
     {
         NetworkWidgetDisplayMode.Speeds => "仅上下行速度",
-        NetworkWidgetDisplayMode.Chart => "上下行曲线图",
+        NetworkWidgetDisplayMode.Chart => "速度与曲线",
+        NetworkWidgetDisplayMode.Curve => "仅上下行曲线",
         _ => "完整信息"
     };
 

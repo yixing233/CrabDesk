@@ -55,6 +55,27 @@ public static class WidgetNetworkGraph
             new(body.X, body.Y + body.Height - 16, body.Width, 16));
     }
 
+    /// <summary>
+    /// Layout for the curve-only style: the plot takes the whole body minus the
+    /// footer. Download and upload share no header row here, so both spans are
+    /// reported as the plot area to keep the record shape unchanged.
+    /// </summary>
+    public static Layout CurveLayout(double width, double height, double radius)
+    {
+        var body = WidgetMonitorPresentation.Body(width, height, radius);
+        // The title row is gone and nothing sits above the plot, so the curve
+        // reclaims that space instead of starting below a title it does not have.
+        var inset = 12 + Math.Clamp(radius, 0, 20) * .2;
+        // Keep the curve off the rounded edge: Body already insets by the card
+        // radius, and this adds the usual text margin on top of it.
+        var left = body.X + 2;
+        var widthUsed = Math.Max(0, body.Width - 4);
+        var top = inset;
+        var footer = new LayoutRect(left, height - inset - 12, widthUsed, 12);
+        var plot = new LayoutRect(left, top, widthUsed, Math.Max(0, footer.Y - top - 4));
+        return new(plot, plot, plot, footer);
+    }
+
     public static (LayoutRect Download, LayoutRect Upload) SpeedLayout(double width, double height, double radius)
     {
         var inset = 12 + Math.Clamp(radius, 0, 20) * .2;

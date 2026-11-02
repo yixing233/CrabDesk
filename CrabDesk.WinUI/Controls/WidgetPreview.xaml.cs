@@ -81,8 +81,10 @@ public sealed partial class WidgetPreview : UserControl
         var (width, height) = DesktopWidgets.Dimensions(widget);
         CardSurface.Width = width;
         CardSurface.Height = height;
-        var networkSpeeds = widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds;
-        CardTitle.Visibility = networkSpeeds || widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? Visibility.Collapsed : Visibility.Visible;
+        // Both of these render without a card title, so the body takes the title row.
+        var networkWithoutTitle = widget.Kind == DesktopWidgetKind.Network &&
+            widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Speeds or NetworkWidgetDisplayMode.Curve;
+        CardTitle.Visibility = networkWithoutTitle || widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? Visibility.Collapsed : Visibility.Visible;
         _calendarHeader.Visibility = widget.Kind == DesktopWidgetKind.Calendar ? Visibility.Visible : Visibility.Collapsed;
         _calendarUpcomingTitle.Visibility = widget.Kind == DesktopWidgetKind.Calendar && width >= 300 ? Visibility.Visible : Visibility.Collapsed;
         _calendarUpcomingTitle.Foreground = _secondary;
@@ -105,9 +107,9 @@ public sealed partial class WidgetPreview : UserControl
             CardTitle.Text = widget.Location is { } city ? $"{city.Name}  ⌄" : widget.DisplayTitle;
         }
         CardTitle.Foreground = _text;
-        Grid.SetRow(CardBody, networkSpeeds ? 0 : 1);
-        Grid.SetRowSpan(CardBody, networkSpeeds ? 2 : 1);
-        CardBody.Margin = networkSpeeds || widget.Kind == DesktopWidgetKind.Weather ? new Thickness(0) :
+        Grid.SetRow(CardBody, networkWithoutTitle ? 0 : 1);
+        Grid.SetRowSpan(CardBody, networkWithoutTitle ? 2 : 1);
+        CardBody.Margin = networkWithoutTitle || widget.Kind == DesktopWidgetKind.Weather ? new Thickness(0) :
             widget.Kind == DesktopWidgetKind.Todo ? new Thickness(8, 4, 8, 8) : new Thickness(8);
         CardBody.Children.Clear();
         switch (widget.Kind)
@@ -520,11 +522,19 @@ public sealed partial class WidgetPreview : UserControl
             CardBody.Children.Add(panel);
             return;
         }
-        if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Chart)
+        if (widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Chart or NetworkWidgetDisplayMode.Curve)
         {
-            var layout = WidgetNetworkGraph.ChartLayout(width, height, radius);
-            Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
-            Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
+            // Both styles share the plot; only Chart adds the headline figures
+            // above it. The caller already hides the card title for Curve.
+            var curveOnly = widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Curve;
+            var layout = curveOnly
+                ? WidgetNetworkGraph.CurveLayout(width, height, radius)
+                : WidgetNetworkGraph.ChartLayout(width, height, radius);
+            if (!curveOnly)
+            {
+                Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
+                Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
+            }
             var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
             var plot = new Canvas();
             var gridColor = _text.Color; gridColor.A = 24;

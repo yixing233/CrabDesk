@@ -45,6 +45,8 @@ internal sealed partial class DesktopBoxForm
         { DrawNetworkSpeeds(graphics, widget, text, muted, accent); return; }
         if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Chart)
         { DrawNetworkChart(graphics, widget, text, muted, accent); return; }
+        if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Curve)
+        { DrawNetworkCurveOnly(graphics, widget, text, muted, accent); return; }
         var layout = WidgetMonitorPresentation.NetworkFields(MonitorBody(widget)); var snapshot = widget.Network;
         void Speed(LayoutRect rect, string label, LucideRuntimeIcon icon, double? bytes)
         {
@@ -190,25 +192,61 @@ internal sealed partial class DesktopBoxForm
             var y = plot.Y + plot.Height * row / 2;
             graphics.DrawLine(grid, plot.X, y, plot.Right, y);
         }
-        void DrawSeries(System.Collections.Generic.IReadOnlyList<WidgetNetworkGraph.Point[]> segments, Color color)
-        {
-            using var pen = new Pen(color, 2) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
-            using var dot = new SolidBrush(color);
-            foreach (var segment in segments)
-            {
-                var points = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(segment, point =>
-                    new PointF((float)(widget.Bounds.X + point.X), (float)(widget.Bounds.Y + point.Y))));
-                if (points.Length > 1) graphics.DrawLines(pen, points);
-                else if (points.Length == 1) graphics.FillEllipse(dot, points[0].X - 2, points[0].Y - 2, 4, 4);
-            }
-        }
-        DrawSeries(graph.Download, accent); DrawSeries(graph.Upload, uploadColor);
+        DrawNetworkSeries(graphics, widget, graph.Download, accent);
+        DrawNetworkSeries(graphics, widget, graph.Upload, uploadColor);
         if (graph.Download.Count == 0 && graph.Upload.Count == 0)
             WidgetText(graphics, widget.Network is { IsConnected: false } ? "未连接网络" : "正在积累数据…", plot, muted, 11, centered: true);
         var footer = MonitorRectangle(widget, layout.Footer);
         WidgetText(graphics, "最近 60 秒", new(footer.X, footer.Y, footer.Width / 2, footer.Height), muted, 10);
         WidgetText(graphics, "上限 " + WidgetMonitorMetrics.Speed(graph.Maximum),
             new(footer.X + footer.Width / 2, footer.Y, footer.Width / 2, footer.Height), muted, 10, rightAligned: true);
+    }
+
+    /// <summary>
+    /// Curve-only style: the two speed series fill the card with no headline
+    /// figures. It exists for the desktop corner where the numbers are already
+    /// known and only the trend matters.
+    /// </summary>
+    private void DrawNetworkCurveOnly(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent)
+    {
+        var layout = WidgetNetworkGraph.CurveLayout(widget.Bounds.Width, widget.Bounds.Height,
+            _runtime.State.Settings.Appearance.CornerRadius);
+        var plot = MonitorRectangle(widget, layout.Plot);
+        var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
+        using (var grid = new Pen(Color.FromArgb(24, text), 1) { DashStyle = DashStyle.Dash })
+        {
+            for (var row = 0; row <= 2; row++)
+            {
+                var y = plot.Y + plot.Height * row / 2;
+                graphics.DrawLine(grid, plot.X, y, plot.Right, y);
+            }
+        }
+        DrawNetworkSeries(graphics, widget, graph.Download, accent);
+        DrawNetworkSeries(graphics, widget, graph.Upload, NetworkUploadColor(text));
+        if (graph.Download.Count == 0 && graph.Upload.Count == 0)
+        {
+            WidgetText(graphics, widget.Network is { IsConnected: false } ? "未连接网络" : "正在积累数据…",
+                plot, muted, 11, centered: true);
+        }
+        var footer = MonitorRectangle(widget, layout.Footer);
+        WidgetText(graphics, "最近 60 秒", new(footer.X, footer.Y, footer.Width / 2, footer.Height), muted, 10);
+        WidgetText(graphics, "上限 " + WidgetMonitorMetrics.Speed(graph.Maximum),
+            new(footer.X + footer.Width / 2, footer.Y, footer.Width / 2, footer.Height), muted, 10, rightAligned: true);
+    }
+
+    /// <summary>Draws one projected series, breaking the line wherever a sample is missing.</summary>
+    private static void DrawNetworkSeries(Graphics graphics, DesktopWidget widget,
+        System.Collections.Generic.IReadOnlyList<WidgetNetworkGraph.Point[]> segments, Color color)
+    {
+        using var pen = new Pen(color, 2) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var dot = new SolidBrush(color);
+        foreach (var segment in segments)
+        {
+            var points = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(segment, point =>
+                new PointF((float)(widget.Bounds.X + point.X), (float)(widget.Bounds.Y + point.Y))));
+            if (points.Length > 1) graphics.DrawLines(pen, points);
+            else if (points.Length == 1) graphics.FillEllipse(dot, points[0].X - 2, points[0].Y - 2, 4, 4);
+        }
     }
 
     // The readings are reference information, not commands. They live in a

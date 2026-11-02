@@ -48,7 +48,8 @@ internal sealed partial class DesktopBoxForm
         var state = graphics.Save();
         graphics.SetClip(path, CombineMode.Intersect);
         if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather) &&
-            !(widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds))
+            !(widget.Kind == DesktopWidgetKind.Network &&
+              widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Speeds or NetworkWidgetDisplayMode.Curve))
         {
             var titleMargin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? 60 : 32;
             WidgetText(graphics, widget.DisplayTitle, new(bounds.X + titleMargin, bounds.Y, bounds.Width - titleMargin * 2, 28), text, 13.333f, true, true);
