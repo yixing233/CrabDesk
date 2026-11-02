@@ -103,7 +103,36 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.False(widget.IsPublicIpLoading); Assert.NotEmpty(widget.PublicIpError); Assert.Empty(widget.PublicIp);
     }
 
-    // The readings used to sit directly in the top level, and their combined
+        // The model names are the reason the submenu exists; they have to reach it.
+    [Fact]
+    public void HardwareSubmenuListsTheModelNamesItKnows()
+    {
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.Performance,
+            Performance = new WidgetPerformanceSnapshot(DateTimeOffset.Now, 12, 3, 8L << 30, 16L << 30, 4, 1024, 2048, 100L << 30, 512L << 30)
+            {
+                Hardware = new WidgetHardwareNames(
+                    "12th Gen Intel Core i7-12700H", "NVIDIA GeForce RTX 4060 Laptop GPU",
+                    "DDR4 3200MHz 32 GB", "NVMe WD PC SN740 SDDP")
+            }
+        };
+
+        using var menu = DesktopBoxForm.BuildMonitorContextMenu(widget);
+
+        var parent = Assert.Single(menu.Items.OfType<ToolStripMenuItem>());
+        var rows = parent.DropDownItems.OfType<ToolStripMenuItem>()
+            .Select(item => item.Text).ToArray();
+        Assert.Contains("处理器：12th Gen Intel Core i7-12700H", rows);
+        Assert.Contains("显卡：NVIDIA GeForce RTX 4060 Laptop GPU", rows);
+        Assert.Contains("内存：DDR4 3200MHz 32 GB", rows);
+        Assert.Contains("磁盘：NVMe WD PC SN740 SDDP", rows);
+        // The readings still follow, separated from the names.
+        Assert.Contains(rows, row => row.StartsWith("物理内存"));
+        Assert.Contains(parent.DropDownItems.Cast<ToolStripItem>(), item => item is ToolStripSeparator);
+    }
+
+// The readings used to sit directly in the top level, and their combined
     // height stretched the menu far past the actions the user picks from.
     [Fact]
     public void PerformanceMenuKeepsHardwareReadingsInAChildMenu()

@@ -26,12 +26,46 @@ public static class WidgetMonitorPresentation
     public static Metric[] PerformanceMetrics(WidgetPerformanceSnapshot? snapshot)
     {
         var memory = snapshot is { MemoryTotalBytes: > 0 } ? snapshot.MemoryUsedBytes * 100d / snapshot.MemoryTotalBytes : (double?)null;
-        return [new("CPU", WidgetMonitorMetrics.Percent(snapshot?.CpuPercent), "系统处理器", snapshot?.CpuPercent),
-            new("GPU", WidgetMonitorMetrics.Percent(snapshot?.GpuPercent), snapshot?.GpuPercent is null ? "等待或不可用" : "最繁忙的图形引擎", snapshot?.GpuPercent),
+        var hardware = snapshot?.Hardware ?? WidgetHardwareNames.Empty;
+        // The model name replaces the generic description once it is known: the
+        // row already says "CPU", so "12th Gen Intel Core i7-12700H" is what the
+        // user cannot get anywhere else on this card. Memory and disk keep their
+        // measurements, which are more useful there than a part number.
+        return [new("CPU", WidgetMonitorMetrics.Percent(snapshot?.CpuPercent), Detail(hardware.Cpu, "系统处理器"), snapshot?.CpuPercent),
+            new("GPU", WidgetMonitorMetrics.Percent(snapshot?.GpuPercent),
+                Detail(hardware.Gpu, snapshot?.GpuPercent is null ? "等待或不可用" : "最繁忙的图形引擎"), snapshot?.GpuPercent),
             new("内存", WidgetMonitorMetrics.Percent(memory), snapshot is { MemoryTotalBytes: > 0 }
                 ? $"{WidgetMonitorMetrics.Bytes(snapshot.MemoryUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot.MemoryTotalBytes)}" : "等待采样", memory),
             new("磁盘", WidgetMonitorMetrics.Percent(snapshot?.DiskActivePercent),
                 $"读 {WidgetMonitorMetrics.Speed(snapshot?.DiskReadBytesPerSecond)} · 写 {WidgetMonitorMetrics.Speed(snapshot?.DiskWriteBytesPerSecond)}", snapshot?.DiskActivePercent)];
+    }
+
+    private static string Detail(string hardware, string fallback)
+    {
+        var label = WidgetMonitorMetrics.HardwareLabel(hardware);
+        return label.Length == 0 ? fallback : label;
+    }
+
+    /// <summary>
+    /// The hardware model lines the context menu lists under 硬件信息. Blank
+    /// entries are left out so the menu never shows an empty value.
+    /// </summary>
+    public static string[] HardwareDetailLines(WidgetPerformanceSnapshot? snapshot)
+    {
+        var hardware = snapshot?.Hardware ?? WidgetHardwareNames.Empty;
+        var lines = new List<string>(4);
+        foreach (var (label, value) in new[]
+                 {
+                     ("处理器", hardware.Cpu), ("显卡", hardware.Gpu),
+                     ("内存", hardware.Memory), ("磁盘", hardware.Disk)
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                lines.Add($"{label}：{value.Trim()}");
+            }
+        }
+        return lines.ToArray();
     }
 
     public static NetworkLayout NetworkFields(LayoutRect body)

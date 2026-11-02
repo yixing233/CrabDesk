@@ -4,7 +4,25 @@ namespace CrabDesk.Core;
 
 public sealed record WidgetPerformanceSnapshot(DateTimeOffset CapturedAt, double? CpuPercent, double? GpuPercent,
     long MemoryUsedBytes, long MemoryTotalBytes, double? DiskActivePercent,
-    double? DiskReadBytesPerSecond, double? DiskWriteBytesPerSecond, long? DiskUsedBytes, long? DiskTotalBytes);
+    double? DiskReadBytesPerSecond, double? DiskWriteBytesPerSecond, long? DiskUsedBytes, long? DiskTotalBytes)
+{
+    /// <summary>
+    /// Model names of the sampled hardware. Empty until the first enumeration
+    /// finishes; the names never change while the machine is running, so they
+    /// are read once and carried on every snapshot rather than re-queried.
+    /// </summary>
+    public WidgetHardwareNames Hardware { get; init; } = WidgetHardwareNames.Empty;
+}
+
+/// <summary>
+/// Human-readable model names for the four metrics the performance card shows.
+/// A blank field means the name could not be determined and the card falls back
+/// to describing the metric instead.
+/// </summary>
+public sealed record WidgetHardwareNames(string Cpu, string Gpu, string Memory, string Disk)
+{
+    public static WidgetHardwareNames Empty { get; } = new("", "", "", "");
+}
 
 public sealed record WidgetNetworkSnapshot(DateTimeOffset CapturedAt)
 {
@@ -27,6 +45,30 @@ public sealed record WidgetNetworkAdapter(string Id, string Name, string Network
 
 public static class WidgetMonitorMetrics
 {
+    /// <summary>
+    /// Shortens a hardware model name to what fits beside a metric. Vendor
+    /// prefixes and the repeated "CPU"/"GPU" tokens only restate the row they
+    /// sit on, so they are dropped before the length cap is applied.
+    /// </summary>
+    public static string HardwareLabel(string value, int maximumLength = 34)
+    {
+        var text = (value ?? "").Trim();
+        if (text.Length == 0) return "";
+        foreach (var prefix in new[] { "(R)", "(TM)", "(tm)", "(r)" })
+        {
+            text = text.Replace(prefix, "");
+        }
+        foreach (var noise in new[] { "CPU ", "GPU ", "Processor ", "Graphics " })
+        {
+            if (text.StartsWith(noise, StringComparison.OrdinalIgnoreCase) && text.Length > noise.Length)
+            {
+                text = text[noise.Length..];
+            }
+        }
+        text = text.Replace("  ", " ").Trim();
+        return text.Length <= maximumLength ? text : text[..Math.Max(1, maximumLength - 1)].TrimEnd() + "…";
+    }
+
     public static bool IsValidLatencyTarget(string value) => value.Length == 0 ||
         value.Length <= 253 && (System.Net.IPAddress.TryParse(value, out _) || Uri.CheckHostName(value) == UriHostNameType.Dns);
     public static double? Rate(long previous, long current, double elapsedSeconds) =>

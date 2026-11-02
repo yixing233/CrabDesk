@@ -20,6 +20,7 @@ public sealed class WidgetPerformanceMonitor : IDisposable
     private long _capacityTimestamp;
     private bool _capacityChecked;
     private long? _diskUsedBytes, _diskTotalBytes;
+    private readonly WidgetHardwareInventory _hardware = new();
 
     public WidgetPerformanceSnapshot Sample()
     {
@@ -48,7 +49,12 @@ public sealed class WidgetPerformanceMonitor : IDisposable
             return new WidgetPerformanceSnapshot(DateTimeOffset.Now, cpu, gpu,
                 memoryAvailable ? (long)(memory.TotalPhysical - memory.AvailablePhysical) : 0,
                 memoryAvailable ? (long)memory.TotalPhysical : 0, active, read, write,
-                _diskUsedBytes, _diskTotalBytes);
+                _diskUsedBytes, _diskTotalBytes)
+            {
+                // Cached inside the inventory, so this costs nothing after the
+                // first sample and never touches the counters above.
+                Hardware = _hardware.Read()
+            };
         }
     }
 

@@ -141,6 +141,11 @@ internal sealed partial class DesktopBoxForm
     private static void AddHardwareDetails(FluentContextMenuStrip menu, WidgetPerformanceSnapshot? snapshot)
     {
         var details = new FluentToolStripMenuItem("硬件信息");
+        foreach (var line in WidgetMonitorPresentation.HardwareDetailLines(snapshot))
+        {
+            details.DropDownItems.Add(new FluentToolStripMenuItem(line) { Enabled = false });
+        }
+        if (details.DropDownItems.Count > 0) details.DropDownItems.Add(new Forms.ToolStripSeparator());
         details.DropDownItems.Add(new FluentToolStripMenuItem("物理内存：" + (snapshot is { MemoryTotalBytes: > 0 }
             ? $"{WidgetMonitorMetrics.Bytes(snapshot.MemoryUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot.MemoryTotalBytes)}" : "等待采样")) { Enabled = false });
         details.DropDownItems.Add(new FluentToolStripMenuItem($"磁盘读 {WidgetMonitorMetrics.Speed(snapshot?.DiskReadBytesPerSecond)} · 写 {WidgetMonitorMetrics.Speed(snapshot?.DiskWriteBytesPerSecond)}") { Enabled = false });
