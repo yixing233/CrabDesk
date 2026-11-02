@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Windows.Forms;
 using System.Runtime.CompilerServices;
 using CrabDesk.Core;
 using CrabDesk.Runtime;
@@ -100,6 +101,62 @@ public sealed class WidgetMonitorRuntimeTests
         Set(runtime, "_publicIpQuery", (Func<CancellationToken, Task<string>>)(_ => Task.FromException<string>(new TaskCanceledException("HTTP timeout"))));
         await runtime.QueryWidgetPublicIpAsync(widget);
         Assert.False(widget.IsPublicIpLoading); Assert.NotEmpty(widget.PublicIpError); Assert.Empty(widget.PublicIp);
+    }
+
+    // The readings used to sit directly in the top level, and their combined
+    // height stretched the menu far past the actions the user picks from.
+    [Fact]
+    public void PerformanceMenuKeepsHardwareReadingsInAChildMenu()
+    {
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.Performance,
+            Performance = new WidgetPerformanceSnapshot(DateTimeOffset.Now, 12, 3, 8L << 30, 16L << 30, 4, 1024, 2048, 100L << 30, 512L << 30)
+        };
+
+        using var menu = DesktopBoxForm.BuildMonitorContextMenu(widget);
+
+        var parent = Assert.Single(menu.Items.OfType<ToolStripMenuItem>());
+        Assert.Equal("硬件信息", parent.Text);
+        Assert.Empty(menu.Items.OfType<ToolStripItem>().Where(item => !item.Equals(parent) && item is not ToolStripSeparator));
+        Assert.All(parent.DropDownItems.OfType<ToolStripMenuItem>(), item => Assert.False(item.Enabled));
+        Assert.Contains(parent.DropDownItems.OfType<ToolStripMenuItem>(), item => item.Text.StartsWith("物理内存"));
+        Assert.Contains(parent.DropDownItems.OfType<ToolStripMenuItem>(), item => item.Text.StartsWith("磁盘读"));
+        Assert.Contains(parent.DropDownItems.OfType<ToolStripMenuItem>(), item => item.Text.StartsWith("固定磁盘容量"));
+    }
+
+    // A disabled parent cannot open its child, so the readings would be
+    // unreachable if the container inherited their read-only state.
+    [Fact]
+    public void TheHardwareReadingParentStaysEnabledSoItsChildCanOpen()
+    {
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Performance };
+
+        using var menu = DesktopBoxForm.BuildMonitorContextMenu(widget);
+
+        var parent = Assert.Single(menu.Items.OfType<ToolStripMenuItem>());
+        Assert.True(parent.Enabled);
+        Assert.Equal(3, parent.DropDownItems.Count);
+        // Read-only values: the rows exist but cannot be invoked.
+        Assert.Contains(parent.DropDownItems.OfType<ToolStripMenuItem>(), item => item.Text.Contains("等待采样"));
+    }
+
+    [Fact]
+    public void PerformanceMenuSpendsNoExtraTopLevelRowsOnReadings()
+    {
+        var withData = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.Performance,
+            Performance = new WidgetPerformanceSnapshot(DateTimeOffset.Now, 12, 3, 8L << 30, 16L << 30, 4, 1024, 2048, 100L << 30, 512L << 30)
+        };
+        var withoutData = new DesktopWidget { Kind = DesktopWidgetKind.Performance };
+
+        using var populated = DesktopBoxForm.BuildMonitorContextMenu(withData);
+        using var empty = DesktopBoxForm.BuildMonitorContextMenu(withoutData);
+
+        // Same row count either way: the readings never drive the top level.
+        Assert.Equal(empty.Items.Count, populated.Items.Count);
+        Assert.Single(populated.Items.OfType<ToolStripMenuItem>());
     }
 
     private static CrabDeskRuntime Fixture()

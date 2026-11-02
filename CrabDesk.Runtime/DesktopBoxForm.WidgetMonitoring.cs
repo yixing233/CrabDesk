@@ -134,15 +134,42 @@ internal sealed partial class DesktopBoxForm
             new(footer.X + footer.Width / 2, footer.Y, footer.Width / 2, footer.Height), muted, 10, rightAligned: true);
     }
 
-    private void AddMonitorContextMenu(FluentContextMenuStrip menu, DesktopWidget widget)
+    // The readings are reference information, not commands. They live in a
+    // child menu so the top level stays at the height of the actions the user
+    // actually picks from; three long values used to stretch it well past them.
+    // The parent stays enabled because a disabled item cannot open its child.
+    private static void AddHardwareDetails(FluentContextMenuStrip menu, WidgetPerformanceSnapshot? snapshot)
+    {
+        var details = new FluentToolStripMenuItem("硬件信息");
+        details.DropDownItems.Add(new FluentToolStripMenuItem("物理内存：" + (snapshot is { MemoryTotalBytes: > 0 }
+            ? $"{WidgetMonitorMetrics.Bytes(snapshot.MemoryUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot.MemoryTotalBytes)}" : "等待采样")) { Enabled = false });
+        details.DropDownItems.Add(new FluentToolStripMenuItem($"磁盘读 {WidgetMonitorMetrics.Speed(snapshot?.DiskReadBytesPerSecond)} · 写 {WidgetMonitorMetrics.Speed(snapshot?.DiskWriteBytesPerSecond)}") { Enabled = false });
+        details.DropDownItems.Add(new FluentToolStripMenuItem($"固定磁盘容量：{WidgetMonitorMetrics.Bytes(snapshot?.DiskUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot?.DiskTotalBytes)}") { Enabled = false });
+        menu.Items.Add(details);
+    }
+
+    /// <summary>
+    /// Builds the monitor section on its own so the menu shape can be asserted
+    /// without a live desktop surface.
+    /// </summary>
+    internal static FluentContextMenuStrip BuildMonitorContextMenu(DesktopWidget widget)
+    {
+        var menu = new FluentContextMenuStrip();
+        AddMonitorItems(menu, widget, action => action(), (_, _) => { }, _ => { });
+        return menu;
+    }
+
+    private void AddMonitorContextMenu(FluentContextMenuStrip menu, DesktopWidget widget) =>
+        AddMonitorItems(menu, widget, TryAction,
+            (target, mode) => _runtime.SetNetworkDisplayMode(target, mode),
+            target => _ = _runtime.QueryWidgetPublicIpAsync(target));
+
+    private static void AddMonitorItems(FluentContextMenuStrip menu, DesktopWidget widget, Action<Action> run,
+        Action<DesktopWidget, NetworkWidgetDisplayMode> setDisplayMode, Action<DesktopWidget> queryPublicIp)
     {
         if (widget.Kind == DesktopWidgetKind.Performance)
         {
-            var snapshot = widget.Performance;
-            menu.Items.Add(new FluentToolStripMenuItem("物理内存：" + (snapshot is { MemoryTotalBytes: > 0 }
-                ? $"{WidgetMonitorMetrics.Bytes(snapshot.MemoryUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot.MemoryTotalBytes)}" : "等待采样")) { Enabled = false });
-            menu.Items.Add(new FluentToolStripMenuItem($"磁盘读 {WidgetMonitorMetrics.Speed(snapshot?.DiskReadBytesPerSecond)} · 写 {WidgetMonitorMetrics.Speed(snapshot?.DiskWriteBytesPerSecond)}") { Enabled = false });
-            menu.Items.Add(new FluentToolStripMenuItem($"固定磁盘容量：{WidgetMonitorMetrics.Bytes(snapshot?.DiskUsedBytes)} / {WidgetMonitorMetrics.Bytes(snapshot?.DiskTotalBytes)}") { Enabled = false });
+            AddHardwareDetails(menu, widget.Performance);
         }
         else if (widget.Kind == DesktopWidgetKind.Network)
         {
@@ -150,15 +177,15 @@ internal sealed partial class DesktopBoxForm
             foreach (var mode in Enum.GetValues<NetworkWidgetDisplayMode>())
             {
                 var item = new FluentToolStripMenuItem(DesktopWidgets.NetworkDisplayName(mode)) { Checked = widget.NetworkDisplayMode == mode };
-                item.Click += (_, _) => TryAction(() => _runtime.SetNetworkDisplayMode(widget, mode));
+                item.Click += (_, _) => setDisplayMode(widget, mode);
                 styles.DropDownItems.Add(item);
             }
             menu.Items.Add(styles);
-            menu.Items.Add(widget.IsPublicIpLoading ? "正在查询公网 IP…" : "查询 / 刷新公网 IP", null, async (_, _) => await _runtime.QueryWidgetPublicIpAsync(widget));
+            menu.Items.Add(widget.IsPublicIpLoading ? "正在查询公网 IP…" : "查询 / 刷新公网 IP", null, (_, _) => queryPublicIp(widget));
             foreach (var (label, value) in new[] { ("IPv4", widget.Network?.IPv4), ("IPv6", widget.Network?.IPv6), ("公网 IP", widget.PublicIp), ("网关", widget.Network?.Gateway) })
             {
                 var item = new FluentToolStripMenuItem("复制 " + label) { Enabled = !string.IsNullOrEmpty(value) };
-                item.Click += (_, _) => { if (!string.IsNullOrEmpty(value)) TryAction(() => Forms.Clipboard.SetText(value)); };
+                item.Click += (_, _) => { if (!string.IsNullOrEmpty(value)) run(() => Forms.Clipboard.SetText(value)); };
                 menu.Items.Add(item);
             }
             menu.Items.Add("打开网络设置", null, (_, _) => System.Diagnostics.Process.Start(
