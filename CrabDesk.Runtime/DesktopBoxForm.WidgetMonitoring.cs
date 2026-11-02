@@ -81,12 +81,19 @@ internal sealed partial class DesktopBoxForm
         if (compact)
         {
             LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), ink, 14);
-            WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes), new(bounds.X + 22, bounds.Y, bounds.Width - 22, bounds.Height), text, 18, bold: true);
+            // Right-aligned so the unit holds still. A left-aligned value moved
+            // its "/s" every time the magnitude changed width, which read as the
+            // row jittering while the numbers were merely being resampled.
+            WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes),
+                new(bounds.X + 22, bounds.Y, bounds.Width - 22, bounds.Height), text, 18, bold: true, rightAligned: true);
             return;
         }
         LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, 14), ink, 12);
         WidgetText(graphics, upload ? "上传" : "下载", new(bounds.X + 19, bounds.Y, bounds.Width - 19, 14), muted, 10.5f);
-        WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes), new(bounds.X, bounds.Y + 14, bounds.Width, 26), text, 21, bold: true);
+        // Right-aligned for the same reason as the compact row: the column edge
+        // is fixed, so a changing magnitude cannot shift the unit sideways.
+        WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes), new(bounds.X, bounds.Y + 14, bounds.Width, 26),
+            text, 21, bold: true, rightAligned: true);
     }
 
     private void DrawNetworkSpeeds(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent)

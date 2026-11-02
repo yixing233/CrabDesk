@@ -483,9 +483,10 @@ public sealed partial class WidgetPreview : UserControl
             Canvas.SetLeft(element, bounds.X - (speedsOnly ? 0 : 8));
             Canvas.SetTop(element, bounds.Y - (speedsOnly ? 0 : 36)); panel.Children.Add(element);
         }
-        void Label(string value, double size, LayoutRect bounds, bool secondary = false, bool bold = false)
+        void Label(string value, double size, LayoutRect bounds, bool secondary = false, bool bold = false, bool rightAligned = false)
         {
             var label = Text(value, size, secondary, bold); label.VerticalAlignment = VerticalAlignment.Center;
+            if (rightAligned) label.TextAlignment = TextAlignment.Right;
             Place(label, bounds);
         }
         void Speed(LucideIconName direction, string caption, double? speed, LayoutRect bounds, SolidColorBrush? ink = null, bool compact = false)
@@ -493,12 +494,15 @@ public sealed partial class WidgetPreview : UserControl
             if (compact)
             {
                 Place(new LucideIcon { Icon = direction, FontSize = 14, Foreground = ink ?? _accent }, bounds with { Width = 14 });
-                Label(WidgetMonitorMetrics.Speed(speed), 18, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, bold: true);
+                // Matches the desktop card: the unit stays put only when the
+                // value anchors to the trailing edge.
+                Label(WidgetMonitorMetrics.Speed(speed), 18, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 },
+                    bold: true, rightAligned: true);
                 return;
             }
             Place(new LucideIcon { Icon = direction, FontSize = 12, Foreground = ink ?? _accent }, bounds with { Width = 14, Height = 14 });
             Label(caption, 10.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19, Height = 14 }, true);
-            Label(WidgetMonitorMetrics.Speed(speed), 21, bounds with { Y = bounds.Y + 14, Height = 26 }, bold: true);
+            Label(WidgetMonitorMetrics.Speed(speed), 21, bounds with { Y = bounds.Y + 14, Height = 26 }, bold: true, rightAligned: true);
         }
         if (speedsOnly)
         {

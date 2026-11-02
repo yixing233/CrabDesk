@@ -1847,6 +1847,72 @@ public sealed class DesktopWidgetRuntimeTests
 
     private static void Set(object instance, string name, object value) => instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(instance, value);
     private static object? Call(object instance, string name, params object[] args) => instance.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(instance, args);
+    // The value used to be left-aligned, so a magnitude change of a different
+    // width slid the unit sideways and the card looked like it was jittering.
+    // Measuring the painted pixels is the only way to catch that: the layout
+    // rectangle is identical either way, only the glyph positions differ.
+    [Theory]
+    [InlineData(DesktopWidgetSize.Small)]
+    [InlineData(DesktopWidgetSize.Wide)]
+    public void SpeedValuesHoldTheirUnitAtAFixedRightEdge(DesktopWidgetSize size) => OnSta(() =>
+    {
+        var (runtime, _) = Fixture();
+        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { });
+        Set(runtime, "_saveTimer", timer);
+        using var surface = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        var (width, height) = DesktopWidgets.Dimensions(size);
+
+        // Values chosen so the formatted text differs in both digit count and
+        // unit: "9.2 KB/s", "921.6 KB/s", "1.4 MB/s" and a bare "128 B/s".
+        var edges = new[] { 9.4e3, 943.7e3, 1.5e6, 128 }
+            .Select(bytes => PaintedRightEdge(surface, runtime, size, width, height, bytes))
+            .ToArray();
+
+        Assert.All(edges, edge => Assert.Equal(edges[0], edge));
+    });
+
+    /// <summary>Rightmost painted pixel of the download value in a rendered card.</summary>
+    private static int PaintedRightEdge(DesktopBoxForm surface, CrabDeskRuntime runtime,
+        DesktopWidgetSize size, double width, double height, double bytesPerSecond)
+    {
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.Network, Size = size, MonitorId = "t",
+            NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds,
+            Bounds = new LayoutRect(0, 0, width, height),
+            Network = new(DateTimeOffset.Now)
+            {
+                IsConnected = true, DownloadBytesPerSecond = bytesPerSecond, UploadBytesPerSecond = bytesPerSecond
+            }
+        };
+        runtime.State.Widgets.Add(widget);
+        try
+        {
+            using var bitmap = new Bitmap((int)width + 8, (int)height + 8);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.Black);
+                Call(surface, "DrawWidget", graphics, widget);
+            }
+            // The download row is the upper half of the card; scanning only that
+            // band avoids picking up the upload row's edge.
+            var limit = (int)(height / 2) + 8;
+            var right = 0;
+            for (var y = 0; y < Math.Min(limit, bitmap.Height); y++)
+            {
+                for (var x = bitmap.Width - 1; x >= 0; x--)
+                {
+                    if (bitmap.GetPixel(x, y).R > 96) { right = Math.Max(right, x); break; }
+                }
+            }
+            return right;
+        }
+        finally
+        {
+            runtime.State.Widgets.Remove(widget);
+        }
+    }
+
     private static void OnSta(Action action)
     {
         Exception? error = null;
