@@ -530,11 +530,10 @@ public sealed partial class WidgetPreview : UserControl
             var layout = curveOnly
                 ? WidgetNetworkGraph.CurveLayout(width, height, radius)
                 : WidgetNetworkGraph.ChartLayout(width, height, radius);
-            if (!curveOnly)
-            {
-                Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
-                Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
-            }
+            // Curve keeps a compact pair of current speeds above its plot; only
+            // the chart style's larger headline figures differ.
+            Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
+            Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
             var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
             var plot = new Canvas();
             var gridColor = _text.Color; gridColor.A = 24;

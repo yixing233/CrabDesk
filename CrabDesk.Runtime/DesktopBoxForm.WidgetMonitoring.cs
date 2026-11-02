@@ -211,6 +211,10 @@ internal sealed partial class DesktopBoxForm
     {
         var layout = WidgetNetworkGraph.CurveLayout(widget.Bounds.Width, widget.Bounds.Height,
             _runtime.State.Settings.Appearance.CornerRadius);
+        // Current speeds sit above the plot in the compact form: the curve shows
+        // the trend, these two numbers answer "how fast is it right now".
+        DrawNetworkSpeed(graphics, widget, layout.Download, widget.Network?.DownloadBytesPerSecond, false, false, text, muted, accent);
+        DrawNetworkSpeed(graphics, widget, layout.Upload, widget.Network?.UploadBytesPerSecond, true, false, text, muted, NetworkUploadColor(text));
         var plot = MonitorRectangle(widget, layout.Plot);
         var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
         using (var grid = new Pen(Color.FromArgb(24, text), 1) { DashStyle = DashStyle.Dash })

@@ -70,10 +70,18 @@ public static class WidgetNetworkGraph
         // radius, and this adds the usual text margin on top of it.
         var left = body.X + 2;
         var widthUsed = Math.Max(0, body.Width - 4);
-        var top = inset;
+        // A single compact row of current speeds: a curve alone says nothing
+        // about the magnitude right now, which is what the reader looks for first.
+        // DrawNetworkSpeed lays out a caption line above the value, so the header
+        // needs both rows before the plot may start.
+        var headerHeight = 40d;
+        var half = Math.Max(0, (widthUsed - 12) / 2);
+        var download = new LayoutRect(left, inset, half, headerHeight);
+        var upload = new LayoutRect(left + half + 12, inset, half, headerHeight);
+        var plotTop = inset + headerHeight + 8;
         var footer = new LayoutRect(left, height - inset - 12, widthUsed, 12);
-        var plot = new LayoutRect(left, top, widthUsed, Math.Max(0, footer.Y - top - 4));
-        return new(plot, plot, plot, footer);
+        var plot = new LayoutRect(left, plotTop, widthUsed, Math.Max(0, footer.Y - plotTop - 4));
+        return new(download, upload, plot, footer);
     }
 
     public static (LayoutRect Download, LayoutRect Upload) SpeedLayout(double width, double height, double radius)

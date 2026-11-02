@@ -24,21 +24,23 @@ public sealed class WidgetNetworkGraphTests
     [Fact]
     public void CurveOnlyStyleReclaimsTheTitleRowForThePlot()
     {
-        // Chart spends its top rows on two speed figures; the curve-only style
-        // has neither a title nor figures and must not leave that space blank.
+        // The curve-only style drops the card title, so its plot has to be taller
+        // than the chart's, which spends the top rows on headline figures.
         const double width = 372, height = 180, radius = 8;
         var chart = WidgetNetworkGraph.ChartLayout(width, height, radius);
         var curve = WidgetNetworkGraph.CurveLayout(width, height, radius);
 
         Assert.True(curve.Plot.Height > chart.Plot.Height);
-        Assert.True(curve.Plot.Y < chart.Plot.Y);
-        // Same card, so the plot stays inside it with the footer beneath.
+        // Everything stays inside the card and nothing overlaps.
         Assert.True(curve.Plot.Y >= 0);
         Assert.True(curve.Footer.Y >= curve.Plot.Y + curve.Plot.Height);
         Assert.True(curve.Footer.Y + curve.Footer.Height <= height);
-        // No headline figures in this style.
-        Assert.Equal(curve.Plot, curve.Download);
-        Assert.Equal(curve.Plot, curve.Upload);
+        // Current speeds keep their own row above the plot: the curve shows the
+        // trend, those numbers answer "how fast is it right now".
+        Assert.True(curve.Download.Y + curve.Download.Height <= curve.Plot.Y);
+        Assert.True(curve.Upload.Y + curve.Upload.Height <= curve.Plot.Y);
+        Assert.True(curve.Upload.X >= curve.Download.X + curve.Download.Width);
+        Assert.Equal(curve.Download.Y, curve.Upload.Y);
     }
 
     [Fact]
