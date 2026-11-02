@@ -51,7 +51,7 @@ internal sealed partial class DesktopBoxForm
             var bounds = MonitorRectangle(widget, rect);
             LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, 14), accent, 12);
             WidgetText(graphics, label, new(bounds.X + 19, bounds.Y, bounds.Width - 19, 14), muted, 10.5f);
-            WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes), new(bounds.X, bounds.Y + 14, bounds.Width, 26), text, 21, bold: true);
+            DrawSpeedValue(graphics, bytes, new(bounds.X, bounds.Y + 14, bounds.Width, 26), text, 21);
         }
         Speed(layout.Download, "下载", LucideRuntimeIcon.ArrowDown, snapshot?.DownloadBytesPerSecond);
         Speed(layout.Upload, "上传", LucideRuntimeIcon.ArrowUp, snapshot?.UploadBytesPerSecond);
@@ -81,19 +81,89 @@ internal sealed partial class DesktopBoxForm
         if (compact)
         {
             LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), ink, 14);
-            // Right-aligned so the unit holds still. A left-aligned value moved
-            // its "/s" every time the magnitude changed width, which read as the
-            // row jittering while the numbers were merely being resampled.
-            WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes),
-                new(bounds.X + 22, bounds.Y, bounds.Width - 22, bounds.Height), text, 18, bold: true, rightAligned: true);
+            DrawSpeedValue(graphics, bytes, new(bounds.X + 22, bounds.Y, bounds.Width - 22, bounds.Height), text, 18);
             return;
         }
         LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, 14), ink, 12);
         WidgetText(graphics, upload ? "上传" : "下载", new(bounds.X + 19, bounds.Y, bounds.Width - 19, 14), muted, 10.5f);
-        // Right-aligned for the same reason as the compact row: the column edge
-        // is fixed, so a changing magnitude cannot shift the unit sideways.
-        WidgetText(graphics, WidgetMonitorMetrics.Speed(bytes), new(bounds.X, bounds.Y + 14, bounds.Width, 26),
-            text, 21, bold: true, rightAligned: true);
+        DrawSpeedValue(graphics, bytes, new(bounds.X, bounds.Y + 14, bounds.Width, 26), text, 21);
+    }
+
+    /// <summary>
+    /// Draws a speed so the number stays put while the value is resampled.
+    ///
+    /// The row is split into two slots of fixed width, both derived from the
+    /// widest reading the card can show rather than from the live value: the
+    /// number ends at a constant right edge and the unit starts at a constant
+    /// left edge. A value that gains a digit therefore grows leftwards inside
+    /// its own slot and cannot move the unit beside it.
+    /// </summary>
+    internal static void DrawSpeedValue(Graphics graphics, double? bytes, RectangleF bounds, Color text, float size)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
+        var slot = MeasureSpeedSlots(graphics, bounds, size);
+        using var font = slot.Font;
+        // Typographic formatting for drawing as well as measuring: the default
+        // StringFormat adds roughly a sixth of an em of padding on each side, so
+        // a slot sized from a plain measurement trimmed the very glyphs it was
+        // sized to hold and "921.6" came out as "92...".
+        using var format = new StringFormat(StringFormat.GenericTypographic)
+        {
+            Alignment = StringAlignment.Far,
+            LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.NoWrap
+        };
+        using var brush = new SolidBrush(text);
+        var (number, unit) = WidgetMonitorMetrics.SpeedParts(bytes);
+        var numberRight = bounds.X + slot.NumberWidth;
+        // Number: right-aligned in its slot, so extra digits extend leftwards
+        // rather than pushing the unit. The slot stops short of the card's left
+        // edge so the widest reading never touches it.
+        graphics.DrawString(number, font, brush,
+            new RectangleF(bounds.X, bounds.Y, slot.NumberWidth, bounds.Height), format);
+        // Unit: left-aligned from a fixed origin, so its width never drags the
+        // number with it.
+        format.Alignment = StringAlignment.Near;
+        graphics.DrawString(unit, font, brush,
+            new RectangleF(numberRight + slot.Gap, bounds.Y, Math.Max(0, bounds.Width - slot.NumberWidth - slot.Gap), bounds.Height),
+            format);
+    }
+
+    internal readonly record struct SpeedSlots(Font Font, float NumberWidth, float Gap);
+
+    /// <summary>
+    /// Constant slot widths for a row, plus the font that keeps the widest
+    /// reading inside them. Both come from fixed sample strings, so consecutive
+    /// frames lay out identically and the figure cannot visibly drift.
+    /// </summary>
+    internal static SpeedSlots MeasureSpeedSlots(Graphics graphics, RectangleF bounds, float size)
+    {
+        using var measure = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap };
+        // Keep the widest reading off the card's edge; the row is flush with it
+        // otherwise and "921.6" looked clipped.
+        bounds = new RectangleF(bounds.X, bounds.Y, Math.Max(0, bounds.Width - size * 0.3f), bounds.Height);
+        var current = size;
+        while (true)
+        {
+            var font = new Font(BoxAppearance.DefaultFontFamily, current, FontStyle.Bold, GraphicsUnit.Pixel);
+            // DrawString pads inside the layout rectangle, so both slots carry
+            // headroom; without it the widest sample is trimmed to an ellipsis.
+            // Measured with the same typographic format used to draw, so these
+            // widths are what actually reaches the row.
+            var number = graphics.MeasureString(WidgetMonitorMetrics.WidestSpeedNumber, font, int.MaxValue, measure).Width;
+            var unit = graphics.MeasureString(WidgetMonitorMetrics.WidestSpeedUnit, font, int.MaxValue, measure).Width;
+            // A visible gap: typographic formatting removes the padding that used
+            // to separate "921.6" from "KB/s", so without this they read as one
+            // token.
+            var gap = current * 0.3f;
+            if (number + gap + unit <= bounds.Width || current <= 9f)
+            {
+                return new SpeedSlots(font, Math.Min(number, bounds.Width), gap);
+            }
+            font.Dispose();
+            current -= 0.5f;
+        }
     }
 
     private void DrawNetworkSpeeds(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent)

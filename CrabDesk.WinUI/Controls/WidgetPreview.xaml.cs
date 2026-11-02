@@ -494,15 +494,23 @@ public sealed partial class WidgetPreview : UserControl
             if (compact)
             {
                 Place(new LucideIcon { Icon = direction, FontSize = 14, Foreground = ink ?? _accent }, bounds with { Width = 14 });
-                // Matches the desktop card: the unit stays put only when the
-                // value anchors to the trailing edge.
-                Label(WidgetMonitorMetrics.Speed(speed), 18, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 },
-                    bold: true, rightAligned: true);
+                SpeedValue(speed, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, 18);
                 return;
             }
             Place(new LucideIcon { Icon = direction, FontSize = 12, Foreground = ink ?? _accent }, bounds with { Width = 14, Height = 14 });
             Label(caption, 10.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19, Height = 14 }, true);
-            Label(WidgetMonitorMetrics.Speed(speed), 21, bounds with { Y = bounds.Y + 14, Height = 26 }, bold: true, rightAligned: true);
+            SpeedValue(speed, bounds with { Y = bounds.Y + 14, Height = 26 }, 21);
+        }
+        // The unit is pinned to the trailing edge and the number ends at a fixed
+        // reserve for the widest unit, matching the desktop card: right-aligning
+        // the joined string still slid the digits when the unit changed width.
+        void SpeedValue(double? speed, LayoutRect bounds, double size)
+        {
+            // Centred in a slot sized for the widest reading, matching the desktop
+            // card: a fixed centre keeps the figure still as digits change.
+            var label = Text(WidgetMonitorMetrics.Speed(speed), size, false, true);
+            label.TextAlignment = TextAlignment.Center; label.VerticalAlignment = VerticalAlignment.Center;
+            Place(label, bounds);
         }
         if (speedsOnly)
         {

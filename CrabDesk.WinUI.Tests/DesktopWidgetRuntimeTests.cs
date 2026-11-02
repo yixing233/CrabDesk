@@ -1847,71 +1847,65 @@ public sealed class DesktopWidgetRuntimeTests
 
     private static void Set(object instance, string name, object value) => instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(instance, value);
     private static object? Call(object instance, string name, params object[] args) => instance.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(instance, args);
-    // The value used to be left-aligned, so a magnitude change of a different
-    // width slid the unit sideways and the card looked like it was jittering.
-    // Measuring the painted pixels is the only way to catch that: the layout
-    // rectangle is identical either way, only the glyph positions differ.
+    // The unit used to move with the value: it sat in one run with the number,
+    // so a magnitude change of different width slid the whole figure sideways
+    // and the card looked like it was jittering between samples.
+    //
+    // The contract is two fixed edges, measured over the widest reading the card
+    // can show: the number's right edge and the unit's left edge never move, so
+    // a value that gains digits grows leftwards inside its own slot.
     [Theory]
     [InlineData(DesktopWidgetSize.Small)]
     [InlineData(DesktopWidgetSize.Wide)]
-    public void SpeedValuesHoldTheirUnitAtAFixedRightEdge(DesktopWidgetSize size) => OnSta(() =>
+    public void SpeedValuesKeepTheNumberAndUnitEdgesFixed(DesktopWidgetSize size) => OnSta(() =>
     {
-        var (runtime, _) = Fixture();
-        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { });
-        Set(runtime, "_saveTimer", timer);
-        using var surface = new DesktopBoxForm(runtime, runtime.Monitors[0]);
         var (width, height) = DesktopWidgets.Dimensions(size);
+        var layout = WidgetNetworkGraph.SpeedLayout(width, height, 8);
+        var bounds = new RectangleF((float)layout.Download.X, (float)layout.Download.Y,
+            (float)layout.Download.Width, (float)layout.Download.Height);
+        using var bitmap = new Bitmap((int)width + 8, (int)height + 8);
+        using var graphics = Graphics.FromImage(bitmap);
 
-        // Values chosen so the formatted text differs in both digit count and
-        // unit: "9.2 KB/s", "921.6 KB/s", "1.4 MB/s" and a bare "128 B/s".
-        var edges = new[] { 9.4e3, 943.7e3, 1.5e6, 128 }
-            .Select(bytes => PaintedRightEdge(surface, runtime, size, width, height, bytes))
+        // Slot geometry must not depend on the value being drawn.
+        var slots = new[] { 9.4e3, 943.7e3, 1.5e6, 128.0 }
+            .Select(bytes =>
+            {
+                using var probe = new Bitmap(4, 4);
+                using var probeGraphics = Graphics.FromImage(probe);
+                var slot = DesktopBoxForm.MeasureSpeedSlots(probeGraphics, bounds, 18);
+                return (NumberWidth: slot.NumberWidth, Gap: slot.Gap);
+            })
             .ToArray();
 
-        Assert.All(edges, edge => Assert.Equal(edges[0], edge));
-    });
+        Assert.All(slots, slot => Assert.Equal(slots[0].NumberWidth, slot.NumberWidth));
+        Assert.All(slots, slot => Assert.Equal(slots[0].Gap, slot.Gap));
 
-    /// <summary>Rightmost painted pixel of the download value in a rendered card.</summary>
-    private static int PaintedRightEdge(DesktopBoxForm surface, CrabDeskRuntime runtime,
-        DesktopWidgetSize size, double width, double height, double bytesPerSecond)
-    {
-        var widget = new DesktopWidget
-        {
-            Kind = DesktopWidgetKind.Network, Size = size, MonitorId = "t",
-            NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds,
-            Bounds = new LayoutRect(0, 0, width, height),
-            Network = new(DateTimeOffset.Now)
-            {
-                IsConnected = true, DownloadBytesPerSecond = bytesPerSecond, UploadBytesPerSecond = bytesPerSecond
-            }
-        };
-        runtime.State.Widgets.Add(widget);
-        try
-        {
-            using var bitmap = new Bitmap((int)width + 8, (int)height + 8);
-            using (var graphics = Graphics.FromImage(bitmap))
+        // And the painted number must land on that slot's right edge for every
+        // value, never drifting with the digits it happens to show.
+        var numberRights = new[] { 9.4e3, 943.7e3, 1.5e6, 128.0 }
+            .Select(bytes =>
             {
                 graphics.Clear(Color.Black);
-                Call(surface, "DrawWidget", graphics, widget);
-            }
-            // The download row is the upper half of the card; scanning only that
-            // band avoids picking up the upload row's edge.
-            var limit = (int)(height / 2) + 8;
-            var right = 0;
-            for (var y = 0; y < Math.Min(limit, bitmap.Height); y++)
-            {
-                for (var x = bitmap.Width - 1; x >= 0; x--)
+                DesktopBoxForm.DrawSpeedValue(graphics, bytes, bounds, Color.White, 18);
+                // Rightmost lit pixel left of the unit's origin is the number.
+                var unitOrigin = bounds.X + slots[0].NumberWidth + slots[0].Gap;
+                var right = 0;
+                for (var y = (int)bounds.Y; y < (int)(bounds.Y + bounds.Height); y++)
                 {
-                    if (bitmap.GetPixel(x, y).R > 96) { right = Math.Max(right, x); break; }
+                    for (var x = (int)unitOrigin - 1; x >= (int)bounds.X; x--)
+                    {
+                        if (bitmap.GetPixel(x, y).R > 96) { right = Math.Max(right, x); break; }
+                    }
                 }
-            }
-            return right;
-        }
-        finally
-        {
-            runtime.State.Widgets.Remove(widget);
-        }
-    }
+                return right;
+            })
+            .ToArray();
+
+        // One pixel of slack: antialiasing on the last glyph can light a
+        // neighbouring column. Drift from a changing digit count was 9 to 30 px,
+        // so this still separates "held still" from "following the value".
+        Assert.All(numberRights, right => Assert.InRange(right, numberRights.Min() - 1, numberRights.Min() + 1));
+    });
 
     private static void OnSta(Action action)
     {

@@ -88,6 +88,34 @@ public static class WidgetMonitorMetrics
 
     public static string Speed(double? value) => value is null ? "—" : Bytes(value) + "/s";
 
+    /// <summary>
+    /// Splits a speed into its number and its unit so a caller can give each a
+    /// fixed slot. Right-aligning the whole string is not enough: the unit
+    /// changes width (B/s, KB/s, MB/s), which slides the number sideways even
+    /// though its own right edge held still.
+    /// </summary>
+    public static (string Number, string Unit) SpeedParts(double? value)
+    {
+        if (value is not { } bytes || !double.IsFinite(bytes) || bytes < 0) return ("—", "");
+        var units = new[] { "B", "KB", "MB", "GB", "TB" }; var unit = 0;
+        while (bytes >= 1024 && unit < units.Length - 1) { bytes /= 1024; unit++; }
+        return (bytes.ToString(unit == 0 ? "0" : "0.#", CultureInfo.InvariantCulture), units[unit] + "/s");
+    }
+
+    /// <summary>
+    /// Widest unit a speed row can show, as a fraction of the row width. The
+    /// number is right-aligned against this reserve so a unit that grows from
+    /// B/s to MB/s never pushes the digits leftwards.
+    /// </summary>
+    public static string WidestSpeedUnit => "MB/s";
+
+    /// <summary>
+    /// Widest number slot a speed row reserves: four digits and the point. The
+    /// slot is fixed to this, never to the live value, so the digits a reading
+    /// happens to have cannot move it.
+    /// </summary>
+    public static string WidestSpeedNumber => "999.9";
+
     public static double? GpuUtilization(IEnumerable<(string Engine, double Value)> samples)
     {
         var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
