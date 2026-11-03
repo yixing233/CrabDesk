@@ -97,7 +97,8 @@ public sealed partial class CrabDeskRuntime
 
     public void SetNetworkDisplayMode(DesktopWidget widget, NetworkWidgetDisplayMode mode)
     {
-        if (_disposed || widget.Kind != DesktopWidgetKind.Network || !State.Widgets.Contains(widget) || !Enum.IsDefined(mode) || widget.NetworkDisplayMode == mode) return;
+        if (_disposed || widget.Kind != DesktopWidgetKind.Network || !State.Widgets.Contains(widget) ||
+            !DesktopWidgets.OfferedNetworkDisplayModes.Contains(mode) || widget.NetworkDisplayMode == mode) return;
         var monitor = Monitors.FirstOrDefault(m => m.Id == widget.MonitorId);
         if (monitor is null) return;
         var size = mode == NetworkWidgetDisplayMode.Speeds

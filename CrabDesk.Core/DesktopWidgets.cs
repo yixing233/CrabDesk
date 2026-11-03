@@ -4,7 +4,19 @@ namespace CrabDesk.Core;
 
 public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network }
 public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape, Custom }
-public enum NetworkWidgetDisplayMode { Details, Speeds, Chart, Curve }
+/// <summary>
+/// How a network widget presents itself. Values are persisted, so new members
+/// are appended and retired ones keep their slot as a reserved gap: reusing a
+/// number would silently reinterpret an existing widget's saved style.
+/// </summary>
+public enum NetworkWidgetDisplayMode
+{
+    Details = 0,
+    Speeds = 1,
+    /// <summary>Was "speed and chart". Kept so saved widgets still resolve.</summary>
+    LegacyChart = 2,
+    Curve = 3
+}
 
 public sealed class DesktopWidget
 {
@@ -216,20 +228,24 @@ public static class DesktopWidgets
             ? DesktopWidgetSize.Small : DefaultSize(widget.Kind);
 
     /// <summary>
-    /// True for the network styles that render nothing but the two speed curves.
-    /// Both drop the card title and the speed figures, so the curve gets the
-    /// whole card.
+    /// The three styles the user can pick between. The retired combined style
+    /// stays readable in saved files but is not offered any more.
     /// </summary>
+    public static IReadOnlyList<NetworkWidgetDisplayMode> OfferedNetworkDisplayModes { get; } =
+        [NetworkWidgetDisplayMode.Details, NetworkWidgetDisplayMode.Speeds, NetworkWidgetDisplayMode.Curve];
+
+    /// <summary>True when the widget draws the curve rather than the detail rows.</summary>
     public static bool IsNetworkCurveOnly(DesktopWidget widget) =>
         widget.Kind == DesktopWidgetKind.Network &&
-        widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Chart or NetworkWidgetDisplayMode.Curve;
+        widget.NetworkDisplayMode is NetworkWidgetDisplayMode.LegacyChart or NetworkWidgetDisplayMode.Curve;
 
     public static string NetworkDisplayName(NetworkWidgetDisplayMode mode) => mode switch
     {
-        NetworkWidgetDisplayMode.Speeds => "仅上下行速度",
-        NetworkWidgetDisplayMode.Chart => "速度与曲线",
-        NetworkWidgetDisplayMode.Curve => "仅上下行曲线",
-        _ => "完整信息"
+        NetworkWidgetDisplayMode.Speeds => "网速文本",
+        // Both curve styles present the same way now, so they share one label:
+        // showing a retired name in the picker would confuse the three-way choice.
+        NetworkWidgetDisplayMode.Curve or NetworkWidgetDisplayMode.LegacyChart => "网速曲线",
+        _ => "详细信息"
     };
 
     public static (double Width, double Height) Dimensions(DesktopWidgetSize size) => size switch
@@ -284,6 +300,13 @@ public static class DesktopWidgets
             widget.Translation = NormalizeText(widget.Translation);
             widget.MonitorId ??= string.Empty;
             widget.NetworkAdapterId ??= string.Empty;
+            // The combined speed-and-chart style was retired in favour of the
+            // three-way choice; anything saved with it becomes the curve style,
+            // which keeps its headline speeds and drops only the card title.
+            if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.LegacyChart)
+            {
+                widget.NetworkDisplayMode = NetworkWidgetDisplayMode.Curve;
+            }
             if (!Enum.IsDefined(widget.NetworkDisplayMode)) widget.NetworkDisplayMode = NetworkWidgetDisplayMode.Details;
             widget.NetworkLatencyTarget = (widget.NetworkLatencyTarget ?? "1.1.1.1").Trim();
             if (!WidgetMonitorMetrics.IsValidLatencyTarget(widget.NetworkLatencyTarget)) widget.NetworkLatencyTarget = "1.1.1.1";

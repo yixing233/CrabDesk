@@ -43,9 +43,10 @@ internal sealed partial class DesktopBoxForm
     {
         if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds)
         { DrawNetworkSpeeds(graphics, widget, text, muted, accent); return; }
-        if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Chart)
-        { DrawNetworkChart(graphics, widget, text, muted, accent); return; }
-        if (widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Curve)
+        // The retired combined style is migrated to Curve on load, so a saved
+        // value can still arrive here and must draw the curve rather than fall
+        // through to the detail rows it no longer resembles.
+        if (widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Curve or NetworkWidgetDisplayMode.LegacyChart)
         { DrawNetworkCurveOnly(graphics, widget, text, muted, accent); return; }
         var layout = WidgetMonitorPresentation.NetworkFields(MonitorBody(widget)); var snapshot = widget.Network;
         void Speed(LayoutRect rect, string label, LucideRuntimeIcon icon, double? bytes)
@@ -177,31 +178,6 @@ internal sealed partial class DesktopBoxForm
         DrawNetworkSpeed(graphics, widget, fields.Upload, widget.Network?.UploadBytesPerSecond, true, compact, text, muted, NetworkUploadColor(text));
     }
 
-    private void DrawNetworkChart(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent)
-    {
-        var layout = WidgetNetworkGraph.ChartLayout(widget.Bounds.Width, widget.Bounds.Height,
-            _runtime.State.Settings.Appearance.CornerRadius);
-        var uploadColor = NetworkUploadColor(text);
-        DrawNetworkSpeed(graphics, widget, layout.Download, widget.Network?.DownloadBytesPerSecond, false, false, text, muted, accent);
-        DrawNetworkSpeed(graphics, widget, layout.Upload, widget.Network?.UploadBytesPerSecond, true, false, text, muted, uploadColor);
-        var plot = MonitorRectangle(widget, layout.Plot);
-        var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
-        using var grid = new Pen(Color.FromArgb(24, text), 1) { DashStyle = DashStyle.Dash };
-        for (var row = 0; row <= 2; row++)
-        {
-            var y = plot.Y + plot.Height * row / 2;
-            graphics.DrawLine(grid, plot.X, y, plot.Right, y);
-        }
-        DrawNetworkSeries(graphics, widget, graph.Download, accent);
-        DrawNetworkSeries(graphics, widget, graph.Upload, uploadColor);
-        if (graph.Download.Count == 0 && graph.Upload.Count == 0)
-            WidgetText(graphics, widget.Network is { IsConnected: false } ? "未连接网络" : "正在积累数据…", plot, muted, 11, centered: true);
-        var footer = MonitorRectangle(widget, layout.Footer);
-        WidgetText(graphics, "最近 60 秒", new(footer.X, footer.Y, footer.Width / 2, footer.Height), muted, 10);
-        WidgetText(graphics, "上限 " + WidgetMonitorMetrics.Speed(graph.Maximum),
-            new(footer.X + footer.Width / 2, footer.Y, footer.Width / 2, footer.Height), muted, 10, rightAligned: true);
-    }
-
     /// <summary>
     /// Curve-only style: the two speed series fill the card with no headline
     /// figures. It exists for the desktop corner where the numbers are already
@@ -298,7 +274,9 @@ internal sealed partial class DesktopBoxForm
         else if (widget.Kind == DesktopWidgetKind.Network)
         {
             var styles = new FluentToolStripMenuItem("显示样式");
-            foreach (var mode in Enum.GetValues<NetworkWidgetDisplayMode>())
+            // Offered styles only: the retired combined style still loads from
+            // saved files but must not appear in the menu.
+            foreach (var mode in DesktopWidgets.OfferedNetworkDisplayModes)
             {
                 var item = new FluentToolStripMenuItem(DesktopWidgets.NetworkDisplayName(mode)) { Checked = widget.NetworkDisplayMode == mode };
                 item.Click += (_, _) => setDisplayMode(widget, mode);

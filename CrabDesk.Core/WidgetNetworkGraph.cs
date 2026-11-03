@@ -46,19 +46,10 @@ public static class WidgetNetworkGraph
         return new(maximum, Series(point => point.Download), Series(point => point.Upload));
     }
 
-    public static Layout ChartLayout(double width, double height, double radius)
-    {
-        var body = WidgetMonitorPresentation.Body(width, height, radius);
-        var half = (body.Width - 16) / 2;
-        return new(new(body.X, body.Y, half, 40), new(body.X + half + 16, body.Y, half, 40),
-            new(body.X, body.Y + 48, body.Width, body.Height - 68),
-            new(body.X, body.Y + body.Height - 16, body.Width, 16));
-    }
-
     /// <summary>
-    /// Layout for the curve-only style: the plot takes the whole body minus the
-    /// footer. Download and upload share no header row here, so both spans are
-    /// reported as the plot area to keep the record shape unchanged.
+    /// Layout for the curve style: a compact headline of current speeds, the
+    /// plot filling the rest of the body, and a footer with the time span and
+    /// the scale maximum.
     /// </summary>
     public static Layout CurveLayout(double width, double height, double radius)
     {

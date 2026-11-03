@@ -8,7 +8,6 @@ public sealed class WidgetNetworkGraphTests
     [Theory]
     [InlineData(NetworkWidgetDisplayMode.Details, DesktopWidgetSize.Large)]
     [InlineData(NetworkWidgetDisplayMode.Speeds, DesktopWidgetSize.Small)]
-    [InlineData(NetworkWidgetDisplayMode.Chart, DesktopWidgetSize.Large)]
     [InlineData(NetworkWidgetDisplayMode.Curve, DesktopWidgetSize.Large)]
     public void DisplayPreferencePersistsAndNormalizesSizeWithoutPersistingSamples(NetworkWidgetDisplayMode mode, DesktopWidgetSize size)
     {
@@ -22,15 +21,40 @@ public sealed class WidgetNetworkGraphTests
     }
 
     [Fact]
-    public void CurveOnlyStyleReclaimsTheTitleRowForThePlot()
+    public void OnlyThreeStylesAreOfferedAndStoredValuesKeepTheirMeaning()
     {
-        // The curve-only style drops the card title, so its plot has to be taller
-        // than the chart's, which spends the top rows on headline figures.
-        const double width = 372, height = 180, radius = 8;
-        var chart = WidgetNetworkGraph.ChartLayout(width, height, radius);
-        var curve = WidgetNetworkGraph.CurveLayout(width, height, radius);
+        // Dropping the combined style must not renumber the others: a saved
+        // "2" would otherwise silently become a different style.
+        Assert.Equal(0, (int)NetworkWidgetDisplayMode.Details);
+        Assert.Equal(1, (int)NetworkWidgetDisplayMode.Speeds);
+        Assert.Equal(2, (int)NetworkWidgetDisplayMode.LegacyChart);
+        Assert.Equal(3, (int)NetworkWidgetDisplayMode.Curve);
 
-        Assert.True(curve.Plot.Height > chart.Plot.Height);
+        Assert.Equal(
+            [NetworkWidgetDisplayMode.Details, NetworkWidgetDisplayMode.Speeds, NetworkWidgetDisplayMode.Curve],
+            DesktopWidgets.OfferedNetworkDisplayModes);
+        Assert.Equal(["详细信息", "网速文本", "网速曲线"],
+            DesktopWidgets.OfferedNetworkDisplayModes.Select(DesktopWidgets.NetworkDisplayName).ToArray());
+    }
+
+    [Fact]
+    public void RetiredCombinedStyleLoadsAsTheCurveStyle()
+    {
+        var retired = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.LegacyChart };
+        var state = new CrabDeskState { Widgets = [retired] };
+
+        DesktopWidgets.Normalize(state);
+
+        Assert.Equal(NetworkWidgetDisplayMode.Curve, retired.NetworkDisplayMode);
+        Assert.True(DesktopWidgets.IsNetworkCurveOnly(retired));
+    }
+
+    [Fact]
+    public void CurveStyleKeepsItsHeadlineRowPlotAndFooterInsideTheCard()
+    {
+        const double width = 372, height = 180;
+        var curve = WidgetNetworkGraph.CurveLayout(width, height, 8);
+
         // Everything stays inside the card and nothing overlaps.
         Assert.True(curve.Plot.Y >= 0);
         Assert.True(curve.Footer.Y >= curve.Plot.Y + curve.Plot.Height);
@@ -41,19 +65,11 @@ public sealed class WidgetNetworkGraphTests
         Assert.True(curve.Upload.Y + curve.Upload.Height <= curve.Plot.Y);
         Assert.True(curve.Upload.X >= curve.Download.X + curve.Download.Width);
         Assert.Equal(curve.Download.Y, curve.Upload.Y);
-    }
-
-    [Fact]
-    public void CurveOnlyStyleIsRecognisedAndNamed()
-    {
-        var curve = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Curve };
-        var chart = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Chart };
-        var speeds = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds };
-
-        Assert.True(DesktopWidgets.IsNetworkCurveOnly(curve));
-        Assert.True(DesktopWidgets.IsNetworkCurveOnly(chart));
-        Assert.False(DesktopWidgets.IsNetworkCurveOnly(speeds));
-        Assert.Equal("仅上下行曲线", DesktopWidgets.NetworkDisplayName(NetworkWidgetDisplayMode.Curve));
+        // The plot is the point of this style, so it has to take the largest
+        // single share of the card: more than the headline row and footer
+        // together, which is what a reader would call "mostly curve".
+        Assert.True(curve.Plot.Height > curve.Footer.Height * 4);
+        Assert.True(curve.Plot.Height > curve.Download.Height * 2);
     }
 
     [Fact]

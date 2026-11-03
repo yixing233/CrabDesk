@@ -522,16 +522,11 @@ public sealed partial class WidgetPreview : UserControl
             CardBody.Children.Add(panel);
             return;
         }
-        if (widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Chart or NetworkWidgetDisplayMode.Curve)
+        if (widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Curve or NetworkWidgetDisplayMode.LegacyChart)
         {
-            // Both styles share the plot; only Chart adds the headline figures
-            // above it. The caller already hides the card title for Curve.
-            var curveOnly = widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Curve;
-            var layout = curveOnly
-                ? WidgetNetworkGraph.CurveLayout(width, height, radius)
-                : WidgetNetworkGraph.ChartLayout(width, height, radius);
-            // Curve keeps a compact pair of current speeds above its plot; only
-            // the chart style's larger headline figures differ.
+            // One curve style now: headline speeds above a plot that fills the
+            // rest of the card.
+            var layout = WidgetNetworkGraph.CurveLayout(width, height, radius);
             Speed(LucideIconName.ArrowDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
             Speed(LucideIconName.ArrowUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
             var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);

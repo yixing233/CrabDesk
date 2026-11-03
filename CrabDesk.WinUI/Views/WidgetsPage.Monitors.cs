@@ -22,7 +22,9 @@ public sealed partial class WidgetsPage
     {
         if (widget.Kind != DesktopWidgetKind.Network) return;
         NetworkDisplayModePicker.DisplayMemberPath = nameof(NetworkDisplayChoice.Label);
-        NetworkDisplayModePicker.ItemsSource = Enum.GetValues<NetworkWidgetDisplayMode>()
+        // Only the offered styles are listed; the retired combined style still
+        // exists so saved widgets load, but it must not be selectable.
+        NetworkDisplayModePicker.ItemsSource = DesktopWidgets.OfferedNetworkDisplayModes
             .Select(mode => new NetworkDisplayChoice(mode, DesktopWidgets.NetworkDisplayName(mode))).ToArray();
         SyncNetworkDisplaySettings(widget);
         var choices = new List<NetworkAdapterChoice> { new("", "自动选择活动适配器") };

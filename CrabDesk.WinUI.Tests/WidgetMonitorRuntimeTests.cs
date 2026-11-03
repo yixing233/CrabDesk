@@ -21,10 +21,10 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.Equal(DesktopWidgetSize.Small, widget.Size); Assert.Equal(180, widget.Bounds.Width); Assert.Equal(84, widget.Bounds.Height);
         Assert.True(widget.Bounds.X + widget.Bounds.Width <= 1000 && widget.Bounds.Y + widget.Bounds.Height <= 700);
         runtime.ResizeWidget(widget, DesktopWidgetSize.Wide); Assert.Equal(372, widget.Bounds.Width);
-        runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Chart);
+        runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Curve);
         Assert.Equal(DesktopWidgetSize.Large, widget.Size); Assert.Equal(180, widget.Bounds.Height);
         Assert.NotNull(widget.Network); Assert.Single(widget.NetworkHistory); Assert.Equal(3, changed);
-        runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Chart); Assert.Equal(3, changed);
+        runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Curve); Assert.Equal(3, changed);
         runtime.ResizeWidget(widget, DesktopWidgetSize.Small); Assert.Equal(DesktopWidgetSize.Large, widget.Size);
     }
 
@@ -38,7 +38,7 @@ public sealed class WidgetMonitorRuntimeTests
         runtime.SetNetworkDisplayMode(widget, (NetworkWidgetDisplayMode)999);
         Set(runtime, "<Monitors>k__BackingField", new[] { new MonitorLayout { Id = "test", DeviceName = "test", IsPrimary = true,
             Bounds = new(0, 0, 200, 100), WorkArea = new(0, 0, 200, 100), PixelBounds = new(0, 0, 200, 100), PixelWorkArea = new(0, 0, 200, 100) } });
-        Assert.Throws<InvalidOperationException>(() => runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Chart));
+        Assert.Throws<InvalidOperationException>(() => runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Curve));
         Assert.Equal(NetworkWidgetDisplayMode.Speeds, widget.NetworkDisplayMode); Assert.Equal(DesktopWidgetSize.Small, widget.Size);
         Assert.Equal(new LayoutRect(0, 0, 180, 84), widget.Bounds);
     }
@@ -117,8 +117,9 @@ public sealed class WidgetMonitorRuntimeTests
         {
             var styles = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "显示样式");
             var labels = styles.DropDownItems.OfType<ToolStripMenuItem>().Select(item => item.Text).ToArray();
-            Assert.Contains("仅上下行曲线", labels);
-            Assert.Equal(Enum.GetValues<NetworkWidgetDisplayMode>().Length, labels.Length);
+            Assert.Contains("网速曲线", labels);
+            Assert.Equal(DesktopWidgets.OfferedNetworkDisplayModes.Count, labels.Length);
+            Assert.Equal(["详细信息", "网速文本", "网速曲线"], labels);
         }
 
         runtime.SetNetworkDisplayMode(widget, NetworkWidgetDisplayMode.Curve);
