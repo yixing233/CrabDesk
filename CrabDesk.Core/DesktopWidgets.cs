@@ -45,6 +45,12 @@ public sealed class DesktopWidget
     [JsonIgnore] public WidgetPerformanceSnapshot? Performance { get; set; }
     [JsonIgnore] public WidgetNetworkSnapshot? Network { get; set; }
     [JsonIgnore] public ControlCenterSnapshot? Controls { get; set; }
+    /// <summary>
+    /// Forces the control centre's ink to white or to dark, overriding the
+    /// automatic choice from the card colour. Null keeps the automatic
+    /// behaviour, which is what every other widget uses.
+    /// </summary>
+    public bool? ControlCenterLightText { get; set; }
     [JsonIgnore] public string MonitorError { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIp { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIpError { get; set; } = string.Empty;

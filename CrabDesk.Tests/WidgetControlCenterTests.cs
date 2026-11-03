@@ -211,4 +211,28 @@ public sealed class WidgetControlCenterTests
         Assert.Null(ControlCenterPresentation.NextOutputDevice(single));
         Assert.Null(ControlCenterPresentation.NextOutputDevice(null));
     }
+
+    // The card sits over a wallpaper it cannot see, so the automatic light/dark
+    // choice is sometimes wrong. The override is a saved setting, not transient
+    // state, so it has to survive a round trip.
+    [Fact]
+    public void InkOverridePersistsAcrossSerialization()
+    {
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, ControlCenterLightText = true };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(widget);
+        var loaded = System.Text.Json.JsonSerializer.Deserialize<DesktopWidget>(json)!;
+
+        Assert.True(loaded.ControlCenterLightText);
+    }
+
+    [Fact]
+    public void InkOverrideDefaultsToAutomatic()
+    {
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter };
+
+        // Null means "decide from the card colour", which is what every other
+        // widget does; a default of true or false would force ink on all cards.
+        Assert.Null(widget.ControlCenterLightText);
+    }
 }

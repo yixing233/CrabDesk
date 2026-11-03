@@ -482,6 +482,12 @@ public sealed partial class WidgetPreview : UserControl
         var radius = PreviewAppearance?.Settings.CornerRadius ?? 8;
         var body = WidgetMonitorPresentation.Body(width, height, radius);
         var snapshot = widget.Controls;
+        // Same ink rule as the desktop card, so the thumbnail shows the colours
+        // the user will actually get.
+        var ink = widget.ControlCenterLightText is true ? Color.FromArgb(255, 255, 255, 255)
+            : widget.ControlCenterLightText is false ? Color.FromArgb(255, 31, 35, 41) : _text.Color;
+        var softInk = widget.ControlCenterLightText is true ? Color.FromArgb(255, 214, 220, 230)
+            : widget.ControlCenterLightText is false ? Color.FromArgb(255, 70, 78, 90) : _secondary.Color;
         void Place(FrameworkElement element, LayoutRect bounds)
         {
             Canvas.SetLeft(element, bounds.X); Canvas.SetTop(element, bounds.Y);
@@ -518,14 +524,14 @@ public sealed partial class WidgetPreview : UserControl
                             },
                             Width = 18, Height = 18,
                             HorizontalAlignment = HorizontalAlignment.Center,
-                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color)
+                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color)
                         },
                         new TextBlock { Text = ControlCenterPresentation.ToggleLabel(toggle), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
                             HorizontalAlignment = HorizontalAlignment.Center,
-                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color) },
+                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color) },
                         new TextBlock { Text = ControlCenterPresentation.ToggleStateText(toggle, snapshot), FontSize = 10,
                             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 0),
-                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color) }
+                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color) }
                     }
                 }
             };
@@ -570,7 +576,7 @@ public sealed partial class WidgetPreview : UserControl
                 Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    new LucideIcon { Icon = LucideIconName.MonitorSpeaker, Width = 14, Height = 14, Foreground = new SolidColorBrush(_text.Color) },
+                    new LucideIcon { Icon = LucideIconName.MonitorSpeaker, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
                     Text(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
                 }
             }
@@ -580,7 +586,7 @@ public sealed partial class WidgetPreview : UserControl
         var card = new Border
         {
             CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(_text.Color with { A = 20 }),
+            Background = new SolidColorBrush(ink with { A = 20 }),
             Child = new Grid
             {
                 Children =

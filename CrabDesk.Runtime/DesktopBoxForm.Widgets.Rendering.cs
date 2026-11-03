@@ -67,7 +67,7 @@ internal sealed partial class DesktopBoxForm
             case DesktopWidgetKind.Weather: DrawWeatherWidget(graphics, widget, body, text, muted); break;
             case DesktopWidgetKind.Performance: DrawPerformanceWidget(graphics, widget, text, muted, accent); break;
             case DesktopWidgetKind.Network: DrawNetworkWidget(graphics, widget, text, muted, accent); break;
-            case DesktopWidgetKind.ControlCenter: DrawControlCenterWidget(graphics, widget, text, muted, accent); break;
+            case DesktopWidgetKind.ControlCenter: DrawControlCenterWidget(graphics, widget, text, muted, accent, background); break;
         }
         if (_hoveredWidgetId == widget.Id)
         {

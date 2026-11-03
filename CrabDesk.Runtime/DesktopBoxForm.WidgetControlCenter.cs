@@ -16,15 +16,20 @@ internal sealed partial class DesktopBoxForm
     /// a machine that cannot toggle it would send the user clicking a dead
     /// target.
     /// </summary>
-    private void DrawControlCenterWidget(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent)
+    private void DrawControlCenterWidget(Graphics graphics, DesktopWidget widget, Color text, Color muted, Color accent,
+        Color background)
     {
         var body = MonitorBody(widget);
         var snapshot = widget.Controls;
+        // Inner panels paint an opaque shade of the card colour. They used to be
+        // a translucent white, which let the wallpaper through and turned a light
+        // backdrop into a pale surface that white text could not be read on.
+        var panel = PanelFill(background, text);
 
         foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
         {
             var cell = MonitorRectangle(widget, ControlCenterPresentation.Toggle(body, (int)toggle));
-            DrawControlCenterToggle(graphics, cell, toggle, snapshot, text, muted, accent);
+            DrawControlCenterToggle(graphics, cell, toggle, snapshot, text, muted, accent, panel);
         }
 
         var sliders = MonitorRectangle(widget, ControlCenterPresentation.SliderArea(body));
@@ -37,14 +42,35 @@ internal sealed partial class DesktopBoxForm
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
         var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
             ControlCenterPresentation.MediaArea(body)));
-        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, Color.FromArgb(38, text));
-        var panel = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
+        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, Mix(panel, text, 0.14));
+        var panelBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
             ControlCenterPresentation.MediaArea(body)));
-        DrawControlCenterMedia(graphics, panel, snapshot, text, muted, accent);
+        DrawControlCenterMedia(graphics, panelBounds, snapshot, text, muted, accent, Mix(background, text, 0.10));
+
+        // Contrast switch, top right. The card sits over a wallpaper it does not
+        // control, so the automatic light/dark choice can still read badly; this
+        // lets the ink be set by hand.
+        var toggleBounds = ControlCenterInkToggleRectangle(widget);
+        using (var togglePath = RoundedRectangle(toggleBounds, 6))
+        using (var toggleBrush = new SolidBrush(Mix(background, text, 0.18)))
+        {
+            graphics.FillPath(toggleBrush, togglePath);
+        }
+        LucideRuntimeIcons.Draw(graphics,
+            widget.ControlCenterLightText is true ? LucideRuntimeIcon.Sun : LucideRuntimeIcon.Moon,
+            new RectangleF(toggleBounds.X + (toggleBounds.Width - 13) / 2,
+                toggleBounds.Y + (toggleBounds.Height - 13) / 2, 13, 13), text, 13);
+    }
+
+    /// <summary>Hit area of the ink-contrast button, shared by drawing and clicking.</summary>
+    private static RectangleF ControlCenterInkToggleRectangle(DesktopWidget widget)
+    {
+        var bounds = WidgetRectangle(widget);
+        return new RectangleF(bounds.Right - 52, bounds.Y + 6, 22, 20);
     }
 
     private void DrawControlCenterToggle(Graphics graphics, RectangleF cell, ControlCenterToggle toggle,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color panel)
     {
         var available = ControlCenterPresentation.ToggleAvailable(toggle, snapshot);
         var on = toggle switch
@@ -56,7 +82,7 @@ internal sealed partial class DesktopBoxForm
         using var path = RoundedRectangle(cell, 8);
         // An on tile is filled with the accent; an unavailable one is faded so it
         // reads as disabled before the label is even read.
-        var fill = !available ? Color.FromArgb(16, text) : on ? accent : Color.FromArgb(26, text);
+        var fill = on ? accent : Mix(panel, text, available ? 0.16 : 0.06);
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
@@ -122,10 +148,10 @@ internal sealed partial class DesktopBoxForm
     }
 
     private void DrawControlCenterMedia(Graphics graphics, RectangleF bounds,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color fill)
     {
         using var path = RoundedRectangle(bounds, 8);
-        using var brush = new SolidBrush(Color.FromArgb(20, text));
+        using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
         var media = snapshot?.Media;
@@ -178,6 +204,19 @@ internal sealed partial class DesktopBoxForm
             ink, size);
     }
 
+    /// <summary>Opaque shade of the card colour, used as the surface for inner panels.</summary>
+    private static Color PanelFill(Color background, Color text) => Mix(background, text, 0.10);
+
+    /// <summary>Linear blend of two colours, always opaque.</summary>
+    private static Color Mix(Color from, Color to, double amount)
+    {
+        var t = Math.Clamp(amount, 0, 1);
+        return Color.FromArgb(255,
+            (int)Math.Round(from.R + (to.R - from.R) * t),
+            (int)Math.Round(from.G + (to.G - from.G) * t),
+            (int)Math.Round(from.B + (to.B - from.B) * t));
+    }
+
     /// <summary>Icon for a switch, matched to its state so an off radio reads as off.</summary>
     private static LucideRuntimeIcon ControlCenterToggleIcon(ControlCenterToggle toggle, bool on) => toggle switch
     {
@@ -212,6 +251,15 @@ internal sealed partial class DesktopBoxForm
     /// </summary>
     private bool HandleControlCenterClick(DesktopWidget widget, PointF point)
     {
+        if (ControlCenterInkToggleRectangle(widget).Contains(point))
+        {
+            // Two states only: white ink, or dark ink. The first click takes the
+            // card off the automatic choice rather than trying to cycle back into
+            // it, which would be a third state the button cannot show.
+            widget.ControlCenterLightText = widget.ControlCenterLightText != true;
+            _runtime.RefreshWidgetPosition(widget, save: true);
+            return true;
+        }
         var body = MonitorBody(widget);
         var snapshot = widget.Controls;
 
