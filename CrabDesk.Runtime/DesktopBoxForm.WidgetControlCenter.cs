@@ -384,10 +384,12 @@ internal sealed partial class DesktopBoxForm
             ControlCenterPresentation.MediaArea(body)));
         if (outputRow.Contains(point))
         {
-            // Open the list at the row rather than cycling: with more than two
-            // devices, cycling makes the user click through them guessing at the
-            // order, and there is no way to go back except around again.
-            ShowControlCenterOutputMenu(widget, PointToScreen(new Point((int)outputRow.X, (int)outputRow.Bottom)));
+            // Anchor the list under the row. outputRow is card-local, so the card's
+            // own position is added first - the weather menu's anchor already
+            // includes it, which is why that one worked and this did not.
+            var anchor = WidgetRectangle(widget);
+            ShowControlCenterOutputMenu(widget, new Point(
+                ToPixel(anchor.X + outputRow.X), ToPixel(anchor.Y + outputRow.Y + outputRow.Height)));
             return true;
         }
         var mediaBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(

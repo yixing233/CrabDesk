@@ -267,4 +267,25 @@ public sealed class WidgetControlCenterTests
         Assert.Equal(ControlCenterPresentation.ControlCenterTarget.None,
             ControlCenterPresentation.TargetAt(body, sliders.X + 20, sliders.Y + sliders.Height - 2));
     }
+
+    // The output list is anchored under its row. The row is card-local, so the
+    // card's own origin has to be added: the first version passed the local
+    // rect straight through and the menu appeared a card-length away.
+    [Fact]
+    public void OutputRowAnchorSitsAtTheRowsBottomLeftInsideTheCard()
+    {
+        var body = WidgetMonitorPresentation.Body(
+            ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
+        var row = ControlCenterPresentation.OutputRow(ControlCenterPresentation.MediaArea(body));
+        var cardOriginX = 300d;
+        var cardOriginY = 200d;
+
+        var anchorX = cardOriginX + row.X;
+        var anchorY = cardOriginY + row.Y + row.Height;
+
+        Assert.InRange(anchorX, cardOriginX, cardOriginX + ControlCenterPresentation.CardWidth);
+        Assert.Equal(cardOriginY + row.Y + row.Height, anchorY);
+        // Directly beneath the row, not offset by its own top.
+        Assert.NotEqual(cardOriginY + row.Y, anchorY);
+    }
 }
