@@ -37,7 +37,7 @@ internal sealed partial class DesktopBoxForm
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
         var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
             ControlCenterPresentation.MediaArea(body)));
-        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, accent);
+        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, Color.FromArgb(38, text));
         var panel = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
             ControlCenterPresentation.MediaArea(body)));
         DrawControlCenterMedia(graphics, panel, snapshot, text, muted, accent);
@@ -61,10 +61,17 @@ internal sealed partial class DesktopBoxForm
         graphics.FillPath(brush, path);
 
         var labelInk = !available ? muted : on ? ResolveAutoTextColor(accent) : text;
+        // The glyph carries the meaning at a glance; the words underneath say
+        // which switch it is and what state it is in.
+        var icon = ControlCenterToggleIcon(toggle, on);
+        var iconSize = 18f;
+        LucideRuntimeIcons.Draw(graphics, icon,
+            new RectangleF(cell.X + (cell.Width - iconSize) / 2, cell.Y + 5, iconSize, iconSize),
+            labelInk, iconSize);
         WidgetText(graphics, ControlCenterPresentation.ToggleLabel(toggle),
-            new RectangleF(cell.X, cell.Y + 10, cell.Width, 18), labelInk, 12.5f, bold: true, centered: true);
+            new RectangleF(cell.X, cell.Y + 27, cell.Width, 15), labelInk, 11f, bold: true, centered: true);
         WidgetText(graphics, ControlCenterPresentation.ToggleStateText(toggle, snapshot),
-            new RectangleF(cell.X, cell.Y + 30, cell.Width, 16), labelInk, 10f, centered: true);
+            new RectangleF(cell.X, cell.Y + 42, cell.Width, 13), labelInk, 9f, centered: true);
     }
 
     private static void DrawControlCenterSlider(Graphics graphics, RectangleF cell, string label, string value,
@@ -93,15 +100,25 @@ internal sealed partial class DesktopBoxForm
     /// next endpoint, so changing output does not need a menu.
     /// </summary>
     private static void DrawControlCenterDevice(Graphics graphics, RectangleF bounds,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color rowFill)
     {
         var name = snapshot?.OutputDeviceName is { Length: > 0 } device ? device : "输出设备不可用";
+        // A filled row with body-coloured text and a speaker glyph: the previous
+        // accent-on-transparent version was unreadable over a light or acrylic
+        // backdrop, and gave no hint that the row is clickable.
         using var path = RoundedRectangle(bounds, 6);
-        using var brush = new SolidBrush(Color.FromArgb(20, text));
+        using var brush = new SolidBrush(rowFill);
         graphics.FillPath(brush, path);
-        var microphone = snapshot?.OutputDevices.Count > 1 ? "  ⇄" : "";
-        WidgetText(graphics, "输出：" + WidgetMonitorMetrics.HardwareLabel(name, 24) + microphone,
-            new RectangleF(bounds.X + 8, bounds.Y, bounds.Width - 16, bounds.Height), accent, 10.5f);
+        var speaker = new RectangleF(bounds.X + 8, bounds.Y + (bounds.Height - 14) / 2, 14, 14);
+        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MonitorSpeaker, speaker, text, 14);
+        var hasChoice = snapshot?.OutputDevices.Count > 1;
+        var textWidth = Math.Max(0, bounds.Width - 30 - (hasChoice ? 16 : 0));
+        WidgetText(graphics, WidgetMonitorMetrics.HardwareLabel(name, 24),
+            new RectangleF(bounds.X + 28, bounds.Y, textWidth, bounds.Height), text, 10.5f);
+        if (!hasChoice) return;
+        // Signals that the row cycles through devices rather than just labelling.
+        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronsUpDown,
+            new RectangleF(bounds.Right - 20, bounds.Y + (bounds.Height - 13) / 2, 13, 13), muted, 13);
     }
 
     private void DrawControlCenterMedia(Graphics graphics, RectangleF bounds,
@@ -142,18 +159,34 @@ internal sealed partial class DesktopBoxForm
         // Three transport buttons, drawn as glyphs: the card ships no icon font.
         var buttons = ControlCenterMediaButtons(bounds);
         var enabled = media is not null;
-        DrawControlCenterMediaButton(graphics, buttons[0], "◀◀", enabled && media!.CanPrevious, muted, accent);
-        DrawControlCenterMediaButton(graphics, buttons[1], media?.IsPlaying is true ? "❚❚" : "▶",
+        DrawControlCenterMediaButton(graphics, buttons[0], LucideRuntimeIcon.SkipBack,
+            enabled && media!.CanPrevious, muted, accent);
+        DrawControlCenterMediaButton(graphics, buttons[1],
+            media?.IsPlaying is true ? LucideRuntimeIcon.Pause : LucideRuntimeIcon.Play,
             enabled && (media?.CanPlayPause ?? false), muted, accent);
-        DrawControlCenterMediaButton(graphics, buttons[2], "▶▶", enabled && media!.CanNext, muted, accent);
+        DrawControlCenterMediaButton(graphics, buttons[2], LucideRuntimeIcon.SkipForward,
+            enabled && media!.CanNext, muted, accent);
     }
 
-    private static void DrawControlCenterMediaButton(Graphics graphics, RectangleF bounds, string glyph,
-        bool enabled, Color muted, Color accent)
+    private static void DrawControlCenterMediaButton(Graphics graphics, RectangleF bounds,
+        LucideRuntimeIcon icon, bool enabled, Color muted, Color accent)
     {
         var ink = enabled ? accent : Color.FromArgb(90, muted);
-        WidgetText(graphics, glyph, bounds, ink, 11, bold: true, centered: true);
+        const float size = 15f;
+        LucideRuntimeIcons.Draw(graphics, icon,
+            new RectangleF(bounds.X + (bounds.Width - size) / 2, bounds.Y + (bounds.Height - size) / 2, size, size),
+            ink, size);
     }
+
+    /// <summary>Icon for a switch, matched to its state so an off radio reads as off.</summary>
+    private static LucideRuntimeIcon ControlCenterToggleIcon(ControlCenterToggle toggle, bool on) => toggle switch
+    {
+        ControlCenterToggle.WiFi => on ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.WifiOff,
+        // Bluetooth has no off variant in the font, so the same glyph serves both
+        // states and the tile's fill carries the difference.
+        ControlCenterToggle.Bluetooth => LucideRuntimeIcon.Bluetooth,
+        _ => LucideRuntimeIcon.Moon
+    };
 
     /// <summary>
     /// Hit rectangles of the three transport buttons. Shared with the click

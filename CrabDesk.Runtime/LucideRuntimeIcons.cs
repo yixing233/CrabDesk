@@ -68,7 +68,16 @@ internal enum LucideRuntimeIcon
     ChevronLeft,
     MapPin,
     Copy,
-    Eraser
+    Eraser,
+    // Control centre. Play, Pause and Sun already exist above.
+    Wifi,
+    WifiOff,
+    Bluetooth,
+    Volume2,
+    Moon,
+    SkipBack,
+    SkipForward,
+    MonitorSpeaker
 }
 
 internal static class LucideRuntimeIcons
@@ -141,6 +150,14 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.Wind => "\uE1B0",
         LucideRuntimeIcon.Thermometer => "\uE186",
         LucideRuntimeIcon.Gauge => "\uE1BF",
+        LucideRuntimeIcon.Wifi => "\uE1AE",
+        LucideRuntimeIcon.WifiOff => "\uE1AF",
+        LucideRuntimeIcon.Bluetooth => "\uE05C",
+        LucideRuntimeIcon.Volume2 => "\uE1AB",
+        LucideRuntimeIcon.Moon => "\uE11E",
+        LucideRuntimeIcon.SkipBack => "\uE15F",
+        LucideRuntimeIcon.SkipForward => "\uE160",
+        LucideRuntimeIcon.MonitorSpeaker => "\uE210",
         _ => string.Empty
     };
 

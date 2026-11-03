@@ -508,7 +508,19 @@ public sealed partial class WidgetPreview : UserControl
                     VerticalAlignment = VerticalAlignment.Center,
                     Children =
                     {
-                        new TextBlock { Text = ControlCenterPresentation.ToggleLabel(toggle), FontSize = 12.5, FontWeight = FontWeights.Bold,
+                        new LucideIcon
+                        {
+                            Icon = toggle switch
+                            {
+                                ControlCenterToggle.WiFi => on ? LucideIconName.Wifi : LucideIconName.WifiOff,
+                                ControlCenterToggle.Bluetooth => LucideIconName.Bluetooth,
+                                _ => LucideIconName.Moon
+                            },
+                            Width = 18, Height = 18,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color)
+                        },
+                        new TextBlock { Text = ControlCenterPresentation.ToggleLabel(toggle), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
                             HorizontalAlignment = HorizontalAlignment.Center,
                             Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color) },
                         new TextBlock { Text = ControlCenterPresentation.ToggleStateText(toggle, snapshot), FontSize = 10,
@@ -549,9 +561,21 @@ public sealed partial class WidgetPreview : UserControl
         }
 
         var media = ControlCenterPresentation.MediaArea(body);
-        var device = Text("输出：" + (snapshot?.OutputDeviceName is { Length: > 0 } name ? name : "输出设备不可用"), 10.5, true);
-        device.Foreground = new SolidColorBrush(_accent.Color);
-        Place(device, media with { Height = 26 });
+        var outputRow = new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            Background = new SolidColorBrush(_text.Color with { A = 38 }),
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new LucideIcon { Icon = LucideIconName.MonitorSpeaker, Width = 14, Height = 14, Foreground = new SolidColorBrush(_text.Color) },
+                    Text(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
+                }
+            }
+        };
+        Place(outputRow, media with { Height = 26 });
 
         var card = new Border
         {
@@ -612,9 +636,9 @@ public sealed partial class WidgetPreview : UserControl
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
                 Margin = new Thickness(0, 0, 0, 6) };
-            row.Children.Add(new TextBlock { Text = "◀◀", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
-            row.Children.Add(new TextBlock { Text = snapshot?.Media?.IsPlaying is true ? "❚❚" : "▶", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
-            row.Children.Add(new TextBlock { Text = "▶▶", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
+            row.Children.Add(new LucideIcon { Icon = LucideIconName.SkipBack, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
+            row.Children.Add(new LucideIcon { Icon = snapshot?.Media?.IsPlaying is true ? LucideIconName.Pause : LucideIconName.Play, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
+            row.Children.Add(new LucideIcon { Icon = LucideIconName.SkipForward, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
             return row;
         }
 
