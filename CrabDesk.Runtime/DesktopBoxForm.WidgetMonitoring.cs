@@ -23,14 +23,17 @@ internal sealed partial class DesktopBoxForm
             var metric = rows[index]; var cell = MonitorRectangle(widget, WidgetMonitorPresentation.PerformanceCell(body, index));
             WidgetText(graphics, metric.Label, new(cell.X, cell.Y, cell.Width - 52, 20), muted, 12);
             WidgetText(graphics, metric.Value, new(cell.Right - 52, cell.Y, 52, 20), text, 13.5f, bold: true, centered: true);
-            // The temperature sits under the value: the detail line below is
-            // already filled by the model name and would clip anything appended.
+            // Temperature sits on the label row, right after the metric name.
+            // Keeping it there leaves the value column for the percentage alone
+            // and stops it floating between the number and the model name.
             if (metric.TemperatureCelsius is { } celsius)
             {
-                WidgetText(graphics, WidgetMonitorMetrics.Degrees(celsius),
-                    new(cell.X, cell.Y + 17, cell.Width, 14), muted, 10f, rightAligned: true);
+                var degrees = WidgetMonitorMetrics.Degrees(celsius);
+                var labelWidth = MeasureWidgetText(graphics, metric.Label, 12);
+                WidgetText(graphics, degrees, new(cell.X + labelWidth + 6, cell.Y, cell.Width - labelWidth - 6, 20),
+                    muted, 10.5f);
             }
-            if (wide) WidgetText(graphics, metric.Detail, new(cell.X, cell.Y + 32, cell.Width, 18), muted, 10.5f);
+            if (wide) WidgetText(graphics, metric.Detail, new(cell.X, cell.Y + 24, cell.Width, 20), muted, 10.5f);
             var track = new RectangleF(cell.X, cell.Bottom - (wide ? 2 : 7), cell.Width, 3);
             using var path = RoundedRectangle(track, 1.5f);
             using var background = new SolidBrush(Color.FromArgb(24, text)); graphics.FillPath(background, path);

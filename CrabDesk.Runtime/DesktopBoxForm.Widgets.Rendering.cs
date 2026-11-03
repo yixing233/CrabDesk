@@ -93,6 +93,19 @@ internal sealed partial class DesktopBoxForm
         }
     }
 
+    /// <summary>
+    /// Width of a string at a given size, using the same font the widget draws
+    /// with. Used to place text that follows another run on the same line, such
+    /// as a temperature after a metric label.
+    /// </summary>
+    internal static float MeasureWidgetText(Graphics graphics, string value, float size, bool bold = false)
+    {
+        using var font = new Font(BoxAppearance.DefaultFontFamily, size,
+            bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+        using var format = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap };
+        return string.IsNullOrEmpty(value) ? 0 : graphics.MeasureString(value, font, int.MaxValue, format).Width;
+    }
+
     private static void WidgetText(Graphics graphics, string value, RectangleF bounds, Color color, float size = 12,
         bool bold = false, bool centered = false, bool multiline = false, bool strike = false, bool rightAligned = false)
     {

@@ -118,4 +118,26 @@ public sealed class WidgetHardwareTests
 
         Assert.Null(reader.Read());
     }
+
+    // The cell that shows a model name is a fixed pixel width, but the label cap
+    // counts characters, so a name inside the cap can still be clipped by the
+    // renderer. Dropping the vendor buys the room the model number needs.
+    [Theory]
+    [InlineData("NVIDIA GeForce RTX 4060 Laptop GPU", "GeForce RTX 4060 Laptop GPU")]
+    [InlineData("AMD Radeon RX 7900 XTX", "Radeon RX 7900 XTX")]
+    [InlineData("12th Gen Intel Core i7-12700H", "12th Gen Intel Core i7-12700H")]
+    public void VendorPrefixIsDroppedSoTheModelNumberSurvives(string model, string expected)
+    {
+        Assert.Equal(expected, WidgetMonitorMetrics.HardwareLabel(model));
+    }
+
+    [Fact]
+    public void OverlongModelNamesStillEndWithAnEllipsis()
+    {
+        var label = WidgetMonitorMetrics.HardwareLabel(
+            "Some Extremely Long Graphics Adapter Product Name That Cannot Fit", 20);
+
+        Assert.EndsWith("…", label);
+        Assert.True(label.Length <= 20);
+    }
 }

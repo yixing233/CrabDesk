@@ -67,6 +67,12 @@ public static class WidgetMonitorMetrics
     /// prefixes and the repeated "CPU"/"GPU" tokens only restate the row they
     /// sit on, so they are dropped before the length cap is applied.
     /// </summary>
+    /// <summary>
+    /// Vendor names that only restate the brand. Dropped when the full model
+    /// name would not fit, because the model number is what identifies the part.
+    /// </summary>
+    private static readonly string[] VendorPrefixes = ["NVIDIA ", "AMD ", "Intel ", "Advanced Micro Devices, Inc. "];
+
     public static string HardwareLabel(string value, int maximumLength = 34)
     {
         var text = (value ?? "").Trim();
@@ -83,6 +89,17 @@ public static class WidgetMonitorMetrics
             }
         }
         text = text.Replace("  ", " ").Trim();
+        // Drop the vendor unconditionally, not only when over the cap: the cap
+        // counts characters while the cell has a fixed pixel width, so a name
+        // inside the cap can still be clipped by the renderer. The vendor only
+        // restates the brand, and "GeForce RTX 4060 Laptop GPU" fits the cell
+        // where the full name ends up as "NVIDIA GeForce RTX 4060 La...".
+        foreach (var vendor in VendorPrefixes)
+        {
+            if (!text.StartsWith(vendor, StringComparison.OrdinalIgnoreCase)) continue;
+            var shortened = text[vendor.Length..].Trim();
+            if (shortened.Length > 0) { text = shortened; break; }
+        }
         return text.Length <= maximumLength ? text : text[..Math.Max(1, maximumLength - 1)].TrimEnd() + "…";
     }
 
