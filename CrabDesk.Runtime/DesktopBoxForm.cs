@@ -1181,7 +1181,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             DrawBox(graphics, box, clipBounds);
         }
-        if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        // Resizing snaps edges to the same lines, so it needs the guides too.
+        if (_widgetDragging || _widgetResizing) DrawBoxAlignmentGuides(graphics, _monitor.Id);
         DrawCalendarToolTip(graphics);
     }
 
@@ -1237,7 +1238,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 suppressedHoverItemKeys: isSelectionBox ? _marqueeSelectionKeys : null,
                 includeItemHoverFeedback: _itemHoverOverlayUnavailable);
         }
-        if (_widgetDragging) DrawBoxAlignmentGuides(graphics, _monitor.Id);
+        // Resizing snaps edges to the same lines, so it needs the guides too.
+        if (_widgetDragging || _widgetResizing) DrawBoxAlignmentGuides(graphics, _monitor.Id);
         DrawCalendarToolTip(graphics);
     }
 

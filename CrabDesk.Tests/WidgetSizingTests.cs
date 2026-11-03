@@ -84,4 +84,119 @@ public sealed class WidgetSizingTests
         widget.IsLocked = false; widget.Kind = DesktopWidgetKind.Weather;
         Assert.Equal(WidgetResizeEdges.None, WidgetSizing.HitTest(widget, 101, 200));
     }
+
+    // Resizing snaps the edges the user holds, not the whole rectangle. These
+    // fix the two ways that can go wrong: snapping an edge that was not being
+    // dragged, and letting a snap push the card below its minimum size.
+    [Fact]
+    public void ResizeSnapsTheDraggedRightEdgeToAPeerEdge()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        // The peer's left edge sits at 305, five pixels past our right edge.
+        var peer = new LayoutRect(305, 50, 100, 50);
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Right, [peer], new(0, 0, 1000, 700));
+
+        Assert.Equal(305, result.Bounds.X + result.Bounds.Width);
+        Assert.Equal(100, result.Bounds.X); // The opposite edge must not move.
+        Assert.Single(result.Guides);
+        Assert.True(result.Guides[0].IsVertical);
+        Assert.Equal(305, result.Guides[0].Position);
+    }
+
+    [Fact]
+    public void ResizeSnapsTheDraggedLeftEdgeWithoutMovingTheRightOne()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        // The peer's left edge sits at 95, five pixels left of ours.
+        var peer = new LayoutRect(95, 50, 100, 50);
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Left, [peer], new(0, 0, 1000, 700));
+
+        Assert.Equal(95, result.Bounds.X);
+        Assert.Equal(300, result.Bounds.X + result.Bounds.Width); // Right stays put.
+    }
+
+    [Fact]
+    public void ResizeSnapsVerticallyAndReportsAHorizontalGuide()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        // The peer's top edge sits at 255, five pixels past our bottom edge.
+        var peer = new LayoutRect(50, 255, 100, 50);
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Bottom, [peer], new(0, 0, 1000, 700));
+
+        Assert.Equal(255, result.Bounds.Y + result.Bounds.Height);
+        Assert.False(result.Guides[0].IsVertical);
+    }
+
+    [Fact]
+    public void ResizeLeavesTheCardAloneWhenNoLineIsNear()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.BottomRight,
+            [new LayoutRect(800, 600, 100, 50)], new(0, 0, 1000, 700));
+
+        Assert.Equal(resizing, result.Bounds);
+        Assert.Empty(result.Guides);
+    }
+
+    [Fact]
+    public void ResizeSnapCannotShrinkBelowTheMinimumSize()
+    {
+        var resizing = new LayoutRect(300, 100, 200, 150);
+        // A line very close to the left edge would otherwise collapse the card.
+        var peer = new LayoutRect(310, 50, 100, 50);
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Left, [peer], new(0, 0, 1000, 700));
+
+        Assert.True(result.Bounds.Width >= WidgetSizing.MinimumWidth);
+    }
+
+    [Fact]
+    public void ResizeSnapIgnoresEdgesThatAreNotBeingDragged()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        var peer = new LayoutRect(96, 50, 100, 50); // Left edge nearby, but we drag the right one.
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Right, [peer], new(0, 0, 1000, 700));
+
+        Assert.Equal(resizing, result.Bounds);
+        Assert.Empty(result.Guides);
+    }
+
+    // A corner drag holds two edges at once; each axis must snap on its own so
+    // one axis locking does not suppress the other.
+    [Fact]
+    public void CornerResizeSnapsBothAxesIndependently()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        // Left edge of the peer at 305, top edge at 255.
+        var peer = new LayoutRect(305, 255, 100, 50);
+
+        var result = DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.BottomRight,
+            [peer], new(0, 0, 1000, 700));
+
+        Assert.Equal(305, result.Bounds.X + result.Bounds.Width);
+        Assert.Equal(255, result.Bounds.Y + result.Bounds.Height);
+        Assert.Equal(100, result.Bounds.X);
+        Assert.Equal(100, result.Bounds.Y);
+        Assert.Equal(2, result.Guides.Count);
+    }
+
+    [Fact]
+    public void ResizeSnapRejectsDegenerateInput()
+    {
+        var resizing = new LayoutRect(100, 100, 200, 150);
+        var peers = new[] { new LayoutRect(305, 255, 100, 50) };
+
+        // No edges held: nothing to snap.
+        Assert.Equal(resizing, DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.None, peers, new(0, 0, 1000, 700)).Bounds);
+        // Non-finite input must be returned unchanged rather than crashing.
+        Assert.Equal(resizing, DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Right, peers,
+            new(0, 0, double.NaN, 700)).Bounds);
+        // Peers with no extent are ignored.
+        Assert.Empty(DesktopBoxAlignmentEngine.SnapResize(resizing, WidgetResizeEdges.Right,
+            [new LayoutRect(305, 255, 0, 0)], new(0, 0, 1000, 700)).Guides);
+    }
 }

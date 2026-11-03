@@ -78,7 +78,7 @@ internal sealed partial class DesktopBoxForm
 
     private void DrawBoxAlignmentGuides(Graphics graphics, string monitorId)
     {
-        if ((_movingBox is null && !_widgetDragging) || _boxAlignmentGuides.Count == 0 ||
+        if ((_movingBox is null && !_widgetDragging && !_widgetResizing) || _boxAlignmentGuides.Count == 0 ||
             !string.Equals(_boxAlignmentMonitorId, monitorId, StringComparison.OrdinalIgnoreCase)) return;
         var state = graphics.Save();
         try
