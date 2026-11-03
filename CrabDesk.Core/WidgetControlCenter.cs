@@ -120,23 +120,6 @@ public static class ControlCenterPresentation
     public static LayoutRect MediaProgress(LayoutRect mediaPanel) =>
         new(mediaPanel.X + 10, mediaPanel.Y + mediaPanel.Height - 46, mediaPanel.Width - 20, 4);
 
-    /// <summary>
-    /// Next endpoint after the current one, wrapping. Returning the current id
-    /// when there is only one device keeps the click from doing nothing visible.
-    /// </summary>
-    public static string? NextOutputDevice(ControlCenterSnapshot? snapshot)
-    {
-        if (snapshot is null || snapshot.OutputDevices.Count < 2) return null;
-        var index = 0;
-        for (var candidate = 0; candidate < snapshot.OutputDevices.Count; candidate++)
-        {
-            if (!string.Equals(snapshot.OutputDevices[candidate].Id, snapshot.OutputDeviceId, StringComparison.OrdinalIgnoreCase)) continue;
-            index = candidate;
-            break;
-        }
-        return snapshot.OutputDevices[(index + 1) % snapshot.OutputDevices.Count].Id;
-    }
-
     /// <summary>Elapsed and total time, e.g. "0:37 / 3:10".</summary>
     public static string MediaTimeText(ControlCenterMedia? media, DateTimeOffset now)
     {

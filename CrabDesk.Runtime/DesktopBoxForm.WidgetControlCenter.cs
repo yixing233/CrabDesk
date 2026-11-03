@@ -302,9 +302,10 @@ internal sealed partial class DesktopBoxForm
             ControlCenterPresentation.MediaArea(body)));
         if (outputRow.Contains(point))
         {
-            // Cycle to the next endpoint; the row shows a ⇄ when there is a choice.
-            if (ControlCenterPresentation.NextOutputDevice(snapshot) is { } next)
-                _ = _runtime.SetControlOutputAsync(next);
+            // Open the list at the row rather than cycling: with more than two
+            // devices, cycling makes the user click through them guessing at the
+            // order, and there is no way to go back except around again.
+            ShowControlCenterOutputMenu(widget, PointToScreen(new Point((int)outputRow.X, (int)outputRow.Bottom)));
             return true;
         }
         var mediaBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
@@ -347,20 +348,32 @@ internal sealed partial class DesktopBoxForm
     /// </summary>
     private void ShowControlCenterOutputMenu(DesktopWidget widget, Point location)
     {
-        var snapshot = widget.Controls;
-        if (snapshot is null || snapshot.OutputDevices.Count == 0) return;
+        if (widget.Controls is null) return;
         // Reuses the same themed menu the widget menu uses, so the picker looks
         // like the rest of the shell rather than a raw WinForms list.
-        var menu = new FluentContextMenuStrip();
-        foreach (var device in snapshot.OutputDevices)
-        {
-            var item = new ToolStripMenuItem(device.Name) { Checked = device.IsDefault };
-            var id = device.Id;
-            item.Click += (_, _) => _ = _runtime.SetControlOutputAsync(id);
-            menu.Items.Add(item);
-        }
+        var menu = BuildControlCenterOutputMenu(widget.Controls);
+        if (menu.Items.Count == 0) { menu.Dispose(); return; }
         menu.Closed += (_, _) => menu.Dispose();
         _runtime.ApplyContextMenuTheme(menu);
         menu.Show(this, location);
+    }
+
+    /// <summary>
+    /// Builds the endpoint list. Split out from the popup so the contents can be
+    /// tested without a window to host it.
+    /// </summary>
+    internal static FluentContextMenuStrip BuildControlCenterOutputMenu(ControlCenterSnapshot snapshot)
+    {
+        var menu = new FluentContextMenuStrip();
+        foreach (var device in snapshot.OutputDevices)
+        {
+            // The tick marks what the card is showing, which during a switch can
+            // briefly differ from what the OS reports as default.
+            var current = string.Equals(device.Id, snapshot.OutputDeviceId, StringComparison.OrdinalIgnoreCase);
+            var item = new ToolStripMenuItem(device.Name) { Checked = current };
+            var id = device.Id;
+            menu.Items.Add(item);
+        }
+        return menu;
     }
 }

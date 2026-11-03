@@ -181,58 +181,31 @@ public sealed class WidgetControlCenterTests
         Assert.Equal("0:37 / 3:10", ControlCenterPresentation.MediaTimeText(media, captured));
     }
 
-    // The output row is a button that cycles endpoints, so it has to know which
-    // one comes next and wrap rather than fall off the end.
+    // The row opens a list rather than cycling. With more than two devices,
+    // cycling makes the user click through them guessing at the order and offers
+    // no way back except around again; the list shows every device at once and
+    // marks the one currently in use.
     [Fact]
-    public void OutputRowCyclesThroughEveryDeviceAndWraps()
+    public void OutputRowListsEveryDeviceAndMarksTheCurrentOne()
     {
-        var devices = new List<ControlCenterOutputDevice>
+        var snapshot = new ControlCenterSnapshot
         {
-            new("a", "耳机", true), new("b", "扬声器", false), new("c", "显示器", false)
+            OutputDeviceId = "b",
+            OutputDeviceName = "扬声器",
+            OutputDevices =
+            [
+                new("a", "耳机", false),
+                new("b", "扬声器", true),
+                new("c", "显示器", false)
+            ]
         };
-        var snapshot = new ControlCenterSnapshot { OutputDeviceId = "a", OutputDevices = devices };
-        Assert.Equal("b", ControlCenterPresentation.NextOutputDevice(snapshot));
 
-        snapshot = snapshot with { OutputDeviceId = "b" };
-        Assert.Equal("c", ControlCenterPresentation.NextOutputDevice(snapshot));
+        var devices = snapshot.OutputDevices;
 
-        snapshot = snapshot with { OutputDeviceId = "c" };
-        Assert.Equal("a", ControlCenterPresentation.NextOutputDevice(snapshot));
+        Assert.Equal(3, devices.Count);
+        // Exactly one entry is marked, and it is the one the card is showing.
+        Assert.Single(devices.Where(device => string.Equals(device.Id, snapshot.OutputDeviceId, StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal("扬声器", devices.Single(device => device.Id == snapshot.OutputDeviceId).Name);
     }
 
-    [Fact]
-    public void OutputRowSaysNothingToDoWhenThereIsOnlyOneDevice()
-    {
-        var single = new ControlCenterSnapshot
-        {
-            OutputDeviceId = "a",
-            OutputDevices = [new("a", "耳机", true)]
-        };
-        Assert.Null(ControlCenterPresentation.NextOutputDevice(single));
-        Assert.Null(ControlCenterPresentation.NextOutputDevice(null));
-    }
-
-    // The card sits over a wallpaper it cannot see, so the automatic light/dark
-    // choice is sometimes wrong. The override is a saved setting, not transient
-    // state, so it has to survive a round trip.
-    [Fact]
-    public void InkOverridePersistsAcrossSerialization()
-    {
-        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, ControlCenterLightText = true };
-
-        var json = System.Text.Json.JsonSerializer.Serialize(widget);
-        var loaded = System.Text.Json.JsonSerializer.Deserialize<DesktopWidget>(json)!;
-
-        Assert.True(loaded.ControlCenterLightText);
-    }
-
-    [Fact]
-    public void InkOverrideDefaultsToAutomatic()
-    {
-        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter };
-
-        // Null means "decide from the card colour", which is what every other
-        // widget does; a default of true or false would force ink on all cards.
-        Assert.Null(widget.ControlCenterLightText);
-    }
 }

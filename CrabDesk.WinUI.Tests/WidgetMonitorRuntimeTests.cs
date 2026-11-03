@@ -130,6 +130,34 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.Equal(180, widget.Bounds.Height);
     }
 
+    // The output row opens a list rather than cycling: with three devices the
+    // user picks the one they want instead of clicking until it comes round.
+    [Fact]
+    public void OutputDeviceMenuListsEveryEndpointAndMarksTheCurrentOne()
+    {
+        var snapshot = new ControlCenterSnapshot
+        {
+            OutputDeviceId = "b",
+            OutputDevices = [new("a", "耳机", false), new("b", "扬声器", true), new("c", "显示器", false)]
+        };
+
+        using var menu = DesktopBoxForm.BuildControlCenterOutputMenu(snapshot);
+
+        var items = menu.Items.OfType<ToolStripMenuItem>().ToArray();
+        Assert.Equal(["耳机", "扬声器", "显示器"], items.Select(item => item.Text).ToArray());
+        // Exactly one tick, on the device the card is currently showing.
+        Assert.Single(items, item => item.Checked);
+        Assert.Equal("扬声器", items.Single(item => item.Checked).Text);
+    }
+
+    [Fact]
+    public void OutputDeviceMenuIsEmptyWhenNoEndpointIsKnown()
+    {
+        using var menu = DesktopBoxForm.BuildControlCenterOutputMenu(new ControlCenterSnapshot());
+
+        Assert.Empty(menu.Items);
+    }
+
     // The model names are the reason the submenu exists; they have to reach it.    // The model names are the reason the submenu exists; they have to reach it.
     [Fact]
     public void HardwareSubmenuListsTheModelNamesItKnows()
