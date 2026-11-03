@@ -40,7 +40,7 @@ public sealed class WidgetControlCenterMonitor : IDisposable
             VolumeMuted = audio.Muted,
             OutputDeviceId = audio.DeviceId,
             OutputDeviceName = audio.DeviceName,
-            BrightnessPercent = BrightnessControl.Read()
+            BrightnessPercent = BrightnessControl.Read().Percent
         };
     }
 
@@ -68,7 +68,7 @@ public sealed class WidgetControlCenterMonitor : IDisposable
         snapshot = snapshot with { OutputDevices = outputs };
 
         var brightness = BrightnessControl.Read();
-        snapshot = snapshot with { BrightnessPercent = brightness };
+        snapshot = snapshot with { BrightnessPercent = brightness.Percent };
 
         var media = await ReadMediaAsync(token).ConfigureAwait(false);
         return snapshot with { Media = media };
@@ -197,7 +197,7 @@ public sealed class WidgetControlCenterMonitor : IDisposable
     }
 
     /// <summary>Reads only the panel brightness; used to verify a write landed.</summary>
-    public double? BrightnessReadAsync() => BrightnessControl.Read();
+    public double? BrightnessReadAsync() => BrightnessControl.Read().Percent;
     /// <summary>Reads only the endpoint volume; used to verify a write landed.</summary>
     public double? VolumeReadAsync() => AudioSession.Read().Volume;
 

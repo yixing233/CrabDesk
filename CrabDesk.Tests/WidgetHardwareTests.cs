@@ -140,4 +140,52 @@ public sealed class WidgetHardwareTests
         Assert.EndsWith("…", label);
         Assert.True(label.Length <= 20);
     }
+
+    // Brightness has two sources that behave nothing alike: DDC/CI for external
+    // monitors, WMI for the internal panel. On a laptop with the lid shut the WMI
+    // panel is dark and adjusting it changes nothing visible, which made the
+    // control look broken. DDC must therefore be preferred whenever a monitor
+    // answers it.
+    [Fact]
+    public void BrightnessReportsWhichSourceItUsed()
+    {
+        var reading = BrightnessControl.Read();
+
+        if (reading.Percent is { } percent)
+        {
+            Assert.InRange(percent, 0, 100);
+            // Only the two known mechanisms; a third would mean an unhandled path.
+            Assert.Contains(reading.Source, new[] { "ddc", "wmi" });
+        }
+        else
+        {
+            Assert.Equal("wmi", reading.Source);
+        }
+    }
+
+    [Fact]
+    public void BrightnessRoundTripsThroughItsPreferredSource()
+    {
+        var original = BrightnessControl.Read();
+        if (original.Percent is not { } start) return; // No dimmable monitor here.
+
+        try
+        {
+            var target = start > 50 ? 40d : 60d;
+            Assert.True(BrightnessControl.Write(target));
+            Thread.Sleep(600);
+            var applied = BrightnessControl.Read();
+            // The panel applies a DDC write asynchronously and some monitors round
+            // slightly, so allow a small tolerance rather than an exact match.
+            Assert.NotNull(applied.Percent);
+            Assert.InRange(applied.Percent!.Value, target - 5, target + 5);
+        }
+        finally
+        {
+            BrightnessControl.Write(start);
+            Thread.Sleep(400);
+            // Leaving the screen dimmed after a test run would be a nasty surprise.
+            Assert.InRange(BrightnessControl.Read().Percent ?? start, start - 5, start + 5);
+        }
+    }
 }
