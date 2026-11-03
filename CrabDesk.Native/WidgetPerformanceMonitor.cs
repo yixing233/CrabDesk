@@ -16,11 +16,12 @@ public sealed class WidgetPerformanceMonitor : IDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _hasPreviousSample;
-    private IntPtr _cpu, _cpuFallback, _gpu, _diskIdle, _diskRead, _diskWrite;
+    private IntPtr _cpu, _cpuFallback, _gpu, _diskIdle, _diskRead, _diskWrite, _temperature;
     private long _capacityTimestamp;
     private bool _capacityChecked;
     private long? _diskUsedBytes, _diskTotalBytes;
     private readonly WidgetHardwareInventory _hardware = new();
+    private readonly WidgetGpuTemperature _gpuTemperature = new();
 
     public WidgetPerformanceSnapshot Sample()
     {
@@ -53,7 +54,11 @@ public sealed class WidgetPerformanceMonitor : IDisposable
             {
                 // Cached inside the inventory, so this costs nothing after the
                 // first sample and never touches the counters above.
-                Hardware = _hardware.Read()
+                Hardware = _hardware.Read(),
+                CpuTemperatureCelsius = ReadTemperature(),
+                // Only the GPU exposes a sensor that actually tracks load on this
+                // hardware; the CPU zone is often a fixed firmware placeholder.
+                GpuTemperatureCelsius = _gpuTemperature.Read()
             };
         }
     }
@@ -70,6 +75,15 @@ public sealed class WidgetPerformanceMonitor : IDisposable
         _diskIdle = AddCounter(@"\PhysicalDisk(_Total)\% Idle Time");
         _diskRead = AddCounter(@"\PhysicalDisk(_Total)\Disk Read Bytes/sec");
         _diskWrite = AddCounter(@"\PhysicalDisk(_Total)\Disk Write Bytes/sec");
+        // Temperature comes from the ACPI thermal zone counters, which read
+        // without elevation. MSAcpi_ThermalZoneTemperature needs an elevated
+        // WMI call and fails for a normal desktop process, so it is not an
+        // option, and there is no per-core sensor without a kernel driver.
+        _temperature = AddCounter(@"\Thermal Zone Information(*)\High Precision Temperature");
+        if (_temperature == IntPtr.Zero)
+        {
+            _temperature = AddCounter(@"\Thermal Zone Information(*)\Temperature");
+        }
     }
 
     private IntPtr AddCounter(string path) =>
@@ -155,6 +169,9 @@ public sealed class WidgetPerformanceMonitor : IDisposable
             _disposed = true;
             _query?.Dispose(); // Closing the query releases all attached counters.
             _query = null;
+            // Releases the NVML handle and calls nvmlShutdown so the driver is
+            // left the way we found it.
+            _gpuTemperature.Dispose();
         }
     }
 
@@ -194,6 +211,54 @@ public sealed class WidgetPerformanceMonitor : IDisposable
     private static extern uint PdhCollectQueryData(PdhQueryHandle query);
     [DllImport("pdh.dll", ExactSpelling = true)]
     private static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, out uint type, out CounterValue value);
+
+    /// <summary>
+    /// Hottest ACPI thermal zone in Celsius.
+    ///
+    /// The counters report tenths of a Kelvin and there can be several zones
+    /// (one per package or region), so every instance is read and the maximum
+    /// is taken: the hottest zone is the one a user watching for throttling
+    /// cares about. A machine with no exposed zone reports null rather than a
+    /// fabricated number.
+    /// </summary>
+    private double? ReadTemperature()
+    {
+        if (_temperature == IntPtr.Zero) return null;
+        uint size = 0;
+        var status = PdhGetFormattedCounterArrayW(_temperature, FormatDouble | FormatNoCap100,
+            ref size, out _, IntPtr.Zero);
+        if (status != MoreData || size == 0 || size > 1024 * 1024) return null;
+        var buffer = Marshal.AllocHGlobal(checked((int)size));
+        try
+        {
+            status = PdhGetFormattedCounterArrayW(_temperature, FormatDouble | FormatNoCap100,
+                ref size, out var count, buffer);
+            if (status != 0) return null;
+            var stride = Marshal.SizeOf<CounterValueItem>();
+            if (count == 0 || count > size / stride) return null;
+            double? hottest = null;
+            for (var index = 0; index < count; index++)
+            {
+                var item = Marshal.PtrToStructure<CounterValueItem>(buffer + index * stride);
+                if (!Valid(item.Value.Status) || !double.IsFinite(item.Value.Value)) continue;
+                // The "High Precision" counter reports tenths of a Kelvin; the
+                // plain one reports whole Kelvin. Both are normalised by the
+                // magnitude: a plausible reading is a few hundred units.
+                var kelvin = item.Value.Value > 1000 ? item.Value.Value / 10 : item.Value.Value;
+                var celsius = kelvin - 273.15;
+                // Reject readings outside any physical range so a driver that
+                // reports a sentinel value cannot paint a nonsense temperature.
+                if (celsius < -50 || celsius > 200) continue;
+                hottest = hottest is { } current ? Math.Max(current, celsius) : celsius;
+            }
+            return hottest;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
     [DllImport("pdh.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint PdhGetFormattedCounterArrayW(IntPtr counter, uint format, ref uint size, out uint count, IntPtr buffer);
     [DllImport("pdh.dll", ExactSpelling = true)]

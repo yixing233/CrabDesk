@@ -84,4 +84,38 @@ public sealed class WidgetHardwareTests
         formatted[0x18] = 3; // part number
         return formatted.Concat(System.Text.Encoding.ASCII.GetBytes(strings)).ToArray();
     }
+
+    // The GPU temperature comes from NVML rather than an external process: a
+    // child process costs ~140 ms per call, far too slow for a one-second
+    // sampler. On a machine without an NVIDIA adapter this must return null
+    // instead of throwing, so the rest of the sample survives.
+    [Fact]
+    public void GpuTemperatureEitherReadsAPlausibleValueOrReportsNothing()
+    {
+        using var reader = new WidgetGpuTemperature();
+
+        var first = reader.Read();
+        var second = reader.Read();
+
+        if (first is { } celsius)
+        {
+            Assert.InRange(celsius, -50, 200);
+            // Repeated reads must be stable and must not reinitialise the driver
+            // into a different device on every call.
+            Assert.Equal(first, second);
+        }
+        else
+        {
+            Assert.Null(second);
+        }
+    }
+
+    [Fact]
+    public void GpuTemperatureToleratesUseAfterDispose()
+    {
+        var reader = new WidgetGpuTemperature();
+        reader.Dispose();
+
+        Assert.Null(reader.Read());
+    }
 }

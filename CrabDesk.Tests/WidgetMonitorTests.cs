@@ -92,4 +92,54 @@ public sealed class WidgetMonitorTests
             for (var other = index + 1; other < regions.Length; other++) Assert.False(regions[index].Intersects(regions[other]));
         }
     }
+
+    // Temperatures arrive from two unrelated sources and either can be absent,
+    // so each cell must degrade on its own rather than blanking both.
+    [Fact]
+    public void PerformanceMetricsCarryEachTemperatureOnItsOwnRow()
+    {
+        var snapshot = new WidgetPerformanceSnapshot(DateTimeOffset.Now, 42, 34, 24_000_000_000, 34_000_000_000,
+            12, 2_000_000, 500_000, 400_000_000_000, 512_000_000_000)
+        {
+            Hardware = new("12th Gen Intel Core i7-12700H", "NVIDIA GeForce RTX 4060 Laptop GPU", "", ""),
+            CpuTemperatureCelsius = 27.9, GpuTemperatureCelsius = 66
+        };
+
+        var rows = WidgetMonitorPresentation.PerformanceMetrics(snapshot);
+
+        Assert.Equal(27.9, rows[0].TemperatureCelsius);
+        Assert.Equal(66, rows[1].TemperatureCelsius);
+        Assert.Null(rows[2].TemperatureCelsius);
+        Assert.Null(rows[3].TemperatureCelsius);
+        // The model name keeps the detail line to itself; the temperature has its
+        // own field because the line would otherwise clip it.
+        Assert.Equal("12th Gen Intel Core i7-12700H", rows[0].Detail);
+    }
+
+    [Fact]
+    public void MissingTemperatureLeavesNoTraceInTheRow()
+    {
+        var withoutSensors = new WidgetPerformanceSnapshot(DateTimeOffset.Now, 10, 10, 1, 2, 0, 0, 0, 0, 0);
+        var rows = WidgetMonitorPresentation.PerformanceMetrics(withoutSensors);
+
+        Assert.All(rows, row => Assert.Null(row.TemperatureCelsius));
+        Assert.DoesNotContain("°C", rows[0].Detail);
+    }
+
+    [Theory]
+    [InlineData(27.9, "27.9 °C")]
+    [InlineData(66d, "66 °C")]
+    [InlineData(null, "—")]
+    public void TemperatureFormattingHidesImplausibleReadings(double? celsius, string expected)
+    {
+        Assert.Equal(expected, WidgetMonitorMetrics.Degrees(celsius));
+    }
+
+    [Theory]
+    [InlineData(-273.15)] // Sentinels some drivers report instead of a reading.
+    [InlineData(999)]
+    public void ImplausibleTemperaturesAreReportedAsMissing(double celsius)
+    {
+        Assert.Equal("—", WidgetMonitorMetrics.Degrees(celsius));
+    }
 }

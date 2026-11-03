@@ -12,6 +12,23 @@ public sealed record WidgetPerformanceSnapshot(DateTimeOffset CapturedAt, double
     /// are read once and carried on every snapshot rather than re-queried.
     /// </summary>
     public WidgetHardwareNames Hardware { get; init; } = WidgetHardwareNames.Empty;
+
+    /// <summary>
+    /// CPU temperature in Celsius from the ACPI thermal zone, or null when the
+    /// firmware exposes no readable zone.
+    ///
+    /// This is a zone reading, not a per-core sensor: Windows offers none
+    /// without a kernel driver. Some laptops report only an ambient or skin
+    /// zone, which barely moves under load, so callers must not assume the
+    /// value tracks CPU heat.
+    /// </summary>
+    public double? CpuTemperatureCelsius { get; init; }
+
+    /// <summary>
+    /// GPU temperature in Celsius, or null when no readable source exists.
+    /// Currently populated from nvidia-smi, so it is limited to NVIDIA adapters.
+    /// </summary>
+    public double? GpuTemperatureCelsius { get; init; }
 }
 
 /// <summary>
@@ -87,6 +104,12 @@ public static class WidgetMonitorMetrics
     }
 
     public static string Speed(double? value) => value is null ? "—" : Bytes(value) + "/s";
+
+    /// <summary>Formats a temperature, or an em dash when the sensor is absent.</summary>
+    public static string Degrees(double? celsius) =>
+        celsius is { } value && double.IsFinite(value) && value > -50 && value < 200
+            ? $"{value:0.#} °C"
+            : "—";
 
     /// <summary>
     /// Splits a speed into its number and its unit so a caller can give each a
