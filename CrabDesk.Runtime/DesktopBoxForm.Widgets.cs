@@ -233,6 +233,7 @@ internal sealed partial class DesktopBoxForm
         { _runtime.OpenWidgetWeatherLocations(widget); return; }
         if (widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point))
         { ShowWeatherCityMenu(widget); return; }
+        if (widget.Kind == DesktopWidgetKind.ControlCenter && HandleControlCenterClick(widget, point)) return;
         if (widget.Kind == DesktopWidgetKind.Note && WidgetBodyRectangle(widget).Contains(point))
         { BeginWidgetNoteInput(widget); return; }
         if (widget.Kind == DesktopWidgetKind.Translation) { HandleTranslationWidgetClick(widget, point); return; }
@@ -318,6 +319,23 @@ internal sealed partial class DesktopBoxForm
         }
         menu.Items.Add(sizes);
         if (widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network) AddMonitorContextMenu(menu, widget);
+        if (widget.Kind == DesktopWidgetKind.ControlCenter)
+        {
+            var outputs = new Forms.ToolStripMenuItem("输出设备");
+            var snapshot = widget.Controls;
+            if (snapshot is null || snapshot.OutputDevices.Count == 0) outputs.Enabled = false;
+            else
+            {
+                foreach (var device in snapshot.OutputDevices)
+                {
+                    var item = new Forms.ToolStripMenuItem(device.Name) { Checked = device.IsDefault };
+                    var id = device.Id;
+                    item.Click += (_, _) => _ = _runtime.SetControlOutputAsync(id);
+                    outputs.DropDownItems.Add(item);
+                }
+            }
+            menu.Items.Add(outputs);
+        }
         if (widget.Kind == DesktopWidgetKind.Note)
             menu.Items.Add("编辑便签", null, (_, _) => BeginWidgetNoteInput(widget));
         if (widget.Kind == DesktopWidgetKind.Translation)

@@ -48,6 +48,7 @@ internal sealed partial class DesktopBoxForm
         var state = graphics.Save();
         graphics.SetClip(path, CombineMode.Intersect);
         if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather) &&
+            widget.Kind != DesktopWidgetKind.ControlCenter &&
             !(widget.Kind == DesktopWidgetKind.Network &&
               widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Speeds or NetworkWidgetDisplayMode.Curve))
         {
@@ -66,6 +67,7 @@ internal sealed partial class DesktopBoxForm
             case DesktopWidgetKind.Weather: DrawWeatherWidget(graphics, widget, body, text, muted); break;
             case DesktopWidgetKind.Performance: DrawPerformanceWidget(graphics, widget, text, muted, accent); break;
             case DesktopWidgetKind.Network: DrawNetworkWidget(graphics, widget, text, muted, accent); break;
+            case DesktopWidgetKind.ControlCenter: DrawControlCenterWidget(graphics, widget, text, muted, accent); break;
         }
         if (_hoveredWidgetId == widget.Id)
         {

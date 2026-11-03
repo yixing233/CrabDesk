@@ -2,8 +2,13 @@ using System.Text.Json.Serialization;
 
 namespace CrabDesk.Core;
 
-public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network }
-public enum DesktopWidgetSize { Small, Medium, Wide, Large, Compact, Landscape, Custom }
+public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter }
+public enum DesktopWidgetSize
+{
+    Small, Medium, Wide, Large, Compact, Landscape, Custom,
+    /// <summary>Tall panel for the control centre. Appended so saved values hold.</summary>
+    Panel
+}
 /// <summary>
 /// How a network widget presents itself. Values are persisted, so new members
 /// are appended and retired ones keep their slot as a reserved gap: reusing a
@@ -39,6 +44,7 @@ public sealed class DesktopWidget
     [JsonIgnore] public List<WidgetNetworkRatePoint> NetworkHistory { get; } = [];
     [JsonIgnore] public WidgetPerformanceSnapshot? Performance { get; set; }
     [JsonIgnore] public WidgetNetworkSnapshot? Network { get; set; }
+    [JsonIgnore] public ControlCenterSnapshot? Controls { get; set; }
     [JsonIgnore] public string MonitorError { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIp { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIpError { get; set; } = string.Empty;
@@ -200,7 +206,8 @@ public static class DesktopWidgets
     {
         DesktopWidgetKind.Clock => "时钟", DesktopWidgetKind.Calendar => "月历", DesktopWidgetKind.Note => "便签",
         DesktopWidgetKind.Todo => "待办", DesktopWidgetKind.Translation => "翻译", DesktopWidgetKind.Weather => "天气",
-        DesktopWidgetKind.Performance => "性能监控", DesktopWidgetKind.Network => "网络监控", _ => "小组件"
+        DesktopWidgetKind.Performance => "性能监控", DesktopWidgetKind.Network => "网络监控",
+        DesktopWidgetKind.ControlCenter => "控制中心", _ => "小组件"
     };
 
     public static DesktopWidgetSize DefaultSize(DesktopWidgetKind kind) => kind switch
@@ -216,6 +223,7 @@ public static class DesktopWidgets
         DesktopWidgetKind.Calendar => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
         DesktopWidgetKind.Note or DesktopWidgetKind.Todo => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large, DesktopWidgetSize.Custom],
         DesktopWidgetKind.Translation or DesktopWidgetKind.Network => [DesktopWidgetSize.Large],
+        DesktopWidgetKind.ControlCenter => [DesktopWidgetSize.Panel],
         _ => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large]
     };
 
@@ -253,7 +261,9 @@ public static class DesktopWidgets
         DesktopWidgetSize.Compact => (144, 144),
         DesktopWidgetSize.Landscape => (288, 120),
         DesktopWidgetSize.Small => (180, 84), DesktopWidgetSize.Wide => (372, 84),
-        DesktopWidgetSize.Large => (372, 180), _ => (180, 180)
+        DesktopWidgetSize.Large => (372, 180),
+        DesktopWidgetSize.Panel => (ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight),
+        _ => (180, 180)
     };
 
     public static bool SupportsFreeResize(DesktopWidgetKind kind) => kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo;

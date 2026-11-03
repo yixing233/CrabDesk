@@ -94,7 +94,9 @@ public sealed partial class WidgetsPage : Page
                 DesktopWidgetKind.Clock => "黑白表盘与可选秒针", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
                 DesktopWidgetKind.Note => "随手记下灵感", DesktopWidgetKind.Todo => "记录并完成每一件事",
                 DesktopWidgetKind.Translation => "随时翻译一段文字", DesktopWidgetKind.Weather => "关心城市的阴晴冷暖",
-                DesktopWidgetKind.Performance => "实时查看 CPU、GPU、内存与磁盘", _ => "完整信息、仅速度或实时曲线"
+                DesktopWidgetKind.Performance => "实时查看 CPU、GPU、内存与磁盘",
+                DesktopWidgetKind.ControlCenter => "开关、音量、亮度与媒体控制",
+                _ => "完整信息、仅速度或实时曲线"
             } : (widget.Kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " : "") + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
             var count = catalog ? _runtime.State.Widgets.Count(existing => existing.Kind == widget.Kind) : 0;
             if (item is null)

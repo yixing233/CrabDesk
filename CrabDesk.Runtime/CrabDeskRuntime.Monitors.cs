@@ -19,6 +19,8 @@ public sealed partial class CrabDeskRuntime
     private long _monitorLastTick, _monitorLastPing;
     private int _monitorSampling;
     private string _monitorPingKey = "";
+    private WidgetControlCenterMonitor? _controlMonitor;
+    private long _controlLastTick;
     private Dictionary<Guid, CancellationTokenSource>? _publicIpRequests;
     private Func<CancellationToken, Task<string>>? _publicIpQuery = WidgetNetworkMonitor.QueryPublicIpAsync;
     public event EventHandler? WidgetMonitorUpdated;
@@ -28,7 +30,8 @@ public sealed partial class CrabDeskRuntime
         if (_disposed || IsPaused) return;
         var performance = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Performance);
         var network = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Network);
-        if (performance is null && network is null) return;
+        var controls = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.ControlCenter);
+        if (performance is null && network is null && controls is null) return;
         var now = Stopwatch.GetTimestamp();
         if (!force && _monitorLastTick != 0 && Stopwatch.GetElapsedTime(_monitorLastTick, now).TotalMilliseconds < 900) return;
         if (Interlocked.CompareExchange(ref _monitorSampling, 1, 0) != 0) return;
@@ -39,20 +42,30 @@ public sealed partial class CrabDeskRuntime
         var adapter = network?.NetworkAdapterId ?? ""; var target = network?.NetworkLatencyTarget ?? "";
         if (performance is not null) _performanceMonitor ??= new();
         if (network is not null) _networkMonitor ??= new();
+        // The control centre polls slower than the charts: switch states change
+        // rarely, and every radio/media read crosses into WinRT.
+        var controlDue = controls is not null &&
+            (_controlLastTick == 0 || Stopwatch.GetElapsedTime(_controlLastTick, now).TotalSeconds >= 2);
+        if (controlDue) _controlMonitor ??= new();
         var performanceSource = _performanceMonitor; var networkSource = _networkMonitor;
+        var controlSource = _controlMonitor;
         try
         {
-            var data = await Task.Run(() =>
+            var data = await Task.Run(async () =>
             {
                 token.ThrowIfCancellationRequested();
                 WidgetPerformanceSnapshot? machine = null; WidgetNetworkSnapshot? connection = null;
-                var machineError = ""; var networkError = "";
+                CrabDesk.Core.ControlCenterSnapshot? controls = null;
+                var machineError = ""; var networkError = ""; var controlError = "";
                 try { if (performance is not null) machine = performanceSource!.Sample(); }
                 catch (Exception exception) { machineError = "性能采样失败：" + exception.Message; }
                 try { if (network is not null) connection = networkSource!.Sample(adapter, target); }
                 catch (Exception exception) { networkError = "网络采样失败：" + exception.Message; }
-                return (machine, connection, machineError, networkError);
+                try { if (controlDue) controls = await controlSource!.ReadAsync(token).ConfigureAwait(false); }
+                catch (Exception exception) { controlError = "控制中心采样失败：" + exception.Message; }
+                return (machine, connection, controls, machineError, networkError, controlError);
             }, token);
+            if (controlDue) _controlLastTick = Stopwatch.GetTimestamp();
             if (network is not null && networkSource is not null && !token.IsCancellationRequested && !IsPaused &&
                 State.Widgets.Contains(network) && network.NetworkAdapterId == adapter && network.NetworkLatencyTarget == target)
             {
@@ -80,6 +93,8 @@ public sealed partial class CrabDeskRuntime
                         WidgetNetworkGraph.Append(network, data.connection);
                         network.Network = data.connection; network.MonitorError = data.networkError;
                     }
+                    if (controls is not null && State.Widgets.Contains(controls) && data.controls is not null)
+                    { controls.Controls = data.controls; controls.MonitorError = data.controlError; }
                     NotifyMonitorFrame();
                 });
         }

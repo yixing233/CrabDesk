@@ -121,6 +121,7 @@ public sealed partial class WidgetPreview : UserControl
             case DesktopWidgetKind.Translation: TranslationPreview(widget); break;
             case DesktopWidgetKind.Weather: Weather(widget); break;
             case DesktopWidgetKind.Performance: Performance(widget); break;
+            case DesktopWidgetKind.ControlCenter: ControlCenter(widget); break;
             case DesktopWidgetKind.Network: Network(widget); break;
         }
     }
@@ -462,6 +463,131 @@ public sealed partial class WidgetPreview : UserControl
                 Place(new Border { Background = _accent, CornerRadius = new CornerRadius(Math.Min(1.5, radius)) },
                     track with { Width = track.Width * Math.Clamp(percentage, 0, 100) / 100 });
         }
+        CardBody.Children.Add(panel);
+    }
+
+    /// <summary>
+    /// Mirrors the desktop card in the settings preview: same tiles, sliders and
+    /// media strip, so the thumbnail matches what will be placed.
+    /// </summary>
+    /// <summary>Ink that stays readable on the accent fill used by active tiles.</summary>
+    private Color ResolveAccentForeground() =>
+        _accent.Color.R * 299 + _accent.Color.G * 587 + _accent.Color.B * 114 > 128000
+            ? Color.FromArgb(255, 20, 22, 26) : Color.FromArgb(255, 255, 255, 255);
+
+    private void ControlCenter(DesktopWidget widget)
+    {
+        var panel = new Canvas();
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var radius = PreviewAppearance?.Settings.CornerRadius ?? 8;
+        var body = WidgetMonitorPresentation.Body(width, height, radius);
+        var snapshot = widget.Controls;
+        void Place(FrameworkElement element, LayoutRect bounds)
+        {
+            Canvas.SetLeft(element, bounds.X); Canvas.SetTop(element, bounds.Y);
+            element.Width = bounds.Width; element.Height = bounds.Height;
+            panel.Children.Add(element);
+        }
+
+        foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
+        {
+            var cell = ControlCenterPresentation.Toggle(body, (int)toggle);
+            var available = ControlCenterPresentation.ToggleAvailable(toggle, snapshot);
+            var on = toggle switch
+            {
+                ControlCenterToggle.WiFi => snapshot?.WiFiEnabled is true,
+                ControlCenterToggle.Bluetooth => snapshot?.BluetoothEnabled is true,
+                _ => snapshot?.NightLightEnabled is true
+            };
+            var tile = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Background = new SolidColorBrush(on ? _accent.Color : (_text.Color with { A = 26 })),
+                Child = new StackPanel
+                {
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children =
+                    {
+                        new TextBlock { Text = ControlCenterPresentation.ToggleLabel(toggle), FontSize = 12.5, FontWeight = FontWeights.Bold,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color) },
+                        new TextBlock { Text = ControlCenterPresentation.ToggleStateText(toggle, snapshot), FontSize = 10,
+                            HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 0),
+                            Foreground = new SolidColorBrush(!available ? _secondary.Color : on ? ResolveAccentForeground() : _text.Color) }
+                    }
+                }
+            };
+            Place(tile, cell);
+        }
+
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        var half = (sliders.Width - 14) / 2;
+        Slider("音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent,
+            new LayoutRect(sliders.X, sliders.Y, half, sliders.Height));
+        Slider("亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent,
+            new LayoutRect(sliders.X + half + 14, sliders.Y, half, sliders.Height));
+
+        void Slider(string label, string value, double? percent, LayoutRect area)
+        {
+            var header = Text(label, 11, true); Place(header, area with { Height = 16 });
+            var amount = Text(value, 11, true); amount.TextAlignment = TextAlignment.Right;
+            Place(amount, area with { Height = 16 });
+            var track = new Border
+            {
+                CornerRadius = new CornerRadius(2.5), Height = 5,
+                Background = new SolidColorBrush(_text.Color with { A = 28 }),
+                VerticalAlignment = VerticalAlignment.Top,
+                Child = new Border
+                {
+                    CornerRadius = new CornerRadius(2.5),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Width = percent is { } level ? area.Width * ControlCenterPresentation.ClampPercent(level) / 100 : 0,
+                    Background = new SolidColorBrush(_accent.Color)
+                }
+            };
+            Place(track, area with { Y = area.Y + 24, Height = 5 });
+        }
+
+        var media = ControlCenterPresentation.MediaArea(body);
+        var device = Text("输出：" + (snapshot?.OutputDeviceName is { Length: > 0 } name ? name : "输出设备不可用"), 10.5, true);
+        Place(device, media with { Height = 26 });
+
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Background = new SolidColorBrush(_text.Color with { A = 20 }),
+            Child = new Grid
+            {
+                Children =
+                {
+                    MediaTitle(),
+                    Transport()
+                }
+            }
+        };
+        Canvas.SetLeft(card, media.X); Canvas.SetTop(card, media.Y + 34);
+        card.Width = media.Width; card.Height = Math.Max(0, media.Height - 34);
+        panel.Children.Add(card);
+
+        FrameworkElement MediaTitle()
+        {
+            var title = Text(snapshot?.Media is null ? "没有正在播放的媒体" : ControlCenterPresentation.MediaSummary(snapshot), 11.5);
+            title.Margin = new Thickness(10, 8, 10, 0);
+            title.VerticalAlignment = VerticalAlignment.Top;
+            return title;
+        }
+
+        FrameworkElement Transport()
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 0, 6) };
+            row.Children.Add(new TextBlock { Text = "◀◀", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
+            row.Children.Add(new TextBlock { Text = snapshot?.Media?.IsPlaying is true ? "❚❚" : "▶", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
+            row.Children.Add(new TextBlock { Text = "▶▶", FontSize = 11, Foreground = new SolidColorBrush(_accent.Color) });
+            return row;
+        }
+
         CardBody.Children.Add(panel);
     }
 

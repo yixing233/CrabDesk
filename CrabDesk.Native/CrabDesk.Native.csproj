@@ -1,11 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\CrabDesk.Core\CrabDesk.Core.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <!-- Windows SDK projections are needed for the radio and media sessions the
+         control centre drives; the plain windows TFM does not include them. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
@@ -14,6 +16,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Brightness is reachable only through WMI's monitor provider: Windows has
+         no Win32 API for panel backlight. -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <InternalsVisibleTo Include="CrabDesk.WinUI.Tests" />
     <InternalsVisibleTo Include="CrabDesk.Tests" />
