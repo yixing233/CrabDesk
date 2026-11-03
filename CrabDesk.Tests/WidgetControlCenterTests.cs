@@ -208,4 +208,63 @@ public sealed class WidgetControlCenterTests
         Assert.Equal("扬声器", devices.Single(device => device.Id == snapshot.OutputDeviceId).Name);
     }
 
+
+    // Hover and click must agree: both go through this one hit test, so a
+    // highlight can never appear on a control that a click would ignore.
+    [Fact]
+    public void HitTestFindsEachControlAtItsOwnCentre()
+    {
+        var body = WidgetMonitorPresentation.Body(
+            ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
+
+        for (var index = 0; index < 3; index++)
+        {
+            var toggle = ControlCenterPresentation.Toggle(body, index);
+            var expected = index switch
+            {
+                0 => ControlCenterPresentation.ControlCenterTarget.ToggleWiFi,
+                1 => ControlCenterPresentation.ControlCenterTarget.ToggleBluetooth,
+                _ => ControlCenterPresentation.ControlCenterTarget.ToggleNightLight
+            };
+            Assert.Equal(expected, ControlCenterPresentation.TargetAt(body,
+                toggle.X + toggle.Width / 2, toggle.Y + toggle.Height / 2));
+        }
+
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        var half = (sliders.Width - 14) / 2;
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.VolumeSlider,
+            ControlCenterPresentation.TargetAt(body, sliders.X + half / 2, sliders.Y + 10));
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.BrightnessSlider,
+            ControlCenterPresentation.TargetAt(body, sliders.X + half + 14 + half / 2, sliders.Y + 10));
+
+        var media = ControlCenterPresentation.MediaArea(body);
+        var output = ControlCenterPresentation.OutputRow(media);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.OutputRow,
+            ControlCenterPresentation.TargetAt(body, output.X + output.Width / 2, output.Y + output.Height / 2));
+
+        var buttons = ControlCenterPresentation.MediaButtonRects(ControlCenterPresentation.MediaPanel(media));
+        var expectedMedia = new[]
+        {
+            ControlCenterPresentation.ControlCenterTarget.MediaPrevious,
+            ControlCenterPresentation.ControlCenterTarget.MediaPlayPause,
+            ControlCenterPresentation.ControlCenterTarget.MediaNext
+        };
+        for (var index = 0; index < buttons.Length; index++)
+        {
+            Assert.Equal(expectedMedia[index], ControlCenterPresentation.TargetAt(body,
+                buttons[index].X + buttons[index].Width / 2, buttons[index].Y + buttons[index].Height / 2));
+        }
+    }
+
+    [Fact]
+    public void HitTestReportsNothingOutsideAControl()
+    {
+        var body = WidgetMonitorPresentation.Body(
+            ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
+
+        // The gap between the sliders and the output row belongs to no control.
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.None,
+            ControlCenterPresentation.TargetAt(body, sliders.X + 20, sliders.Y + sliders.Height - 2));
+    }
 }

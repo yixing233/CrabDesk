@@ -99,7 +99,15 @@ public static class ControlCenterPresentation
     };
 
     public static LayoutRect SliderArea(LayoutRect body) =>
-        new(body.X, body.Y + 64, body.Width, 76);
+        new(body.X, body.Y + 64, body.Width, 46);
+
+    /// <summary>
+    /// The part of a slider column that responds to clicks: the caption and the
+    /// track. The area below the track is padding between controls, and treating
+    /// it as a hit target meant a click in empty space changed the volume.
+    /// </summary>
+    public static LayoutRect SliderHitArea(LayoutRect sliderColumn) =>
+        new(sliderColumn.X, sliderColumn.Y, sliderColumn.Width, 32);
 
     public static LayoutRect MediaArea(LayoutRect body) =>
         new(body.X, body.Y + 148, body.Width, body.Height - 148);
@@ -130,6 +138,67 @@ public static class ControlCenterPresentation
         static string Format(TimeSpan value) =>
             value.TotalHours >= 1 ? $"{(int)value.TotalHours}:{value.Minutes:00}:{value.Seconds:00}"
                 : $"{value.Minutes}:{value.Seconds:00}";
+    }
+
+    /// <summary>
+    /// Which control sits under a point. Drawing and hit-testing both use this,
+    /// so a button's highlight can never disagree with what a click does.
+    /// </summary>
+    public enum ControlCenterTarget
+    {
+        None, InkToggle,
+        ToggleWiFi, ToggleBluetooth, ToggleNightLight,
+        VolumeSlider, BrightnessSlider, OutputRow,
+        MediaPrevious, MediaPlayPause, MediaNext
+    }
+
+    public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y)
+    {
+        foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
+        {
+            if (!Toggle(body, (int)toggle).Contains(x, y)) continue;
+            return toggle switch
+            {
+                ControlCenterToggle.WiFi => ControlCenterTarget.ToggleWiFi,
+                ControlCenterToggle.Bluetooth => ControlCenterTarget.ToggleBluetooth,
+                _ => ControlCenterTarget.ToggleNightLight
+            };
+        }
+        var sliders = SliderArea(body);
+        var half = (sliders.Width - 14) / 2;
+        if (SliderHitArea(new(sliders.X, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.VolumeSlider;
+        if (SliderHitArea(new(sliders.X + half + 14, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.BrightnessSlider;
+        var mediaArea = MediaArea(body);
+        if (OutputRow(mediaArea).Contains(x, y)) return ControlCenterTarget.OutputRow;
+        var buttons = MediaButtonRects(MediaPanel(mediaArea));
+        for (var index = 0; index < buttons.Length; index++)
+        {
+            if (!buttons[index].Contains(x, y)) continue;
+            return index switch
+            {
+                0 => ControlCenterTarget.MediaPrevious,
+                1 => ControlCenterTarget.MediaPlayPause,
+                _ => ControlCenterTarget.MediaNext
+            };
+        }
+        return ControlCenterTarget.None;
+    }
+
+    /// <summary>
+    /// The three transport buttons, in draw order. Shared so the glyph and its
+    /// clickable area stay together.
+    /// </summary>
+    public static LayoutRect[] MediaButtonRects(LayoutRect mediaPanel)
+    {
+        const double buttonWidth = 34, height = 22;
+        var startX = mediaPanel.X + (mediaPanel.Width - buttonWidth * 3) / 2;
+        var top = mediaPanel.Y + mediaPanel.Height - 22;
+        return
+        [
+            new(startX, top, buttonWidth, height),
+            new(startX + buttonWidth, top, buttonWidth, height),
+            new(startX + buttonWidth * 2, top, buttonWidth, height)
+        ];
     }
 
     /// <summary>Short label for a toggle, used on the button face.</summary>

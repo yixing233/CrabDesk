@@ -7,6 +7,40 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
+    // Transient interaction state. Pressed is separate from hovered so a click can
+    // darken the control under the pointer while the button is held down, which
+    // is the only feedback a card without real widgets can give.
+    private Guid? _controlHoverWidgetId;
+    private ControlCenterPresentation.ControlCenterTarget _controlHoverTarget;
+    private ControlCenterPresentation.ControlCenterTarget _controlPressedTarget;
+    private Guid? _controlPressedWidgetId;
+
+    /// <summary>Recomputes which control is under the pointer and repaints on change.</summary>
+    private void UpdateControlCenterHover(DesktopWidget? widget, PointF point)
+    {
+        var target = widget?.Kind == DesktopWidgetKind.ControlCenter
+            ? ControlCenterTargetAt(widget, point)
+            : ControlCenterPresentation.ControlCenterTarget.None;
+        if (_controlHoverWidgetId == widget?.Id && _controlHoverTarget == target) return;
+        _controlHoverWidgetId = widget?.Id;
+        _controlHoverTarget = target;
+        RequestVisualLayerRender();
+    }
+
+    /// <summary>Hit target that corresponds to a switch.</summary>
+    private static ControlCenterPresentation.ControlCenterTarget ControlCenterToggleTarget(ControlCenterToggle toggle) => toggle switch
+    {
+        ControlCenterToggle.WiFi => ControlCenterPresentation.ControlCenterTarget.ToggleWiFi,
+        ControlCenterToggle.Bluetooth => ControlCenterPresentation.ControlCenterTarget.ToggleBluetooth,
+        _ => ControlCenterPresentation.ControlCenterTarget.ToggleNightLight
+    };
+
+    private bool IsControlHovered(DesktopWidget widget, ControlCenterPresentation.ControlCenterTarget target) =>
+        _controlHoverWidgetId == widget.Id && _controlHoverTarget == target;
+
+    private bool IsControlPressed(DesktopWidget widget, ControlCenterPresentation.ControlCenterTarget target) =>
+        _controlPressedWidgetId == widget.Id && _controlPressedTarget == target;
+
     /// <summary>
     /// Draws the control centre: three toggle tiles, two sliders and a media
     /// strip.
@@ -29,7 +63,7 @@ internal sealed partial class DesktopBoxForm
         foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
         {
             var cell = MonitorRectangle(widget, ControlCenterPresentation.Toggle(body, (int)toggle));
-            DrawControlCenterToggle(graphics, cell, toggle, snapshot, text, muted, accent, panel);
+            DrawControlCenterToggle(graphics, cell, toggle, snapshot, text, muted, accent, panel, widget);
         }
 
         var sliders = MonitorRectangle(widget, ControlCenterPresentation.SliderArea(body));
@@ -42,10 +76,13 @@ internal sealed partial class DesktopBoxForm
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
         var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
             ControlCenterPresentation.MediaArea(body)));
-        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, Mix(panel, text, 0.14));
+        var outputHovered = IsControlHovered(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
+        var outputPressed = IsControlPressed(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
+        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted,
+            Mix(panel, text, outputPressed ? 0.22 : outputHovered ? 0.18 : 0.14));
         var panelBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
             ControlCenterPresentation.MediaArea(body)));
-        DrawControlCenterMedia(graphics, panelBounds, snapshot, text, muted, accent, Mix(background, text, 0.10));
+        DrawControlCenterMedia(graphics, panelBounds, snapshot, text, muted, accent, Mix(background, text, 0.10), widget);
 
         // Contrast switch, top right. The card sits over a wallpaper it does not
         // control, so the automatic light/dark choice can still read badly; this
@@ -70,7 +107,7 @@ internal sealed partial class DesktopBoxForm
     }
 
     private void DrawControlCenterToggle(Graphics graphics, RectangleF cell, ControlCenterToggle toggle,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color panel)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color panel, DesktopWidget widgetRef)
     {
         var available = ControlCenterPresentation.ToggleAvailable(toggle, snapshot);
         var on = toggle switch
@@ -82,7 +119,13 @@ internal sealed partial class DesktopBoxForm
         using var path = RoundedRectangle(cell, 8);
         // An on tile is filled with the accent; an unavailable one is faded so it
         // reads as disabled before the label is even read.
-        var fill = on ? accent : Mix(panel, text, available ? 0.16 : 0.06);
+        // Pressed sinks a shade below hovered; an unavailable tile does not react
+        // at all, since clicking it does nothing.
+        var hovered = available && IsControlHovered(widgetRef, ControlCenterToggleTarget(toggle));
+        var pressed = available && IsControlPressed(widgetRef, ControlCenterToggleTarget(toggle));
+        var fill = on
+            ? (pressed ? Mix(accent, Color.Black, 0.18) : hovered ? Mix(accent, Color.White, 0.12) : accent)
+            : Mix(panel, text, available ? (pressed ? 0.26 : hovered ? 0.21 : 0.16) : 0.06);
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
@@ -148,7 +191,7 @@ internal sealed partial class DesktopBoxForm
     }
 
     private void DrawControlCenterMedia(Graphics graphics, RectangleF bounds,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color fill)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color fill, DesktopWidget widgetRef)
     {
         using var path = RoundedRectangle(bounds, 8);
         using var brush = new SolidBrush(fill);
@@ -249,6 +292,43 @@ internal sealed partial class DesktopBoxForm
     /// Returns true when the click was consumed, so it does not fall through to
     /// dragging the card.
     /// </summary>
+    /// <summary>
+    /// Records which control is being held down, so it can render a pressed state
+    /// between mouse-down and mouse-up.
+    /// </summary>
+    /// <summary>
+    /// Which control a screen point is over. The body grid is laid out in
+    /// card-local coordinates, so the card origin is removed once here and the
+    /// same helper serves drawing, hover and clicks.
+    /// </summary>
+    private ControlCenterPresentation.ControlCenterTarget ControlCenterTargetAt(DesktopWidget widget, PointF point)
+    {
+        if (ControlCenterInkToggleRectangle(widget).Contains(point))
+            return ControlCenterPresentation.ControlCenterTarget.InkToggle;
+        var bounds = WidgetRectangle(widget);
+        var body = WidgetMonitorPresentation.Body(bounds.Width, bounds.Height,
+            _runtime.State.Settings.Appearance.CornerRadius);
+        return ControlCenterPresentation.TargetAt(body, point.X - bounds.X, point.Y - bounds.Y);
+    }
+
+    private bool BeginControlCenterPress(DesktopWidget widget, PointF point)
+    {
+        var target = ControlCenterTargetAt(widget, point);
+        if (target == ControlCenterPresentation.ControlCenterTarget.None) return false;
+        _controlPressedWidgetId = widget.Id;
+        _controlPressedTarget = target;
+        RequestVisualLayerRender();
+        return true;
+    }
+
+    private void EndControlCenterPress()
+    {
+        if (_controlPressedWidgetId is null) return;
+        _controlPressedWidgetId = null;
+        _controlPressedTarget = ControlCenterPresentation.ControlCenterTarget.None;
+        RequestVisualLayerRender();
+    }
+
     private bool HandleControlCenterClick(DesktopWidget widget, PointF point)
     {
         if (ControlCenterInkToggleRectangle(widget).Contains(point))
@@ -280,20 +360,22 @@ internal sealed partial class DesktopBoxForm
             return true;
         }
 
-        var sliders = MonitorRectangle(widget, ControlCenterPresentation.SliderArea(body));
+        var sliders = ControlCenterPresentation.SliderArea(body);
         var half = (sliders.Width - 14) / 2;
-        // A click anywhere in a slider's column sets that level; the hit area is
-        // taller than the visible bar so the target is comfortable.
-        var volumeArea = new RectangleF(sliders.X, sliders.Y, half, sliders.Height);
-        if (volumeArea.Contains(point) && snapshot?.VolumePercent is not null)
+        // Only the caption and track respond; the padding below them is dead space
+        // and clicking it used to change the level by accident.
+        var volumeColumn = new LayoutRect(sliders.X, sliders.Y, half, sliders.Height);
+        if (ControlCenterPresentation.SliderHitArea(volumeColumn).Contains(point.X, point.Y) &&
+            snapshot?.VolumePercent is not null)
         {
-            _runtime.SetControlVolume(PercentFromPoint(volumeArea, point));
+            _runtime.SetControlVolume(PercentFromPoint(volumeColumn, point));
             return true;
         }
-        var brightnessArea = new RectangleF(sliders.X + half + 14, sliders.Y, half, sliders.Height);
-        if (brightnessArea.Contains(point) && snapshot?.BrightnessPercent is not null)
+        var brightnessColumn = new LayoutRect(sliders.X + half + 14, sliders.Y, half, sliders.Height);
+        if (ControlCenterPresentation.SliderHitArea(brightnessColumn).Contains(point.X, point.Y) &&
+            snapshot?.BrightnessPercent is not null)
         {
-            _runtime.SetControlBrightness(PercentFromPoint(brightnessArea, point));
+            _runtime.SetControlBrightness(PercentFromPoint(brightnessColumn, point));
             return true;
         }
 
@@ -336,7 +418,7 @@ internal sealed partial class DesktopBoxForm
     }
 
     /// <summary>Maps a point on a slider column to a 0-100 level.</summary>
-    private static double PercentFromPoint(RectangleF area, PointF point)
+    private static double PercentFromPoint(LayoutRect area, PointF point)
     {
         if (area.Width <= 0) return 0;
         return ControlCenterPresentation.ClampPercent((point.X - area.X) / area.Width * 100);

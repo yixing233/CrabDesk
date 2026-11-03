@@ -87,6 +87,9 @@ internal sealed partial class DesktopBoxForm
         if (args.Button != Forms.MouseButtons.Left) return true;
         _widgetResizeEdges = WidgetSizing.HitTest(widget, point.X, point.Y);
         if (_widgetResizeEdges == WidgetResizeEdges.None && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
+        // Show the press immediately rather than waiting for the click to finish:
+        // that delay is what made the card's buttons feel inert.
+        if (widget.Kind == DesktopWidgetKind.ControlCenter) BeginControlCenterPress(widget, point);
         _pressedWidget = widget;
         _widgetPressPoint = point;
         _widgetStartBounds = widget.Bounds;
@@ -126,6 +129,8 @@ internal sealed partial class DesktopBoxForm
         var widget = WidgetAt(point);
         var menuId = widget is not null && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         UpdateCalendarHover(widget, point);
+        // Only the control centre has per-button hover state; other cards skip this.
+        UpdateControlCenterHover(widget, point);
         var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         var calendarButton = RectangleF.Empty;
         var translationButton = RectangleF.Empty;
@@ -182,6 +187,7 @@ internal sealed partial class DesktopBoxForm
     private bool HandleWidgetMouseUp(Forms.MouseEventArgs args, PointF point)
     {
         if (_pressedWidget is not { } widget || args.Button != Forms.MouseButtons.Left) return false;
+        EndControlCenterPress();
         if (_widgetResizeEdges != WidgetResizeEdges.None)
         {
             UpdateWidgetResize(widget, point);
@@ -209,6 +215,7 @@ internal sealed partial class DesktopBoxForm
 
     private void FinishWidgetPress(bool save)
     {
+        EndControlCenterPress();
         var widget = _pressedWidget;
         save &= _widgetResizeEdges == WidgetResizeEdges.None || _widgetResizing;
         ClearBoxAlignmentGuides();
