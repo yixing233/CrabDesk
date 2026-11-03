@@ -351,10 +351,14 @@ internal sealed partial class DesktopBoxForm
         if (widget.Controls is null) return;
         // Reuses the same themed menu the widget menu uses, so the picker looks
         // like the rest of the shell rather than a raw WinForms list.
-        var menu = BuildControlCenterOutputMenu(widget.Controls);
+        var menu = BuildControlCenterOutputMenu(widget.Controls, (float)_scale);
         if (menu.Items.Count == 0) { menu.Dispose(); return; }
-        menu.Closed += (_, _) => menu.Dispose();
-        _runtime.ApplyContextMenuTheme(menu);
+        // Same lifecycle the other widget menus use: theme on open, and dispose
+        // deferred so the menu's own close animation is not torn down underneath
+        // it. Disposing inline from inside Closed threw
+        // "Cannot access a disposed object: FluentContextMenuStrip".
+        menu.Opening += (_, _) => _runtime.ApplyContextMenuTheme(menu);
+        menu.Closed += (_, _) => { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)menu.Dispose); else menu.Dispose(); };
         menu.Show(this, location);
     }
 
@@ -362,9 +366,10 @@ internal sealed partial class DesktopBoxForm
     /// Builds the endpoint list. Split out from the popup so the contents can be
     /// tested without a window to host it.
     /// </summary>
-    internal static FluentContextMenuStrip BuildControlCenterOutputMenu(ControlCenterSnapshot snapshot)
+    internal static FluentContextMenuStrip BuildControlCenterOutputMenu(ControlCenterSnapshot snapshot,
+        float dpiScale = 1f)
     {
-        var menu = new FluentContextMenuStrip();
+        var menu = new FluentContextMenuStrip { PreferredDpiScale = dpiScale };
         foreach (var device in snapshot.OutputDevices)
         {
             // The tick marks what the card is showing, which during a switch can

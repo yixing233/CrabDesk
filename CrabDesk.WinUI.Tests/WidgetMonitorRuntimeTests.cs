@@ -158,7 +158,30 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.Empty(menu.Items);
     }
 
-    // The model names are the reason the submenu exists; they have to reach it.    // The model names are the reason the submenu exists; they have to reach it.
+    // Disposing a ContextMenuStrip synchronously from its own Closed handler
+    // leaves a disposed drop-down behind that ToolStripManager still references,
+    // which crashed the app on the next click. Every menu in this project defers
+    // the dispose; this test pins the contract for the output picker too.
+    [Fact]
+    public void OutputDeviceSelectionHandsOffWithoutThrow()
+    {
+        var snapshot = new ControlCenterSnapshot
+        {
+            OutputDeviceId = "a",
+            OutputDevices = [new("a", "耳机", true), new("b", "扬声器", false)]
+        };
+        using var menu = DesktopBoxForm.BuildControlCenterOutputMenu(snapshot);
+
+        var item = menu.Items.OfType<ToolStripMenuItem>().Last();
+        Assert.Equal("扬声器", item.Text);
+
+        // Closing then disposing is the deferred path the form uses; disposing
+        // while Closed is still running is what threw.
+        menu.Close();
+        menu.Dispose();
+    }
+
+    // The model names are the reason the submenu exists; they have to reach it.
     [Fact]
     public void HardwareSubmenuListsTheModelNamesItKnows()
     {
