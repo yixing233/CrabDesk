@@ -35,13 +35,12 @@ internal sealed partial class DesktopBoxForm
             "亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent, text, muted, accent);
 
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
-        var deviceHeight = 26f;
-        DrawControlCenterDevice(graphics,
-            new RectangleF(mediaArea.X, mediaArea.Y, mediaArea.Width, deviceHeight), snapshot, muted);
-        var mediaTop = mediaArea.Y + deviceHeight + 8;
-        DrawControlCenterMedia(graphics,
-            new RectangleF(mediaArea.X, mediaTop, mediaArea.Width, mediaArea.Bottom - mediaTop),
-            snapshot, text, muted, accent);
+        var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
+            ControlCenterPresentation.MediaArea(body)));
+        DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted, accent);
+        var panel = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
+            ControlCenterPresentation.MediaArea(body)));
+        DrawControlCenterMedia(graphics, panel, snapshot, text, muted, accent);
     }
 
     private void DrawControlCenterToggle(Graphics graphics, RectangleF cell, ControlCenterToggle toggle,
@@ -89,12 +88,20 @@ internal sealed partial class DesktopBoxForm
         graphics.FillEllipse(knob, filled.Right - 5, track.Y - 2.5f, 10, 10);
     }
 
+    /// <summary>
+    /// The output row doubles as the device switch: clicking it advances to the
+    /// next endpoint, so changing output does not need a menu.
+    /// </summary>
     private static void DrawControlCenterDevice(Graphics graphics, RectangleF bounds,
-        ControlCenterSnapshot? snapshot, Color muted)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent)
     {
         var name = snapshot?.OutputDeviceName is { Length: > 0 } device ? device : "输出设备不可用";
-        WidgetText(graphics, "输出：" + WidgetMonitorMetrics.HardwareLabel(name, 26),
-            bounds, muted, 10.5f);
+        using var path = RoundedRectangle(bounds, 6);
+        using var brush = new SolidBrush(Color.FromArgb(20, text));
+        graphics.FillPath(brush, path);
+        var microphone = snapshot?.OutputDevices.Count > 1 ? "  ⇄" : "";
+        WidgetText(graphics, "输出：" + WidgetMonitorMetrics.HardwareLabel(name, 24) + microphone,
+            new RectangleF(bounds.X + 8, bounds.Y, bounds.Width - 16, bounds.Height), accent, 10.5f);
     }
 
     private void DrawControlCenterMedia(Graphics graphics, RectangleF bounds,
@@ -107,6 +114,30 @@ internal sealed partial class DesktopBoxForm
         var media = snapshot?.Media;
         WidgetText(graphics, ControlCenterPresentation.MediaSummary(snapshot),
             new RectangleF(bounds.X + 10, bounds.Y + 8, bounds.Width - 20, 18), text, 11.5f);
+
+        // Progress: the bar advances from the sampled position plus elapsed wall
+        // clock, so it moves smoothly instead of stepping once per poll.
+        if (media is { Duration.TotalSeconds: > 0 })
+        {
+            var now = DateTimeOffset.Now;
+            var track = new RectangleF(bounds.X + 10, bounds.Y + 33, bounds.Width - 20, 4);
+            using (var trackPath = RoundedRectangle(track, 2))
+            using (var trackBrush = new SolidBrush(Color.FromArgb(30, text)))
+            {
+                graphics.FillPath(trackBrush, trackPath);
+            }
+            var ratio = ControlCenterPresentation.ClampPercent(
+                media.PositionNow(now).TotalSeconds / media.Duration.TotalSeconds * 100) / 100;
+            if (ratio > 0)
+            {
+                var filled = track; filled.Width = (float)(track.Width * ratio);
+                using var fillPath = RoundedRectangle(filled, 2);
+                using var fillBrush = new SolidBrush(accent);
+                graphics.FillPath(fillBrush, fillPath);
+            }
+            WidgetText(graphics, ControlCenterPresentation.MediaTimeText(media, now),
+                new RectangleF(bounds.X + 10, bounds.Y + 39, bounds.Width - 20, 14), muted, 9.5f, rightAligned: true);
+        }
 
         // Three transport buttons, drawn as glyphs: the card ships no icon font.
         var buttons = ControlCenterMediaButtons(bounds);
@@ -132,7 +163,7 @@ internal sealed partial class DesktopBoxForm
     {
         const float buttonWidth = 34f;
         var startX = mediaBounds.X + (mediaBounds.Width - buttonWidth * 3) / 2;
-        var top = mediaBounds.Bottom - 30;
+        var top = mediaBounds.Y + mediaBounds.Height - 22;
         return
         [
             new RectangleF(startX, top, buttonWidth, 22),
@@ -186,8 +217,17 @@ internal sealed partial class DesktopBoxForm
         }
 
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
-        var mediaTop = mediaArea.Y + 26 + 8;
-        var mediaBounds = new RectangleF(mediaArea.X, mediaTop, mediaArea.Width, mediaArea.Bottom - mediaTop);
+        var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
+            ControlCenterPresentation.MediaArea(body)));
+        if (outputRow.Contains(point))
+        {
+            // Cycle to the next endpoint; the row shows a ⇄ when there is a choice.
+            if (ControlCenterPresentation.NextOutputDevice(snapshot) is { } next)
+                _ = _runtime.SetControlOutputAsync(next);
+            return true;
+        }
+        var mediaBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
+            ControlCenterPresentation.MediaArea(body)));
         if (snapshot?.Media is { } media)
         {
             var buttons = ControlCenterMediaButtons(mediaBounds);

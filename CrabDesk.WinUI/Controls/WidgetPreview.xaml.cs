@@ -550,6 +550,7 @@ public sealed partial class WidgetPreview : UserControl
 
         var media = ControlCenterPresentation.MediaArea(body);
         var device = Text("输出：" + (snapshot?.OutputDeviceName is { Length: > 0 } name ? name : "输出设备不可用"), 10.5, true);
+        device.Foreground = new SolidColorBrush(_accent.Color);
         Place(device, media with { Height = 26 });
 
         var card = new Border
@@ -568,6 +569,35 @@ public sealed partial class WidgetPreview : UserControl
         Canvas.SetLeft(card, media.X); Canvas.SetTop(card, media.Y + 34);
         card.Width = media.Width; card.Height = Math.Max(0, media.Height - 34);
         panel.Children.Add(card);
+        MediaProgressBar();
+
+        void MediaProgressBar()
+        {
+            var track_media = snapshot?.Media;
+            if (track_media is not { Duration.TotalSeconds: > 0 }) return;
+            var now = DateTimeOffset.Now;
+            var track = new Border
+            {
+                CornerRadius = new CornerRadius(2), Height = 4,
+                Background = new SolidColorBrush(_text.Color with { A = 30 }),
+                Child = new Border
+                {
+                    CornerRadius = new CornerRadius(2),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Width = (track_media.PositionNow(now).TotalSeconds / track_media.Duration.TotalSeconds) * (media.Width - 20),
+                    Background = new SolidColorBrush(_accent.Color)
+                }
+            };
+            Canvas.SetLeft(track, media.X + 10);
+            Canvas.SetTop(track, media.Y + 33);
+            track.Width = media.Width - 20;
+            panel.Children.Add(track);
+            var time = Text(ControlCenterPresentation.MediaTimeText(track_media, now), 9.5, true);
+            time.TextAlignment = TextAlignment.Right;
+            Canvas.SetLeft(time, media.X + 10); Canvas.SetTop(time, media.Y + 39);
+            time.Width = media.Width - 20;
+            panel.Children.Add(time);
+        }
 
         FrameworkElement MediaTitle()
         {

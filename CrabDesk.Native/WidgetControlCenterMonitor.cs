@@ -25,6 +25,25 @@ public sealed class WidgetControlCenterMonitor : IDisposable
     /// Reads every control's current state. Async because the WinRT radio and
     /// media queries are async; callers run it off the UI thread.
     /// </summary>
+    /// <summary>
+    /// Fast read used while the user drags a slider or after a command: volume and
+    /// brightness only. Both are local COM calls costing single-digit
+    /// milliseconds, where the radio and media queries would add tens.
+    /// </summary>
+    public ControlCenterSnapshot ReadFast()
+    {
+        var audio = AudioSession.Read();
+        return new ControlCenterSnapshot
+        {
+            CapturedAt = DateTimeOffset.Now,
+            VolumePercent = audio.Volume,
+            VolumeMuted = audio.Muted,
+            OutputDeviceId = audio.DeviceId,
+            OutputDeviceName = audio.DeviceName,
+            BrightnessPercent = BrightnessControl.Read()
+        };
+    }
+
     public async Task<ControlCenterSnapshot> ReadAsync(CancellationToken token = default)
     {
         var snapshot = new ControlCenterSnapshot { CapturedAt = DateTimeOffset.Now };
@@ -99,6 +118,8 @@ public sealed class WidgetControlCenterMonitor : IDisposable
             if (session is null) return null;
             var info = session.GetPlaybackInfo();
             var properties = await session.TryGetMediaPropertiesAsync().AsTask(token).ConfigureAwait(false);
+            var timeline = session.GetTimelineProperties();
+            var duration = timeline.EndTime - timeline.StartTime;
             return new ControlCenterMedia(
                 properties?.Title ?? "",
                 properties?.Artist ?? "",
@@ -106,7 +127,13 @@ public sealed class WidgetControlCenterMonitor : IDisposable
                 info?.PlaybackStatus == global::Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
                 info?.Controls.IsPlayPauseToggleEnabled ?? false,
                 info?.Controls.IsNextEnabled ?? false,
-                info?.Controls.IsPreviousEnabled ?? false);
+                info?.Controls.IsPreviousEnabled ?? false)
+            {
+                // A player reporting no end time is a live stream; the bar hides.
+                Duration = duration > TimeSpan.Zero ? duration : TimeSpan.Zero,
+                Position = timeline.Position > TimeSpan.Zero ? timeline.Position : TimeSpan.Zero,
+                CapturedAt = DateTimeOffset.Now
+            };
         }
         catch (Exception)
         {

@@ -118,4 +118,97 @@ public sealed class WidgetControlCenterTests
         Assert.Equal(6, (int)DesktopWidgetSize.Custom);
         Assert.Equal(7, (int)DesktopWidgetSize.Panel);
     }
+
+    // The progress bar has to move on its own between polls, otherwise it jumps
+    // once every couple of seconds while the music plays smoothly.
+    [Fact]
+    public void ProgressAdvancesWithTheClockWhilePlaying()
+    {
+        var captured = DateTimeOffset.Now;
+        var media = new ControlCenterMedia("t", "a", "", true, true, true, true)
+        {
+            Duration = TimeSpan.FromSeconds(190), Position = TimeSpan.FromSeconds(30), CapturedAt = captured
+        };
+
+        Assert.Equal(TimeSpan.FromSeconds(30), media.PositionNow(captured));
+        Assert.Equal(TimeSpan.FromSeconds(31.5), media.PositionNow(captured.AddSeconds(1.5)));
+    }
+
+    [Fact]
+    public void ProgressStaysStillWhilePaused()
+    {
+        var captured = DateTimeOffset.Now;
+        var media = new ControlCenterMedia("t", "a", "", false, true, true, true)
+        {
+            Duration = TimeSpan.FromSeconds(190), Position = TimeSpan.FromSeconds(30), CapturedAt = captured
+        };
+
+        // A paused player must not drift forward just because time passed.
+        Assert.Equal(TimeSpan.FromSeconds(30), media.PositionNow(captured.AddSeconds(5)));
+    }
+
+    [Fact]
+    public void ProgressNeverRunsPastTheEndOfTheTrack()
+    {
+        var captured = DateTimeOffset.Now;
+        var media = new ControlCenterMedia("t", "a", "", true, true, true, true)
+        {
+            Duration = TimeSpan.FromSeconds(10), Position = TimeSpan.FromSeconds(9), CapturedAt = captured
+        };
+
+        Assert.Equal(TimeSpan.FromSeconds(10), media.PositionNow(captured.AddSeconds(60)));
+    }
+
+    [Fact]
+    public void LiveStreamReportsNoProgress()
+    {
+        // A stream with no end time cannot show a bar; it must report nothing
+        // rather than a percentage against zero.
+        var media = new ControlCenterMedia("t", "a", "", true, true, true, true);
+        Assert.Equal(TimeSpan.Zero, media.PositionNow(DateTimeOffset.Now));
+        Assert.Equal("", ControlCenterPresentation.MediaTimeText(media, DateTimeOffset.Now));
+    }
+
+    [Fact]
+    public void MediaTimeIsFormattedAsMinutesAndSeconds()
+    {
+        var captured = DateTimeOffset.Now;
+        var media = new ControlCenterMedia("t", "a", "", false, true, true, true)
+        {
+            Duration = TimeSpan.FromSeconds(190.4), Position = TimeSpan.FromSeconds(37.9), CapturedAt = captured
+        };
+
+        Assert.Equal("0:37 / 3:10", ControlCenterPresentation.MediaTimeText(media, captured));
+    }
+
+    // The output row is a button that cycles endpoints, so it has to know which
+    // one comes next and wrap rather than fall off the end.
+    [Fact]
+    public void OutputRowCyclesThroughEveryDeviceAndWraps()
+    {
+        var devices = new List<ControlCenterOutputDevice>
+        {
+            new("a", "耳机", true), new("b", "扬声器", false), new("c", "显示器", false)
+        };
+        var snapshot = new ControlCenterSnapshot { OutputDeviceId = "a", OutputDevices = devices };
+        Assert.Equal("b", ControlCenterPresentation.NextOutputDevice(snapshot));
+
+        snapshot = snapshot with { OutputDeviceId = "b" };
+        Assert.Equal("c", ControlCenterPresentation.NextOutputDevice(snapshot));
+
+        snapshot = snapshot with { OutputDeviceId = "c" };
+        Assert.Equal("a", ControlCenterPresentation.NextOutputDevice(snapshot));
+    }
+
+    [Fact]
+    public void OutputRowSaysNothingToDoWhenThereIsOnlyOneDevice()
+    {
+        var single = new ControlCenterSnapshot
+        {
+            OutputDeviceId = "a",
+            OutputDevices = [new("a", "耳机", true)]
+        };
+        Assert.Null(ControlCenterPresentation.NextOutputDevice(single));
+        Assert.Null(ControlCenterPresentation.NextOutputDevice(null));
+    }
 }

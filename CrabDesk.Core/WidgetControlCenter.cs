@@ -38,7 +38,40 @@ public sealed record ControlCenterOutputDevice(string Id, string Name, bool IsDe
 
 /// <summary>What the media session reports, or null when nothing is playing.</summary>
 public sealed record ControlCenterMedia(
-    string Title, string Artist, string Album, bool IsPlaying, bool CanPlayPause, bool CanNext, bool CanPrevious);
+    string Title, string Artist, string Album, bool IsPlaying, bool CanPlayPause, bool CanNext, bool CanPrevious)
+{
+    /// <summary>Track length; zero when the player reports none (a live stream).</summary>
+    public TimeSpan Duration { get; init; }
+
+    /// <summary>Playback position at <see cref="CapturedAt"/>.</summary>
+    public TimeSpan Position { get; init; }
+
+    /// <summary>
+    /// When Position was read. The card advances the bar from here rather than
+    /// re-querying the player, so the progress moves smoothly between polls.
+    /// </summary>
+    public DateTimeOffset CapturedAt { get; init; }
+
+    /// <summary>
+    /// Position now. A progress bar that only moved when polled would step
+    /// visibly once every couple of seconds, so the elapsed wall clock is added
+    /// while playing. Clamped to the track length so it cannot overshoot.
+    /// </summary>
+    public TimeSpan PositionNow(DateTimeOffset now)
+    {
+        if (Duration <= TimeSpan.Zero) return TimeSpan.Zero;
+        var position = Position;
+        if (IsPlaying && CapturedAt != default)
+        {
+            var elapsed = now - CapturedAt;
+            if (elapsed > TimeSpan.Zero) position += elapsed;
+        }
+        if (position < TimeSpan.Zero) return TimeSpan.Zero;
+        return position > Duration ? Duration : position;
+    }
+}
+
+
 
 public static class ControlCenterPresentation
 {
@@ -70,6 +103,51 @@ public static class ControlCenterPresentation
 
     public static LayoutRect MediaArea(LayoutRect body) =>
         new(body.X, body.Y + 148, body.Width, body.Height - 148);
+
+    /// <summary>
+    /// The output-device row inside the card. It is a button: clicking cycles to
+    /// the next active endpoint, so switching devices does not require opening a
+    /// menu.
+    /// </summary>
+    public static LayoutRect OutputRow(LayoutRect mediaArea) =>
+        new(mediaArea.X, mediaArea.Y, mediaArea.Width, 26);
+
+    /// <summary>The media panel under the output row.</summary>
+    public static LayoutRect MediaPanel(LayoutRect mediaArea) =>
+        new(mediaArea.X, mediaArea.Y + 34, mediaArea.Width, Math.Max(0, mediaArea.Height - 34));
+
+    /// <summary>Progress bar inside the media panel, above the transport buttons.</summary>
+    public static LayoutRect MediaProgress(LayoutRect mediaPanel) =>
+        new(mediaPanel.X + 10, mediaPanel.Y + mediaPanel.Height - 46, mediaPanel.Width - 20, 4);
+
+    /// <summary>
+    /// Next endpoint after the current one, wrapping. Returning the current id
+    /// when there is only one device keeps the click from doing nothing visible.
+    /// </summary>
+    public static string? NextOutputDevice(ControlCenterSnapshot? snapshot)
+    {
+        if (snapshot is null || snapshot.OutputDevices.Count < 2) return null;
+        var index = 0;
+        for (var candidate = 0; candidate < snapshot.OutputDevices.Count; candidate++)
+        {
+            if (!string.Equals(snapshot.OutputDevices[candidate].Id, snapshot.OutputDeviceId, StringComparison.OrdinalIgnoreCase)) continue;
+            index = candidate;
+            break;
+        }
+        return snapshot.OutputDevices[(index + 1) % snapshot.OutputDevices.Count].Id;
+    }
+
+    /// <summary>Elapsed and total time, e.g. "0:37 / 3:10".</summary>
+    public static string MediaTimeText(ControlCenterMedia? media, DateTimeOffset now)
+    {
+        if (media is null || media.Duration <= TimeSpan.Zero) return "";
+        var position = media.PositionNow(now);
+        return $"{Format(position)} / {Format(media.Duration)}";
+
+        static string Format(TimeSpan value) =>
+            value.TotalHours >= 1 ? $"{(int)value.TotalHours}:{value.Minutes:00}:{value.Seconds:00}"
+                : $"{value.Minutes}:{value.Seconds:00}";
+    }
 
     /// <summary>Short label for a toggle, used on the button face.</summary>
     public static string ToggleLabel(ControlCenterToggle toggle) => toggle switch

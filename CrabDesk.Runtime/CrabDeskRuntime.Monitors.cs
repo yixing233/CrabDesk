@@ -34,7 +34,14 @@ public sealed partial class CrabDeskRuntime
         if (performance is null && network is null && controls is null) return;
         var now = Stopwatch.GetTimestamp();
         if (!force && _monitorLastTick != 0 && Stopwatch.GetElapsedTime(_monitorLastTick, now).TotalMilliseconds < 900) return;
-        if (Interlocked.CompareExchange(ref _monitorSampling, 1, 0) != 0) return;
+        // A forced refresh (a switch or slider command) must not be silently
+        // dropped because a poll happens to be in flight, or the command looks
+        // ignored. Skipping the non-forced one is fine; those run again in a second.
+        if (Interlocked.CompareExchange(ref _monitorSampling, 1, 0) != 0)
+        {
+            if (force) _ = RefreshMonitorWidgetsAsync(force: false);
+            return;
+        }
         var gap = _monitorLastTick == 0 ? 0 : Stopwatch.GetElapsedTime(_monitorLastTick, now).TotalSeconds;
         _monitorLastTick = now;
         _monitorLifetime ??= new();
@@ -44,8 +51,11 @@ public sealed partial class CrabDeskRuntime
         if (network is not null) _networkMonitor ??= new();
         // The control centre polls slower than the charts: switch states change
         // rarely, and every radio/media read crosses into WinRT.
+        // A forced refresh must re-read the controls too: that is what the switch
+        // and slider commands call, and keeping the throttle here made them wait
+        // up to two seconds before showing what they had just done.
         var controlDue = controls is not null &&
-            (_controlLastTick == 0 || Stopwatch.GetElapsedTime(_controlLastTick, now).TotalSeconds >= 2);
+            (force || _controlLastTick == 0 || Stopwatch.GetElapsedTime(_controlLastTick, now).TotalSeconds >= 2);
         if (controlDue) _controlMonitor ??= new();
         var performanceSource = _performanceMonitor; var networkSource = _networkMonitor;
         var controlSource = _controlMonitor;
