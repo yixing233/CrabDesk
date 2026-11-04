@@ -101,7 +101,11 @@ internal sealed partial class DesktopBoxForm
             !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
             (widget.Kind == DesktopWidgetKind.Clock || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds || point.Y < widget.Bounds.Y + 28 ||
              widget.Kind == DesktopWidgetKind.Weather &&
-             (GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Icon.Contains(point)));
+             (GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Icon.Contains(point))) &&
+            // A slider must not drag the card: pressing one and moving adjusts the
+            // level, and the pointer routinely leaves the control while dragging,
+            // which used to start moving the whole widget instead.
+            !(widget.Kind == DesktopWidgetKind.ControlCenter && IsControlCenterDragTarget(widget, point));
         Capture = true;
         return true;
     }
@@ -114,6 +118,14 @@ internal sealed partial class DesktopBoxForm
             {
                 UpdateWidgetResize(pressed, point);
                 Cursor = WidgetResizeCursor(_widgetResizeEdges);
+                return true;
+            }
+            // A held slider consumes the move: without this the press fell through
+            // to the drag branch and moving the mouse slid the whole card, which
+            // is why the sliders could be clicked but never dragged.
+            if (pressed.Kind == DesktopWidgetKind.ControlCenter && UpdateControlCenterDrag(pressed, point))
+            {
+                Cursor = Forms.Cursors.Hand;
                 return true;
             }
             if (_widgetCanDrag && (Math.Abs(point.X - _widgetPressPoint.X) > 4 || Math.Abs(point.Y - _widgetPressPoint.Y) > 4)) _widgetDragging = true;

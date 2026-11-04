@@ -321,6 +321,44 @@ internal sealed partial class DesktopBoxForm
         return true;
     }
 
+    /// <summary>
+    /// True for controls that capture the pointer instead of dragging the card:
+    /// the volume and brightness sliders.
+    /// </summary>
+    private bool IsControlCenterDragTarget(DesktopWidget widget, PointF point)
+    {
+        var target = ControlCenterTargetAt(widget, point);
+        return target is ControlCenterPresentation.ControlCenterTarget.VolumeSlider
+            or ControlCenterPresentation.ControlCenterTarget.BrightnessSlider;
+    }
+
+    /// <summary>
+    /// Continues a slider drag. Called for every mouse move while the button is
+    /// held, so the level follows the pointer instead of only jumping on click.
+    /// </summary>
+    private bool UpdateControlCenterDrag(DesktopWidget widget, PointF point)
+    {
+        var target = _controlPressedWidgetId == widget.Id
+            ? _controlPressedTarget
+            : ControlCenterTargetAt(widget, point);
+        if (target is not (ControlCenterPresentation.ControlCenterTarget.VolumeSlider
+            or ControlCenterPresentation.ControlCenterTarget.BrightnessSlider)) return false;
+        var body = WidgetMonitorPresentation.Body(
+            WidgetRectangle(widget).Width, WidgetRectangle(widget).Height, _runtime.State.Settings.Appearance.CornerRadius);
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        var half = (sliders.Width - 14) / 2;
+        var bounds = WidgetRectangle(widget);
+        var local = new PointF(point.X - bounds.X, point.Y - bounds.Y);
+        if (target == ControlCenterPresentation.ControlCenterTarget.VolumeSlider)
+        {
+            _runtime.SetControlVolume(PercentFromPoint(new LayoutRect(sliders.X, sliders.Y, half, sliders.Height), local));
+            return true;
+        }
+        _runtime.SetControlBrightness(PercentFromPoint(
+            new LayoutRect(sliders.X + half + 14, sliders.Y, half, sliders.Height), local));
+        return true;
+    }
+
     private void EndControlCenterPress()
     {
         if (_controlPressedWidgetId is null) return;

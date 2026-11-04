@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
 using System.Runtime.CompilerServices;
@@ -181,6 +182,47 @@ public sealed class WidgetMonitorRuntimeTests
         menu.Dispose();
     }
 
+    // A slider that can only be clicked is not a slider. Pressing one must capture
+    // the pointer, or the move falls through to the drag branch and the whole card
+    // slides away instead of the level changing.
+    [Fact]
+    public void SlidersCaptureThePointerAndFollowItWhileDragging() => OnSta(() =>
+    {
+        var runtime = Fixture(); using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(100, 100, 372, 292),
+            Controls = new ControlCenterSnapshot { VolumePercent = 20, BrightnessPercent = 20 }
+        };
+        runtime.State.Widgets.Add(widget);
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors.First());
+
+        var body = WidgetMonitorPresentation.Body(372, 292, 8);
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        var half = (sliders.Width - 14) / 2;
+
+        var captures = (bool)typeof(DesktopBoxForm)
+            .GetMethod("IsControlCenterDragTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(form, [widget, new PointF((float)(100 + sliders.X + half / 2), (float)(100 + sliders.Y + 10))])!;
+        Assert.True(captures);
+
+        var update = typeof(DesktopBoxForm)
+            .GetMethod("UpdateControlCenterDrag", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        typeof(DesktopBoxForm).GetField("_controlPressedWidgetId", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(form, (Guid?)widget.Id);
+        typeof(DesktopBoxForm).GetField("_controlPressedTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .SetValue(form, ControlCenterPresentation.ControlCenterTarget.VolumeSlider);
+
+        foreach (var fraction in new[] { 0.25, 0.75 })
+        {
+            var x = (float)(100 + sliders.X + half * fraction);
+            update.Invoke(form, [widget, new PointF(x, (float)(100 + sliders.Y + 10))]);
+            // The level tracks the pointer rather than staying where it was pressed.
+            Assert.Equal(fraction * 100, widget.Controls!.VolumePercent!.Value, 1);
+        }
+    });
+
     // The model names are the reason the submenu exists; they have to reach it.
     [Fact]
     public void HardwareSubmenuListsTheModelNamesItKnows()
@@ -280,4 +322,18 @@ public sealed class WidgetMonitorRuntimeTests
     }
 
     private static void Set(object target, string field, object value) => target.GetType().GetField(field, BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(target, value);
+
+    /// <summary>
+    /// Runs a body on an STA thread. Constructing a DesktopBoxForm touches WPF's
+    /// InputManager, which refuses to initialise on an MTA test thread.
+    /// </summary>
+    private static void OnSta(Action action)
+    {
+        Exception? failure = null;
+        var thread = new Thread(() => { try { action(); } catch (Exception exception) { failure = exception; } });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        if (failure is not null) throw failure;
+    }
 }

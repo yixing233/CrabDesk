@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -6,7 +7,8 @@ namespace CrabDesk.Runtime;
 public sealed partial class CrabDeskRuntime
 {
     private ControlCenterSnapshot? _controlFast;
-    private int _controlCommandBusy;
+    private bool _controlRefreshPending;
+    private long _controlLastRefreshTick;
 
     private DesktopWidget? ControlCenterWidget => State.Widgets.FirstOrDefault(w => w.Kind == DesktopWidgetKind.ControlCenter);
 
@@ -43,21 +45,27 @@ public sealed partial class CrabDeskRuntime
             OutputDeviceName = local.OutputDeviceName.Length > 0 ? local.OutputDeviceName : full.OutputDeviceName
         };
 
+    /// <summary>
+    /// Sets volume and paints it at once.
+    ///
+    /// While a slider is dragged this runs on every mouse move, so the cheap part
+    /// - updating the number the card draws - happens unconditionally, and the
+    /// read-back that costs a COM round trip is throttled. Doing both per move
+    /// made the drag stutter.
+    /// </summary>
     public void SetControlVolume(double percent)
     {
         if (_disposed) return;
         _controlMonitor ??= new WidgetControlCenterMonitor();
         var level = ControlCenterPresentation.ClampPercent(percent);
-        // Paint first, then command: the bar follows the pointer even if the COM
-        // call takes a few milliseconds.
-        ApplyControlValue(snapshot => { });
-        if (_controlMonitor.SetVolume(level))
+        var widget = ControlCenterWidget;
+        if (widget?.Controls is { } current)
         {
-            ApplyControlValue(snapshot => { });
-            var widget = ControlCenterWidget;
-            if (widget?.Controls is { } current) widget.Controls = current with { VolumePercent = level, VolumeMuted = false };
+            widget.Controls = current with { VolumePercent = level, VolumeMuted = false };
+            _surfaceManager?.RefreshMonitorVisuals();
         }
-        RefreshControlFast();
+        if (!_controlMonitor.SetVolume(level)) return;
+        ScheduleControlRefresh();
     }
 
     public void SetControlBrightness(double percent)
@@ -65,13 +73,34 @@ public sealed partial class CrabDeskRuntime
         if (_disposed) return;
         _controlMonitor ??= new WidgetControlCenterMonitor();
         var level = ControlCenterPresentation.ClampPercent(percent);
-        if (_controlMonitor.SetBrightness(level))
+        var widget = ControlCenterWidget;
+        if (widget?.Controls is { } current)
         {
-            var widget = ControlCenterWidget;
-            if (widget?.Controls is { } current) widget.Controls = current with { BrightnessPercent = level };
+            widget.Controls = current with { BrightnessPercent = level };
             _surfaceManager?.RefreshMonitorVisuals();
         }
-        RefreshControlFast();
+        if (!_controlMonitor.SetBrightness(level)) return;
+        ScheduleControlRefresh();
+    }
+
+    /// <summary>
+    /// Coalesces read-backs during a drag: at most one every 150 ms, with a final
+    /// one after the last change so the settled value is confirmed.
+    /// </summary>
+    private void ScheduleControlRefresh()
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (_controlRefreshPending) return;
+        if (_controlLastRefreshTick != 0 &&
+            Stopwatch.GetElapsedTime(_controlLastRefreshTick, now).TotalMilliseconds < 150) return;
+        _controlRefreshPending = true;
+        _controlLastRefreshTick = now;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(150).ConfigureAwait(false);
+            _controlRefreshPending = false;
+            RefreshControlFast();
+        });
     }
 
     public void SetControlMuted(bool muted)
