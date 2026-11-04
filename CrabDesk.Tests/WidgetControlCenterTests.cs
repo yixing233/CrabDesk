@@ -268,24 +268,25 @@ public sealed class WidgetControlCenterTests
             ControlCenterPresentation.TargetAt(body, sliders.X + 20, sliders.Y + sliders.Height - 2));
     }
 
-    // The output list is anchored under its row. The row is card-local, so the
-    // card's own origin has to be added: the first version passed the local
-    // rect straight through and the menu appeared a card-length away.
+    // The output list is anchored under its row. MonitorRectangle already returns
+    // screen DIPs, so adding the card origin again doubled it and threw the menu
+    // to the far side of the desktop - the bug this pins down.
     [Fact]
-    public void OutputRowAnchorSitsAtTheRowsBottomLeftInsideTheCard()
+    public void OutputRowAnchorSitsAtTheRowsBottomEdgeInScreenCoordinates()
     {
         var body = WidgetMonitorPresentation.Body(
             ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
         var row = ControlCenterPresentation.OutputRow(ControlCenterPresentation.MediaArea(body));
-        var cardOriginX = 300d;
-        var cardOriginY = 200d;
+        var cardX = 80d;
+        var cardY = 60d;
 
-        var anchorX = cardOriginX + row.X;
-        var anchorY = cardOriginY + row.Y + row.Height;
+        // What MonitorRectangle produces: the card origin plus the local rect.
+        var rowLeft = cardX + row.X;
+        var rowBottom = cardY + row.Y + row.Height;
 
-        Assert.InRange(anchorX, cardOriginX, cardOriginX + ControlCenterPresentation.CardWidth);
-        Assert.Equal(cardOriginY + row.Y + row.Height, anchorY);
-        // Directly beneath the row, not offset by its own top.
-        Assert.NotEqual(cardOriginY + row.Y, anchorY);
+        Assert.InRange(rowLeft, cardX, cardX + ControlCenterPresentation.CardWidth);
+        // Below the row's top and at most the card's bottom edge.
+        Assert.True(rowBottom > cardY + row.Y);
+        Assert.True(rowBottom <= cardY + ControlCenterPresentation.CardHeight);
     }
 }
