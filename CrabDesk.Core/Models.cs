@@ -267,6 +267,7 @@ public sealed class MonitorLayout
 {
     public required string Id { get; init; }
     public required string DeviceName { get; init; }
+    public string ModelName { get; init; } = string.Empty;
     public required LayoutRect Bounds { get; init; }
     public required LayoutRect WorkArea { get; init; }
     public required LayoutRect PixelBounds { get; init; }

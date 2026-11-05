@@ -107,7 +107,7 @@ public sealed partial class CrabDeskRuntime
         var widget = new DesktopWidget { Kind = kind, Size = size, MonitorId = monitor.Id, Bounds = bounds };
         State.Widgets.Add(widget);
         WidgetChanged(widget);
-        if (_surfaceManager is not null && (kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network)) _ = RefreshMonitorWidgetsAsync(true);
+        if (_surfaceManager is not null && DesktopWidgets.RequiresMonitoring(kind)) _ = RefreshMonitorWidgetsAsync(true);
         return widget;
     }
 

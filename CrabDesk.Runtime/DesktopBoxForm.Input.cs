@@ -1377,7 +1377,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             if (target is null)
             {
                 if (SetBoxAlignmentGuides([], null)) RequestDragRender();
-                _iconLayerRenderRequest?.Invoke();
+                RequestDragRender();
                 return;
             }
 
@@ -1401,7 +1401,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     ApplyBoxDragPosition(box, box.Bounds, target);
                     MarkMonitorTransferRefreshPending(previousMonitorId);
                 }
-                _iconLayerRenderRequest?.Invoke();
+                RequestDragRender();
                 return;
             }
 
@@ -1415,7 +1415,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     new LayoutRect(0, 0, target.WorkArea.Width, target.WorkArea.Height),
                     GetMinimumBoxWidth(box));
             ApplyBoxDragPosition(box, transferredBounds, target);
-            _iconLayerRenderRequest?.Invoke();
+            RequestDragRender();
             return;
         }
 
@@ -1436,7 +1436,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 ApplyBoxDragPosition(box, box.Bounds, target);
                 MarkMonitorTransferRefreshPending(previousMonitorId);
             }
-            _iconLayerRenderRequest?.Invoke();
+            RequestDragRender();
             return;
         }
         var nextBounds = new LayoutRect(

@@ -112,6 +112,8 @@ public static class ControlCenterPresentation
     public static LayoutRect MediaArea(LayoutRect body) =>
         new(body.X, body.Y + 148, body.Width, body.Height - 148);
 
+    public static LayoutRect BrightnessDisplayRow(LayoutRect body) => new(body.X, body.Y + 112, body.Width, 26);
+
     /// <summary>
     /// The output-device row inside the card. It is a button: clicking cycles to
     /// the next active endpoint, so switching devices does not require opening a
@@ -148,7 +150,7 @@ public static class ControlCenterPresentation
     {
         None, InkToggle,
         ToggleWiFi, ToggleBluetooth, ToggleNightLight,
-        VolumeSlider, BrightnessSlider, OutputRow,
+        VolumeSlider, BrightnessSlider, OutputRow, BrightnessDisplayRow,
         MediaPrevious, MediaPlayPause, MediaNext
     }
 
@@ -169,6 +171,7 @@ public static class ControlCenterPresentation
         if (SliderHitArea(new(sliders.X, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.VolumeSlider;
         if (SliderHitArea(new(sliders.X + half + 14, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.BrightnessSlider;
         var mediaArea = MediaArea(body);
+        if (BrightnessDisplayRow(body).Contains(x, y)) return ControlCenterTarget.BrightnessDisplayRow;
         if (OutputRow(mediaArea).Contains(x, y)) return ControlCenterTarget.OutputRow;
         var buttons = MediaButtonRects(MediaPanel(mediaArea));
         for (var index = 0; index < buttons.Length; index++)

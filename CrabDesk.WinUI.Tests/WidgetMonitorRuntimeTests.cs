@@ -4,12 +4,171 @@ using System.Windows.Forms;
 using System.Runtime.CompilerServices;
 using CrabDesk.Core;
 using CrabDesk.Runtime;
+using CrabDesk.Native;
+using Moq;
+using System.Collections.Concurrent;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
 
 public sealed class WidgetMonitorRuntimeTests
 {
+    [Fact]
+    public void ControlCenterOnlySurfacePollsAndRepaintsWithoutOtherMonitorWidgets() => OnSta(() =>
+    {
+        var runtime = Fixture(); Set(runtime, "<Items>k__BackingField", Array.Empty<DesktopItemRef>());
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel, Bounds = new(20, 20, 372, 292) };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.ReadAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ControlCenterSnapshot { VolumePercent = 42, BrightnessPercent = 61, WiFiEnabled = true });
+        Set(runtime, "_controlMonitor", source.Object);
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        form.Location = new(-12000, -12000); _ = form.Handle;
+        var renders = 0;
+        Set(form, "_isCompositedByIconSurface", true);
+        Set(form, "_iconLayerRenderRequest", (Action)(() => renders++));
+        var manager = (DesktopSurfaceManager)RuntimeHelpers.GetUninitializedObject(typeof(DesktopSurfaceManager));
+        Set(manager, "_surfaces", new List<DesktopBoxForm> { form }); Set(runtime, "_surfaceManager", manager);
+        form.Show();
+        var framesBeforeSampling = renders;
+        var timer = (System.Windows.Forms.Timer)typeof(DesktopBoxForm).GetField("_widgetTimer", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(form)!;
+        typeof(System.Windows.Forms.Timer).GetMethod("OnTick", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(timer, [EventArgs.Empty]);
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (widget.Controls is null && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(10); }
+        Assert.NotNull(widget.Controls); Assert.Equal(42, widget.Controls!.VolumePercent); Assert.Equal(61, widget.Controls.BrightnessPercent);
+        Assert.True(renders > framesBeforeSampling);
+        source.Verify(s => s.ReadAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        form.Hide();
+    });
+
+    [Fact]
+    public async Task AddingControlCenterStartsItsFirstSample()
+    {
+        var runtime = Fixture(); using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var manager = (DesktopSurfaceManager)RuntimeHelpers.GetUninitializedObject(typeof(DesktopSurfaceManager));
+        Set(manager, "_surfaces", new List<DesktopBoxForm>()); Set(runtime, "_surfaceManager", manager);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.ReadAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ControlCenterSnapshot { VolumePercent = 37 });
+        Set(runtime, "_controlMonitor", source.Object);
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        runtime.WidgetMonitorUpdated += (_, _) => received.TrySetResult();
+        var widget = runtime.AddWidget(DesktopWidgetKind.ControlCenter);
+        await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(37, widget.Controls!.VolumePercent);
+    }
+
+    [Fact]
+    public async Task SelectingDisplayCancelsQueuedBrightnessAndRoutesNewWritesToTheSelectedScreen()
+    {
+        var runtime = Fixture(); using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var second = new MonitorLayout { Id = "second", DeviceName = "second", ModelName = "AOC 27B30H6", IsPrimary = false,
+            Bounds = new(1000, 0, 800, 600), WorkArea = new(1000, 0, 800, 600), PixelBounds = new(1000, 0, 800, 600), PixelWorkArea = new(1000, 0, 800, 600) };
+        Set(runtime, "<Monitors>k__BackingField", new[] { runtime.Monitors[0], second });
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Controls = new() { BrightnessPercent = 20 } }; runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>(); source.SetupProperty(s => s.BrightnessDisplayId, "");
+        source.Setup(s => s.ReadAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ControlCenterSnapshot { BrightnessPercent = 60 });
+        source.Setup(s => s.ReadFast()).Returns(new ControlCenterSnapshot { BrightnessPercent = 40 });
+        var writes = new ConcurrentQueue<(string, double)>();
+        source.Setup(s => s.SetBrightness(It.IsAny<double>())).Returns((double value) => { writes.Enqueue((source.Object.BrightnessDisplayId, value)); return true; });
+        Set(runtime, "_controlMonitor", source.Object);
+        runtime.SetControlBrightness(70);
+        await runtime.SelectControlBrightnessDisplayAsync(widget, "second");
+        Assert.Equal("second", widget.ControlBrightnessDisplayId); Assert.Equal(60, widget.Controls!.BrightnessPercent);
+        Assert.Contains("AOC 27B30H6", runtime.ControlBrightnessDisplays[1].Label);
+        Assert.Contains("800 × 600", runtime.ControlBrightnessDisplays[1].Label);
+        Assert.Contains("AOC 27B30H6", runtime.ControlBrightnessDisplayLabel(widget));
+        runtime.SetControlBrightness(40);
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(("second", 40d), Assert.Single(writes));
+        await runtime.SelectControlBrightnessDisplayAsync(widget, "missing"); Assert.Equal("second", widget.ControlBrightnessDisplayId);
+    }
+    [Fact]
+    public void NewlyAddedControlCenterHasASupportedSizeAndSurvivesNormalization()
+    {
+        var runtime = Fixture(); using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+        var widget = runtime.AddWidget(DesktopWidgetKind.ControlCenter);
+        Assert.Contains(widget.Size, DesktopWidgets.SupportedSizes(widget));
+        Assert.Equal(DesktopWidgetSize.Panel, widget.Size);
+        var bounds = widget.Bounds; DesktopWidgets.Normalize(runtime.State);
+        Assert.Equal(bounds, widget.Bounds);
+    }
+
+    [Fact]
+    public async Task HardwareWritesAreCoalescedAndReadBackOnlyAppliesOnTheUiDispatcher()
+    {
+        var runtime = Fixture(); var ui = new ConcurrentQueue<Action>(); Set(runtime, "_beginInvoke", (Action<Action>)(ui.Enqueue));
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { BrightnessPercent = 20 } };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        var requested = new TaskCompletionSource<double>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var finish = new ManualResetEventSlim();
+        source.Setup(s => s.SetBrightness(It.IsAny<double>())).Returns((double value) => { requested.TrySetResult(value); finish.Wait(TimeSpan.FromSeconds(5)); return true; });
+        source.Setup(s => s.ReadFast()).Returns(new ControlCenterSnapshot { BrightnessPercent = 73 });
+        Set(runtime, "_controlMonitor", source.Object);
+        for (var value = 30; value <= 80; value++) runtime.SetControlBrightness(value);
+        Assert.Equal(80, widget.Controls!.BrightnessPercent);
+        try { Assert.Equal(80, await requested.Task.WaitAsync(TimeSpan.FromSeconds(5))); }
+        finally { finish.Set(); }
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+        source.Verify(s => s.SetBrightness(80), Times.Once);
+        source.Verify(s => s.SetBrightness(It.IsAny<double>()), Times.Once);
+        Assert.Equal(80, widget.Controls.BrightnessPercent);
+        Assert.True(ui.TryDequeue(out var apply)); apply!();
+        Assert.Equal(73, widget.Controls.BrightnessPercent);
+    }
+
+    [Fact]
+    public async Task CommandsReadBackOnUiAndDiscardResultsForRemovedWidgets()
+    {
+        var runtime = Fixture(); var ui = new ConcurrentQueue<Action>(); Set(runtime, "_beginInvoke", (Action<Action>)(ui.Enqueue));
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { OutputDeviceId = "old" } }; runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.SetOutputDevice("new")).Returns(true);
+        source.Setup(s => s.ReadAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new ControlCenterSnapshot { OutputDeviceId = "new" });
+        Set(runtime, "_controlMonitor", source.Object);
+        await runtime.SetControlOutputAsync("new");
+        Assert.Equal("old", widget.Controls!.OutputDeviceId);
+        Assert.True(ui.TryDequeue(out var apply)); apply!();
+        Assert.Equal("new", widget.Controls.OutputDeviceId);
+        await runtime.SetControlOutputAsync("new"); runtime.State.Widgets.Clear(); widget.Controls = new() { OutputDeviceId = "removed" };
+        Assert.True(ui.TryDequeue(out apply)); apply!(); Assert.Equal("removed", widget.Controls.OutputDeviceId);
+    }
+
+    [Fact]
+    public async Task SliderFlushesTheLastValueArrivingDuringASlowWriteAndRollsBackFailures()
+    {
+        var runtime = Fixture(); var ui = new ConcurrentQueue<Action>(); Set(runtime, "_beginInvoke", (Action<Action>)(ui.Enqueue));
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { BrightnessPercent = 20 } }; runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var writes = new ConcurrentQueue<double>(); double actual = 20;
+        source.Setup(s => s.SetBrightness(It.IsAny<double>())).Returns((double value) =>
+        {
+            writes.Enqueue(value);
+            if (value == 30) { first.TrySetResult(); release.Wait(TimeSpan.FromSeconds(5)); actual = value; return true; }
+            return false;
+        });
+        source.Setup(s => s.ReadFast()).Returns(() => new ControlCenterSnapshot { BrightnessPercent = actual });
+        Set(runtime, "_controlMonitor", source.Object);
+        runtime.SetControlBrightness(30);
+        try { await first.Task.WaitAsync(TimeSpan.FromSeconds(5)); runtime.SetControlBrightness(50); runtime.SetControlBrightness(80); }
+        finally { release.Set(); }
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 30d, 80d }, writes.ToArray());
+        Assert.True(ui.TryDequeue(out var old)); old!(); Assert.Equal(80, widget.Controls!.BrightnessPercent);
+        Assert.True(ui.TryDequeue(out var latest)); latest!();
+        Assert.Equal(30, widget.Controls.BrightnessPercent); Assert.NotEmpty(widget.MonitorError);
+    }
+
+    [Fact]
+    public void OutputMenuClickDispatchesTheChosenDevice() => OnSta(() =>
+    {
+        var choices = new List<string>();
+        using var menu = DesktopBoxForm.BuildControlCenterOutputMenu(new ControlCenterSnapshot { OutputDevices = [new("a", "A", true), new("b", "B", false)] },
+            selectOutput: id => { choices.Add(id); return Task.CompletedTask; });
+        menu.Items[1].PerformClick(); Assert.Equal("b", Assert.Single(choices));
+    });
     [Fact]
     public void SwitchingNetworkStylesResizesAndClampsWithoutLosingLiveData()
     {
@@ -318,6 +477,8 @@ public sealed class WidgetMonitorRuntimeTests
         Set(runtime, "_beginInvoke", (Action<Action>)(action => action()));
         Set(runtime, "_widgetRequests", new Dictionary<Guid, CancellationTokenSource>());
         Set(runtime, "_weatherRetryAt", new Dictionary<Guid, DateTimeOffset>());
+        // Unit tests never write the host machine's volume, brightness or radios.
+        Set(runtime, "_controlMonitor", new Mock<IWidgetControlCenterMonitor>().Object);
         return runtime;
     }
 

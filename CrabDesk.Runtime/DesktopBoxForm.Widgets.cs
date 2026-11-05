@@ -32,7 +32,7 @@ internal sealed partial class DesktopBoxForm
             if (_resourcesDisposed || _runtime.IsPaused || !Visible) return;
             var items = DesktopWidgetItems.ToArray();
             if (items.Length == 0) return;
-            if (items.Any(widget => widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network))
+            if (items.Any(widget => DesktopWidgets.RequiresMonitoring(widget.Kind)))
                 _ = _runtime.RefreshMonitorWidgetsAsync();
             var now = DateTime.Now;
             var tick = now.ToString(items.Any(w => w.Kind == DesktopWidgetKind.Clock && w.ShowSeconds) ? "yyyyMMddHHmmss" : "yyyyMMddHHmm");
@@ -50,7 +50,7 @@ internal sealed partial class DesktopBoxForm
     internal void RefreshMonitorVisuals()
     {
         if (!_resourcesDisposed && !IsDisposed && !_runtime.IsPaused &&
-            DesktopWidgetItems.Any(widget => widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network)) RequestVisualLayerRender();
+            DesktopWidgetItems.Any(widget => DesktopWidgets.RequiresMonitoring(widget.Kind))) RequestVisualLayerRender();
     }
 
     internal void RefreshWidgets()
@@ -131,9 +131,7 @@ internal sealed partial class DesktopBoxForm
             if (_widgetCanDrag && (Math.Abs(point.X - _widgetPressPoint.X) > 4 || Math.Abs(point.Y - _widgetPressPoint.Y) > 4)) _widgetDragging = true;
             if (_widgetDragging)
             {
-                var bounds = new LayoutRect(_widgetStartBounds.X + point.X - _widgetPressPoint.X,
-                    _widgetStartBounds.Y + point.Y - _widgetPressPoint.Y, _widgetStartBounds.Width, _widgetStartBounds.Height);
-                ApplyWidgetDragPosition(pressed, bounds, _monitor);
+                UpdateMovingWidget(pressed, point);
             }
             Cursor = _widgetDragging ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
             return true;
@@ -210,15 +208,7 @@ internal sealed partial class DesktopBoxForm
         var dragged = _widgetDragging;
         if (dragged)
         {
-            var screen = PointToScreen(args.Location);
-            var target = _runtime.Monitors.FirstOrDefault(m => m.PixelBounds.Contains(screen.X, screen.Y)) ?? _monitor;
-            var scale = Math.Max(.1, target.DpiScale);
-            var bounds = string.Equals(target.Id, _monitor.Id, StringComparison.OrdinalIgnoreCase)
-                ? new LayoutRect(_widgetStartBounds.X + point.X - _widgetPressPoint.X,
-                    _widgetStartBounds.Y + point.Y - _widgetPressPoint.Y, widget.Bounds.Width, widget.Bounds.Height)
-                : new LayoutRect((screen.X - target.PixelBounds.X) / scale - (_widgetPressPoint.X - _widgetStartBounds.X) * _scale / scale,
-                    (screen.Y - target.PixelBounds.Y) / scale - (_widgetPressPoint.Y - _widgetStartBounds.Y) * _scale / scale, widget.Bounds.Width, widget.Bounds.Height);
-            ApplyWidgetDragPosition(widget, bounds, target);
+            UpdateMovingWidget(widget, point);
         }
         FinishWidgetPress(true);
         if (!dragged && ReferenceEquals(WidgetAt(point), widget)) HandleWidgetClick(widget, point);

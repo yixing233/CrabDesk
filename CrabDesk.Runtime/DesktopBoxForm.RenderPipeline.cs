@@ -323,6 +323,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
             UpdateWindowRegion();
             PresentLayer();
+            _crossMonitorDragRenderRequest?.Invoke(this);
             return;
         }
         if (_isCompositedByIconSurface && _iconLayerRenderRequest is not null)

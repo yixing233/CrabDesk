@@ -409,6 +409,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             _boxItems[box.Id] = _runtime.GetItemsForBox(box.Id);
         }
+        if ((_movingBox ?? _resizingBox) is { } active && !_boxItems.ContainsKey(active.Id))
+            _boxItems[active.Id] = _runtime.GetItemsForBox(active.Id);
     }
 
     private IReadOnlyList<DesktopItemRef> GetCachedItemsForBox(Guid boxId) =>
@@ -1485,10 +1487,11 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                     (float)(ClientSize.Height / _scale));
                 clipBounds.Inflate(8, 8);
                 DrawWidgets(graphics, clipBounds);
-                foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
+                foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds) && !IsIncomingBoxTransform(box.Box.Id)))
                 {
                     DrawBox(graphics, box, clipBounds);
                 }
+                DrawIncomingBoxTransforms(graphics, clipBounds);
                 DrawBoxAlignmentGuides(graphics, _monitor.Id);
                 DrawCalendarToolTip(graphics);
                 graphics.ResetTransform();

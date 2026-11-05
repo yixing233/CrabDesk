@@ -77,7 +77,9 @@ internal enum LucideRuntimeIcon
     Moon,
     SkipBack,
     SkipForward,
-    MonitorSpeaker
+    MonitorSpeaker,
+    Monitor,
+    Headphones
 }
 
 internal static class LucideRuntimeIcons
@@ -158,6 +160,8 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.SkipBack => "\uE15F",
         LucideRuntimeIcon.SkipForward => "\uE160",
         LucideRuntimeIcon.MonitorSpeaker => "\uE210",
+        LucideRuntimeIcon.Monitor => "\uE11D",
+        LucideRuntimeIcon.Headphones => "\uE0F1",
         _ => string.Empty
     };
 

@@ -13,7 +13,7 @@ public sealed partial class WidgetsPage
     {
         if (!IsLoaded) return;
         if (!_galleryIsCatalog)
-            foreach (var item in _galleryItems.Where(item => item.Widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network))
+            foreach (var item in _galleryItems.Where(item => DesktopWidgets.RequiresMonitoring(item.Widget.Kind)))
                 item.Refresh(item.Appearance, item.Caption, item.ExistingCount, refreshPreview: true);
         UpdateMonitorStatus();
     }

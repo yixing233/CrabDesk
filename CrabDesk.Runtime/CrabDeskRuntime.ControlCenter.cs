@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using CrabDesk.Core;
 using CrabDesk.Native;
 
@@ -6,207 +5,176 @@ namespace CrabDesk.Runtime;
 
 public sealed partial class CrabDeskRuntime
 {
-    private ControlCenterSnapshot? _controlFast;
-    private bool _controlRefreshPending;
-    private long _controlLastRefreshTick;
-
+    private object? _controlQueueGate;
+    private SemaphoreSlim? _controlIoGate;
+    private object ControlQueueGate => LazyInitializer.EnsureInitialized(ref _controlQueueGate)!;
+    private SemaphoreSlim ControlIoGate => LazyInitializer.EnsureInitialized(ref _controlIoGate, () => new SemaphoreSlim(1, 1));
+    private double? _pendingControlVolume, _pendingControlBrightness;
+    private DesktopWidget? _pendingControlWidget;
+    private string _pendingControlDisplayId = "";
+    private int _controlWriting;
+    private long _controlCommandVersion;
+    private Task? _controlWriteTask;
     private DesktopWidget? ControlCenterWidget => State.Widgets.FirstOrDefault(w => w.Kind == DesktopWidgetKind.ControlCenter);
 
-    /// <summary>
-    /// Applies a locally known value straight to the card.
-    ///
-    /// Every command used to wait for a full sample to travel back through the
-    /// polling loop, which took a second or more and made sliders feel like they
-    /// were lagging behind the pointer. Painting the value that was just applied
-    /// removes that wait; the next sample confirms it.
-    /// </summary>
-    private void ApplyControlValue(Action<ControlCenterSnapshot> update)
+    private async Task<ControlCenterSnapshot> ReadControlSnapshotAsync(IWidgetControlCenterMonitor source, CancellationToken token, string displayId)
     {
-        if (ControlCenterWidget is not { } widget) return;
-        var current = _controlFast ?? widget.Controls ?? ControlCenterSnapshot.Empty;
-        var updated = current with { };
-        update(updated);
-        _controlFast = updated;
-        widget.Controls = MergeControlValues(widget.Controls, updated);
-        _surfaceManager?.RefreshMonitorVisuals();
+        await ControlIoGate.WaitAsync(token).ConfigureAwait(false);
+        try { source.BrightnessDisplayId = displayId; return await source.ReadAsync(token).ConfigureAwait(false); }
+        finally { ControlIoGate.Release(); }
     }
 
-    /// <summary>
-    /// Overlays the locally applied values onto the last full snapshot so a
-    /// partial update never blanks the readings it does not carry.
-    /// </summary>
-    private static ControlCenterSnapshot MergeControlValues(ControlCenterSnapshot? full, ControlCenterSnapshot local) =>
-        full is null ? local : full with
-        {
-            VolumePercent = local.VolumePercent ?? full.VolumePercent,
-            VolumeMuted = local.VolumeMuted ?? full.VolumeMuted,
-            BrightnessPercent = local.BrightnessPercent ?? full.BrightnessPercent,
-            OutputDeviceId = local.OutputDeviceId.Length > 0 ? local.OutputDeviceId : full.OutputDeviceId,
-            OutputDeviceName = local.OutputDeviceName.Length > 0 ? local.OutputDeviceName : full.OutputDeviceName
-        };
-
-    /// <summary>
-    /// Sets volume and paints it at once.
-    ///
-    /// While a slider is dragged this runs on every mouse move, so the cheap part
-    /// - updating the number the card draws - happens unconditionally, and the
-    /// read-back that costs a COM round trip is throttled. Doing both per move
-    /// made the drag stutter.
-    /// </summary>
-    public void SetControlVolume(double percent)
+    private void PublishControlResult(DesktopWidget widget, long version, ControlCenterSnapshot? snapshot, string error)
     {
         if (_disposed) return;
-        _controlMonitor ??= new WidgetControlCenterMonitor();
-        var level = ControlCenterPresentation.ClampPercent(percent);
-        var widget = ControlCenterWidget;
-        if (widget?.Controls is { } current)
+        _beginInvoke(() =>
         {
-            widget.Controls = current with { VolumePercent = level, VolumeMuted = false };
-            _surfaceManager?.RefreshMonitorVisuals();
-        }
-        if (!_controlMonitor.SetVolume(level)) return;
-        ScheduleControlRefresh();
+            if (_disposed || IsPaused || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
+            if (snapshot is not null) widget.Controls = snapshot;
+            widget.MonitorError = error;
+            NotifyMonitorFrame();
+        });
     }
 
-    public void SetControlBrightness(double percent)
+    public void SetControlVolume(double percent) => QueueControlLevel(percent, brightness: false);
+    public void SetControlBrightness(double percent) => QueueControlLevel(percent, brightness: true);
+
+    private void QueueControlLevel(double percent, bool brightness)
     {
-        if (_disposed) return;
+        if (_disposed || IsPaused || ControlCenterWidget is not { } widget) return;
         _controlMonitor ??= new WidgetControlCenterMonitor();
         var level = ControlCenterPresentation.ClampPercent(percent);
-        var widget = ControlCenterWidget;
-        if (widget?.Controls is { } current)
+        if (widget.Controls is { } current)
         {
-            widget.Controls = current with { BrightnessPercent = level };
-            _surfaceManager?.RefreshMonitorVisuals();
+            widget.Controls = brightness ? current with { BrightnessPercent = level } : current with { VolumePercent = level };
+            NotifyMonitorFrame();
         }
-        if (!_controlMonitor.SetBrightness(level)) return;
-        ScheduleControlRefresh();
+        lock (ControlQueueGate)
+        {
+            Interlocked.Increment(ref _controlCommandVersion);
+            _pendingControlWidget = widget;
+            _pendingControlDisplayId = ResolveControlBrightnessDisplay(widget);
+            if (brightness) _pendingControlBrightness = level; else _pendingControlVolume = level;
+            if (_controlWriting != 0) return;
+            Volatile.Write(ref _controlWriting, 1);
+            _controlWriteTask = Task.Run(DrainControlLevelsAsync);
+        }
     }
 
-    /// <summary>
-    /// Coalesces read-backs during a drag: at most one every 150 ms, with a final
-    /// one after the last change so the settled value is confirmed.
-    /// </summary>
-    private void ScheduleControlRefresh()
+    // Coalesce pointer updates; serialize slow hardware writes and read-backs off
+    // the UI thread. Keep draining until the last requested value has been sent.
+    private async Task DrainControlLevelsAsync()
     {
-        var now = Stopwatch.GetTimestamp();
-        if (_controlRefreshPending) return;
-        if (_controlLastRefreshTick != 0 &&
-            Stopwatch.GetElapsedTime(_controlLastRefreshTick, now).TotalMilliseconds < 150) return;
-        _controlRefreshPending = true;
-        _controlLastRefreshTick = now;
-        _ = Task.Run(async () =>
+        while (true)
         {
             await Task.Delay(150).ConfigureAwait(false);
-            _controlRefreshPending = false;
-            RefreshControlFast();
-        });
+            double? volume, brightness; DesktopWidget? widget; long version; string displayId;
+            lock (ControlQueueGate)
+            {
+                volume = _pendingControlVolume; brightness = _pendingControlBrightness; widget = _pendingControlWidget;
+                _pendingControlVolume = _pendingControlBrightness = null;
+                version = Volatile.Read(ref _controlCommandVersion);
+                displayId = _pendingControlDisplayId;
+                if (volume is null && brightness is null) { Volatile.Write(ref _controlWriting, 0); return; }
+            }
+            if (widget is null || _disposed || IsPaused) continue;
+            var source = _controlMonitor!;
+            ControlCenterSnapshot? read = null; var error = "";
+            await ControlIoGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                source.BrightnessDisplayId = displayId;
+                if (volume is { } v && !source.SetVolume(v)) error = "无法调整音量";
+                if (brightness is { } b && !source.SetBrightness(b)) error = "无法调整亮度";
+                read = source.ReadFast();
+            }
+            catch (Exception exception) { error = "控制设置失败：" + exception.Message; }
+            finally { ControlIoGate.Release(); }
+            var result = read; var message = error;
+            if (_disposed) continue;
+            _beginInvoke(() =>
+            {
+                if (_disposed || IsPaused || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
+                if (result is not null && widget.Controls is { } current)
+                    widget.Controls = current with { VolumePercent = result.VolumePercent, VolumeMuted = result.VolumeMuted,
+                        BrightnessPercent = result.BrightnessPercent, OutputDeviceId = result.OutputDeviceId, OutputDeviceName = result.OutputDeviceName };
+                widget.MonitorError = message;
+                NotifyMonitorFrame();
+            });
+        }
+    }
+
+    private async Task RunControlCommandAsync(DesktopWidget widget, Func<IWidgetControlCenterMonitor, Task<bool>> command, string failure)
+    {
+        if (_disposed || IsPaused || !State.Widgets.Contains(widget)) return;
+        var source = _controlMonitor ??= new WidgetControlCenterMonitor();
+        var version = Interlocked.Increment(ref _controlCommandVersion);
+        var displayId = ResolveControlBrightnessDisplay(widget);
+        await Task.Run(async () =>
+        {
+            ControlCenterSnapshot? snapshot = null; var error = "";
+            await ControlIoGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (_disposed || IsPaused) return;
+                source.BrightnessDisplayId = displayId;
+                if (!await command(source).ConfigureAwait(false)) error = failure;
+                snapshot = await source.ReadAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception) { error = failure + "：" + exception.Message; }
+            finally { ControlIoGate.Release(); }
+            PublishControlResult(widget, version, snapshot, error);
+        }).ConfigureAwait(false);
+    }
+
+    public Task ToggleControlAsync(DesktopWidget widget, ControlCenterToggle toggle, bool enabled) =>
+        widget.Kind != DesktopWidgetKind.ControlCenter ? Task.CompletedTask : RunControlCommandAsync(widget,
+            source => toggle == ControlCenterToggle.NightLight ? Task.FromResult(source.SetNightLight(enabled)) : source.SetRadioAsync(toggle, enabled),
+            "无法切换" + ControlCenterPresentation.ToggleLabel(toggle));
+
+    private static string ResolveControlBrightnessDisplay(DesktopWidget widget) =>
+        string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? widget.MonitorId : widget.ControlBrightnessDisplayId;
+
+    public IReadOnlyList<(string Id, string Label)> ControlBrightnessDisplays => Monitors.Select((monitor, index) =>
+        (monitor.Id, $"显示器 {index + 1}" + (string.IsNullOrWhiteSpace(monitor.ModelName) ? "" : " · " + monitor.ModelName) +
+            $" · {monitor.PixelBounds.Width:0} × {monitor.PixelBounds.Height:0}" + (monitor.IsPrimary ? " · 主屏" : ""))).ToArray();
+
+    public string ControlBrightnessDisplayLabel(DesktopWidget widget) =>
+        ControlBrightnessDisplays.FirstOrDefault(choice => choice.Id == ResolveControlBrightnessDisplay(widget)).Label ?? "所选显示器已断开";
+
+    public Task SelectControlBrightnessDisplayAsync(DesktopWidget widget, string displayId)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.ControlCenter || !State.Widgets.Contains(widget) || !Monitors.Any(m => m.Id == displayId)) return Task.CompletedTask;
+        widget.ControlBrightnessDisplayId = displayId;
+        lock (ControlQueueGate)
+        {
+            _pendingControlBrightness = null;
+            _pendingControlDisplayId = displayId;
+            Interlocked.Increment(ref _controlCommandVersion);
+        }
+        if (widget.Controls is { } current) widget.Controls = current with { BrightnessPercent = null };
+        WidgetChanged(widget);
+        return RunControlCommandAsync(widget, _ => Task.FromResult(true), "无法读取显示器亮度");
     }
 
     public void SetControlMuted(bool muted)
     {
-        if (_disposed) return;
-        _controlMonitor ??= new WidgetControlCenterMonitor();
-        if (_controlMonitor.SetMuted(muted))
-        {
-            var widget = ControlCenterWidget;
-            if (widget?.Controls is { } current) widget.Controls = current with { VolumeMuted = muted };
-            _surfaceManager?.RefreshMonitorVisuals();
-        }
-        RefreshControlFast();
+        if (ControlCenterWidget is { } widget) _ = RunControlCommandAsync(widget, source => Task.FromResult(source.SetMuted(muted)), "无法设置静音");
     }
 
-    /// <summary>
-    /// Reads the cheap controls and pushes them to the card. Called after every
-    /// command so the displayed state matches the machine without waiting for the
-    /// next poll; the poll itself continues in the background.
-    /// </summary>
-    private void RefreshControlFast()
-    {
-        var widget = ControlCenterWidget;
-        if (widget is null || _controlMonitor is null) return;
-        var refresh = _controlMonitor.ReadFast();
-        _controlFast = refresh;
-        widget.Controls = MergeControlValues(widget.Controls, refresh);
-        _surfaceManager?.RefreshMonitorVisuals();
-    }
-
-    public async Task ToggleControlAsync(DesktopWidget widget, ControlCenterToggle toggle, bool enabled)
-    {
-        if (_disposed || widget.Kind != DesktopWidgetKind.ControlCenter || !State.Widgets.Contains(widget)) return;
-        _controlMonitor ??= new WidgetControlCenterMonitor();
-
-        // Show the intended state immediately: a radio transition takes a moment
-        // in the driver, and until now the tile looked dead for over a second.
-        if (widget.Controls is { } before)
+    public Task SetControlOutputAsync(string deviceId) => string.IsNullOrEmpty(deviceId) || ControlCenterWidget is not { } widget
+        ? Task.CompletedTask : RunControlCommandAsync(widget, async source =>
         {
-            widget.Controls = toggle switch
-            {
-                ControlCenterToggle.WiFi => before with { WiFiEnabled = enabled },
-                ControlCenterToggle.Bluetooth => before with { BluetoothEnabled = enabled },
-                _ => before with { NightLightEnabled = enabled }
-            };
-            _surfaceManager?.RefreshMonitorVisuals();
-        }
+            var changed = source.SetOutputDevice(deviceId);
+            if (changed) await Task.Delay(80).ConfigureAwait(false);
+            return changed;
+        }, "无法切换输出设备");
 
-        var ok = toggle == ControlCenterToggle.NightLight
-            ? _controlMonitor.SetNightLight(enabled)
-            : await _controlMonitor.SetRadioAsync(toggle, enabled).ConfigureAwait(false);
-
-        if (!ok)
+    public Task SendControlMediaCommandAsync(ControlCenterMediaCommand command) => ControlCenterWidget is not { } widget
+        ? Task.CompletedTask : RunControlCommandAsync(widget, async _ =>
         {
-            // Roll back rather than leave a tile claiming a state the machine is
-            // not in.
-            if (widget.Controls is { } current)
-            {
-                widget.Controls = toggle switch
-                {
-                    ControlCenterToggle.WiFi => current with { WiFiEnabled = !enabled },
-                    ControlCenterToggle.Bluetooth => current with { BluetoothEnabled = !enabled },
-                    _ => current with { NightLightEnabled = !enabled }
-                };
-            }
-            widget.MonitorError = "无法切换" + ControlCenterPresentation.ToggleLabel(toggle);
-            _surfaceManager?.RefreshMonitorVisuals();
-            return;
-        }
-        widget.MonitorError = "";
-        // Confirm against the machine rather than trusting the optimistic write.
-        await RefreshMonitorWidgetsAsync(force: true).ConfigureAwait(false);
-    }
-
-    public async Task SetControlOutputAsync(string deviceId)
-    {
-        if (_disposed || string.IsNullOrEmpty(deviceId)) return;
-        _controlMonitor ??= new WidgetControlCenterMonitor();
-        if (_controlMonitor.SetOutputDevice(deviceId))
-        {
-            // Reflect the new name at once; the endpoint switch itself settles
-            // asynchronously in the audio service.
-            if (ControlCenterWidget is { } widget && widget.Controls is { } current)
-            {
-                var name = current.OutputDevices.FirstOrDefault(d => d.Id == deviceId)?.Name ?? current.OutputDeviceName;
-                widget.Controls = current with { OutputDeviceId = deviceId, OutputDeviceName = name };
-                _surfaceManager?.RefreshMonitorVisuals();
-            }
-            await Task.Delay(80).ConfigureAwait(false);
-            RefreshControlFast();
-            await RefreshMonitorWidgetsAsync(force: true).ConfigureAwait(false);
-        }
-    }
-
-    public async Task SendControlMediaCommandAsync(ControlCenterMediaCommand command)
-    {
-        if (_disposed) return;
-        if (!await WidgetControlCenterMonitor.MediaCommandAsync(command).ConfigureAwait(false)) return;
-        // Flip the play state immediately so the button responds on click.
-        if (command == ControlCenterMediaCommand.PlayPause && ControlCenterWidget is { } widget &&
-            widget.Controls?.Media is { } media)
-        {
-            widget.Controls = widget.Controls with { Media = media with { IsPlaying = !media.IsPlaying, CapturedAt = DateTimeOffset.Now } };
-            _surfaceManager?.RefreshMonitorVisuals();
-        }
-        await Task.Delay(150).ConfigureAwait(false);
-        await RefreshMonitorWidgetsAsync(force: true).ConfigureAwait(false);
-    }
+            var changed = await WidgetControlCenterMonitor.MediaCommandAsync(command).ConfigureAwait(false);
+            if (changed) await Task.Delay(150).ConfigureAwait(false);
+            return changed;
+        }, "无法控制媒体播放");
 }

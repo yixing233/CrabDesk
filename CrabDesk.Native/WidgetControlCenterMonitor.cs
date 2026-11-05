@@ -14,8 +14,22 @@ namespace CrabDesk.Native;
 /// controls. Each part fails independently and reports null, so a machine
 /// missing one capability still shows the others.
 /// </summary>
-public sealed class WidgetControlCenterMonitor : IDisposable
+public interface IWidgetControlCenterMonitor
 {
+    string BrightnessDisplayId { get; set; }
+    ControlCenterSnapshot ReadFast();
+    Task<ControlCenterSnapshot> ReadAsync(CancellationToken token = default);
+    bool SetVolume(double percent);
+    bool SetBrightness(double percent);
+    bool SetMuted(bool muted);
+    bool SetOutputDevice(string deviceId);
+    bool SetNightLight(bool enabled);
+    Task<bool> SetRadioAsync(ControlCenterToggle toggle, bool enabled, CancellationToken token = default);
+}
+
+public sealed class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, IDisposable
+{
+    public string BrightnessDisplayId { get; set; } = "";
     private readonly object _gate = new();
     private bool _disposed;
     private bool _radioAccessRequested;
@@ -26,9 +40,8 @@ public sealed class WidgetControlCenterMonitor : IDisposable
     /// media queries are async; callers run it off the UI thread.
     /// </summary>
     /// <summary>
-    /// Fast read used while the user drags a slider or after a command: volume and
-    /// brightness only. Both are local COM calls costing single-digit
-    /// milliseconds, where the radio and media queries would add tens.
+    /// Partial read after a command: volume and brightness only. External display
+    /// brightness can involve slow DDC/CI calls; run this on the hardware worker.
     /// </summary>
     public ControlCenterSnapshot ReadFast()
     {
@@ -40,7 +53,7 @@ public sealed class WidgetControlCenterMonitor : IDisposable
             VolumeMuted = audio.Muted,
             OutputDeviceId = audio.DeviceId,
             OutputDeviceName = audio.DeviceName,
-            BrightnessPercent = BrightnessControl.Read().Percent
+            BrightnessPercent = BrightnessControl.Read(BrightnessDisplayId).Percent
         };
     }
 
@@ -67,7 +80,7 @@ public sealed class WidgetControlCenterMonitor : IDisposable
         var outputs = AudioSession.ReadOutputs();
         snapshot = snapshot with { OutputDevices = outputs };
 
-        var brightness = BrightnessControl.Read();
+        var brightness = BrightnessControl.Read(BrightnessDisplayId);
         snapshot = snapshot with { BrightnessPercent = brightness.Percent };
 
         var media = await ReadMediaAsync(token).ConfigureAwait(false);
@@ -197,14 +210,14 @@ public sealed class WidgetControlCenterMonitor : IDisposable
     }
 
     /// <summary>Reads only the panel brightness; used to verify a write landed.</summary>
-    public double? BrightnessReadAsync() => BrightnessControl.Read().Percent;
+    public double? BrightnessReadAsync() => BrightnessControl.Read(BrightnessDisplayId).Percent;
     /// <summary>Reads only the endpoint volume; used to verify a write landed.</summary>
     public double? VolumeReadAsync() => AudioSession.Read().Volume;
 
     public bool SetVolume(double percent) => AudioSession.SetVolume(percent);
     public bool SetMuted(bool muted) => AudioSession.SetMuted(muted);
     public bool SetOutputDevice(string deviceId) => AudioSession.SetDefaultOutput(deviceId);
-    public bool SetBrightness(double percent) => BrightnessControl.Write(percent);
+    public bool SetBrightness(double percent) => BrightnessControl.Write(percent, BrightnessDisplayId);
     public bool SetNightLight(bool enabled) => NightLightState.Write(enabled);
 
     public void Dispose()

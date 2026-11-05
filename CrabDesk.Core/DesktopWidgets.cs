@@ -38,6 +38,7 @@ public sealed class DesktopWidget
     public List<WidgetTodoItem> Tasks { get; set; } = [];
     public string TargetLanguage { get; set; } = "简体中文";
     public string Translation { get; set; } = string.Empty;
+    public string ControlBrightnessDisplayId { get; set; } = string.Empty;
     public string NetworkAdapterId { get; set; } = string.Empty;
     public string NetworkLatencyTarget { get; set; } = "1.1.1.1";
     public NetworkWidgetDisplayMode NetworkDisplayMode { get; set; }
@@ -151,6 +152,9 @@ public sealed record WidgetWeatherIndex(string Name, string Value)
 
 public static class DesktopWidgets
 {
+    public static bool RequiresMonitoring(DesktopWidgetKind kind) => kind is
+        DesktopWidgetKind.Performance or DesktopWidgetKind.Network or DesktopWidgetKind.ControlCenter;
+
     public static void NormalizeWeatherCities(DesktopWidget widget)
     {
         var legacyLocation = widget.Location;
@@ -218,6 +222,7 @@ public static class DesktopWidgets
 
     public static DesktopWidgetSize DefaultSize(DesktopWidgetKind kind) => kind switch
     {
+        DesktopWidgetKind.ControlCenter => DesktopWidgetSize.Panel,
         DesktopWidgetKind.Clock => DesktopWidgetSize.Medium,
         DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Network => DesktopWidgetSize.Large,
         _ => DesktopWidgetSize.Medium

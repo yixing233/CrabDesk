@@ -19,7 +19,7 @@ public sealed partial class CrabDeskRuntime
     private long _monitorLastTick, _monitorLastPing;
     private int _monitorSampling;
     private string _monitorPingKey = "";
-    private WidgetControlCenterMonitor? _controlMonitor;
+    private IWidgetControlCenterMonitor? _controlMonitor;
     private long _controlLastTick;
     private Dictionary<Guid, CancellationTokenSource>? _publicIpRequests;
     private Func<CancellationToken, Task<string>>? _publicIpQuery = WidgetNetworkMonitor.QueryPublicIpAsync;
@@ -56,9 +56,12 @@ public sealed partial class CrabDeskRuntime
         // up to two seconds before showing what they had just done.
         var controlDue = controls is not null &&
             (force || _controlLastTick == 0 || Stopwatch.GetElapsedTime(_controlLastTick, now).TotalSeconds >= 2);
-        if (controlDue) _controlMonitor ??= new();
+        if (controlDue) _controlMonitor ??= new WidgetControlCenterMonitor();
+        var controlVersion = Volatile.Read(ref _controlCommandVersion);
+        controlDue &= Volatile.Read(ref _controlWriting) == 0;
         var performanceSource = _performanceMonitor; var networkSource = _networkMonitor;
         var controlSource = _controlMonitor;
+        var controlDisplayId = controls is null ? "" : ResolveControlBrightnessDisplay(controls);
         try
         {
             var data = await Task.Run(async () =>
@@ -71,7 +74,7 @@ public sealed partial class CrabDeskRuntime
                 catch (Exception exception) { machineError = "性能采样失败：" + exception.Message; }
                 try { if (network is not null) connection = networkSource!.Sample(adapter, target); }
                 catch (Exception exception) { networkError = "网络采样失败：" + exception.Message; }
-                try { if (controlDue) controls = await controlSource!.ReadAsync(token).ConfigureAwait(false); }
+                try { if (controlDue) controls = await ReadControlSnapshotAsync(controlSource!, token, controlDisplayId).ConfigureAwait(false); }
                 catch (Exception exception) { controlError = "控制中心采样失败：" + exception.Message; }
                 return (machine, connection, controls, machineError, networkError, controlError);
             }, token);
@@ -103,7 +106,8 @@ public sealed partial class CrabDeskRuntime
                         WidgetNetworkGraph.Append(network, data.connection);
                         network.Network = data.connection; network.MonitorError = data.networkError;
                     }
-                    if (controls is not null && State.Widgets.Contains(controls) && data.controls is not null)
+                    if (controls is not null && State.Widgets.Contains(controls) && data.controls is not null &&
+                        controlVersion == Volatile.Read(ref _controlCommandVersion) && Volatile.Read(ref _controlWriting) == 0)
                     { controls.Controls = data.controls; controls.MonitorError = data.controlError; }
                     NotifyMonitorFrame();
                 });

@@ -13,7 +13,8 @@ namespace CrabDesk.Native;
 /// adjusting it does nothing visible - which is exactly the case that made
 /// brightness look broken.
 ///
-/// DDC/CI is therefore tried first and WMI only if no external monitor answers.
+/// A matching WMI panel is preferred; external displays use their own DDC/CI
+/// handle. Both paths stay bound to the selected display.
 /// </summary>
 internal static class BrightnessControl
 {
@@ -22,13 +23,14 @@ internal static class BrightnessControl
     public readonly record struct Reading(double? Percent, string Source);
 
     /// <summary>
-    /// Current brightness. DDC/CI monitors are preferred; the ACPI panel is the
-    /// fallback for machines with no external display.
+    /// Current brightness. Prefer the selected panel's WMI backlight reading;
+    /// some internal panels also answer DDC/CI with an unrelated fixed value.
     /// </summary>
-    public static Reading Read()
+    public static Reading Read(string displayId = "")
     {
-        if (ReadDdc() is { } ddc) return new(ddc, "ddc");
-        return new(ReadWmi(), "wmi");
+        if (ReadWmi(displayId) is { } panel) return new(panel, "wmi");
+        if (ReadDdc(displayId) is { } ddc) return new(ddc, "ddc");
+        return new(null, "unavailable");
     }
 
     /// <summary>
@@ -36,17 +38,16 @@ internal static class BrightnessControl
     /// monitor answered, so the caller keeps the old value on screen rather than
     /// showing a level that was never applied.
     /// </summary>
-    public static bool Write(double percent)
+    public static bool Write(double percent, string displayId = "")
     {
         var level = (byte)Math.Clamp(Math.Round(percent), 0, 100);
-        if (WriteDdc(level)) return true;
-        return WriteWmi(level);
+        return ReadWmi(displayId) is not null ? WriteWmi(level, displayId) : WriteDdc(level, displayId);
     }
 
-    private static bool WriteDdc(byte level)
+    private static bool WriteDdc(byte level, string displayId)
     {
         var wrote = false;
-        ForEachMonitor(handle =>
+        ForEachMonitor(displayId, handle =>
         {
             if (wrote) return;
             if (!GetMonitorBrightness(handle, out var minimum, out _, out var maximum) || maximum <= minimum) return;
@@ -58,10 +59,10 @@ internal static class BrightnessControl
         return wrote;
     }
 
-    private static double? ReadDdc()
+    private static double? ReadDdc(string displayId)
     {
         double? found = null;
-        ForEachMonitor(handle =>
+        ForEachMonitor(displayId, handle =>
         {
             if (found is not null) return;
             if (!GetMonitorBrightness(handle, out var minimum, out var current, out var maximum) || maximum <= minimum) return;
@@ -71,7 +72,7 @@ internal static class BrightnessControl
     }
 
     /// <summary>Enumerates every physical monitor and releases each handle.</summary>
-    private static void ForEachMonitor(Action<IntPtr> action)
+    private static void ForEachMonitor(string displayId, Action<IntPtr> action)
     {
         var handles = new List<IntPtr>();
         try
@@ -83,6 +84,9 @@ internal static class BrightnessControl
             }, IntPtr.Zero);
             foreach (var monitor in handles)
             {
+                var info = new NativeMethods.MonitorInfoEx { Size = Marshal.SizeOf<NativeMethods.MonitorInfoEx>(), DeviceName = "" };
+                if (!NativeMethods.GetMonitorInfo(monitor, ref info) ||
+                    !string.IsNullOrEmpty(displayId) && !string.Equals(info.DeviceName, displayId, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!GetNumberOfPhysicalMonitorsFromHMONITOR(monitor, out var count) || count == 0) continue;
                 var physical = new PHYSICAL_MONITOR[count];
                 if (!GetPhysicalMonitorsFromHMONITOR(monitor, count, physical)) continue;
@@ -102,15 +106,16 @@ internal static class BrightnessControl
         }
     }
 
-    private static double? ReadWmi()
+    private static double? ReadWmi(string displayId)
     {
         try
         {
-            using var searcher = new ManagementObjectSearcher(Scope, "SELECT CurrentBrightness FROM WmiMonitorBrightness");
+            using var searcher = new ManagementObjectSearcher(Scope, "SELECT CurrentBrightness, InstanceName FROM WmiMonitorBrightness");
             foreach (ManagementObject item in searcher.Get())
             {
                 using (item)
                 {
+                    if (!MatchesDisplay(displayId, item["InstanceName"] as string)) continue;
                     if (item["CurrentBrightness"] is { } value && TryNumber(value, out var percent)) return percent;
                 }
             }
@@ -122,7 +127,7 @@ internal static class BrightnessControl
         return null;
     }
 
-    private static bool WriteWmi(byte level)
+    private static bool WriteWmi(byte level, string displayId)
     {
         try
         {
@@ -131,6 +136,7 @@ internal static class BrightnessControl
             {
                 using (item)
                 {
+                    if (!MatchesDisplay(displayId, item["InstanceName"] as string)) continue;
                     using var parameters = item.GetMethodParameters("WmiSetBrightness");
                     parameters["Timeout"] = 0;
                     parameters["Brightness"] = level;
@@ -151,6 +157,20 @@ internal static class BrightnessControl
         try { number = Convert.ToDouble(value); return double.IsFinite(number); }
         catch (Exception) { number = 0; return false; }
     }
+
+    // Bind WMI's panel instance to the selected logical display. A failed match
+    // must not fall back to another screen (e.g. the laptop's closed lid).
+    private static bool MatchesDisplay(string displayId, string? instance)
+    {
+        if (string.IsNullOrEmpty(displayId)) return true;
+        if (!ActiveDisplayPaths.Read().TryGetValue(displayId, out var target)) return false;
+        var parts = target.DevicePath.Replace(@"\\?\", "").Split('#');
+        return parts.Length >= 3 && InstanceMatches(instance, string.Join("\\", parts.Take(3)));
+    }
+
+    internal static bool InstanceMatches(string? instance, string deviceInstance) =>
+        !string.IsNullOrEmpty(deviceInstance) && instance is not null &&
+        (instance.Equals(deviceInstance, StringComparison.OrdinalIgnoreCase) || instance.StartsWith(deviceInstance + "_", StringComparison.OrdinalIgnoreCase));
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct PHYSICAL_MONITOR

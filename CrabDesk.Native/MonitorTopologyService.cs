@@ -27,6 +27,7 @@ public sealed class MonitorTopologyService : IMonitorTopologyService
             {
                 Id = info.DeviceName,
                 DeviceName = info.DeviceName,
+                ModelName = MonitorModelName.Read(info.DeviceName),
                 PixelBounds = pixelBounds,
                 PixelWorkArea = pixelWorkArea,
                 Bounds = MonitorCoordinateConverter.PixelsToDips(pixelBounds, scale),

@@ -31,20 +31,29 @@ internal sealed partial class DesktopBoxForm
                 (float)_runtime.State.Settings.Appearance.CornerRadius);
         foreach (var geometry in _boxes)
         {
-            if (geometry.Box.Id == transform?.Id) continue;
+            if (geometry.Box.Id == transform?.Id || IsIncomingBoxTransform(geometry.Box.Id)) continue;
             yield return CreateAcrylicRegion(geometry.Box.Id, geometry.Bounds, _monitor,
                 (float)_runtime.State.Settings.Appearance.CornerRadius);
         }
-        if (transform is not null)
-        {
-            var monitor = _runtime.Monitors.FirstOrDefault(m => m.Id == transform.MonitorId) ?? _monitor;
-            var geometry = _boxes.FirstOrDefault(g => g.Box.Id == transform.Id);
-            var bounds = monitor.Id == _monitor.Id && geometry is not null
-                ? GetTransformGeometry(geometry).Bounds
-                : CreateBoxGeometry(transform, (float)GetVisualBoxHeight(transform), IsEffectivelyCollapsed(transform)).Bounds;
-            yield return CreateAcrylicRegion(transform.Id, bounds, monitor,
-                (float)_runtime.State.Settings.Appearance.CornerRadius);
-        }
+        if (GetTransformAcrylicRegion() is { } ownTransform) yield return ownTransform;
+        // Foreground and backdrop must use the same capture owner's view. The
+        // destination has independent hover/animation state and may still see
+        // the incoming box as collapsed, even though its content is expanded.
+        foreach (var source in IncomingBoxTransforms)
+            if (source.GetTransformAcrylicRegion() is { } incoming) yield return incoming;
+    }
+
+    private AcrylicBoxRegion? GetTransformAcrylicRegion()
+    {
+        if (IsDisposed || _resourcesDisposed || (_movingBox ?? _resizingBox) is not { } transform) return null;
+        EnsureGeometry();
+        var monitor = _runtime.Monitors.FirstOrDefault(m => m.Id == transform.MonitorId) ?? _monitor;
+        var geometry = _boxes.FirstOrDefault(g => g.Box.Id == transform.Id);
+        var bounds = monitor.Id == _monitor.Id && geometry is not null
+            ? GetTransformGeometry(geometry).Bounds
+            : CreateBoxGeometry(transform, (float)GetVisualBoxHeight(transform), IsEffectivelyCollapsed(transform)).Bounds;
+        return CreateAcrylicRegion(transform.Id, bounds, monitor,
+            (float)_runtime.State.Settings.Appearance.CornerRadius);
     }
 
     internal static AcrylicBoxRegion CreateAcrylicRegion(Guid id, RectangleF bounds, MonitorLayout monitor, float radius)
@@ -78,7 +87,7 @@ internal sealed partial class DesktopBoxForm
             }
             behind.Add(bounds);
         }
-        foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds)))
+        foreach (var box in _boxes.Where(box => box.Bounds.IntersectsWith(clipBounds) && !IsIncomingBoxTransform(box.Box.Id)))
         {
             // No Graphics is open while the previous pixels are sampled.
             // Follow the same back-to-front geometry order as painting/input.
@@ -99,6 +108,7 @@ internal sealed partial class DesktopBoxForm
         using (var graphics = Graphics.FromImage(bitmap))
         {
             graphics.ScaleTransform((float)_scale, (float)_scale);
+            DrawIncomingBoxTransforms(graphics, clipBounds);
             DrawBoxAlignmentGuides(graphics, _monitor.Id);
             DrawCalendarToolTip(graphics);
         }

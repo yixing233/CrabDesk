@@ -181,6 +181,11 @@ internal sealed class DesktopSurfaceManager : IDisposable
             {
                 ConfigureBoxIconLayerComposition();
             }
+            else
+            {
+                foreach (var surface in _surfaces)
+                    surface.ConfigureCrossMonitorDragging(_surfaces, RequestAcrylicDragFrames);
+            }
             // Keep Explorer's native desktop fully visible and interactive
             // while the replacement windows are prepared. Render the final
             // icon/box composite once, then show every prepared child in one
@@ -822,6 +827,15 @@ internal sealed class DesktopSurfaceManager : IDisposable
             monitorIds.Add(sourceMonitorId);
         }
         return monitorIds;
+    }
+
+    private void RequestAcrylicDragFrames(DesktopBoxForm sourceSurface)
+    {
+        var monitorIds = ResolveIconDragFrameMonitorIds(sourceSurface.MonitorId,
+            sourceSurface.TransformMonitorId, sourceSurface.ConsumeMonitorTransferPreviousMonitorId());
+        foreach (var surface in _surfaces)
+            if (!ReferenceEquals(surface, sourceSurface) && monitorIds.Contains(surface.MonitorId))
+                surface.RefreshTransferredBoxVisuals();
     }
 
     private void RequestIconDragFrames(DesktopBoxForm sourceSurface)

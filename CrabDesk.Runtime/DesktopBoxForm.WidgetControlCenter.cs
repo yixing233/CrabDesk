@@ -73,6 +73,12 @@ internal sealed partial class DesktopBoxForm
         DrawControlCenterSlider(graphics, new RectangleF(sliders.X + half + 14, sliders.Y, half, sliders.Height),
             "亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent, text, muted, accent);
 
+        var displayTarget = ControlCenterPresentation.ControlCenterTarget.BrightnessDisplayRow;
+        DrawControlCenterDevice(graphics, MonitorRectangle(widget, ControlCenterPresentation.BrightnessDisplayRow(body)),
+            new ControlCenterSnapshot { OutputDeviceName = "亮度 · " + _runtime.ControlBrightnessDisplayLabel(widget) }, text, muted,
+            Mix(panel, text, IsControlPressed(widget, displayTarget) ? .22 : IsControlHovered(widget, displayTarget) ? .18 : .14),
+            leadingIcon: LucideRuntimeIcon.Monitor, forceChoice: true);
+
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
         var outputRow = MonitorRectangle(widget, ControlCenterPresentation.OutputRow(
             ControlCenterPresentation.MediaArea(body)));
@@ -169,7 +175,7 @@ internal sealed partial class DesktopBoxForm
     /// next endpoint, so changing output does not need a menu.
     /// </summary>
     private static void DrawControlCenterDevice(Graphics graphics, RectangleF bounds,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color rowFill)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color rowFill, LucideRuntimeIcon? leadingIcon = null, bool forceChoice = false)
     {
         var name = snapshot?.OutputDeviceName is { Length: > 0 } device ? device : "输出设备不可用";
         // A filled row with body-coloured text and a speaker glyph: the previous
@@ -179,10 +185,18 @@ internal sealed partial class DesktopBoxForm
         using var brush = new SolidBrush(rowFill);
         graphics.FillPath(brush, path);
         var speaker = new RectangleF(bounds.X + 8, bounds.Y + (bounds.Height - 14) / 2, 14, 14);
-        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MonitorSpeaker, speaker, text, 14);
-        var hasChoice = snapshot?.OutputDevices.Count > 1;
+        var icon = leadingIcon ?? (name.Contains("耳机") || name.Contains("headphone", StringComparison.OrdinalIgnoreCase) || name.Contains("headset", StringComparison.OrdinalIgnoreCase)
+            ? LucideRuntimeIcon.Headphones : LucideRuntimeIcon.Volume2);
+        LucideRuntimeIcons.Draw(graphics, icon, speaker, text, 14);
+        if (leadingIcon == LucideRuntimeIcon.Monitor)
+        {
+            using var badge = new SolidBrush(rowFill);
+            graphics.FillEllipse(badge, bounds.X + 17, bounds.Y + 13, 10, 10);
+            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Sun, new(bounds.X + 18, bounds.Y + 14, 8, 8), text, 8);
+        }
+        var hasChoice = forceChoice || snapshot?.OutputDevices.Count > 1;
         var textWidth = Math.Max(0, bounds.Width - 30 - (hasChoice ? 16 : 0));
-        WidgetText(graphics, WidgetMonitorMetrics.HardwareLabel(name, 24),
+        WidgetText(graphics, name,
             new RectangleF(bounds.X + 28, bounds.Y, textWidth, bounds.Height), text, 10.5f);
         if (!hasChoice) return;
         // Signals that the row cycles through devices rather than just labelling.
@@ -369,6 +383,20 @@ internal sealed partial class DesktopBoxForm
 
     private bool HandleControlCenterClick(DesktopWidget widget, PointF point)
     {
+        var displayRow = MonitorRectangle(widget, ControlCenterPresentation.BrightnessDisplayRow(MonitorBody(widget)));
+        if (displayRow.Contains(point))
+        {
+            var choices = new ControlCenterSnapshot
+            {
+                OutputDeviceId = string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? widget.MonitorId : widget.ControlBrightnessDisplayId,
+                OutputDevices = _runtime.ControlBrightnessDisplays.Select(display => new ControlCenterOutputDevice(display.Id, display.Label, false)).ToArray()
+            };
+            var menu = BuildControlCenterOutputMenu(choices, (float)_scale, id => _runtime.SelectControlBrightnessDisplayAsync(widget, id));
+            menu.Opening += (_, _) => _runtime.ApplyContextMenuTheme(menu);
+            menu.Closed += (_, _) => { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)menu.Dispose); else menu.Dispose(); };
+            menu.Show(this, new Point(ToPixel(displayRow.X), ToPixel(displayRow.Bottom)));
+            return true;
+        }
         if (ControlCenterInkToggleRectangle(widget).Contains(point))
         {
             // Two states only: white ink, or dark ink. The first click takes the
@@ -473,7 +501,7 @@ internal sealed partial class DesktopBoxForm
         if (widget.Controls is null) return;
         // Reuses the same themed menu the widget menu uses, so the picker looks
         // like the rest of the shell rather than a raw WinForms list.
-        var menu = BuildControlCenterOutputMenu(widget.Controls, (float)_scale);
+        var menu = BuildControlCenterOutputMenu(widget.Controls, (float)_scale, _runtime.SetControlOutputAsync);
         if (menu.Items.Count == 0) { menu.Dispose(); return; }
         // Same lifecycle the other widget menus use: theme on open, and dispose
         // deferred so the menu's own close animation is not torn down underneath
@@ -489,7 +517,7 @@ internal sealed partial class DesktopBoxForm
     /// tested without a window to host it.
     /// </summary>
     internal static FluentContextMenuStrip BuildControlCenterOutputMenu(ControlCenterSnapshot snapshot,
-        float dpiScale = 1f)
+        float dpiScale = 1f, Func<string, Task>? selectOutput = null)
     {
         var menu = new FluentContextMenuStrip { PreferredDpiScale = dpiScale };
         foreach (var device in snapshot.OutputDevices)
@@ -499,6 +527,7 @@ internal sealed partial class DesktopBoxForm
             var current = string.Equals(device.Id, snapshot.OutputDeviceId, StringComparison.OrdinalIgnoreCase);
             var item = new ToolStripMenuItem(device.Name) { Checked = current };
             var id = device.Id;
+            item.Click += async (_, _) => { if (selectOutput is not null) await selectOutput(id); };
             menu.Items.Add(item);
         }
         return menu;

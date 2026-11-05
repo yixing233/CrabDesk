@@ -566,6 +566,19 @@ public sealed partial class WidgetPreview : UserControl
             Place(track, area with { Y = area.Y + 24, Height = 5 });
         }
 
+        var displayLabel = Text("亮度 · " + (string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? "组件所在显示器" : widget.ControlBrightnessDisplayId.Replace(@"\\.\DISPLAY", "显示器 ")), 10.5);
+        displayLabel.VerticalAlignment = VerticalAlignment.Center;
+        displayLabel.Margin = new Thickness(28, 0, 24, 0);
+        var displayContent = new Grid(); displayContent.Children.Add(displayLabel);
+        displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.Monitor, Width = 14, Height = 14,
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(8, 0, 0, 0), Foreground = new SolidColorBrush(ink) });
+        displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.Sun, Width = 8, Height = 8,
+            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(18, 0, 0, 4), Foreground = new SolidColorBrush(ink) });
+        displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.ChevronsUpDown, Width = 13, Height = 13,
+            HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 8, 0), Foreground = new SolidColorBrush(softInk) });
+        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(ink with { A = 38 }), Child = displayContent },
+            ControlCenterPresentation.BrightnessDisplayRow(body));
         var media = ControlCenterPresentation.MediaArea(body);
         var outputRow = new Border
         {
@@ -576,7 +589,9 @@ public sealed partial class WidgetPreview : UserControl
                 Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    new LucideIcon { Icon = LucideIconName.MonitorSpeaker, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
+                    new LucideIcon { Icon = snapshot?.OutputDeviceName is { } output &&
+                        (output.Contains("耳机") || output.Contains("headphone", StringComparison.OrdinalIgnoreCase) || output.Contains("headset", StringComparison.OrdinalIgnoreCase))
+                        ? LucideIconName.Headphones : LucideIconName.Volume2, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
                     Text(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
                 }
             }
