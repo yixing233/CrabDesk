@@ -79,7 +79,17 @@ internal enum LucideRuntimeIcon
     SkipForward,
     MonitorSpeaker,
     Monitor,
-    Headphones
+    Headphones,
+    VolumeX,
+    SlidersHorizontal,
+    Mic,
+    MicOff,
+    Music,
+    Cast,
+    ScanLine,
+    Smartphone,
+    Keyboard,
+    Mouse
 }
 
 internal static class LucideRuntimeIcons
@@ -94,6 +104,14 @@ internal static class LucideRuntimeIcons
 
     internal static string GetGlyph(LucideRuntimeIcon icon) => icon switch
     {
+        LucideRuntimeIcon.Smartphone => "\uE163",
+        LucideRuntimeIcon.Keyboard => "\uE284",
+        LucideRuntimeIcon.Mouse => "\uE28E",
+        LucideRuntimeIcon.Cast => "\uE066",
+        LucideRuntimeIcon.ScanLine => "\uE258",
+        LucideRuntimeIcon.Mic => "\uE118",
+        LucideRuntimeIcon.MicOff => "\uE119",
+        LucideRuntimeIcon.Music => "\uE122",
         LucideRuntimeIcon.AppWindow => "\uE426",
         LucideRuntimeIcon.ArrowDown => "\uE042",
         LucideRuntimeIcon.ArrowDownAz => "\uE415",
@@ -156,6 +174,8 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.WifiOff => "\uE1AF",
         LucideRuntimeIcon.Bluetooth => "\uE05C",
         LucideRuntimeIcon.Volume2 => "\uE1AB",
+        LucideRuntimeIcon.VolumeX => "\uE1AC",
+        LucideRuntimeIcon.SlidersHorizontal => "\uE29A",
         LucideRuntimeIcon.Moon => "\uE11E",
         LucideRuntimeIcon.SkipBack => "\uE15F",
         LucideRuntimeIcon.SkipForward => "\uE160",

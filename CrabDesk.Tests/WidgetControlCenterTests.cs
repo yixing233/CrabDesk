@@ -5,6 +5,53 @@ namespace CrabDesk.Tests;
 
 public sealed class WidgetControlCenterTests
 {
+    [Theory]
+    [InlineData(0)] [InlineData(8)] [InlineData(20)]
+    public void CompactMediaLayoutKeepsArtworkTextProgressAndButtonsSeparate(double corners)
+    {
+        var body = WidgetMonitorPresentation.Body(372, 292, corners);
+        var panel = ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body));
+        var regions = new[] { ControlCenterPresentation.MediaArtwork(panel), ControlCenterPresentation.MediaTitle(panel),
+            ControlCenterPresentation.MediaArtist(panel), ControlCenterPresentation.MediaProgressHitArea(panel), ControlCenterPresentation.MediaTime(panel) }
+            .Concat(ControlCenterPresentation.MediaButtonRects(panel)).ToArray();
+        foreach (var region in regions)
+        {
+            Assert.True(region.X >= panel.X && region.Y >= panel.Y);
+            Assert.True(region.X + region.Width <= panel.X + panel.Width + .01 && region.Y + region.Height <= panel.Y + panel.Height + .01);
+        }
+        for (var i = 0; i < regions.Length; i++)
+            for (var j = i + 1; j < regions.Length; j++)
+            {
+                var a = regions[i]; var b = regions[j];
+                Assert.True(a.X + a.Width <= b.X || b.X + b.Width <= a.X || a.Y + a.Height <= b.Y || b.Y + b.Height <= a.Y,
+                    $"Overlapping media regions: {a} and {b}");
+            }
+        var microphone = ControlCenterPresentation.MicrophoneButton(body);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.Microphone,
+            ControlCenterPresentation.TargetAt(body, microphone.X + microphone.Width / 2, microphone.Y + microphone.Height / 2));
+        var track = ControlCenterPresentation.MediaProgress(panel);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.MediaProgress,
+            ControlCenterPresentation.TargetAt(body, track.X + track.Width / 2, track.Y + 2));
+    }
+
+    [Theory]
+    [InlineData(-10, 20)] [InlineData(50, 50)] [InlineData(150, 80)]
+    public void SeekingRespectsThePlayersReportedRange(double seconds, double expected)
+    {
+        var media = new ControlCenterMedia("Track", "Artist", "", false, true, true, true)
+        { Duration = TimeSpan.FromSeconds(100), SeekMinimum = TimeSpan.FromSeconds(20), SeekMaximum = TimeSpan.FromSeconds(80) };
+        Assert.Equal(TimeSpan.FromSeconds(expected), ControlCenterPresentation.ClampMediaPosition(media, TimeSpan.FromSeconds(seconds)));
+    }
+
+    [Fact]
+    public void PlaybackRateIsAppliedBetweenTimelineUpdates()
+    {
+        var captured = DateTimeOffset.Now;
+        var media = new ControlCenterMedia("Track", "", "", true, true, true, true)
+        { Duration = TimeSpan.FromMinutes(2), Position = TimeSpan.FromSeconds(10), CapturedAt = captured, PlaybackRate = 2 };
+        Assert.Equal(TimeSpan.FromSeconds(16), media.PositionNow(captured.AddSeconds(3)));
+    }
+
     // Every reading is nullable because the matching capability can be missing.
     // A control must therefore say "unavailable" rather than "off": a user who
     // reads "off" keeps clicking a switch the machine cannot move.
@@ -254,6 +301,21 @@ public sealed class WidgetControlCenterTests
             Assert.Equal(expectedMedia[index], ControlCenterPresentation.TargetAt(body,
                 buttons[index].X + buttons[index].Width / 2, buttons[index].Y + buttons[index].Height / 2));
         }
+    }
+
+    [Fact]
+    public void MuteButtonAndVolumeTrackHaveSeparateHitTargets()
+    {
+        var body = WidgetMonitorPresentation.Body(
+            ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
+        var button = ControlCenterPresentation.VolumeMuteButton(body);
+        var sliders = ControlCenterPresentation.SliderArea(body);
+
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.VolumeMute,
+            ControlCenterPresentation.TargetAt(body, button.X + button.Width / 2, button.Y + button.Height / 2));
+        Assert.True(button.Y + button.Height < sliders.Y + 24);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.VolumeSlider,
+            ControlCenterPresentation.TargetAt(body, button.X + button.Width / 2, sliders.Y + 26));
     }
 
     [Fact]

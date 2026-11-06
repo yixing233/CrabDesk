@@ -163,6 +163,31 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         if (_controller is not null) await _controller.EnsurePreviousCommitCompletedAsync();
     }
 
+    internal void ClearForeground(string monitorId)
+    {
+        if (!_foregrounds.Remove(monitorId, out var frame)) return;
+        _root!.Children.Remove(frame.Visual);
+        frame.Dispose();
+        Synchronize(_foregrounds.Values.SelectMany(value => value.Regions));
+        _controller!.Commit();
+    }
+
+    internal void PresentPartialForeground(string monitorId, Bitmap bitmap, Rectangle dirty)
+    {
+        if (_bitmapDevice is null || !_foregrounds.TryGetValue(monitorId, out var frame))
+            throw new InvalidOperationException("The acrylic foreground has no complete frame.");
+        frame.Upload(_bitmapDevice, bitmap, dirty);
+        frame.Publish(new Point((int)frame.Visual.Offset.X, (int)frame.Visual.Offset.Y), bitmap.Size);
+        _controller!.Commit();
+    }
+
+    internal static Rectangle CalculateForegroundUploadBounds(Size size, Rectangle dirty, Rectangle previousDirty, bool backReady)
+    {
+        var full = new Rectangle(Point.Empty, size);
+        if (!backReady) return full;
+        return Rectangle.Intersect(full, previousDirty.IsEmpty ? dirty : Rectangle.Union(dirty, previousDirty));
+    }
+
     internal void ShowAtDesktop()
     {
         _desktopDisplayRequested = true;
@@ -349,6 +374,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         private CompositionDrawingSurface? _front;
         private CompositionDrawingSurface? _back;
         private Size _size;
+        private Rectangle _previousDirty;
+        private readonly CompositionBitmapDevice.UploadBitmap _uploadBitmap = new();
         internal IReadOnlyList<AcrylicBoxRegion> Regions = Array.Empty<AcrylicBoxRegion>();
 
         internal ForegroundFrame(Compositor compositor)
@@ -360,16 +387,21 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             Visual.Brush = _brush;
         }
 
-        internal void Upload(CompositionBitmapDevice device, Bitmap bitmap)
+        internal void Upload(CompositionBitmapDevice device, Bitmap bitmap, Rectangle? dirty = null)
         {
             if (_size != bitmap.Size)
             {
                 _back?.Dispose();
                 _back = null;
                 _size = bitmap.Size;
+                _previousDirty = Rectangle.Empty;
             }
+            var changed = dirty ?? new Rectangle(Point.Empty, bitmap.Size);
+            var upload = CalculateForegroundUploadBounds(bitmap.Size, changed, _previousDirty, _back is not null);
             _back ??= device.CreateSurface(bitmap.Size);
-            CompositionBitmapDevice.Upload(_back, bitmap);
+            CompositionBitmapDevice.Upload(_back, bitmap, upload, _uploadBitmap);
+            // After swapping, the next back surface is one frame behind.
+            _previousDirty = changed;
         }
 
         internal void Publish(Point origin, Size size)
@@ -388,6 +420,7 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         public void Dispose()
         {
             Visual.Dispose(); _brush.Dispose(); _front?.Dispose(); _back?.Dispose();
+            _uploadBitmap.Dispose();
         }
     }
 

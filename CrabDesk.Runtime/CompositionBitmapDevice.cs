@@ -38,33 +38,34 @@ internal sealed class CompositionBitmapDevice : IDisposable
         new Windows.Foundation.Size(size.Width, size.Height),
         DirectXPixelFormat.B8G8R8A8UIntNormalized, DirectXAlphaMode.Premultiplied);
 
-    internal static void Upload(CompositionDrawingSurface surface, Bitmap bitmap)
+    internal static void Upload(CompositionDrawingSurface surface, Bitmap bitmap, Rectangle dirty, UploadBitmap upload)
     {
         var interop = surface.As<ICompositionDrawingSurfaceInterop>();
         var contextId = new Guid("E8F7FE7A-191C-466D-AD95-975678BDA998");
-        interop.BeginDraw(IntPtr.Zero, ref contextId, out var context, out var offset);
+        var bounds = new PixelRect(dirty.Left, dirty.Top, dirty.Right, dirty.Bottom);
+        Marshal.StructureToPtr(bounds, upload.RectanglePointer, false);
+        interop.BeginDraw(upload.RectanglePointer, ref contextId, out var context, out var offset);
         try
         {
             // ID2D1RenderTarget vtable slots, as declared in the Windows SDK
             // d2d1.h (IUnknown + ID2D1Resource precede CreateBitmap).
             Method<SetDpi>(context, 51)(context, 96, 96);
-            var pixels = bitmap.LockBits(new Rectangle(Point.Empty, bitmap.Size),
+            upload.EnsureBitmap(context, bitmap.Size);
+            var pixels = bitmap.LockBits(dirty,
                 ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-            IntPtr texture = IntPtr.Zero;
             try
             {
-                var properties = new BitmapProperties(87, 1, 96, 96);
-                Marshal.ThrowExceptionForHR(Method<CreateBitmap>(context, 4)(context,
-                    new PixelSize((uint)bitmap.Width, (uint)bitmap.Height), pixels.Scan0,
-                    (uint)pixels.Stride, ref properties, out texture));
+                // ID2D1Bitmap::CopyFromMemory updates the resident upload bitmap.
+                Marshal.ThrowExceptionForHR(Method<CopyFromMemory>(upload.BitmapPointer, 10)(upload.BitmapPointer,
+                    ref bounds, pixels.Scan0, (uint)pixels.Stride));
                 var transparent = new ColorF();
                 Method<Clear>(context, 47)(context, ref transparent);
-                var destination = new RectF(offset.X, offset.Y, offset.X + bitmap.Width, offset.Y + bitmap.Height);
-                Method<DrawBitmap>(context, 26)(context, texture, ref destination, 1, 0, IntPtr.Zero);
+                var destination = new RectF(offset.X, offset.Y, offset.X + dirty.Width, offset.Y + dirty.Height);
+                var source = new RectF(dirty.Left, dirty.Top, dirty.Right, dirty.Bottom);
+                Method<DrawBitmap>(context, 26)(context, upload.BitmapPointer, ref destination, 1, 0, ref source);
             }
             finally
             {
-                if (texture != IntPtr.Zero) Marshal.Release(texture);
                 bitmap.UnlockBits(pixels);
             }
         }
@@ -72,6 +73,30 @@ internal sealed class CompositionBitmapDevice : IDisposable
         {
             try { interop.EndDraw(); }
             finally { Marshal.Release(context); }
+        }
+    }
+
+    internal sealed class UploadBitmap : IDisposable
+    {
+        internal IntPtr BitmapPointer { get; private set; }
+        internal IntPtr RectanglePointer { get; private set; } = Marshal.AllocHGlobal(16);
+        private Size _size;
+
+        internal void EnsureBitmap(IntPtr context, Size size)
+        {
+            if (BitmapPointer != IntPtr.Zero && _size == size) return;
+            if (BitmapPointer != IntPtr.Zero) { Marshal.Release(BitmapPointer); BitmapPointer = IntPtr.Zero; }
+            var properties = new BitmapProperties(87, 1, 96, 96);
+            Marshal.ThrowExceptionForHR(Method<CreateBitmap>(context, 4)(context,
+                new PixelSize((uint)size.Width, (uint)size.Height), IntPtr.Zero, 0, ref properties, out var bitmap));
+            BitmapPointer = bitmap;
+            _size = size;
+        }
+
+        public void Dispose()
+        {
+            if (BitmapPointer != IntPtr.Zero) { Marshal.Release(BitmapPointer); BitmapPointer = IntPtr.Zero; }
+            if (RectanglePointer != IntPtr.Zero) { Marshal.FreeHGlobal(RectanglePointer); RectanglePointer = IntPtr.Zero; }
         }
     }
 
@@ -89,9 +114,11 @@ internal sealed class CompositionBitmapDevice : IDisposable
     [StructLayout(LayoutKind.Sequential)] private readonly record struct PixelSize(uint Width, uint Height);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct BitmapProperties(int Format, int AlphaMode, float DpiX, float DpiY);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct RectF(float Left, float Top, float Right, float Bottom);
+    [StructLayout(LayoutKind.Sequential)] private readonly record struct PixelRect(int Left, int Top, int Right, int Bottom);
     [StructLayout(LayoutKind.Sequential)] private struct ColorF { public float R, G, B, A; }
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CreateBitmap(IntPtr self, PixelSize size, IntPtr data, uint pitch, ref BitmapProperties properties, out IntPtr bitmap);
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void DrawBitmap(IntPtr self, IntPtr bitmap, ref RectF destination, float opacity, int interpolation, IntPtr source);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void DrawBitmap(IntPtr self, IntPtr bitmap, ref RectF destination, float opacity, int interpolation, ref RectF source);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate int CopyFromMemory(IntPtr self, ref PixelRect rectangle, IntPtr data, uint pitch);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void Clear(IntPtr self, ref ColorF color);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void SetDpi(IntPtr self, float x, float y);
     [DllImport("d3d11.dll")] private static extern int D3D11CreateDevice(IntPtr adapter, int driver, IntPtr software, uint flags, IntPtr levels, uint levelCount, uint sdk, out IntPtr device, out int featureLevel, out IntPtr context);

@@ -28,6 +28,7 @@ public sealed partial class CrabDeskRuntime
     public async Task RefreshMonitorWidgetsAsync(bool force = false)
     {
         if (_disposed || IsPaused) return;
+        _ = RefreshLyricsWidgetsAsync(force);
         var performance = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Performance);
         var network = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Network);
         var controls = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.ControlCenter);

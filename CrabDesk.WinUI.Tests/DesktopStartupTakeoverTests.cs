@@ -88,7 +88,7 @@ public sealed class DesktopStartupTakeoverTests
         var boxSource = ReadRuntimeSource("DesktopBoxForm.cs");
 
         var iconPresent = ExtractMethod(iconSource, "private bool PresentLayer()", "private bool PresentLayerCore()");
-        var boxPresent = ExtractMethod(boxSource, "private bool PresentLayer()", "private void EnsureHitMaskBitmap");
+        var boxPresent = ExtractMethod(boxSource, "private bool PresentLayer()", "private void EnsureHitMaskSize");
         Assert.Contains("catch (Exception exception)", iconPresent, StringComparison.Ordinal);
         Assert.Contains("catch (Exception exception)", boxPresent, StringComparison.Ordinal);
         Assert.Contains("Desktop icon surface render failed", iconPresent, StringComparison.Ordinal);

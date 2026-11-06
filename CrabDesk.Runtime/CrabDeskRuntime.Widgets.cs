@@ -125,6 +125,11 @@ public sealed partial class CrabDeskRuntime
     public void RemoveWidget(DesktopWidget widget)
     {
         if (!State.Widgets.Remove(widget)) return;
+        if (widget.Kind == DesktopWidgetKind.Lyrics)
+        {
+            _localLyrics.Remove(widget.Id);
+            if (!State.Widgets.Any(item => item.Kind == DesktopWidgetKind.Lyrics)) DisposeLyrics();
+        }
         CancelPublicIpRequest(widget.Id);
         widget.IsPublicIpLoading = false;
         if (widget.Kind == DesktopWidgetKind.Network) _monitorPingCancellation?.Cancel();
@@ -416,6 +421,7 @@ public sealed partial class CrabDeskRuntime
 
     private void DisposeWidgets()
     {
+        DisposeLyrics();
         DisposeMonitoring();
         foreach (var id in _widgetRequests.Keys.ToArray()) CancelWidgetRequest(id);
         _widgetWeatherService.Dispose();

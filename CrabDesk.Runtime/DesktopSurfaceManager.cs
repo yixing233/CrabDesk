@@ -156,6 +156,9 @@ internal sealed class DesktopSurfaceManager : IDisposable
                     {
                         surface.SetAcrylicFramePresenter((bitmap, origin, regions) =>
                             _acrylicHost.PresentForeground(monitor.Id, bitmap, origin, regions));
+                        surface.SetAcrylicPartialFramePresenter((bitmap, dirty) =>
+                            _acrylicHost.PresentPartialForeground(monitor.Id, bitmap, dirty));
+                        surface.SetAcrylicEmptyFramePresenter(() => _acrylicHost.ClearForeground(monitor.Id));
                     }
                     surface.AttachToDesktop(boxParentHandle);
                     DesktopWindowTools.PositionAboveDesktop(

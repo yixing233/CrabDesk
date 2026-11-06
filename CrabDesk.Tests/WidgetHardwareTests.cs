@@ -141,11 +141,8 @@ public sealed class WidgetHardwareTests
         Assert.True(label.Length <= 20);
     }
 
-    // Brightness has two sources that behave nothing alike: DDC/CI for external
-    // monitors, WMI for the internal panel. On a laptop with the lid shut the WMI
-    // panel is dark and adjusting it changes nothing visible, which made the
-    // control look broken. DDC must therefore be preferred whenever a monitor
-    // answers it.
+    // Internal panels use WMI; external monitors use DDC/CI. Report the source
+    // actually used, or unavailable when no panel supports brightness control.
     [Fact]
     public void BrightnessReportsWhichSourceItUsed()
     {
@@ -159,22 +156,25 @@ public sealed class WidgetHardwareTests
         }
         else
         {
-            Assert.Equal("wmi", reading.Source);
+            Assert.Equal("unavailable", reading.Source);
         }
     }
 
     [Fact]
     public void BrightnessRoundTripsThroughItsPreferredSource()
     {
-        var original = BrightnessControl.Read();
-        if (original.Percent is not { } start) return; // No dimmable monitor here.
+        // The default WMI panel may belong to a closed laptop lid. Exercise an
+        // active display, using the same explicit target as the control centre.
+        var displayId = ActiveDisplayPaths.Read().Keys.FirstOrDefault(id => BrightnessControl.Read(id).Percent is not null);
+        if (displayId is null) return; // No active dimmable monitor here.
+        var original = BrightnessControl.Read(displayId);
+        if (original.Percent is not { } start) return;
 
         try
         {
             var target = start > 50 ? 40d : 60d;
-            Assert.True(BrightnessControl.Write(target));
-            Thread.Sleep(600);
-            var applied = BrightnessControl.Read();
+            Assert.True(BrightnessControl.Write(target, displayId));
+            var applied = WaitForBrightness(target, displayId);
             // The panel applies a DDC write asynchronously and some monitors round
             // slightly, so allow a small tolerance rather than an exact match.
             Assert.NotNull(applied.Percent);
@@ -182,10 +182,22 @@ public sealed class WidgetHardwareTests
         }
         finally
         {
-            BrightnessControl.Write(start);
-            Thread.Sleep(400);
+            BrightnessControl.Write(start, displayId);
             // Leaving the screen dimmed after a test run would be a nasty surprise.
-            Assert.InRange(BrightnessControl.Read().Percent ?? start, start - 5, start + 5);
+            Assert.InRange(WaitForBrightness(start, displayId).Percent ?? start, start - 5, start + 5);
         }
+    }
+
+    private static BrightnessControl.Reading WaitForBrightness(double expected, string displayId)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        BrightnessControl.Reading reading;
+        do
+        {
+            reading = BrightnessControl.Read(displayId);
+            if (reading.Percent is { } percent && Math.Abs(percent - expected) <= 5) return reading;
+            Thread.Sleep(100);
+        } while (timer.Elapsed < TimeSpan.FromSeconds(5));
+        return reading;
     }
 }

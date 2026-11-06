@@ -26,6 +26,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Lyric fetching/parsing does not use Lyricify's optional Chinese conversion API. -->
+    <PackageReference Include="CHTCHSConv" Version="1.0.0" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="1.8.260710003" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260709004" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
@@ -47,6 +49,8 @@
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\licenses\Lyricify-Lyrics-Helper-LICENSE.txt;..\licenses\Newtonsoft-Json-LICENSE.txt;..\licenses\SharpZipLib-LICENSE.txt"
+             Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk-256.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\CrabDesk.Runtime\Assets\lucide.ttf"

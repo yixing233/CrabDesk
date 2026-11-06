@@ -71,13 +71,14 @@ public sealed partial class WidgetPreview : UserControl
         _secondary = new SolidColorBrush(dark ? Color.FromArgb(255, 237, 240, 245) : Color.FromArgb(255, 52, 59, 69));
         _accent = new SolidColorBrush(Parse(appearance.Surface.Accent, Color.FromArgb(255, 78, 161, 211)));
         var alpha = Math.Clamp(appearance.Surface.Opacity, .35, 1) * (appearance.Settings.UseAcrylicBoxes ? .72 : 1);
-        background.A = (byte)Math.Round(alpha * 255);
+        var hasBackground = DesktopWidgets.HasBackground(widget);
+        background.A = hasBackground ? (byte)Math.Round(alpha * 255) : (byte)0;
         CardSurface.Background = new SolidColorBrush(background);
         CardSurface.CornerRadius = new CornerRadius(Math.Clamp(appearance.Settings.CornerRadius, 0, 20));
         var stroke = BoxBorderStyle.ApplyTint(BoxBorderStyle.ResolveStroke(System.Drawing.Color.FromArgb(background.R, background.G, background.B),
             dark, appearance.Settings.BorderColor, appearance.Settings.BorderOpacity), alpha);
         CardSurface.BorderBrush = new SolidColorBrush(Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
-        CardSurface.BorderThickness = new Thickness(appearance.Settings.ShowBorder ? Math.Clamp(appearance.Settings.BorderWidth, 1, 6) : 0);
+        CardSurface.BorderThickness = new Thickness(hasBackground && appearance.Settings.ShowBorder ? Math.Clamp(appearance.Settings.BorderWidth, 1, 6) : 0);
         var (width, height) = DesktopWidgets.Dimensions(widget);
         CardSurface.Width = width;
         CardSurface.Height = height;
@@ -122,6 +123,7 @@ public sealed partial class WidgetPreview : UserControl
             case DesktopWidgetKind.Weather: Weather(widget); break;
             case DesktopWidgetKind.Performance: Performance(widget); break;
             case DesktopWidgetKind.ControlCenter: ControlCenter(widget); break;
+            case DesktopWidgetKind.Lyrics: Lyrics(widget); break;
             case DesktopWidgetKind.Network: Network(widget); break;
         }
     }
@@ -132,6 +134,16 @@ public sealed partial class WidgetPreview : UserControl
         FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal, Foreground = secondary ? _secondary : _text,
         TextTrimming = TextTrimming.CharacterEllipsis
     };
+
+    private void Lyrics(DesktopWidget widget)
+    {
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var image = new Image { Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
+        CardBody.Children.Add(image);
+        var ink = System.Drawing.Color.FromArgb(_text.Color.A, _text.Color.R, _text.Color.G, _text.Color.B);
+        var accent = System.Drawing.Color.FromArgb(_accent.Color.A, _accent.Color.R, _accent.Color.G, _accent.Color.B);
+        _ = LoadMediaArtworkAsync(image, DesktopLyricsPreview.Render(widget, ink, accent, width - 16, height - 44));
+    }
 
     private void Clock(DesktopWidget widget)
     {
@@ -488,6 +500,12 @@ public sealed partial class WidgetPreview : UserControl
             : widget.ControlCenterLightText is false ? Color.FromArgb(255, 31, 35, 41) : _text.Color;
         var softInk = widget.ControlCenterLightText is true ? Color.FromArgb(255, 214, 220, 230)
             : widget.ControlCenterLightText is false ? Color.FromArgb(255, 70, 78, 90) : _secondary.Color;
+        TextBlock ControlText(string value, double size = 12, bool secondary = false)
+        {
+            var text = Text(value, size, secondary);
+            text.Foreground = new SolidColorBrush(secondary ? softInk : ink);
+            return text;
+        }
         void Place(FrameworkElement element, LayoutRect bounds)
         {
             Canvas.SetLeft(element, bounds.X); Canvas.SetTop(element, bounds.Y);
@@ -495,15 +513,19 @@ public sealed partial class WidgetPreview : UserControl
             panel.Children.Add(element);
         }
 
-        foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
+        var quickActions = ControlQuickActions.For(widget);
+        for (var index = 0; index < quickActions.Count; index++)
         {
-            var cell = ControlCenterPresentation.Toggle(body, (int)toggle);
-            var available = ControlCenterPresentation.ToggleAvailable(toggle, snapshot);
+            var action = quickActions[index];
+            var toggle = ControlQuickActions.Toggle(action);
+            var cell = ControlCenterPresentation.QuickAction(body, index, quickActions.Count);
+            var available = toggle is null || ControlCenterPresentation.ToggleAvailable(toggle.Value, snapshot);
             var on = toggle switch
             {
                 ControlCenterToggle.WiFi => snapshot?.WiFiEnabled is true,
                 ControlCenterToggle.Bluetooth => snapshot?.BluetoothEnabled is true,
-                _ => snapshot?.NightLightEnabled is true
+                ControlCenterToggle.NightLight => snapshot?.NightLightEnabled is true,
+                _ => false
             };
             var tile = new Border
             {
@@ -516,40 +538,70 @@ public sealed partial class WidgetPreview : UserControl
                     {
                         new LucideIcon
                         {
-                            Icon = toggle switch
+                            Icon = action switch
                             {
-                                ControlCenterToggle.WiFi => on ? LucideIconName.Wifi : LucideIconName.WifiOff,
-                                ControlCenterToggle.Bluetooth => LucideIconName.Bluetooth,
-                                _ => LucideIconName.Moon
+                                ControlCenterQuickAction.WiFi => on ? LucideIconName.Wifi : LucideIconName.WifiOff,
+                                ControlCenterQuickAction.Bluetooth => LucideIconName.Bluetooth,
+                                ControlCenterQuickAction.NightLight => LucideIconName.Moon,
+                                ControlCenterQuickAction.Display => LucideIconName.Monitor,
+                                ControlCenterQuickAction.Cast => LucideIconName.Cast,
+                                ControlCenterQuickAction.Microphone => LucideIconName.Mic,
+                                ControlCenterQuickAction.ApplicationVolume => LucideIconName.SlidersHorizontal,
+                                ControlCenterQuickAction.ScreenCapture => LucideIconName.ScanLine,
+                                _ => LucideIconName.Cog
                             },
                             Width = 18, Height = 18,
                             HorizontalAlignment = HorizontalAlignment.Center,
-                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color)
+                            Margin = new Thickness(0, 0, ControlQuickActions.HasDetails(action) ? 12 : 0, 0),
+                            Foreground = new SolidColorBrush(!available ? softInk : on && widget.ControlCenterLightText is null ? ResolveAccentForeground() : ink)
                         },
-                        new TextBlock { Text = ControlCenterPresentation.ToggleLabel(toggle), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
+                        new TextBlock { Text = ControlQuickActions.Label(action), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
                             HorizontalAlignment = HorizontalAlignment.Center,
-                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color) },
-                        new TextBlock { Text = ControlCenterPresentation.ToggleStateText(toggle, snapshot), FontSize = 10,
-                            HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 2, 0, 0),
-                            Foreground = new SolidColorBrush(!available ? softInk : on ? ResolveAccentForeground() : _text.Color) }
+                            Foreground = new SolidColorBrush(!available ? softInk : on && widget.ControlCenterLightText is null ? ResolveAccentForeground() : ink) },
+                        new TextBlock { Text = ControlQuickActions.Status(action, snapshot), FontSize = 9,
+                            TextTrimming = TextTrimming.CharacterEllipsis, TextAlignment = TextAlignment.Center,
+                            HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(3, 2, 3, 0),
+                            Foreground = new SolidColorBrush(!available ? softInk : on && widget.ControlCenterLightText is null ? ResolveAccentForeground() : ink) }
                     }
                 }
             };
+            if (ControlQuickActions.HasDetails(action))
+            {
+                var content = tile.Child;
+                tile.Child = null;
+                var combined = new Grid(); combined.Children.Add(content);
+                combined.Children.Add(new LucideIcon { Icon = LucideIconName.ChevronRight, Width = 10, Height = 12,
+                    HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 8, 5, 0),
+                    Foreground = new SolidColorBrush(!available ? softInk : on && widget.ControlCenterLightText is null ? ResolveAccentForeground() : ink) });
+                tile.Child = combined;
+            }
             Place(tile, cell);
         }
 
         var sliders = ControlCenterPresentation.SliderArea(body);
         var half = (sliders.Width - 14) / 2;
         Slider("音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent,
-            new LayoutRect(sliders.X, sliders.Y, half, sliders.Height));
+            new LayoutRect(sliders.X, sliders.Y, half, sliders.Height), labelInset: 26, valueInset: 26);
+        var muteButton = ControlCenterPresentation.VolumeMuteButton(body);
+        Place(new LucideIcon
+        {
+            Icon = snapshot?.VolumeMuted is true ? LucideIconName.VolumeX : LucideIconName.Volume2,
+            Foreground = new SolidColorBrush(ink),
+            Opacity = snapshot?.VolumeMuted is not null ? 1 : 0.35
+        }, new LayoutRect(muteButton.X + 4, muteButton.Y + 3, 14, 14));
+        var mixerButton = ControlCenterPresentation.VolumeMixerButton(body);
+        Place(new LucideIcon { Icon = LucideIconName.SlidersHorizontal, Foreground = new SolidColorBrush(ink) },
+            new LayoutRect(mixerButton.X + 4, mixerButton.Y + 3, 14, 14));
         Slider("亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent,
             new LayoutRect(sliders.X + half + 14, sliders.Y, half, sliders.Height));
 
-        void Slider(string label, string value, double? percent, LayoutRect area)
+        void Slider(string label, string value, double? percent, LayoutRect area, double labelInset = 0, double valueInset = 0)
         {
-            var header = Text(label, 11, true); Place(header, area with { Height = 16 });
-            var amount = Text(value, 11, true); amount.TextAlignment = TextAlignment.Right;
-            Place(amount, area with { Height = 16 });
+            var header = ControlText(label, 11, true);
+            Place(header, area with { X = area.X + labelInset, Width = area.Width / 2 - labelInset, Height = 16 });
+            var amount = ControlText(value, 11, true); amount.TextAlignment = TextAlignment.Right;
+            Place(amount, area with { Width = area.Width - valueInset, Height = 16 });
             var track = new Border
             {
                 CornerRadius = new CornerRadius(2.5), Height = 5,
@@ -566,7 +618,7 @@ public sealed partial class WidgetPreview : UserControl
             Place(track, area with { Y = area.Y + 24, Height = 5 });
         }
 
-        var displayLabel = Text("亮度 · " + (string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? "组件所在显示器" : widget.ControlBrightnessDisplayId.Replace(@"\\.\DISPLAY", "显示器 ")), 10.5);
+        var displayLabel = ControlText("亮度 · " + (string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? "组件所在显示器" : widget.ControlBrightnessDisplayId.Replace(@"\\.\DISPLAY", "显示器 ")), 10.5);
         displayLabel.VerticalAlignment = VerticalAlignment.Center;
         displayLabel.Margin = new Thickness(28, 0, 24, 0);
         var displayContent = new Grid(); displayContent.Children.Add(displayLabel);
@@ -577,7 +629,7 @@ public sealed partial class WidgetPreview : UserControl
             Margin = new Thickness(18, 0, 0, 4), Foreground = new SolidColorBrush(ink) });
         displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.ChevronsUpDown, Width = 13, Height = 13,
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 8, 0), Foreground = new SolidColorBrush(softInk) });
-        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(ink with { A = 38 }), Child = displayContent },
+        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(_text.Color with { A = 38 }), Child = displayContent },
             ControlCenterPresentation.BrightnessDisplayRow(body));
         var media = ControlCenterPresentation.MediaArea(body);
         var outputRow = new Border
@@ -592,78 +644,71 @@ public sealed partial class WidgetPreview : UserControl
                     new LucideIcon { Icon = snapshot?.OutputDeviceName is { } output &&
                         (output.Contains("耳机") || output.Contains("headphone", StringComparison.OrdinalIgnoreCase) || output.Contains("headset", StringComparison.OrdinalIgnoreCase))
                         ? LucideIconName.Headphones : LucideIconName.Volume2, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
-                    Text(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
+                    ControlText(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
                 }
             }
         };
-        Place(outputRow, media with { Height = 26 });
+        Place(outputRow, ControlCenterPresentation.OutputRow(media));
+        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(_text.Color with { A = 38 }),
+            Child = new LucideIcon { Icon = LucideIconName.Mic, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) } },
+            ControlCenterPresentation.MicrophoneButton(body));
 
-        var card = new Border
+        var mediaPanel = ControlCenterPresentation.MediaPanel(media);
+        var trackMedia = snapshot?.Media;
+        Place(new Border { CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(_text.Color with { A = 20 }) }, mediaPanel);
+        var artwork = new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(_text.Color with { A = 24 }) };
+        if (trackMedia?.Artwork is { Length: > 0 } bytes)
         {
-            CornerRadius = new CornerRadius(8),
-            Background = new SolidColorBrush(ink with { A = 20 }),
-            Child = new Grid
-            {
-                Children =
-                {
-                    MediaTitle(),
-                    Transport()
-                }
-            }
-        };
-        Canvas.SetLeft(card, media.X); Canvas.SetTop(card, media.Y + 34);
-        card.Width = media.Width; card.Height = Math.Max(0, media.Height - 34);
-        panel.Children.Add(card);
-        MediaProgressBar();
-
-        void MediaProgressBar()
+            var cover = new Image { Stretch = Stretch.UniformToFill };
+            artwork.Child = cover;
+            _ = LoadMediaArtworkAsync(cover, bytes);
+        }
+        else artwork.Child = new LucideIcon { Icon = LucideIconName.Music, Width = 18, Height = 18, Foreground = new SolidColorBrush(softInk) };
+        Place(artwork, ControlCenterPresentation.MediaArtwork(mediaPanel));
+        Place(ControlText(trackMedia is null ? "没有正在播放的媒体" : string.IsNullOrWhiteSpace(trackMedia.Title) ? "未知曲目" : trackMedia.Title, 11.5),
+            ControlCenterPresentation.MediaTitle(mediaPanel));
+        Place(ControlText(trackMedia is null ? "" : string.IsNullOrWhiteSpace(trackMedia.Artist) ? trackMedia.Album : trackMedia.Artist, 10, true),
+            ControlCenterPresentation.MediaArtist(mediaPanel));
+        var buttons = ControlCenterPresentation.MediaButtonRects(mediaPanel);
+        var icons = new[] { LucideIconName.SkipBack, trackMedia?.IsPlaying is true ? LucideIconName.Pause : LucideIconName.Play, LucideIconName.SkipForward };
+        for (var index = 0; index < buttons.Length; index++)
         {
-            var track_media = snapshot?.Media;
-            if (track_media is not { Duration.TotalSeconds: > 0 }) return;
+            var button = buttons[index];
+            Place(new LucideIcon { Icon = icons[index], Foreground = new SolidColorBrush(widget.ControlCenterLightText is not null ? ink : _accent.Color),
+                Opacity = trackMedia is null ? .35 : 1 }, new(button.X + (button.Width - 15) / 2, button.Y + 3.5, 15, 15));
+        }
+        if (trackMedia is { Duration.TotalSeconds: > 0 })
+        {
             var now = DateTimeOffset.Now;
-            var track = new Border
-            {
-                CornerRadius = new CornerRadius(2), Height = 4,
-                Background = new SolidColorBrush(_text.Color with { A = 30 }),
-                Child = new Border
-                {
-                    CornerRadius = new CornerRadius(2),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    Width = (track_media.PositionNow(now).TotalSeconds / track_media.Duration.TotalSeconds) * (media.Width - 20),
-                    Background = new SolidColorBrush(_accent.Color)
-                }
-            };
-            Canvas.SetLeft(track, media.X + 10);
-            Canvas.SetTop(track, media.Y + 33);
-            track.Width = media.Width - 20;
-            panel.Children.Add(track);
-            var time = Text(ControlCenterPresentation.MediaTimeText(track_media, now), 9.5, true);
+            var trackBounds = ControlCenterPresentation.MediaProgress(mediaPanel);
+            var ratio = trackMedia.PositionNow(now).TotalSeconds / trackMedia.Duration.TotalSeconds;
+            Place(new Border { CornerRadius = new CornerRadius(2), Background = new SolidColorBrush(_text.Color with { A = 30 }),
+                Child = new Border { CornerRadius = new CornerRadius(2), HorizontalAlignment = HorizontalAlignment.Left,
+                    Width = ratio * trackBounds.Width, Background = new SolidColorBrush(_accent.Color) } }, trackBounds);
+            if (trackMedia.CanSeek) Place(new Border { CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(_accent.Color) },
+                new(trackBounds.X + ratio * trackBounds.Width - 3, trackBounds.Y - 1, 6, 6));
+            var time = ControlText(ControlCenterPresentation.MediaTimeText(trackMedia, now), 9, true);
             time.TextAlignment = TextAlignment.Right;
-            Canvas.SetLeft(time, media.X + 10); Canvas.SetTop(time, media.Y + 39);
-            time.Width = media.Width - 20;
-            panel.Children.Add(time);
-        }
-
-        FrameworkElement MediaTitle()
-        {
-            var title = Text(snapshot?.Media is null ? "没有正在播放的媒体" : ControlCenterPresentation.MediaSummary(snapshot), 11.5);
-            title.Margin = new Thickness(10, 8, 10, 0);
-            title.VerticalAlignment = VerticalAlignment.Top;
-            return title;
-        }
-
-        FrameworkElement Transport()
-        {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
-                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 0, 6) };
-            row.Children.Add(new LucideIcon { Icon = LucideIconName.SkipBack, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
-            row.Children.Add(new LucideIcon { Icon = snapshot?.Media?.IsPlaying is true ? LucideIconName.Pause : LucideIconName.Play, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
-            row.Children.Add(new LucideIcon { Icon = LucideIconName.SkipForward, Width = 15, Height = 15, Foreground = new SolidColorBrush(_accent.Color) });
-            return row;
+            Place(time, ControlCenterPresentation.MediaTime(mediaPanel));
         }
 
         CardBody.Children.Add(panel);
+    }
+
+    private static async Task LoadMediaArtworkAsync(Image image, byte[] bytes)
+    {
+        try
+        {
+            using var stream = new global::Windows.Storage.Streams.InMemoryRandomAccessStream();
+            using var writer = new global::Windows.Storage.Streams.DataWriter(stream);
+            writer.WriteBytes(bytes);
+            await writer.StoreAsync();
+            stream.Seek(0);
+            var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            await bitmap.SetSourceAsync(stream);
+            image.Source = bitmap;
+        }
+        catch (Exception) { }
     }
 
     private void Network(DesktopWidget widget)

@@ -161,9 +161,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             return true;
         }
 
-        EnsureHitMaskBitmap();
+        using var measureBitmap = DesktopLayerBitmapFactory.Create(1, 1);
         RectangleF currentBounds;
-        using (var measureGraphics = Graphics.FromImage(_hitMaskBitmap!))
+        using (var measureGraphics = Graphics.FromImage(measureBitmap))
         {
             measureGraphics.ScaleTransform((float)_scale, (float)_scale);
             currentBounds = GetItemHoverVisualBounds(measureGraphics, item, geometry.Body);

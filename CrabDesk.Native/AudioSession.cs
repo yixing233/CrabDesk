@@ -11,14 +11,16 @@ namespace CrabDesk.Native;
 /// them are still reserved with placeholders, because a COM interface is
 /// positional — skipping a slot would call the wrong method.
 /// </summary>
-internal static class AudioSession
+internal static partial class AudioSession
 {
     private const int ClsCtxAll = 23;
 
     public readonly record struct Reading(double? Volume, bool? Muted, string DeviceId, string DeviceName);
 
     /// <summary>Volume of the default output endpoint.</summary>
-    public static Reading Read()
+    public static Reading Read() => Read(EDataFlow.Render);
+
+    private static Reading Read(EDataFlow flow)
     {
         IMMDevice? device = null;
         try
@@ -26,15 +28,19 @@ internal static class AudioSession
             var enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
             try
             {
-                if (enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Multimedia, out device) != 0 || device is null)
+                if (enumerator.GetDefaultAudioEndpoint(flow, ERole.Multimedia, out device) != 0 || device is null)
                     return new(null, null, "", "");
                 var id = device.GetId();
                 var name = device.GetFriendlyName();
                 var volume = device.ActivateVolume();
                 if (volume is null) return new(null, null, id, name);
-                volume.GetMasterVolumeLevelScalar(out var level);
-                volume.GetMute(out var muted);
-                return new(Math.Clamp(level * 100, 0, 100), muted != 0, id, name);
+                try
+                {
+                    var levelRead = volume.GetMasterVolumeLevelScalar(out var level) >= 0;
+                    var muteRead = volume.GetMute(out var muted) >= 0;
+                    return new(levelRead ? Math.Clamp(level * 100, 0, 100) : null, muteRead ? muted != 0 : null, id, name);
+                }
+                finally { Release(volume); }
             }
             finally { Release(enumerator); }
         }
@@ -46,7 +52,9 @@ internal static class AudioSession
     }
 
     /// <summary>Active output endpoints, with the default marked.</summary>
-    public static IReadOnlyList<ControlCenterOutputDevice> ReadOutputs()
+    public static IReadOnlyList<ControlCenterOutputDevice> ReadOutputs() => ReadEndpoints(EDataFlow.Render);
+
+    private static IReadOnlyList<ControlCenterOutputDevice> ReadEndpoints(EDataFlow flow)
     {
         IMMDeviceCollection? collection = null;
         IMMDeviceEnumerator? enumerator = null;
@@ -54,11 +62,11 @@ internal static class AudioSession
         {
             enumerator = (IMMDeviceEnumerator)new MMDeviceEnumeratorComObject();
             var defaultId = "";
-            if (enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Multimedia, out var current) == 0 && current is not null)
+            if (enumerator.GetDefaultAudioEndpoint(flow, ERole.Multimedia, out var current) == 0 && current is not null)
             {
                 try { defaultId = current.GetId(); } finally { Release(current); }
             }
-            if (enumerator.EnumAudioEndpoints(EDataFlow.Render, DeviceState.Active, out collection) != 0 || collection is null)
+            if (enumerator.EnumAudioEndpoints(flow, DeviceState.Active, out collection) != 0 || collection is null)
                 return [];
             collection.GetCount(out var count);
             var list = new List<ControlCenterOutputDevice>((int)count);
@@ -103,7 +111,8 @@ internal static class AudioSession
                 if (volume is null) return false;
                 try
                 {
-                    return volume.SetMasterVolumeLevelScalar((float)(ControlCenterPresentation.ClampPercent(percent) / 100), Guid.Empty) == 0;
+                    var context = Guid.Empty;
+                    return volume.SetMasterVolumeLevelScalar((float)(ControlCenterPresentation.ClampPercent(percent) / 100), ref context) >= 0;
                 }
                 finally { Release(volume); }
             }
@@ -124,7 +133,7 @@ internal static class AudioSession
                 if (enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Multimedia, out device) != 0 || device is null) return false;
                 var volume = device.ActivateVolume();
                 if (volume is null) return false;
-                try { return volume.SetMute(muted ? 1 : 0, Guid.Empty) == 0; }
+                try { var context = Guid.Empty; return volume.SetMute(muted ? 1 : 0, ref context) >= 0; }
                 finally { Release(volume); }
             }
             finally { Release(enumerator); }
@@ -214,15 +223,16 @@ internal static class AudioSession
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IMMDeviceEnumerator
     {
-        int EnumAudioEndpoints(EDataFlow dataFlow, DeviceState stateMask, out IMMDeviceCollection devices);
-        int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice device);
+        [PreserveSig] int EnumAudioEndpoints(EDataFlow dataFlow, DeviceState stateMask, out IMMDeviceCollection devices);
+        [PreserveSig] int GetDefaultAudioEndpoint(EDataFlow dataFlow, ERole role, out IMMDevice device);
+        [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
     }
 
     [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IMMDeviceCollection
     {
-        int GetCount(out uint count);
-        int Item(uint index, out IMMDevice device);
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int Item(uint index, out IMMDevice device);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -230,19 +240,19 @@ internal static class AudioSession
     {
         [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams,
             [MarshalAs(UnmanagedType.IUnknown)] out object? instance);
-        int OpenPropertyStore(int access, out IPropertyStore properties);
-        int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
-        int GetState(out DeviceState state);
+        [PreserveSig] int OpenPropertyStore(int access, out IPropertyStore properties);
+        [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+        [PreserveSig] int GetState(out DeviceState state);
     }
 
     [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IPropertyStore
     {
-        int GetCount(out uint count);
-        int GetAt(uint index, out PropertyKey key);
-        int GetValue(ref PropertyKey key, out PropVariant value);
-        int SetValue(ref PropertyKey key, ref PropVariant value);
-        int Commit();
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PropertyKey key);
+        [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+        [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+        [PreserveSig] int Commit();
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -278,19 +288,19 @@ internal static class AudioSession
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IAudioEndpointVolume
     {
-        int RegisterControlChangeNotify(IntPtr notify);
-        int UnregisterControlChangeNotify(IntPtr notify);
-        int GetChannelCount(out uint count);
-        int SetMasterVolumeLevel(float level, Guid context);
-        int SetMasterVolumeLevelScalar(float level, Guid context);
-        int GetMasterVolumeLevel(out float level);
-        int GetMasterVolumeLevelScalar(out float level);
-        int SetChannelVolumeLevel(uint channel, float level, Guid context);
-        int SetChannelVolumeLevelScalar(uint channel, float level, Guid context);
-        int GetChannelVolumeLevel(uint channel, out float level);
-        int GetChannelVolumeLevelScalar(uint channel, out float level);
-        int SetMute(int mute, Guid context);
-        int GetMute(out int mute);
+        [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+        [PreserveSig] int GetChannelCount(out uint count);
+        [PreserveSig] int SetMasterVolumeLevel(float level, ref Guid context);
+        [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid context);
+        [PreserveSig] int GetMasterVolumeLevel(out float level);
+        [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+        [PreserveSig] int SetChannelVolumeLevel(uint channel, float level, ref Guid context);
+        [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, ref Guid context);
+        [PreserveSig] int GetChannelVolumeLevel(uint channel, out float level);
+        [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+        [PreserveSig] int SetMute(int mute, ref Guid context);
+        [PreserveSig] int GetMute(out int mute);
     }
 
     [ComImport, Guid("F8679F50-850A-41CF-9C72-430F290290C8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

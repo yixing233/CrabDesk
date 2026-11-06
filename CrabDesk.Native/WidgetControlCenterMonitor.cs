@@ -25,9 +25,10 @@ public interface IWidgetControlCenterMonitor
     bool SetOutputDevice(string deviceId);
     bool SetNightLight(bool enabled);
     Task<bool> SetRadioAsync(ControlCenterToggle toggle, bool enabled, CancellationToken token = default);
+    Task<bool> SeekMediaAsync(ControlCenterMedia media, TimeSpan position, CancellationToken token = default);
 }
 
-public sealed class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, IDisposable
+public sealed partial class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, IDisposable
 {
     public string BrightnessDisplayId { get; set; } = "";
     private readonly object _gate = new();
@@ -64,6 +65,11 @@ public sealed class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, ID
 
         var radio = await ReadRadiosAsync(token).ConfigureAwait(false);
         snapshot = snapshot with { WiFiEnabled = radio.WiFi, BluetoothEnabled = radio.Bluetooth };
+        snapshot = snapshot with
+        {
+            WiFiConnectionName = radio.WiFi is true ? WiFiConnectionService.ReadConnectedName() : "",
+            BluetoothConnectionName = radio.Bluetooth is true ? await BluetoothConnectionService.ReadConnectedLabelAsync(token).ConfigureAwait(false) : ""
+        };
 
         var nightLight = NightLightState.Read();
         snapshot = snapshot with { NightLightEnabled = nightLight };
@@ -117,40 +123,6 @@ public sealed class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, ID
         {
             // No radio, no permission, or WinRT unavailable.
             return (null, null);
-        }
-    }
-
-    private static async Task<ControlCenterMedia?> ReadMediaAsync(CancellationToken token)
-    {
-        try
-        {
-            var manager = await global::Windows.Media.Control
-                .GlobalSystemMediaTransportControlsSessionManager.RequestAsync()
-                .AsTask(token).ConfigureAwait(false);
-            var session = manager.GetCurrentSession();
-            if (session is null) return null;
-            var info = session.GetPlaybackInfo();
-            var properties = await session.TryGetMediaPropertiesAsync().AsTask(token).ConfigureAwait(false);
-            var timeline = session.GetTimelineProperties();
-            var duration = timeline.EndTime - timeline.StartTime;
-            return new ControlCenterMedia(
-                properties?.Title ?? "",
-                properties?.Artist ?? "",
-                properties?.AlbumTitle ?? "",
-                info?.PlaybackStatus == global::Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
-                info?.Controls.IsPlayPauseToggleEnabled ?? false,
-                info?.Controls.IsNextEnabled ?? false,
-                info?.Controls.IsPreviousEnabled ?? false)
-            {
-                // A player reporting no end time is a live stream; the bar hides.
-                Duration = duration > TimeSpan.Zero ? duration : TimeSpan.Zero,
-                Position = timeline.Position > TimeSpan.Zero ? timeline.Position : TimeSpan.Zero,
-                CapturedAt = DateTimeOffset.Now
-            };
-        }
-        catch (Exception)
-        {
-            return null;
         }
     }
 
@@ -226,6 +198,9 @@ public sealed class WidgetControlCenterMonitor : IWidgetControlCenterMonitor, ID
         {
             if (_disposed) return;
             _disposed = true;
+            if (_mediaManager is { } manager) manager.CurrentSessionChanged -= OnCurrentMediaSessionChanged;
+            _mediaManager = null;
+            ClearMedia();
         }
     }
 }

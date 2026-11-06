@@ -25,7 +25,7 @@ internal sealed partial class DesktopBoxForm
     private void InitializeWidgets()
     {
         _calendarToolTipTimer.Tick += ShowCalendarToolTip;
-        VisibleChanged += (_, _) => { if (!Visible) { DismissWidgetInputs(); HideCalendarHover(); } };
+        VisibleChanged += (_, _) => { if (!Visible) { DismissWidgetInputs(); HideCalendarHover(); } UpdateLyricsAnimationTimer(); };
         _widgetTimer = new Forms.Timer { Interval = 1000 };
         _widgetTimer.Tick += (_, _) =>
         {
@@ -60,6 +60,11 @@ internal sealed partial class DesktopBoxForm
         RefreshWidgetTranslationInput();
         RefreshWidgetNoteInput();
         RefreshWidgetTodoInput();
+        RefreshControlCenterMixer();
+        RefreshControlCenterDeviceMenu();
+        RefreshMicrophone();
+        RefreshControlPopup();
+        RefreshLyricsVisuals();
         if (_pressedWidget is not null && !_runtime.State.Widgets.Contains(_pressedWidget)) FinishWidgetPress(false);
         var ids = _runtime.State.Widgets.Select(w => w.Id).ToHashSet();
         foreach (var id in _widgetScroll.Keys.Where(id => !ids.Contains(id)).ToArray()) _widgetScroll.Remove(id);
@@ -99,7 +104,7 @@ internal sealed partial class DesktopBoxForm
             !(widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point)) &&
             !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
             !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
-            (widget.Kind == DesktopWidgetKind.Clock || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds || point.Y < widget.Bounds.Y + 28 ||
+            (widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Lyrics || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds || point.Y < widget.Bounds.Y + 28 ||
              widget.Kind == DesktopWidgetKind.Weather &&
              (GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Icon.Contains(point))) &&
             // A slider must not drag the card: pressing one and moving adjusts the
@@ -197,6 +202,7 @@ internal sealed partial class DesktopBoxForm
     private bool HandleWidgetMouseUp(Forms.MouseEventArgs args, PointF point)
     {
         if (_pressedWidget is not { } widget || args.Button != Forms.MouseButtons.Left) return false;
+        var soughtMedia = CompleteControlSeek(widget, point);
         EndControlCenterPress();
         if (_widgetResizeEdges != WidgetResizeEdges.None)
         {
@@ -211,7 +217,7 @@ internal sealed partial class DesktopBoxForm
             UpdateMovingWidget(widget, point);
         }
         FinishWidgetPress(true);
-        if (!dragged && ReferenceEquals(WidgetAt(point), widget)) HandleWidgetClick(widget, point);
+        if (!dragged && !soughtMedia && ReferenceEquals(WidgetAt(point), widget)) HandleWidgetClick(widget, point);
         return true;
     }
 
@@ -328,6 +334,14 @@ internal sealed partial class DesktopBoxForm
         }
         menu.Items.Add(sizes);
         if (widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network) AddMonitorContextMenu(menu, widget);
+        if (widget.Kind == DesktopWidgetKind.Lyrics) AddLyricsContextMenu(menu, widget);
+        if (widget.Kind == DesktopWidgetKind.ControlCenter)
+        {
+            menu.Items.Add(BuildControlCenterInkMenu(widget));
+            menu.Items.Add("自定义快捷区…", null, (_, _) => ShowQuickActionsEditor(widget));
+            menu.Items.Add("显示控制…", null, (_, _) => ShowDisplayControls(widget,
+                WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius)));
+        }
 
         if (widget.Kind == DesktopWidgetKind.Note)
             menu.Items.Add("编辑便签", null, (_, _) => BeginWidgetNoteInput(widget));

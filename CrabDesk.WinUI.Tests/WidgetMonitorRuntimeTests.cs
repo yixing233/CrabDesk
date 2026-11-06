@@ -14,6 +14,206 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class WidgetMonitorRuntimeTests
 {
     [Fact]
+    public async Task MediaDragPreviewsWithoutWritingAndSeeksOnceWhenReleasedOutsideTheCard()
+    {
+        var runtime = Fixture();
+        var media = new ControlCenterMedia("Track", "Artist", "Album", true, true, true, true)
+        { TrackId = "track", CanSeek = true, Duration = TimeSpan.FromSeconds(100), Position = TimeSpan.FromSeconds(20), CapturedAt = DateTimeOffset.Now };
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(100, 100, 372, 292), Controls = new() { Media = media } };
+        runtime.State.Widgets.Add(widget);
+        var requested = new TaskCompletionSource<(ControlCenterMedia Media, TimeSpan Position)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.SeekMediaAsync(It.IsAny<ControlCenterMedia>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Returns((ControlCenterMedia track, TimeSpan position, CancellationToken _) =>
+            { requested.TrySetResult((track, position)); return Task.FromResult(true); });
+        source.Setup(s => s.ReadAsync(It.IsAny<CancellationToken>())).ReturnsAsync(widget.Controls);
+        Set(runtime, "_controlMonitor", source.Object);
+        OnSta(() =>
+        {
+            using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { }); Set(runtime, "_saveTimer", timer);
+            using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+            var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+            var track = ControlCenterPresentation.MediaProgress(ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body)));
+            var start = new PointF((float)(100 + track.X + track.Width / 4), (float)(100 + track.Y + 2));
+            typeof(DesktopBoxForm).GetMethod("BeginControlCenterPress", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [widget, start]);
+            Set(form, "_pressedWidget", widget);
+            var move = typeof(DesktopBoxForm).GetMethod("UpdateControlCenterDrag", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            for (var fraction = .3; fraction < 1; fraction += .1)
+                Assert.True((bool)move.Invoke(form, [widget, new PointF((float)(100 + track.X + track.Width * fraction), start.Y)])!);
+            source.Verify(s => s.SeekMediaAsync(It.IsAny<ControlCenterMedia>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Never);
+            var end = new PointF(700, start.Y);
+            Assert.True((bool)typeof(DesktopBoxForm).GetMethod("HandleWidgetMouseUp", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(form, [new MouseEventArgs(MouseButtons.Left, 1, 700, (int)end.Y, 0), end])!);
+            Assert.Equal(new LayoutRect(100, 100, 372, 292), widget.Bounds);
+        });
+        var command = await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(media, command.Media);
+        Assert.Equal(TimeSpan.FromSeconds(100), command.Position);
+        source.Verify(s => s.SeekMediaAsync(media, TimeSpan.FromSeconds(100), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("changed")] [InlineData("unsupported")] [InlineData("removed")] [InlineData("cancelled")]
+    public void MediaDragCannotSeekAnUnavailableOrChangedTrack(string situation) => OnSta(() =>
+    {
+        var runtime = Fixture();
+        var media = new ControlCenterMedia("Track", "", "", true, true, true, true)
+        { TrackId = "first", CanSeek = situation != "unsupported", Duration = TimeSpan.FromSeconds(100) };
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(100, 100, 372, 292), Controls = new() { Media = media } };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>(); Set(runtime, "_controlMonitor", source.Object);
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+        var track = ControlCenterPresentation.MediaProgress(ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body)));
+        var point = new PointF((float)(100 + track.X + track.Width / 2), (float)(100 + track.Y + 2));
+        typeof(DesktopBoxForm).GetMethod("BeginControlCenterPress", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [widget, point]);
+        if (situation == "changed") widget.Controls = widget.Controls with { Media = media with { TrackId = "second" } };
+        if (situation == "removed") runtime.State.Widgets.Remove(widget);
+        if (situation == "cancelled") typeof(DesktopBoxForm).GetMethod("EndControlCenterPress", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, null);
+        typeof(DesktopBoxForm).GetMethod("CompleteControlSeek", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [widget, point]);
+        source.Verify(s => s.SeekMediaAsync(It.IsAny<ControlCenterMedia>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Never);
+    });
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void MediaArtworkRendersAndChangesWithoutRetainingThePreviousCover(bool dark) => OnSta(() =>
+    {
+        var runtime = Fixture();
+        runtime.State.Settings.DefaultBoxAppearance.Background = dark ? "#24272D" : "#F8F9FB";
+        var media = new ControlCenterMedia("专辑中的一首歌", "歌手 · 测试", "Album", true, true, true, true)
+        { TrackId = "art", CanSeek = true, Duration = TimeSpan.FromSeconds(210), Position = TimeSpan.FromSeconds(65), CapturedAt = DateTimeOffset.Now };
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(20, 20, 372, 292), Controls = new()
+            { Media = media, VolumePercent = 42, VolumeMuted = false, BrightnessPercent = 65, WiFiEnabled = true, BluetoothEnabled = true, OutputDeviceName = "耳机 · 音频设备" } };
+        runtime.State.Widgets.Add(widget);
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+        var artwork = ControlCenterPresentation.MediaArtwork(ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body)));
+        var center = new Point((int)(20 + artwork.X + artwork.Width / 2), (int)(20 + artwork.Y + artwork.Height / 2));
+        using var bitmap = new Bitmap(412, 332);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        foreach (var color in new[] { Color.Coral, Color.RoyalBlue })
+        {
+            using var cover = new Bitmap(48, 48);
+            using (var paint = Graphics.FromImage(cover)) paint.Clear(color);
+            using var stream = new MemoryStream(); cover.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+            widget.Controls = widget.Controls with { Media = media with { Artwork = stream.ToArray() } };
+            graphics.Clear(dark ? Color.FromArgb(28, 30, 36) : Color.White);
+            typeof(DesktopBoxForm).GetMethod("DrawWidget", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [graphics, widget]);
+            Assert.Equal(color.ToArgb(), bitmap.GetPixel(center.X, center.Y).ToArgb());
+        }
+        bitmap.Save(Path.Combine(AppContext.BaseDirectory, dark ? "control-center-media-dark.png" : "control-center-media-light.png"));
+        widget.Controls = widget.Controls with { Media = media with { Artwork = [0, 1, 2] } };
+        typeof(DesktopBoxForm).GetMethod("DrawWidget", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [graphics, widget]);
+        Assert.NotEqual(Color.RoyalBlue.ToArgb(), bitmap.GetPixel(center.X, center.Y).ToArgb());
+    });
+
+    [Theory]
+    [InlineData("#111827", null, true)]
+    [InlineData("#F5F5F5", null, false)]
+    [InlineData("#111827", false, false)]
+    [InlineData("#F5F5F5", true, true)]
+    public void InkMenuShowsTheCurrentShadeAndSavesTheSelection(string background, bool? initial, bool lightText) => OnSta(() =>
+    {
+        var runtime = Fixture();
+        using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { });
+        Set(runtime, "_saveTimer", timer);
+        runtime.State.Settings.DefaultBoxAppearance.Background = background;
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(20, 20, 372, 292), ControlCenterLightText = initial
+        };
+        runtime.State.Widgets.Add(widget);
+        var changes = 0;
+        runtime.Changed += (_, _) => changes++;
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        using var menu = form.BuildControlCenterInkMenu(widget);
+        var choices = menu.DropDownItems.OfType<ToolStripMenuItem>().ToArray();
+        Assert.Equal("文字和图标颜色", menu.Text);
+        Assert.Equal(new[] { "浅色", "深色" }, choices.Select(choice => choice.Text));
+        Assert.Equal(lightText, choices[0].Checked);
+        Assert.Equal(!lightText, choices[1].Checked);
+
+        choices[1].PerformClick();
+        Assert.False(widget.ControlCenterLightText);
+        Assert.False(choices[0].Checked);
+        Assert.True(choices[1].Checked);
+        choices[0].PerformClick();
+        Assert.True(widget.ControlCenterLightText);
+        Assert.True(choices[0].Checked);
+        Assert.False(choices[1].Checked);
+        Assert.Equal(2, changes);
+        Assert.Equal(background, runtime.State.Settings.DefaultBoxAppearance.Background);
+    });
+
+    [Fact]
+    public void InkChoiceChangesTextAndIconsWhileKeepingPanelColors() => OnSta(() =>
+    {
+        var runtime = Fixture();
+        runtime.State.Settings.DefaultBoxAppearance.Background = "#808080";
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(20, 20, 372, 292),
+            Controls = new()
+            {
+                WiFiEnabled = true, BluetoothEnabled = false, VolumePercent = 42, VolumeMuted = false,
+                OutputDeviceName = "Speakers", BrightnessPercent = 60,
+                Media = new("Track", "Artist", "", false, true, true, true)
+            }
+        };
+        runtime.State.Widgets.Add(widget);
+        using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+        var draw = typeof(DesktopBoxForm).GetMethod("DrawWidget", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Bitmap Render(bool light)
+        {
+            widget.ControlCenterLightText = light;
+            var bitmap = new Bitmap(412, 332);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.Clear(Color.Gray);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            draw.Invoke(form, [graphics, widget]);
+            return bitmap;
+        }
+        using var light = Render(true);
+        using var dark = Render(false);
+        var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+        var sliders = ControlCenterPresentation.SliderArea(body);
+        var media = ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body));
+        var tile = ControlCenterPresentation.Toggle(body, 0);
+        var offTile = ControlCenterPresentation.Toggle(body, 1);
+        var regions = new[]
+        {
+            new LayoutRect(tile.X + (tile.Width - 18) / 2, tile.Y + 5, 18, 18),
+            new LayoutRect(offTile.X + (offTile.Width - 18) / 2, offTile.Y + 5, 18, 18),
+            new LayoutRect(sliders.X + 26, sliders.Y, 48, 16),
+            ControlCenterPresentation.VolumeMuteButton(body),
+            new LayoutRect(media.X + 10, media.Y + 8, 100, 18),
+            ControlCenterPresentation.MediaButtonRects(media)[1]
+        };
+        foreach (var region in regions)
+            Assert.True(AverageInk(light, region) > AverageInk(dark, region) + 2, $"Ink did not change in {region}");
+        foreach (var point in new[] { new Point((int)offTile.X + 4, (int)offTile.Y + 15), new Point((int)media.X + 4, (int)media.Y + 15) })
+            Assert.Equal(light.GetPixel(point.X + 20, point.Y + 20), dark.GetPixel(point.X + 20, point.Y + 20));
+
+        static double AverageInk(Bitmap bitmap, LayoutRect region)
+        {
+            double sum = 0; var count = 0;
+            for (var y = (int)region.Y; y < region.Y + region.Height; y++)
+                for (var x = (int)region.X; x < region.X + region.Width; x++)
+                {
+                    var color = bitmap.GetPixel(x + 20, y + 20);
+                    sum += (color.R + color.G + color.B) / 3d; count++;
+                }
+            return sum / count;
+        }
+    });
+
+    [Fact]
     public void ControlCenterOnlySurfacePollsAndRepaintsWithoutOtherMonitorWidgets() => OnSta(() =>
     {
         var runtime = Fixture(); Set(runtime, "<Items>k__BackingField", Array.Empty<DesktopItemRef>());
@@ -91,6 +291,196 @@ public sealed class WidgetMonitorRuntimeTests
         Assert.Equal(DesktopWidgetSize.Panel, widget.Size);
         var bounds = widget.Bounds; DesktopWidgets.Normalize(runtime.State);
         Assert.Equal(bounds, widget.Bounds);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(45)]
+    [InlineData(100)]
+    public async Task VolumeChangesClearSystemMute(double requestedVolume)
+    {
+        var runtime = Fixture();
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter,
+            Controls = new() { VolumePercent = 20, VolumeMuted = true }
+        };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        double volume = 20;
+        var muted = true;
+        source.Setup(s => s.SetVolume(It.IsAny<double>())).Returns((double value) => { volume = value; return true; });
+        source.Setup(s => s.SetMuted(It.IsAny<bool>())).Returns((bool value) => { muted = value; return true; });
+        source.Setup(s => s.ReadFast()).Returns(() => new ControlCenterSnapshot { VolumePercent = volume, VolumeMuted = muted });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        runtime.SetControlVolume(requestedVolume);
+        var immediate = widget.Controls;
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(muted);
+        Assert.False(immediate!.VolumeMuted);
+        Assert.False(widget.Controls!.VolumeMuted);
+        Assert.Equal(requestedVolume, widget.Controls.VolumePercent);
+        source.Verify(s => s.SetMuted(false), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MuteButtonPreservesTheVolumeAndMedia(bool initialMuted)
+    {
+        var runtime = Fixture();
+        var media = new ControlCenterMedia("Track", "Artist", "", true, true, true, true);
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(100, 100, 372, 292),
+            Controls = new() { VolumePercent = 42, VolumeMuted = initialMuted, Media = media }
+        };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        var muted = initialMuted;
+        source.Setup(s => s.SetMuted(It.IsAny<bool>())).Returns((bool value) => { muted = value; return true; });
+        source.Setup(s => s.ReadFast()).Returns(() => new ControlCenterSnapshot { VolumePercent = 42, VolumeMuted = muted });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        OnSta(() =>
+        {
+            using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+            var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+            var button = ControlCenterPresentation.VolumeMuteButton(body);
+            var point = new PointF((float)(100 + button.X + button.Width / 2), (float)(100 + button.Y + button.Height / 2));
+            var isSlider = (bool)typeof(DesktopBoxForm).GetMethod("IsControlCenterDragTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(form, [widget, point])!;
+            Assert.False(isSlider);
+            Assert.True((bool)typeof(DesktopBoxForm).GetMethod("HandleControlCenterClick", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(form, [widget, point])!);
+            Assert.Equal(!initialMuted, widget.Controls!.VolumeMuted);
+            Assert.Equal(42, widget.Controls.VolumePercent);
+        });
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(!initialMuted, muted);
+        Assert.Equal(muted, widget.Controls!.VolumeMuted);
+        Assert.Equal(42, widget.Controls.VolumePercent);
+        Assert.Same(media, widget.Controls.Media);
+        source.Verify(s => s.SetVolume(It.IsAny<double>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LatestMuteAndVolumeIntentWinsDuringASlowWrite(bool muteLast)
+    {
+        var runtime = Fixture();
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { VolumePercent = 20, VolumeMuted = false } };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        double volume = 20;
+        var muted = false;
+        source.Setup(s => s.SetVolume(It.IsAny<double>())).Returns((double value) =>
+        {
+            if (value == 30) { started.TrySetResult(); release.Wait(TimeSpan.FromSeconds(5)); }
+            volume = value;
+            return true;
+        });
+        source.Setup(s => s.SetMuted(It.IsAny<bool>())).Returns((bool value) => { muted = value; return true; });
+        source.Setup(s => s.ReadFast()).Returns(() => new ControlCenterSnapshot { VolumePercent = volume, VolumeMuted = muted });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        runtime.SetControlVolume(30);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            runtime.SetControlMuted(true);
+            if (!muteLast) runtime.SetControlVolume(60);
+        }
+        finally { release.Set(); }
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(muteLast, muted);
+        Assert.Equal(muteLast ? 30 : 60, volume);
+        Assert.Equal(muted, widget.Controls!.VolumeMuted);
+        Assert.Equal(volume, widget.Controls.VolumePercent);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task FailedMuteWriteRestoresTheReportedState(bool requestedMute)
+    {
+        var runtime = Fixture();
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { VolumePercent = 42, VolumeMuted = !requestedMute } };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.SetMuted(requestedMute)).Returns(false);
+        source.Setup(s => s.ReadFast()).Returns(new ControlCenterSnapshot { VolumePercent = 42, VolumeMuted = !requestedMute });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        runtime.SetControlMuted(requestedMute);
+        var immediate = widget.Controls;
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(requestedMute, immediate!.VolumeMuted);
+        Assert.Equal(!requestedMute, widget.Controls!.VolumeMuted);
+        Assert.Equal(42, widget.Controls.VolumePercent);
+        Assert.NotEmpty(widget.MonitorError);
+    }
+
+    [Fact]
+    public async Task FailedVolumeWriteKeepsTheSystemMuted()
+    {
+        var runtime = Fixture();
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter, Controls = new() { VolumePercent = 90, VolumeMuted = true } };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.SetVolume(10)).Returns(false);
+        source.Setup(s => s.ReadFast()).Returns(new ControlCenterSnapshot { VolumePercent = 90, VolumeMuted = true });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        runtime.SetControlVolume(10);
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+
+        source.Verify(s => s.SetMuted(It.IsAny<bool>()), Times.Never);
+        Assert.True(widget.Controls!.VolumeMuted);
+        Assert.Equal(90, widget.Controls.VolumePercent);
+        Assert.NotEmpty(widget.MonitorError);
+    }
+
+    [Theory]
+    [InlineData(100, 100)]
+    [InlineData(500, 200)]
+    public async Task VolumeTrackClickUsesTheWidgetsPositionAndUnmutes(double x, double y)
+    {
+        var runtime = Fixture();
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter, MonitorId = "test", Size = DesktopWidgetSize.Panel,
+            Bounds = new(x, y, 372, 292), Controls = new() { VolumePercent = 20, VolumeMuted = true }
+        };
+        runtime.State.Widgets.Add(widget);
+        var source = new Mock<IWidgetControlCenterMonitor>();
+        source.Setup(s => s.SetVolume(It.IsAny<double>())).Returns(true);
+        source.Setup(s => s.SetMuted(false)).Returns(true);
+        source.Setup(s => s.ReadFast()).Returns(new ControlCenterSnapshot { VolumePercent = 75, VolumeMuted = false });
+        Set(runtime, "_controlMonitor", source.Object);
+
+        OnSta(() =>
+        {
+            using var form = new DesktopBoxForm(runtime, runtime.Monitors[0]);
+            var body = WidgetMonitorPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
+            var sliders = ControlCenterPresentation.SliderArea(body);
+            var point = new PointF((float)(x + sliders.X + (sliders.Width - 14) / 2 * 0.75), (float)(y + sliders.Y + 26));
+            Assert.True((bool)typeof(DesktopBoxForm).GetMethod("HandleControlCenterClick", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(form, [widget, point])!);
+            Assert.Equal(75, widget.Controls!.VolumePercent!.Value, 2);
+            Assert.False(widget.Controls.VolumeMuted);
+        });
+        await ((Task)runtime.GetType().GetField("_controlWriteTask", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(runtime)!).WaitAsync(TimeSpan.FromSeconds(5));
+        source.Verify(s => s.SetMuted(false), Times.Once);
     }
 
     [Fact]

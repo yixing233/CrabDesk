@@ -109,6 +109,8 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     internal float? PreferredDpiScale { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
     internal TimeSpan? ConstructionDuration { get; set; }
+    // Optional screen-pixel bounds of the row that toggles this menu.
+    internal Rectangle? ToggleSourceBounds { get; set; }
     internal ToolStripItem? PointerHoveredItem => _pointerHoveredItem;
 
     protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
@@ -406,12 +408,26 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         if (code >= 0 && IsMouseButtonDown(message.ToInt32()) && Visible)
         {
             var mouse = Marshal.PtrToStructure<LowLevelMouseInput>(data);
-            if (!ContainsScreenPoint(this, mouse.Point))
-            {
-                Close(ToolStripDropDownCloseReason.AppClicked);
-            }
+            if (HandleGlobalMouseDown(message.ToInt32(), mouse.Point)) return new IntPtr(1);
         }
         return CallNextHookEx(_mouseHook, code, message, data);
+    }
+
+    internal bool HandleGlobalMouseDown(int message, Point point)
+    {
+        if (!Visible || !IsMouseButtonDown(message) || ContainsScreenPoint(this, point)) return false;
+        // Only consume presses on the actual source window: another application
+        // may cover the same screen coordinates while the menu is still open.
+        var toggle = false;
+        if (message == WmLeftButtonDown && ToggleSourceBounds is { } bounds && bounds.Contains(point) &&
+            SourceControl is { IsHandleCreated: true } source)
+        {
+            var window = WindowFromPoint(point);
+            toggle = window == source.Handle || IsChild(source.Handle, window);
+        }
+        ToggleSourceBounds = null;
+        Close(ToolStripDropDownCloseReason.AppClicked);
+        return toggle;
     }
 
     private static bool ContainsScreenPoint(ToolStripDropDown menu, Point point)
@@ -468,6 +484,13 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr message, IntPtr data);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr parent, IntPtr window);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? moduleName);

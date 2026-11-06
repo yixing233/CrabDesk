@@ -26,3 +26,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Lyricify.Lyrics.Helper 0.2.1
+
+Desktop lyrics use [Lyricify Lyrics Helper](https://github.com/WXRIW/Lyricify-Lyrics-Helper)
+for online lyric sources and synchronized lyric formats.
+
+Copyright 2023 XY Wang, WXRIW
+
+Apache License, Version 2.0. The complete upstream license is included in
+[licenses/Lyricify-Lyrics-Helper-LICENSE.txt](licenses/Lyricify-Lyrics-Helper-LICENSE.txt).
+It was retrieved from the source revision identified by the NuGet package:
+`77e7acbcabb14502924fa1d74fa9d8a3a928c59f`.
+
+The following dependencies are included with this component.
+
+### Newtonsoft.Json 13.0.3
+
+Source: [Json.NET](https://github.com/JamesNK/Newtonsoft.Json).
+
+MIT License. The complete license, including its copyright notice, is copied
+from the NuGet package's `LICENSE.md` to
+[licenses/Newtonsoft-Json-LICENSE.txt](licenses/Newtonsoft-Json-LICENSE.txt).
+
+### SharpZipLib 1.4.2
+
+Source: [SharpZipLib](https://github.com/icsharpcode/SharpZipLib).
+
+MIT License. The complete upstream license, including its copyright notice, is
+included in [licenses/SharpZipLib-LICENSE.txt](licenses/SharpZipLib-LICENSE.txt).
+It was retrieved from the source revision identified by the NuGet package:
+`33f64eb0f28cdd2b084cb822fcc224c7c5aba553`.

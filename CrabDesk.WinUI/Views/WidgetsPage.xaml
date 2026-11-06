@@ -152,6 +152,28 @@
                 <ScrollViewer x:Name="EditorScroll" Grid.Row="1" Style="{StaticResource EditorScrollStyle}" Margin="0,0,4,0" Padding="16,0,4,16"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" ZoomMode="Disabled">
                 <StackPanel Spacing="20">
+                    <StackPanel x:Name="LyricsEditor" Visibility="Collapsed" Spacing="14">
+                        <TextBlock Text="歌词显示" FontWeight="SemiBold" />
+                        <ComboBox x:Name="LyricsFontFamily" Header="字体" HorizontalAlignment="Stretch" SelectionChanged="LyricsTypography_SelectionChanged" />
+                        <ComboBox x:Name="LyricsFontStyle" Header="字形" HorizontalAlignment="Stretch" SelectionChanged="LyricsTypography_SelectionChanged">
+                            <ComboBoxItem Content="常规" /><ComboBoxItem Content="斜体" />
+                        </ComboBox>
+                        <ComboBox x:Name="LyricsFontWeight" Header="字重" HorizontalAlignment="Stretch" SelectionChanged="LyricsTypography_SelectionChanged" />
+                        <ComboBox x:Name="LyricsLines" Header="显示行数" HorizontalAlignment="Stretch" SelectionChanged="LyricsLines_SelectionChanged" />
+                        <NumberBox x:Name="LyricsFont" Header="当前行字号" Minimum="14" Maximum="48" SmallChange="2" SpinButtonPlacementMode="Inline" ValueChanged="LyricsNumber_ValueChanged" />
+                        <ComboBox x:Name="LyricsInk" Header="文字颜色" HorizontalAlignment="Stretch" SelectionChanged="LyricsInk_SelectionChanged">
+                            <ComboBoxItem Content="自动" /><ComboBoxItem Content="浅色" /><ComboBoxItem Content="深色" />
+                        </ComboBox>
+                        <ToggleSwitch x:Name="LyricsTransparentBackground" Header="透明背景" OnContent="已开启" OffContent="已关闭" Toggled="LyricsTransparentBackground_Toggled" />
+                        <ToggleSwitch x:Name="LyricsWords" Header="逐字覆盖动画" OnContent="已开启" OffContent="已关闭" Toggled="LyricsWords_Toggled" />
+                        <TextBlock Text="按歌词时间轴点亮每个字；仅有逐行时间轴时突出显示当前句。" Style="{StaticResource SecondaryBodyStyle}" />
+                        <NumberBox x:Name="LyricsOffset" Header="歌词校准（毫秒）" Minimum="-10000" Maximum="10000" SmallChange="250" LargeChange="1000" SpinButtonPlacementMode="Inline" ValueChanged="LyricsNumber_ValueChanged" />
+                        <TextBlock Text="正值让歌词提前，负值让歌词延后。" Style="{StaticResource SecondaryBodyStyle}" />
+                        <TextBlock x:Name="LyricsSourceStatus" Style="{StaticResource SecondaryBodyStyle}" />
+                        <Button Content="重新匹配歌词" Click="LyricsReload_Click" HorizontalAlignment="Left" />
+                        <Button Content="导入当前歌曲的歌词…" Click="LyricsImport_Click" HorizontalAlignment="Left" />
+                        <TextBlock Text="支持 LRC、QRC、YRC 和 TTML。本地歌词会记住对应歌曲。" Style="{StaticResource SecondaryBodyStyle}" />
+                    </StackPanel>
                     <StackPanel x:Name="ClockEditor" Visibility="Collapsed" Spacing="16">
                         <TextBlock Text="表盘显示" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

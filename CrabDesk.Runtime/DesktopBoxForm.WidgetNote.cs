@@ -42,6 +42,10 @@ internal sealed partial class DesktopBoxForm
 
     internal void DismissWidgetInputs()
     {
+        DismissControlPopup();
+        DismissControlCenterDeviceMenu();
+        DismissMicrophone();
+        DismissControlCenterMixer();
         DismissTodoDeleteConfirmation();
         DismissWidgetTranslationInput();
         DismissWidgetNoteInput();

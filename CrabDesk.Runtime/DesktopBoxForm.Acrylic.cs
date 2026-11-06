@@ -9,9 +9,75 @@ internal sealed partial class DesktopBoxForm
 {
     private bool _usesAcrylicBackground;
     private Action<Bitmap, Point, IReadOnlyList<AcrylicBoxRegion>>? _acrylicFramePresenter;
+    private Action<Bitmap, Rectangle>? _acrylicPartialFramePresenter;
+    private Action? _acrylicEmptyFramePresenter;
+    private Bitmap? _acrylicFrameBitmap;
 
     internal void SetAcrylicFramePresenter(Action<Bitmap, Point, IReadOnlyList<AcrylicBoxRegion>> presenter) =>
         _acrylicFramePresenter = presenter;
+
+    internal void SetAcrylicPartialFramePresenter(Action<Bitmap, Rectangle> presenter) =>
+        _acrylicPartialFramePresenter = presenter;
+
+    internal void SetAcrylicEmptyFramePresenter(Action presenter) =>
+        _acrylicEmptyFramePresenter = presenter;
+
+    private Bitmap GetAcrylicFrameBitmap()
+    {
+        if (_acrylicFrameBitmap is null || _acrylicFrameBitmap.Size != ClientSize)
+        {
+            _acrylicFrameBitmap?.Dispose();
+            _acrylicFrameBitmap = DesktopLayerBitmapFactory.Create(ClientSize.Width, ClientSize.Height);
+        }
+        return _acrylicFrameBitmap;
+    }
+
+    private bool TryPresentLyricsFrame()
+    {
+        if (_resourcesDisposed || IsDisposed || !_desktopAttached || !_lastPresentSucceeded || _presentingLayer ||
+            !_usesAcrylicBackground || _acrylicPartialFramePresenter is null || _acrylicFrameBitmap is null ||
+            _acrylicFrameBitmap.Size != ClientSize || HasDynamicVisual || _widgetDragging || _widgetResizing ||
+            _calendarToolTipWidgetId is not null || IncomingBoxTransforms.Any()) return false;
+        var widgets = DesktopWidgetItems.ToArray();
+        var lyrics = widgets.Where(widget => widget.Kind == DesktopWidgetKind.Lyrics).ToArray();
+        if (lyrics.Length == 0) return false;
+        for (var index = 0; index < lyrics.Length; index++)
+            if (lyrics.Skip(index + 1).Any(other => RectangleF.Inflate(WidgetRectangle(other), 8, 8)
+                    .IntersectsWith(RectangleF.Inflate(WidgetRectangle(lyrics[index]), 8, 8)))) return false;
+        // Widgets paint inside their rounded bounds; two DIPs cover edge antialiasing.
+        var dirty = lyrics.Select(widget => RectangleF.Inflate(WidgetRectangle(widget), 2, 2)).Aggregate(RectangleF.Union);
+        // An overlapping foreground needs the complete back-to-front blur pass.
+        if (widgets.Any(widget => widget.Kind != DesktopWidgetKind.Lyrics &&
+                RectangleF.Inflate(WidgetRectangle(widget), 8, 8).IntersectsWith(dirty)) ||
+            _boxes.Any(box => RectangleF.Inflate(box.Bounds, 8, 8).IntersectsWith(dirty))) return false;
+        var pixels = Rectangle.Intersect(new Rectangle(Point.Empty, ClientSize), Rectangle.FromLTRB(
+            (int)Math.Floor(dirty.Left * _scale), (int)Math.Floor(dirty.Top * _scale),
+            (int)Math.Ceiling(dirty.Right * _scale), (int)Math.Ceiling(dirty.Bottom * _scale)));
+        if (pixels.Width <= 0 || pixels.Height <= 0) return true;
+        _presentingLayer = true;
+        try
+        {
+            using (var graphics = Graphics.FromImage(_acrylicFrameBitmap))
+            {
+                graphics.CompositingMode = CompositingMode.SourceCopy;
+                using (var clear = new SolidBrush(Color.Transparent)) graphics.FillRectangle(clear, pixels);
+                graphics.CompositingMode = CompositingMode.SourceOver;
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+                graphics.ScaleTransform((float)_scale, (float)_scale);
+                graphics.SetClip(dirty, CombineMode.Intersect);
+                foreach (var widget in lyrics) DrawWidget(graphics, widget);
+            }
+            _acrylicPartialFramePresenter(_acrylicFrameBitmap, pixels);
+            return true;
+        }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error($"Partial lyrics frame failed monitor={_monitor.Id}", error);
+            return false;
+        }
+        finally { _presentingLayer = false; }
+    }
 
     internal void SetAcrylicBackground(bool enabled)
     {
@@ -26,7 +92,7 @@ internal sealed partial class DesktopBoxForm
         if (IsDisposed || _resourcesDisposed) yield break;
         EnsureGeometry();
         var transform = _movingBox ?? _resizingBox;
-        foreach (var widget in DesktopWidgetItems)
+        foreach (var widget in DesktopWidgetItems.Where(DesktopWidgets.HasBackground))
             yield return CreateAcrylicRegion(widget.Id, WidgetRectangle(widget), _monitor,
                 (float)_runtime.State.Settings.Appearance.CornerRadius);
         foreach (var geometry in _boxes)
@@ -75,8 +141,9 @@ internal sealed partial class DesktopBoxForm
         foreach (var widget in DesktopWidgetItems.Where(widget => WidgetRectangle(widget).IntersectsWith(clipBounds)))
         {
             var bounds = WidgetRectangle(widget);
-            AcrylicOverlapBlur.Apply(bitmap, bounds,
-                (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind);
+            if (DesktopWidgets.HasBackground(widget))
+                AcrylicOverlapBlur.Apply(bitmap, bounds,
+                    (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind);
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 graphics.CompositingMode = CompositingMode.SourceOver;

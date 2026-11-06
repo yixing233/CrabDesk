@@ -20,6 +20,8 @@ public sealed record ControlCenterSnapshot
 {
     public bool? WiFiEnabled { get; init; }
     public bool? BluetoothEnabled { get; init; }
+    public string WiFiConnectionName { get; init; } = "";
+    public string BluetoothConnectionName { get; init; } = "";
     public bool? NightLightEnabled { get; init; }
     public double? VolumePercent { get; init; }
     public bool? VolumeMuted { get; init; }
@@ -40,6 +42,13 @@ public sealed record ControlCenterOutputDevice(string Id, string Name, bool IsDe
 public sealed record ControlCenterMedia(
     string Title, string Artist, string Album, bool IsPlaying, bool CanPlayPause, bool CanNext, bool CanPrevious)
 {
+    public string TrackId { get; init; } = "";
+    public string SourceAppId { get; init; } = "";
+    public byte[]? Artwork { get; init; }
+    public bool CanSeek { get; init; }
+    public TimeSpan SeekMinimum { get; init; }
+    public TimeSpan? SeekMaximum { get; init; }
+    public double PlaybackRate { get; init; } = 1;
     /// <summary>Track length; zero when the player reports none (a live stream).</summary>
     public TimeSpan Duration { get; init; }
 
@@ -64,7 +73,7 @@ public sealed record ControlCenterMedia(
         if (IsPlaying && CapturedAt != default)
         {
             var elapsed = now - CapturedAt;
-            if (elapsed > TimeSpan.Zero) position += elapsed;
+            if (elapsed > TimeSpan.Zero && double.IsFinite(PlaybackRate)) position += elapsed * Math.Max(0, PlaybackRate);
         }
         if (position < TimeSpan.Zero) return TimeSpan.Zero;
         return position > Duration ? Duration : position;
@@ -84,7 +93,7 @@ public static class ControlCenterPresentation
     /// </summary>
     public const double CardHeight = 292;
 
-    private const int ToggleCount = 3;
+    private const int ToggleCount = 4;
     private const double ToggleGap = 8;
 
     public static LayoutRect ToggleRow(LayoutRect body)
@@ -98,8 +107,29 @@ public static class ControlCenterPresentation
         X = body.X + index * (ToggleRow(body).Width + ToggleGap)
     };
 
+    public static LayoutRect QuickAction(LayoutRect body, int index, int count)
+    {
+        var columns = Math.Clamp(count, 1, ControlQuickActions.MaximumCount);
+        var width = (body.Width - (columns - 1) * ToggleGap) / columns;
+        return new(body.X + index * (width + ToggleGap), body.Y, width, 56);
+    }
+
+    public static LayoutRect QuickActionDetails(LayoutRect tile) => new(tile.X + tile.Width - 20, tile.Y + 2, 20, 24);
+
     public static LayoutRect SliderArea(LayoutRect body) =>
         new(body.X, body.Y + 64, body.Width, 46);
+
+    public static LayoutRect VolumeMuteButton(LayoutRect body)
+    {
+        var sliders = SliderArea(body);
+        return new(sliders.X, sliders.Y - 2, 22, 20);
+    }
+
+    public static LayoutRect VolumeMixerButton(LayoutRect body)
+    {
+        var sliders = SliderArea(body);
+        return new(sliders.X + (sliders.Width - 14) / 2 - 22, sliders.Y - 2, 22, 20);
+    }
 
     /// <summary>
     /// The part of a slider column that responds to clicks: the caption and the
@@ -120,7 +150,13 @@ public static class ControlCenterPresentation
     /// menu.
     /// </summary>
     public static LayoutRect OutputRow(LayoutRect mediaArea) =>
-        new(mediaArea.X, mediaArea.Y, mediaArea.Width, 26);
+        new(mediaArea.X, mediaArea.Y, mediaArea.Width - 34, 26);
+
+    public static LayoutRect MicrophoneButton(LayoutRect body)
+    {
+        var media = MediaArea(body);
+        return new(media.X + media.Width - 28, media.Y, 28, 26);
+    }
 
     /// <summary>The media panel under the output row.</summary>
     public static LayoutRect MediaPanel(LayoutRect mediaArea) =>
@@ -128,7 +164,26 @@ public static class ControlCenterPresentation
 
     /// <summary>Progress bar inside the media panel, above the transport buttons.</summary>
     public static LayoutRect MediaProgress(LayoutRect mediaPanel) =>
-        new(mediaPanel.X + 10, mediaPanel.Y + mediaPanel.Height - 46, mediaPanel.Width - 20, 4);
+        new(mediaPanel.X + 10, mediaPanel.Y + mediaPanel.Height - 10, Math.Max(0, mediaPanel.Width - 108), 4);
+
+    public static LayoutRect MediaProgressHitArea(LayoutRect panel)
+    {
+        var track = MediaProgress(panel);
+        return new(track.X - 4, track.Y - 6, track.Width + 8, 16);
+    }
+
+    public static LayoutRect MediaArtwork(LayoutRect panel) => new(panel.X + 8, panel.Y + 6, 36, 36);
+    public static LayoutRect MediaTitle(LayoutRect panel) => new(panel.X + 54, panel.Y + 3, panel.Width - 64, 17);
+    public static LayoutRect MediaArtist(LayoutRect panel) => new(panel.X + 54, panel.Y + 25, Math.Max(0, panel.Width - 148), 16);
+    public static LayoutRect MediaTime(LayoutRect panel) => new(panel.X + panel.Width - 92, panel.Y + panel.Height - 16, 82, 14);
+
+    public static TimeSpan ClampMediaPosition(ControlCenterMedia media, TimeSpan position)
+    {
+        var duration = Math.Max(0, media.Duration.Ticks);
+        var minimum = Math.Clamp(media.SeekMinimum.Ticks, 0, duration);
+        var maximum = Math.Clamp((media.SeekMaximum ?? media.Duration).Ticks, minimum, duration);
+        return TimeSpan.FromTicks(Math.Clamp(position.Ticks, minimum, maximum));
+    }
 
     /// <summary>Elapsed and total time, e.g. "0:37 / 3:10".</summary>
     public static string MediaTimeText(ControlCenterMedia? media, DateTimeOffset now)
@@ -148,31 +203,36 @@ public static class ControlCenterPresentation
     /// </summary>
     public enum ControlCenterTarget
     {
-        None, InkToggle,
+        None,
         ToggleWiFi, ToggleBluetooth, ToggleNightLight,
         VolumeSlider, BrightnessSlider, OutputRow, BrightnessDisplayRow,
-        MediaPrevious, MediaPlayPause, MediaNext
+        MediaPrevious, MediaPlayPause, MediaNext, VolumeMute, VolumeMixer, Microphone, MediaProgress,
+        DisplayControls, Cast, ScreenCapture, SystemSettings, WiFiDetails, BluetoothDetails
     }
 
-    public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y)
+    public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y, IReadOnlyList<ControlCenterQuickAction>? actions = null)
     {
-        foreach (var toggle in Enum.GetValues<ControlCenterToggle>())
+        actions ??= ControlQuickActions.Defaults;
+        for (var index = 0; index < actions.Count; index++)
         {
-            if (!Toggle(body, (int)toggle).Contains(x, y)) continue;
-            return toggle switch
-            {
-                ControlCenterToggle.WiFi => ControlCenterTarget.ToggleWiFi,
-                ControlCenterToggle.Bluetooth => ControlCenterTarget.ToggleBluetooth,
-                _ => ControlCenterTarget.ToggleNightLight
-            };
+            var tile = QuickAction(body, index, actions.Count);
+            if (!tile.Contains(x, y)) continue;
+            var action = actions[index];
+            if (ControlQuickActions.HasDetails(action) && QuickActionDetails(tile).Contains(x, y))
+                return action == ControlCenterQuickAction.WiFi ? ControlCenterTarget.WiFiDetails : ControlCenterTarget.BluetoothDetails;
+            return ControlQuickActions.Target(action);
         }
         var sliders = SliderArea(body);
         var half = (sliders.Width - 14) / 2;
+        if (VolumeMuteButton(body).Contains(x, y)) return ControlCenterTarget.VolumeMute;
+        if (VolumeMixerButton(body).Contains(x, y)) return ControlCenterTarget.VolumeMixer;
         if (SliderHitArea(new(sliders.X, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.VolumeSlider;
         if (SliderHitArea(new(sliders.X + half + 14, sliders.Y, half, sliders.Height)).Contains(x, y)) return ControlCenterTarget.BrightnessSlider;
         var mediaArea = MediaArea(body);
         if (BrightnessDisplayRow(body).Contains(x, y)) return ControlCenterTarget.BrightnessDisplayRow;
         if (OutputRow(mediaArea).Contains(x, y)) return ControlCenterTarget.OutputRow;
+        if (MicrophoneButton(body).Contains(x, y)) return ControlCenterTarget.Microphone;
+        if (MediaProgressHitArea(MediaPanel(mediaArea)).Contains(x, y)) return ControlCenterTarget.MediaProgress;
         var buttons = MediaButtonRects(MediaPanel(mediaArea));
         for (var index = 0; index < buttons.Length; index++)
         {
@@ -193,9 +253,9 @@ public static class ControlCenterPresentation
     /// </summary>
     public static LayoutRect[] MediaButtonRects(LayoutRect mediaPanel)
     {
-        const double buttonWidth = 34, height = 22;
-        var startX = mediaPanel.X + (mediaPanel.Width - buttonWidth * 3) / 2;
-        var top = mediaPanel.Y + mediaPanel.Height - 22;
+        const double buttonWidth = 26, height = 22;
+        var startX = mediaPanel.X + mediaPanel.Width - 8 - buttonWidth * 3;
+        var top = mediaPanel.Y + Math.Min(22, mediaPanel.Height - 38);
         return
         [
             new(startX, top, buttonWidth, height),

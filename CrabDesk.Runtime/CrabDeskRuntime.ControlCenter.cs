@@ -5,11 +5,21 @@ namespace CrabDesk.Runtime;
 
 public sealed partial class CrabDeskRuntime
 {
+    public void SetControlQuickActions(DesktopWidget widget, IEnumerable<ControlCenterQuickAction> actions)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.ControlCenter || !State.Widgets.Contains(widget)) return;
+        var selected = ControlQuickActions.Normalize(actions);
+        if (ControlQuickActions.For(widget).SequenceEqual(selected)) return;
+        widget.ControlCenterQuickActions = selected;
+        RefreshWidgetPosition(widget, save: true);
+    }
+
     private object? _controlQueueGate;
     private SemaphoreSlim? _controlIoGate;
     private object ControlQueueGate => LazyInitializer.EnsureInitialized(ref _controlQueueGate)!;
     private SemaphoreSlim ControlIoGate => LazyInitializer.EnsureInitialized(ref _controlIoGate, () => new SemaphoreSlim(1, 1));
     private double? _pendingControlVolume, _pendingControlBrightness;
+    private bool? _pendingControlMuted;
     private DesktopWidget? _pendingControlWidget;
     private string _pendingControlDisplayId = "";
     private int _controlWriting;
@@ -36,17 +46,24 @@ public sealed partial class CrabDeskRuntime
         });
     }
 
-    public void SetControlVolume(double percent) => QueueControlLevel(percent, brightness: false);
-    public void SetControlBrightness(double percent) => QueueControlLevel(percent, brightness: true);
+    public void SetControlVolume(double percent) =>
+        QueueControlChange(volume: ControlCenterPresentation.ClampPercent(percent), muted: false);
+    public void SetControlBrightness(double percent) =>
+        QueueControlChange(brightness: ControlCenterPresentation.ClampPercent(percent));
+    public void SetControlMuted(bool muted) => QueueControlChange(muted: muted);
 
-    private void QueueControlLevel(double percent, bool brightness)
+    private void QueueControlChange(double? volume = null, double? brightness = null, bool? muted = null)
     {
         if (_disposed || IsPaused || ControlCenterWidget is not { } widget) return;
         _controlMonitor ??= new WidgetControlCenterMonitor();
-        var level = ControlCenterPresentation.ClampPercent(percent);
         if (widget.Controls is { } current)
         {
-            widget.Controls = brightness ? current with { BrightnessPercent = level } : current with { VolumePercent = level };
+            widget.Controls = current with
+            {
+                VolumePercent = volume ?? current.VolumePercent,
+                BrightnessPercent = brightness ?? current.BrightnessPercent,
+                VolumeMuted = muted ?? current.VolumeMuted
+            };
             NotifyMonitorFrame();
         }
         lock (ControlQueueGate)
@@ -54,7 +71,9 @@ public sealed partial class CrabDeskRuntime
             Interlocked.Increment(ref _controlCommandVersion);
             _pendingControlWidget = widget;
             _pendingControlDisplayId = ResolveControlBrightnessDisplay(widget);
-            if (brightness) _pendingControlBrightness = level; else _pendingControlVolume = level;
+            if (volume is not null) _pendingControlVolume = volume;
+            if (brightness is not null) _pendingControlBrightness = brightness;
+            if (muted is not null) _pendingControlMuted = muted;
             if (_controlWriting != 0) return;
             Volatile.Write(ref _controlWriting, 1);
             _controlWriteTask = Task.Run(DrainControlLevelsAsync);
@@ -68,14 +87,16 @@ public sealed partial class CrabDeskRuntime
         while (true)
         {
             await Task.Delay(150).ConfigureAwait(false);
-            double? volume, brightness; DesktopWidget? widget; long version; string displayId;
+            double? volume, brightness; bool? muted; DesktopWidget? widget; long version; string displayId;
             lock (ControlQueueGate)
             {
                 volume = _pendingControlVolume; brightness = _pendingControlBrightness; widget = _pendingControlWidget;
+                muted = _pendingControlMuted;
                 _pendingControlVolume = _pendingControlBrightness = null;
+                _pendingControlMuted = null;
                 version = Volatile.Read(ref _controlCommandVersion);
                 displayId = _pendingControlDisplayId;
-                if (volume is null && brightness is null) { Volatile.Write(ref _controlWriting, 0); return; }
+                if (volume is null && brightness is null && muted is null) { Volatile.Write(ref _controlWriting, 0); return; }
             }
             if (widget is null || _disposed || IsPaused) continue;
             var source = _controlMonitor!;
@@ -84,7 +105,10 @@ public sealed partial class CrabDeskRuntime
             try
             {
                 source.BrightnessDisplayId = displayId;
-                if (volume is { } v && !source.SetVolume(v)) error = "无法调整音量";
+                var volumeWritten = volume is not { } v || source.SetVolume(v);
+                if (!volumeWritten) error = "无法调整音量";
+                if (muted is { } m && (m || volumeWritten) && !source.SetMuted(m))
+                    error = m ? "无法静音" : "无法取消静音";
                 if (brightness is { } b && !source.SetBrightness(b)) error = "无法调整亮度";
                 read = source.ReadFast();
             }
@@ -157,11 +181,6 @@ public sealed partial class CrabDeskRuntime
         return RunControlCommandAsync(widget, _ => Task.FromResult(true), "无法读取显示器亮度");
     }
 
-    public void SetControlMuted(bool muted)
-    {
-        if (ControlCenterWidget is { } widget) _ = RunControlCommandAsync(widget, source => Task.FromResult(source.SetMuted(muted)), "无法设置静音");
-    }
-
     public Task SetControlOutputAsync(string deviceId) => string.IsNullOrEmpty(deviceId) || ControlCenterWidget is not { } widget
         ? Task.CompletedTask : RunControlCommandAsync(widget, async source =>
         {
@@ -177,4 +196,20 @@ public sealed partial class CrabDeskRuntime
             if (changed) await Task.Delay(150).ConfigureAwait(false);
             return changed;
         }, "无法控制媒体播放");
+
+    public Task SeekControlMediaAsync(DesktopWidget widget, ControlCenterMedia media, TimeSpan position)
+    {
+        if (_disposed || IsPaused || !State.Widgets.Contains(widget) || widget.Kind != DesktopWidgetKind.ControlCenter ||
+            !media.CanSeek || media.Duration <= TimeSpan.Zero || string.IsNullOrEmpty(media.TrackId) ||
+            widget.Controls?.Media?.TrackId != media.TrackId) return Task.CompletedTask;
+        var target = ControlCenterPresentation.ClampMediaPosition(media, position);
+        widget.Controls = widget.Controls with { Media = media with { Position = target, CapturedAt = DateTimeOffset.Now } };
+        NotifyMonitorFrame();
+        return RunControlCommandAsync(widget, async source =>
+        {
+            var changed = await source.SeekMediaAsync(media, target).ConfigureAwait(false);
+            if (changed) await Task.Delay(150).ConfigureAwait(false);
+            return changed;
+        }, "无法跳转播放进度");
+    }
 }

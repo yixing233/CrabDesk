@@ -139,7 +139,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool _hoverReconcilePending;
     private bool _confirmationInProgress;
     private bool _staticRenderDiagnosticWritten;
-    private Bitmap? _hitMaskBitmap;
+    private Size _hitMaskSize;
     private bool _hitMaskPresented;
     private Bitmap? _movingBoxVisualCache;
     private Guid? _movingBoxVisualCacheBoxId;
@@ -1423,24 +1423,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             if (_isCompositedByIconSurface)
             {
-                EnsureHitMaskBitmap();
+                EnsureHitMaskSize();
                 if (ShouldPresentHitMask(_hitMaskPresented, !_lastPresentSucceeded))
                 {
-                    using (var graphics = Graphics.FromImage(_hitMaskBitmap!))
-                    {
-                        // The native rounded window region defines the precise
-                        // interactive shape. A resident one-alpha surface keeps
-                        // every future region click-capable without uploading a
-                        // monitor-sized hit mask after each hover transition.
-                        graphics.Clear(Color.FromArgb(1, Color.Black));
-                    }
-
-                    _lastPresentSucceeded = LayeredWindowPresenter.TryPresent(
-                        Handle,
-                        _hitMaskBitmap!,
-                        PointToScreen(Point.Empty),
-                        out _lastPresentDiagnostic);
-                    _hitMaskPresented = _lastPresentSucceeded;
+                    _lastPresentSucceeded = PresentHitMask();
                 }
                 if (_lastPresentSucceeded)
                 {
@@ -1458,9 +1444,19 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 }
                 return true;
             }
-            using var bitmap = DesktopLayerBitmapFactory.Create(
-                ClientSize.Width,
-                ClientSize.Height);
+            var acrylicRegions = _acrylicFramePresenter is not null ? GetAcrylicRegions().ToArray() : null;
+            // A transparent widget still has foreground pixels and an input region.
+            if (acrylicRegions is { Length: 0 } && !DesktopWidgetItems.Any() && _acrylicEmptyFramePresenter is not null)
+            {
+                _acrylicEmptyFramePresenter();
+                _acrylicFrameBitmap?.Dispose();
+                _acrylicFrameBitmap = null;
+                _lastPresentDiagnostic = "empty acrylic foreground";
+                return _lastPresentSucceeded = true;
+            }
+            using var transientBitmap = _acrylicFramePresenter is null
+                ? DesktopLayerBitmapFactory.Create(ClientSize.Width, ClientSize.Height) : null;
+            var bitmap = transientBitmap ?? GetAcrylicFrameBitmap();
             if (_usesAcrylicBackground && _acrylicFramePresenter is not null)
             {
                 PaintAcrylicFrame(bitmap);
@@ -1502,16 +1498,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 // The native child supplies input only; foreground and blur are
                 // committed together by DesktopAcrylicHost.
-                EnsureHitMaskBitmap();
+                EnsureHitMaskSize();
                 if (!_hitMaskPresented)
                 {
-                    using (var maskGraphics = Graphics.FromImage(_hitMaskBitmap!))
-                        maskGraphics.Clear(Color.FromArgb(1, Color.Black));
-                    _hitMaskPresented = LayeredWindowPresenter.TryPresent(Handle, _hitMaskBitmap!,
-                        PointToScreen(Point.Empty), out _lastPresentDiagnostic);
+                    PresentHitMask();
                     if (!_hitMaskPresented) return _lastPresentSucceeded = false;
                 }
-                _acrylicFramePresenter(bitmap, PointToScreen(Point.Empty), GetAcrylicRegions().ToArray());
+                _acrylicFramePresenter(bitmap, PointToScreen(Point.Empty), acrylicRegions!);
                 _lastPresentDiagnostic = "unified acrylic composition";
                 return _lastPresentSucceeded = true;
             }
@@ -1555,18 +1548,27 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
     }
 
-    private void EnsureHitMaskBitmap()
+    private void EnsureHitMaskSize()
     {
-        if (_hitMaskBitmap is null ||
-            _hitMaskBitmap.Width != ClientSize.Width ||
-            _hitMaskBitmap.Height != ClientSize.Height)
+        if (_hitMaskSize != ClientSize)
         {
-            _hitMaskBitmap?.Dispose();
-            _hitMaskBitmap = DesktopLayerBitmapFactory.Create(
-                ClientSize.Width,
-                ClientSize.Height);
+            _hitMaskSize = ClientSize;
             _hitMaskPresented = false;
         }
+    }
+
+    private bool PresentHitMask()
+    {
+        // UpdateLayeredWindow copies these pixels into the window's own surface.
+        // Its one-alpha pixels and native rounded region remain click-capable
+        // after releasing both the temporary GDI+ bitmap and the upload DIB.
+        using var bitmap = DesktopLayerBitmapFactory.Create(_hitMaskSize.Width, _hitMaskSize.Height);
+        using (var graphics = Graphics.FromImage(bitmap))
+            graphics.Clear(Color.FromArgb(1, Color.Black));
+        _hitMaskPresented = LayeredWindowPresenter.TryPresent(Handle, bitmap,
+            PointToScreen(Point.Empty), out _lastPresentDiagnostic);
+        if (_hitMaskPresented) LayeredWindowPresenter.Release(Handle);
+        return _hitMaskPresented;
     }
 
     internal void RequestRender()
@@ -1591,6 +1593,23 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         if (disposing && !_resourcesDisposed)
         {
+            DisposeLyricsVisuals();
+            _acrylicFrameBitmap?.Dispose();
+            _acrylicFrameBitmap = null;
+            _acrylicPartialFramePresenter = null;
+            _controlPopup?.Dispose();
+            _controlPopup = null;
+            _controlPopupWidget = null;
+            _microphonePopup?.Dispose();
+            _microphonePopup = null;
+            _microphoneWidget = null;
+            _controlArtwork?.Dispose();
+            _controlArtwork = null;
+            _controlDeviceMenu?.Dispose();
+            _controlDeviceMenu = null;
+            _controlDeviceWidget = null;
+            _controlMixerPopup?.Dispose();
+            _controlMixerPopup = null;
             _todoDeleteMenu?.Dispose();
             _todoDeleteMenu = null; _todoDeleteCard = null; _todoDeletion = null;
             DismissWidgetTodoInput();
@@ -1629,8 +1648,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _renamingItemKey = null;
             ReleaseMovingBoxVisualCache();
             ClearHeightAnimationVisualCaches();
-            _hitMaskBitmap?.Dispose();
-            _hitMaskBitmap = null;
+            _hitMaskSize = Size.Empty;
             _hitMaskPresented = false;
             LayeredWindowPresenter.Release(Handle);
             ClearIconCache();

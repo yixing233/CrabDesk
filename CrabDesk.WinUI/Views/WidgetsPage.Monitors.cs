@@ -11,10 +11,8 @@ public sealed partial class WidgetsPage
 {
     private void Runtime_WidgetMonitorUpdated(object? sender, EventArgs args)
     {
-        if (!IsLoaded) return;
-        if (!_galleryIsCatalog)
-            foreach (var item in _galleryItems.Where(item => DesktopWidgets.RequiresMonitoring(item.Widget.Kind)))
-                item.Refresh(item.Appearance, item.Caption, item.ExistingCount, refreshPreview: true);
+        // Monitoring updates are only needed by the open editor's status fields.
+        if (!IsLoaded || !_editing) return;
         UpdateMonitorStatus();
     }
 
@@ -69,6 +67,7 @@ public sealed partial class WidgetsPage
 
     private void UpdateMonitorStatus()
     {
+        UpdateLyricsStatus();
         if (_selected is not { } widget) return;
         if (widget.Kind == DesktopWidgetKind.Performance)
         {

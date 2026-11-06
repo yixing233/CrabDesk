@@ -41,14 +41,23 @@ internal sealed partial class DesktopBoxForm
         var text = ResolveAutoTextColor(background);
         var accent = ParseOpaqueColor(appearance.Accent);
         var muted = UsesLightText(background) ? Color.FromArgb(237, 240, 245) : Color.FromArgb(52, 59, 69);
+        if (widget.Kind == DesktopWidgetKind.ControlCenter && widget.ControlCenterLightText is { } lightText)
+        {
+            text = lightText ? Color.White : Color.FromArgb(31, 35, 41);
+            muted = lightText ? Color.FromArgb(214, 220, 230) : Color.FromArgb(70, 78, 90);
+        }
         var tint = ResolveBoxTintOpacity(appearance.Opacity, _usesAcrylicBackground);
         using var path = RoundedRectangle(RectangleF.Inflate(bounds, -.5f, -.5f), (float)settings.CornerRadius);
-        using var fill = new SolidBrush(ApplyOpacity(background, tint));
-        graphics.FillPath(fill, path);
+        var hasBackground = DesktopWidgets.HasBackground(widget);
+        if (hasBackground)
+        {
+            using var fill = new SolidBrush(ApplyOpacity(background, tint));
+            graphics.FillPath(fill, path);
+        }
         var state = graphics.Save();
         graphics.SetClip(path, CombineMode.Intersect);
         if (widget.Kind is not (DesktopWidgetKind.Clock or DesktopWidgetKind.Calendar or DesktopWidgetKind.Todo or DesktopWidgetKind.Weather) &&
-            widget.Kind != DesktopWidgetKind.ControlCenter &&
+            widget.Kind is not (DesktopWidgetKind.ControlCenter or DesktopWidgetKind.Lyrics) &&
             !(widget.Kind == DesktopWidgetKind.Network &&
               widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Speeds or NetworkWidgetDisplayMode.Curve))
         {
@@ -68,6 +77,7 @@ internal sealed partial class DesktopBoxForm
             case DesktopWidgetKind.Performance: DrawPerformanceWidget(graphics, widget, text, muted, accent); break;
             case DesktopWidgetKind.Network: DrawNetworkWidget(graphics, widget, text, muted, accent); break;
             case DesktopWidgetKind.ControlCenter: DrawControlCenterWidget(graphics, widget, text, muted, accent, background); break;
+            case DesktopWidgetKind.Lyrics: DrawLyricsWidget(graphics, widget, text, accent); break;
         }
         if (_hoveredWidgetId == widget.Id)
         {
@@ -86,7 +96,7 @@ internal sealed partial class DesktopBoxForm
                 graphics.FillEllipse(dots, centerX + index * 4 - .9f, centerY - .9f, 1.8f, 1.8f);
         }
         graphics.Restore(state);
-        if (settings.ShowBorder)
+        if (hasBackground && settings.ShowBorder)
         {
             using var pen = new Pen(BoxBorderStyle.ApplyTint(BoxBorderStyle.ResolveStroke(background, UsesLightText(background),
                 settings.BorderColor, settings.BorderOpacity), tint), BoxBorderStyle.ResolveWidth(settings.BorderWidth));

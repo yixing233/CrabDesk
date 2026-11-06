@@ -20,6 +20,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        CaptureControlPopupToggle(eventArgs);
         // A click on the box surface while an inline rename is open commits
         // the edit (this window never activates, so Deactivate does not fire).
         _runtime.CommitActiveDesktopInlineRename();
@@ -603,6 +604,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _hoveredWidgetId = null; _hoveredWidgetMenuId = null; _hoveredWeatherLocationId = null;
             _hoveredCalendarButton = RectangleF.Empty; _hoveredTodoTaskId = null; _hoveredTodoAddId = null;
             _hoveredTranslationButton = RectangleF.Empty;
+            UpdateControlCenterHover(null, PointF.Empty);
             RequestVisualLayerRender();
         }
         if (HasActiveInlineRename)

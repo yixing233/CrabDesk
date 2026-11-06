@@ -96,6 +96,7 @@ public sealed partial class WidgetsPage : Page
                 DesktopWidgetKind.Translation => "随时翻译一段文字", DesktopWidgetKind.Weather => "关心城市的阴晴冷暖",
                 DesktopWidgetKind.Performance => "实时查看 CPU、GPU、内存与磁盘",
                 DesktopWidgetKind.ControlCenter => "开关、音量、亮度与媒体控制",
+                DesktopWidgetKind.Lyrics => "随音乐滚动，逐字点亮歌词",
                 _ => "完整信息、仅速度或实时曲线"
             } : (widget.Kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " : "") + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
             var count = catalog ? _runtime.State.Widgets.Count(existing => existing.Kind == widget.Kind) : 0;
@@ -243,6 +244,7 @@ public sealed partial class WidgetsPage : Page
         WeatherEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Weather);
         PerformanceEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Performance);
         NetworkEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Network);
+        LoadLyricsSettings(widget);
         LoadMonitorSettings(widget);
         _loading = false;
         RenderTasks();

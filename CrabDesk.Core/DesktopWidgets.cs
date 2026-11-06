@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace CrabDesk.Core;
 
-public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter }
+public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter, Lyrics }
 public enum DesktopWidgetSize
 {
     Small, Medium, Wide, Large, Compact, Landscape, Custom,
@@ -52,6 +52,20 @@ public sealed class DesktopWidget
     /// behaviour, which is what every other widget uses.
     /// </summary>
     public bool? ControlCenterLightText { get; set; }
+    public List<ControlCenterQuickAction>? ControlCenterQuickActions { get; set; }
+    public int LyricsLineCount { get; set; } = 5;
+    public double LyricsFontSize { get; set; } = 24;
+    public string LyricsFontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
+    public int LyricsFontWeight { get; set; } = 600;
+    public WidgetLyricsFontStyle LyricsFontStyle { get; set; }
+    public int LyricsOffsetMilliseconds { get; set; }
+    public bool LyricsWordHighlight { get; set; } = true;
+    public bool? LyricsLightText { get; set; }
+    public bool LyricsTransparentBackground { get; set; }
+    public string LyricsLocalText { get; set; } = "";
+    public string LyricsLocalFormat { get; set; } = "";
+    public string LyricsLocalTrackKey { get; set; } = "";
+    [JsonIgnore] public WidgetLyricsSnapshot? Lyrics { get; set; }
     [JsonIgnore] public string MonitorError { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIp { get; set; } = string.Empty;
     [JsonIgnore] public string PublicIpError { get; set; } = string.Empty;
@@ -152,8 +166,11 @@ public sealed record WidgetWeatherIndex(string Name, string Value)
 
 public static class DesktopWidgets
 {
+    public static bool HasBackground(DesktopWidget widget) =>
+        widget.Kind != DesktopWidgetKind.Lyrics || !widget.LyricsTransparentBackground;
+
     public static bool RequiresMonitoring(DesktopWidgetKind kind) => kind is
-        DesktopWidgetKind.Performance or DesktopWidgetKind.Network or DesktopWidgetKind.ControlCenter;
+        DesktopWidgetKind.Performance or DesktopWidgetKind.Network or DesktopWidgetKind.ControlCenter or DesktopWidgetKind.Lyrics;
 
     public static void NormalizeWeatherCities(DesktopWidget widget)
     {
@@ -214,6 +231,7 @@ public static class DesktopWidgets
 
     public static string GetName(DesktopWidgetKind kind) => kind switch
     {
+        DesktopWidgetKind.Lyrics => "桌面歌词",
         DesktopWidgetKind.Clock => "时钟", DesktopWidgetKind.Calendar => "月历", DesktopWidgetKind.Note => "便签",
         DesktopWidgetKind.Todo => "待办", DesktopWidgetKind.Translation => "翻译", DesktopWidgetKind.Weather => "天气",
         DesktopWidgetKind.Performance => "性能监控", DesktopWidgetKind.Network => "网络监控",
@@ -222,6 +240,7 @@ public static class DesktopWidgets
 
     public static DesktopWidgetSize DefaultSize(DesktopWidgetKind kind) => kind switch
     {
+        DesktopWidgetKind.Lyrics => DesktopWidgetSize.Panel,
         DesktopWidgetKind.ControlCenter => DesktopWidgetSize.Panel,
         DesktopWidgetKind.Clock => DesktopWidgetSize.Medium,
         DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Network => DesktopWidgetSize.Large,
@@ -230,6 +249,7 @@ public static class DesktopWidgets
 
     public static IReadOnlyList<DesktopWidgetSize> SupportedSizes(DesktopWidgetKind kind) => kind switch
     {
+        DesktopWidgetKind.Lyrics => [DesktopWidgetSize.Large, DesktopWidgetSize.Panel, DesktopWidgetSize.Custom],
         DesktopWidgetKind.Clock => [DesktopWidgetSize.Medium, DesktopWidgetSize.Landscape],
         DesktopWidgetKind.Calendar => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
         DesktopWidgetKind.Note or DesktopWidgetKind.Todo => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large, DesktopWidgetSize.Custom],
@@ -277,7 +297,7 @@ public static class DesktopWidgets
         _ => (180, 180)
     };
 
-    public static bool SupportsFreeResize(DesktopWidgetKind kind) => kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo;
+    public static bool SupportsFreeResize(DesktopWidgetKind kind) => kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo or DesktopWidgetKind.Lyrics;
 
     public static (double Width, double Height) Dimensions(DesktopWidget widget)
     {
@@ -321,6 +341,17 @@ public static class DesktopWidgets
             widget.Translation = NormalizeText(widget.Translation);
             widget.MonitorId ??= string.Empty;
             widget.NetworkAdapterId ??= string.Empty;
+            widget.LyricsLineCount = WidgetLyricsSettings.NormalizeLineCount(widget.LyricsLineCount);
+            widget.LyricsFontSize = WidgetLyricsSettings.NormalizeFontSize(widget.LyricsFontSize);
+            widget.LyricsFontFamily = WidgetLyricsSettings.NormalizeFontFamily(widget.LyricsFontFamily);
+            widget.LyricsFontWeight = WidgetLyricsSettings.NormalizeFontWeight(widget.LyricsFontWeight);
+            widget.LyricsFontStyle = WidgetLyricsSettings.NormalizeFontStyle(widget.LyricsFontStyle);
+            widget.LyricsOffsetMilliseconds = WidgetLyricsSettings.NormalizeOffset(widget.LyricsOffsetMilliseconds);
+            widget.LyricsLocalText ??= "";
+            widget.LyricsLocalFormat ??= "";
+            widget.LyricsLocalTrackKey ??= "";
+            if (widget.Kind == DesktopWidgetKind.ControlCenter)
+                widget.ControlCenterQuickActions = ControlQuickActions.Normalize(widget.ControlCenterQuickActions);
             // The combined speed-and-chart style was retired in favour of the
             // three-way choice; anything saved with it becomes the curve style,
             // which keeps its headline speeds and drops only the card title.
