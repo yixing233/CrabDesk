@@ -249,9 +249,10 @@ public sealed class DesktopAcrylicTests
     [InlineData(1.0)]
     public void AcrylicTintKeepsTheLiveBackgroundVisible(double opacity)
     {
-        var tint = DesktopBoxForm.ResolveBoxTintOpacity(opacity, true);
+        var appearance = new BoxAppearance { Opacity = opacity };
+        var tint = appearance.ResolveBackgroundOpacity(true);
         Assert.InRange(tint, 0.01, 0.99);
-        Assert.Equal(opacity, DesktopBoxForm.ResolveBoxTintOpacity(opacity, false));
+        Assert.Equal(opacity, appearance.ResolveBackgroundOpacity(false));
     }
 
     [Fact]

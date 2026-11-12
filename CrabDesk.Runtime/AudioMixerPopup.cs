@@ -37,7 +37,8 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
 
     internal Wpf.FrameworkElement ContentView => _content;
 
-    internal AudioMixerPopup(AudioMixerController controller, bool dark, Color accent, double scale)
+    internal AudioMixerPopup(AudioMixerController controller, bool dark, Color accent, double scale, Color? background = null,
+        bool animationsEnabled = true)
     {
         _controller = controller;
         Text = "应用音量";
@@ -47,13 +48,12 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         StartPosition = Forms.FormStartPosition.Manual;
         AutoScaleMode = Forms.AutoScaleMode.None;
         ClientSize = new((int)Math.Round(350 * scale), (int)Math.Round(390 * scale));
-        BackColor = dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251);
+        BackColor = background ?? (dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251));
         _foreground = Brush(dark ? Color.FromArgb(242, 244, 248) : Color.FromArgb(31, 35, 41));
         _secondary = Brush(dark ? Color.FromArgb(176, 183, 195) : Color.FromArgb(102, 110, 124));
         _sliderTemplate = (WpfControls.ControlTemplate)Wpf.Markup.XamlReader.Parse(SliderTemplate);
         _buttonStyle = (Wpf.Style)Wpf.Markup.XamlReader.Parse(ButtonStyle);
         var grid = new WpfControls.Grid();
-        grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
@@ -70,8 +70,10 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         masterPanel.Children.Add(_master.Root);
         masterPanel.Children.Add(new WpfControls.Border { Height = 1, Margin = new Wpf.Thickness(0, 4, 0, 2),
             Background = Brush(dark ? Color.FromArgb(61, 66, 77) : Color.FromArgb(223, 227, 234)) });
-        WpfControls.Grid.SetRow(masterPanel, 1);
-        grid.Children.Add(masterPanel);
+        var body = new WpfControls.Grid();
+        body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
+        body.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
+        body.Children.Add(masterPanel);
 
         _empty = Label("正在读取应用音量…", 12);
         _empty.Foreground = _secondary;
@@ -84,27 +86,29 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
             HorizontalScrollBarVisibility = WpfControls.ScrollBarVisibility.Disabled,
             Content = _applications, Padding = new Wpf.Thickness(0, 0, 4, 0), Focusable = false
         };
-        WpfControls.Grid.SetRow(scroll, 2);
-        grid.Children.Add(scroll);
+        WpfControls.Grid.SetRow(scroll, 1);
+        body.Children.Add(scroll);
+        var loading = CreatePopupLoading(body, dark, animationsEnabled, PopupSkeletonLayout.Mixer);
+        WpfControls.Grid.SetRow(loading, 1);
+        grid.Children.Add(loading);
         _status = Label("", 11);
         _status.Foreground = _secondary;
         _status.TextWrapping = Wpf.TextWrapping.Wrap;
         _status.Margin = new Wpf.Thickness(0, 6, 0, 0);
-        WpfControls.Grid.SetRow(_status, 3);
+        WpfControls.Grid.SetRow(_status, 2);
         grid.Children.Add(_status);
         _content = new WpfControls.Border
         {
             CornerRadius = new Wpf.CornerRadius(12), Padding = new Wpf.Thickness(12, 8, 12, 10),
-            Background = Brush(BackColor), BorderThickness = new Wpf.Thickness(1),
-            BorderBrush = Brush(dark ? Color.FromArgb(64, 69, 79) : Color.FromArgb(216, 222, 230)), Child = grid
+            Background = Brush(BackColor), Child = grid
         };
+        InitializePopupEntrance(_content, animationsEnabled);
         _content.Resources["MixerAccent"] = Brush(accent);
         _content.Resources["MixerTrack"] = Brush(dark ? Color.FromArgb(88, 95, 109) : Color.FromArgb(191, 198, 211));
         _content.Resources["MixerHover"] = Brush(dark ? Color.FromArgb(61, 67, 80) : Color.FromArgb(228, 233, 242));
         _content.Resources["MixerScrollThumb"] = Brush(dark ? Color.FromArgb(105, 116, 135) : Color.FromArgb(169, 179, 196));
         _content.Resources[typeof(WpfControls.Primitives.ScrollBar)] = Wpf.Markup.XamlReader.Parse(ScrollBarStyle);
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
-        this.Controls.Add(new System.Windows.Forms.Integration.ElementHost { Dock = Forms.DockStyle.Fill, Child = _content });
         _controller.Changed += OnSnapshotChanged;
         _refresh.Tick += async (_, _) => await _controller.RefreshAsync();
         Shown += async (_, _) =>
@@ -145,8 +149,10 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        CrabDesk.Native.DesktopPopupWindow.Track(Handle);
         var corners = 2;
         _ = DwmSetWindowAttribute(Handle, 33, ref corners, sizeof(int));
+        ApplyNativePopupMaterial();
     }
 
     private WpfControls.TextBlock Label(string text, double size, bool bold = false) => new()
@@ -255,6 +261,7 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         }
         _status.Text = _controller.Error;
         _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
+        if (_controller.HasSnapshot) Loading!.ShowContent();
     }
 
     private void UpdateRow(MixerRow row, double? volume, bool? muted)

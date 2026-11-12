@@ -337,6 +337,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // interaction state, which intentionally pauses the normal hover
         // timer. Feed the current drag position into the expansion controller
         // here as well; the timer above continues the delay while stationary.
+        if (TryHandleFileShelfDragOver(eventArgs, point)) return;
         UpdateHoverState(point, updateItemHover: false);
         EnsureGeometry();
         var targetGeometry = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
@@ -522,6 +523,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnDragLeave(object? sender, EventArgs eventArgs)
     {
+        SetFileShelfDropTarget(null);
         ClearManualTabDropPreview();
         ClearDropPreview();
         _iconDragStateForward?.Invoke(PointF.Empty, null, null, null);
@@ -592,6 +594,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private bool IsDesktopVirtualAssignment(Forms.DragEventArgs eventArgs, DesktopBox target)
     {
         if (target.IsMappedFolder || eventArgs.Data is null ||
+            eventArgs.Data.GetDataPresent(FileShelfDragFormat) ||
             eventArgs.Data.GetDataPresent(ItemKeysFormat) ||
             !eventArgs.Data.GetDataPresent(Forms.DataFormats.FileDrop) ||
             eventArgs.Data.GetData(Forms.DataFormats.FileDrop) is not string[] paths)
@@ -626,6 +629,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
             var point = ToDip(PointToClient(new Point(eventArgs.X, eventArgs.Y)));
             RebuildGeometry();
+            if (await TryHandleFileShelfDropAsync(eventArgs, point)) return;
             var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
             if (box is null)
             {
@@ -786,6 +790,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
         finally
         {
+            SetFileShelfDropTarget(null);
             ClearManualTabDropPreview();
             ClearDropPreview();
         }
@@ -867,6 +872,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         string targetDirectory,
         IReadOnlyList<string>? sourcePaths)
     {
+        if (eventArgs.Data?.GetDataPresent(FileShelfDragFormat) == true) return false;
         var shiftPressed = IsShiftPressed(eventArgs);
         var controlPressed = IsControlPressed(eventArgs);
         var isSameVolume = sourcePaths is null || sourcePaths.Count == 0 ||
@@ -888,6 +894,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             return BoxTransferEffect.None;
         }
+        if (eventArgs.Data.GetDataPresent(FileShelfDragFormat))
+            return (eventArgs.AllowedEffect & Forms.DragDropEffects.Copy) != 0 ? BoxTransferEffect.CopyFiles : BoxTransferEffect.None;
         var internalItems = eventArgs.Data.GetDataPresent(ItemKeysFormat);
         Guid? sourceId = null;
         var sourceMapped = false;

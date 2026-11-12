@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Drawing;
 using CrabDesk.Core;
 using CrabDesk.Native;
+using Windows.UI.Composition;
 
 namespace CrabDesk.Runtime;
 
@@ -128,9 +129,12 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private long _lastUiHeartbeatTimestamp;
     private RuntimeTimerLatency _lastUiHeartbeatLatency;
 
-    public CrabDeskRuntime(Action<Action> beginInvoke)
+    internal Func<Compositor, CompositionEffectFactory>? AcrylicBlurFactory { get; }
+
+    public CrabDeskRuntime(Action<Action> beginInvoke, Func<Compositor, CompositionEffectFactory>? acrylicBlurFactory = null)
     {
         _beginInvoke = beginInvoke;
+        AcrylicBlurFactory = acrylicBlurFactory;
         UiThreadWatchdog.Start();
         _hostTimer = new RuntimeTimer(
             TimeSpan.FromSeconds(2),
@@ -2879,6 +2883,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
         NotifyWorkspaceChanged(true);
     }
 
+    public void SetAcrylicBlurStrength(double value)
+    {
+        var normalized = Math.Clamp(value, 0, 100);
+        if (State.Settings.Appearance.AcrylicBlurStrength == normalized) return;
+        State.Settings.Appearance.AcrylicBlurStrength = normalized;
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBackdrop());
+    }
+
     public void SetCornerRadius(double value)
     {
         State.Settings.Appearance.CornerRadius = Math.Clamp(value, 0, 20);
@@ -2998,7 +3010,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             box.Appearance.Background = value;
         }
-        NotifyBoxWorkspaceChanged(boxId);
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBackdrop());
     }
 
     public void SetBoxAccent(Guid? boxId, string value)
@@ -3015,8 +3027,9 @@ public sealed partial class CrabDeskRuntime : IDisposable
         foreach (var box in GetAppearanceTargets(boxId))
         {
             box.Appearance.Opacity = Math.Clamp(value, 0.35, 1);
+            box.Appearance.BackgroundOpacity = Math.Clamp(value, 0, 1);
         }
-        NotifyBoxWorkspaceChanged(boxId);
+        NotifyTargetedWorkspaceChanged(manager => manager.RefreshBackdrop());
     }
 
     public void SetBoxTitleBarHeight(Guid? boxId, double value)
@@ -4360,6 +4373,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             Background = source.Background,
             Accent = source.Accent,
             Opacity = source.Opacity,
+            BackgroundOpacity = source.BackgroundOpacity,
             IconSize = source.IconSize,
             LabelFontFamily = source.LabelFontFamily,
             LabelFontSize = source.LabelFontSize,
@@ -4635,7 +4649,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             if (rebuild)
             {
                 if (_surfaceManager is not null &&
-                    _surfaceManager.AcrylicRequested != State.Settings.Appearance.UseAcrylicBoxes)
+                    _surfaceManager.AcrylicRequested != WidgetAppearance.RequiresAcrylic(State))
                 {
                     ActivateDesktopSurfaces("acrylic preference changed");
                 }
@@ -5705,41 +5719,46 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     internal void ApplyContextMenuTheme(System.Windows.Forms.ContextMenuStrip menu)
     {
-        if (menu is FluentContextMenuStrip animatedMenu)
+        menu.SuspendLayout();
+        try
         {
-            animatedMenu.AnimationsEnabled = State.Settings.Appearance.AnimationEnabled &&
-                System.Windows.Forms.SystemInformation.IsMenuAnimationEnabled &&
-                System.Windows.Forms.SystemInformation.IsMenuFadeEnabled;
+            if (menu is FluentContextMenuStrip animatedMenu)
+            {
+                animatedMenu.AnimationsEnabled = State.Settings.Appearance.AnimationEnabled &&
+                    System.Windows.Forms.SystemInformation.IsMenuAnimationEnabled &&
+                    System.Windows.Forms.SystemInformation.IsMenuFadeEnabled;
+            }
+            menu.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
+            menu.Font = _menuFont;
+            // Every metric below is authored in DIPs. WinForms renders the
+            // point-sized menu font at the monitor DPI, so the fixed row height,
+            // paddings and minimum width must scale together with it - otherwise
+            // the text overflows the rows and gets clipped on high-DPI displays.
+            var dpiScale = GetMenuDpiScale(menu);
+            menu.ShowImageMargin = false;
+            menu.ShowCheckMargin = false;
+            var minimumWidth = menu is FluentContextMenuStrip fluentMenu
+                ? fluentMenu.MinimumMenuWidth
+                : 112;
+            minimumWidth = (int)Math.Round(minimumWidth * dpiScale);
+            var menuWidth = CalculateMenuWidth(
+                menu.Items,
+                minimumWidth,
+                dpiScale,
+                menu.Padding.Horizontal);
+            menu.MinimumSize = new System.Drawing.Size(menuWidth, 0);
+            menu.DropShadowEnabled = true;
+            var deferSubmenus = menu is FluentContextMenuStrip { ConfigureSubmenusOnOpening: true };
+            ApplyTrayColors(menu.Items, IsDarkTheme, deferSubmenus);
+            menu.BackColor = IsDarkTheme
+                ? System.Drawing.Color.FromArgb(37, 40, 45)
+                : System.Drawing.Color.FromArgb(252, 252, 252);
+            menu.ForeColor = IsDarkTheme
+                ? System.Drawing.Color.FromArgb(244, 245, 247)
+                : System.Drawing.Color.FromArgb(32, 36, 42);
+            ApplyMenuMetrics(menu.Items, menuWidth - menu.Padding.Horizontal, dpiScale, deferSubmenus);
         }
-        menu.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
-        menu.Font = _menuFont;
-        // Every metric below is authored in DIPs. WinForms renders the
-        // point-sized menu font at the monitor DPI, so the fixed row height,
-        // paddings and minimum width must scale together with it - otherwise
-        // the text overflows the rows and gets clipped on high-DPI displays.
-        var dpiScale = GetMenuDpiScale(menu);
-        menu.ShowImageMargin = false;
-        menu.ShowCheckMargin = false;
-        var minimumWidth = menu is FluentContextMenuStrip fluentMenu
-            ? fluentMenu.MinimumMenuWidth
-            : 112;
-        minimumWidth = (int)Math.Round(minimumWidth * dpiScale);
-        var menuWidth = CalculateMenuWidth(
-            menu.Items,
-            minimumWidth,
-            dpiScale,
-            menu.Padding.Horizontal);
-        menu.MinimumSize = new System.Drawing.Size(menuWidth, 0);
-        menu.DropShadowEnabled = true;
-        ApplyTrayColors(menu.Items, IsDarkTheme);
-        menu.BackColor = IsDarkTheme
-            ? System.Drawing.Color.FromArgb(37, 40, 45)
-            : System.Drawing.Color.FromArgb(252, 252, 252);
-        menu.ForeColor = IsDarkTheme
-            ? System.Drawing.Color.FromArgb(244, 245, 247)
-            : System.Drawing.Color.FromArgb(32, 36, 42);
-        ApplyMenuMetrics(menu.Items, menuWidth - menu.Padding.Horizontal, dpiScale);
-        menu.PerformLayout();
+        finally { menu.ResumeLayout(performLayout: true); }
     }
 
     /// <summary>
@@ -5808,11 +5827,18 @@ public sealed partial class CrabDeskRuntime : IDisposable
         int horizontalMenuPadding)
     {
         var widestText = 0;
+        var widestControl = 0;
         var hasSubmenu = false;
         foreach (System.Windows.Forms.ToolStripItem item in items)
         {
             if (item is System.Windows.Forms.ToolStripSeparator)
             {
+                continue;
+            }
+
+            if (item is System.Windows.Forms.ToolStripControlHost host)
+            {
+                widestControl = Math.Max(widestControl, host.Control.Width + item.Margin.Horizontal);
                 continue;
             }
 
@@ -5831,14 +5857,15 @@ public sealed partial class CrabDeskRuntime : IDisposable
         var trailingSlot = (int)Math.Ceiling((hasSubmenu ? 30 : 10) * dpiScale);
         var itemMargins = (int)Math.Ceiling(2 * dpiScale);
         return Math.Max(
-            minimumWidth,
+            Math.Max(minimumWidth, widestControl + horizontalMenuPadding),
             leadingSlot + widestText + trailingSlot + horizontalMenuPadding + itemMargins);
     }
 
     private void ApplyMenuMetrics(
         System.Windows.Forms.ToolStripItemCollection items,
         int availableWidth,
-        float dpiScale)
+        float dpiScale,
+        bool deferSubmenus = false)
     {
         var itemMargin = (int)Math.Round(1 * dpiScale);
         var itemHeight = (int)Math.Round(30 * dpiScale);
@@ -5859,15 +5886,33 @@ public sealed partial class CrabDeskRuntime : IDisposable
                     Math.Max(1, (int)Math.Round(dpiScale)));
                 continue;
             }
+            if (item is System.Windows.Forms.ToolStripControlHost host)
+            {
+                item.AutoSize = false;
+                item.Padding = System.Windows.Forms.Padding.Empty;
+                item.Margin = System.Windows.Forms.Padding.Empty;
+                item.Size = new System.Drawing.Size(Math.Max(1, availableWidth), host.Control.Height);
+                continue;
+            }
             item.Padding = System.Windows.Forms.Padding.Empty;
             item.Margin = new System.Windows.Forms.Padding(itemMargin, 0, itemMargin, 0);
             item.AutoSize = false;
             item.Size = new System.Drawing.Size(
                 Math.Max(1, availableWidth - item.Margin.Horizontal),
                 itemHeight);
-            if (item is System.Windows.Forms.ToolStripMenuItem menuItem)
+            if (item is System.Windows.Forms.ToolStripMenuItem { HasDropDownItems: true } menuItem)
             {
                 var dropDown = menuItem.DropDown;
+                if (deferSubmenus)
+                {
+                    _ = _configuredSubmenus.GetValue(dropDown, candidate =>
+                    {
+                        candidate.Opening += (_, _) => ApplySubmenuTheme(candidate, dpiScale);
+                        candidate.Opened += OnSubmenuOpened;
+                        return new object();
+                    });
+                    continue;
+                }
                 dropDown.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
                 dropDown.Font = _menuFont;
                 if (dropDown is System.Windows.Forms.ToolStripDropDownMenu dropDownMenu)
@@ -5902,6 +5947,29 @@ public sealed partial class CrabDeskRuntime : IDisposable
         }
     }
 
+    private void ApplySubmenuTheme(System.Windows.Forms.ToolStripDropDown dropDown, float dpiScale)
+    {
+        dropDown.SuspendLayout();
+        try
+        {
+            dropDown.Renderer = IsDarkTheme ? _darkTrayRenderer : _lightTrayRenderer;
+            dropDown.Font = _menuFont;
+            if (dropDown is System.Windows.Forms.ToolStripDropDownMenu menu)
+            {
+                menu.ShowImageMargin = false;
+                menu.ShowCheckMargin = false;
+            }
+            dropDown.BackColor = IsDarkTheme ? System.Drawing.Color.FromArgb(37, 40, 45) : System.Drawing.Color.FromArgb(252, 252, 252);
+            dropDown.ForeColor = IsDarkTheme ? System.Drawing.Color.FromArgb(244, 245, 247) : System.Drawing.Color.FromArgb(32, 36, 42);
+            var width = CalculateMenuWidth(dropDown.Items, (int)Math.Round(112 * dpiScale), dpiScale, dropDown.Padding.Horizontal);
+            dropDown.MinimumSize = new System.Drawing.Size(width, 0);
+            ApplyTrayColors(dropDown.Items, IsDarkTheme, deferSubmenus: true);
+            ApplyMenuMetrics(dropDown.Items, width - dropDown.Padding.Horizontal, dpiScale, deferSubmenus: true);
+        }
+        finally { dropDown.ResumeLayout(performLayout: true); }
+        StretchDropDownItems(dropDown);
+    }
+
     private static void OnSubmenuOpened(object? sender, EventArgs eventArgs)
     {
         if (sender is not System.Windows.Forms.ToolStripDropDown dropDown)
@@ -5926,7 +5994,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
                 1,
                 dropDown.ClientSize.Width -
                 item.Bounds.Left -
-                item.Margin.Right);
+                item.Margin.Right -
+                (item is System.Windows.Forms.ToolStripControlHost ? dropDown.Padding.Right : 0));
             item.AutoSize = false;
             item.Width = width;
         }
@@ -5934,7 +6003,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
 
 
-    private static void ApplyTrayColors(System.Windows.Forms.ToolStripItemCollection items, bool isDark)
+    private static void ApplyTrayColors(System.Windows.Forms.ToolStripItemCollection items, bool isDark, bool deferSubmenus = false)
     {
         var background = isDark
             ? System.Drawing.Color.FromArgb(37, 40, 45)
@@ -5946,7 +6015,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             item.BackColor = background;
             item.ForeColor = foreground;
-            if (item is System.Windows.Forms.ToolStripMenuItem menuItem)
+            if (!deferSubmenus && item is System.Windows.Forms.ToolStripMenuItem { HasDropDownItems: true } menuItem)
             {
                 ApplyTrayColors(menuItem.DropDownItems, isDark);
             }

@@ -6,6 +6,7 @@ public sealed class WidgetSizingTests
 {
     [Theory]
     [InlineData(DesktopWidgetKind.Note)] [InlineData(DesktopWidgetKind.Todo)]
+    [InlineData(DesktopWidgetKind.Lyrics)]
     public async Task CustomDimensionsAndContentsSurviveConfigReload(DesktopWidgetKind kind)
     {
         var directory = Path.Combine(Path.GetTempPath(), "CrabDesk.FreeSizingTests", Guid.NewGuid().ToString("N"));

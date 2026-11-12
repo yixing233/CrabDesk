@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="file-shelf-title">
+<title id="file-shelf-title">文件中转站 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="file-shelf-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#F5BA51"/><stop offset="1" stop-color="#F5BA51" stop-opacity=".84"/></linearGradient></defs>
+<path d="M7 18a6 6 0 0 1 6-6h14l5 6h20a6 6 0 0 1 6 6v27H6Z" fill="#DA9636"/><rect x="16" y="7" width="23" height="35" rx="4" transform="rotate(-9 16 7)" fill="#F4F8FE"/><path d="M22 15h10M21 22h10" stroke="#A6BAD6" stroke-width="2.5" stroke-linecap="round"/><rect x="32" y="10" width="22" height="32" rx="4" transform="rotate(8 32 10)" fill="#91B8EC"/><path d="M38 19h10M37 25h9" stroke="#CFDFFD" stroke-width="2.5" stroke-linecap="round"/><path d="M5 30a6 6 0 0 1 6-5h42a6 6 0 0 1 6 7l-4 18a7 7 0 0 1-7 6H15a7 7 0 0 1-7-6Z" fill="url(#file-shelf-main)"/><rect x="24" y="35" width="17" height="5" rx="2.5" fill="#FFF3D4"/><path d="M13 50h36" stroke="#D99A35" stroke-width="1.5" stroke-linecap="round" opacity=".4"/>
+</svg>

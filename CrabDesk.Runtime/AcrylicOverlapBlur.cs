@@ -23,9 +23,10 @@ internal static class AcrylicOverlapBlur
         RectangleF bounds,
         float cornerRadius,
         double scale,
-        IReadOnlyList<RectangleF> behind)
+        IReadOnlyList<RectangleF> behind,
+        double blurStrength = 50)
     {
-        if (!double.IsFinite(scale) || scale <= 0 || bounds.Width <= 1 || bounds.Height <= 1)
+        if (!double.IsFinite(scale) || scale <= 0 || blurStrength <= 0 || bounds.Width <= 1 || bounds.Height <= 1)
             return false;
 
         var overlap = RectangleF.Empty;
@@ -37,7 +38,7 @@ internal static class AcrylicOverlapBlur
         }
         if (overlap.IsEmpty) return false;
 
-        var radius = Math.Max(1, (int)Math.Round(BlurRadiusDip * scale / SampleScale));
+        var radius = Math.Max(1, (int)Math.Round(BlurRadiusDip * Math.Clamp(blurStrength, 0, 100) / 50 * scale / SampleScale));
         // Three box-filter passes approximate a Gaussian. Include their full
         // support outside the upper box so its edges do not smear a clipped
         // source; round to device pixels only after the DIP conversion.

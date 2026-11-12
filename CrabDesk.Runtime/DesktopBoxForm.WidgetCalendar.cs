@@ -15,6 +15,29 @@ internal sealed partial class DesktopBoxForm
     private DateOnly? _hoveredCalendarDate;
     private readonly Forms.Timer _calendarToolTipTimer = new() { Interval = 450 };
     private string _calendarToolTipText = string.Empty;
+    private readonly Guid _calendarToolTipBackdropId = Guid.NewGuid();
+    private readonly Forms.Timer _calendarToolTipMotion = new() { Interval = DesktopAnimationFrameClock.IntervalMilliseconds };
+    private long _calendarToolTipStarted;
+    private double _calendarToolTipProgress = 1;
+
+    private RectangleF CalendarToolTipVisualBounds
+    {
+        get
+        {
+            var bounds = _calendarToolTipBounds;
+            bounds.Offset(0, (float)(8 * Math.Pow(1 - _calendarToolTipProgress, 3)));
+            return bounds;
+        }
+    }
+
+    private float CalendarToolTipOpacity => (float)(_calendarToolTipProgress * _calendarToolTipProgress * (3 - 2 * _calendarToolTipProgress));
+
+    private void AnimateCalendarToolTip(object? sender, EventArgs args)
+    {
+        _calendarToolTipProgress = Math.Clamp(System.Diagnostics.Stopwatch.GetElapsedTime(_calendarToolTipStarted).TotalMilliseconds / 260, 0, 1);
+        if (_calendarToolTipProgress == 1) _calendarToolTipMotion.Stop();
+        RequestVisualLayerRender();
+    }
 
     private void ShowCalendarToolTip(object? sender, EventArgs args)
     {
@@ -31,13 +54,13 @@ internal sealed partial class DesktopBoxForm
         var details = CalendarDateDetails.ForDate(date);
         const float width = 212;
         const float padding = 12;
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         var text = ResolveAutoTextColor(background);
         var muted = Color.FromArgb(190, text);
         var accent = ParseOpaqueColor(appearance.Accent);
         var badges = details.Festivals.Concat(string.IsNullOrEmpty(details.SolarTerm) ? [] : new[] { details.SolarTerm }).Distinct().ToArray();
-        using var badgeFont = new Font(BoxAppearance.DefaultFontFamily, 11.5f, GraphicsUnit.Pixel);
+        using var badgeFont = WidgetTextRendering.CreateFont(widget, 11.5f);
         var chipLayout = new List<(string Text, RectangleF Bounds)>();
         using (var measure = Graphics.FromHwnd(Handle))
         {
@@ -55,12 +78,16 @@ internal sealed partial class DesktopBoxForm
         using var bitmap = DesktopLayerBitmapFactory.Create(ToPixel(width + shadow * 2), ToPixel(height + shadow * 2));
         using (var graphics = Graphics.FromImage(bitmap))
         {
+            using var typography = WidgetTextRendering.Begin(graphics, widget);
             graphics.Clear(Color.Transparent);
             graphics.ScaleTransform((float)_scale, (float)_scale);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             var card = new RectangleF(shadow, shadow, width, height);
-            var radius = (float)Math.Min(12, _runtime.State.Settings.Appearance.CornerRadius);
+            var radius = (float)Math.Min(12, WidgetCornerRadius);
+            using var path = RoundedRectangle(card, radius);
+            var shadowClip = graphics.Save();
+            graphics.SetClip(path, CombineMode.Exclude);
             for (var spread = 4; spread >= 1; spread--)
             {
                 var shadowBounds = RectangleF.Inflate(card, spread, spread); shadowBounds.Offset(0, 1);
@@ -68,11 +95,9 @@ internal sealed partial class DesktopBoxForm
                 using var shadowInk = new SolidBrush(Color.FromArgb(5, Color.Black));
                 graphics.FillPath(shadowInk, shadowPath);
             }
-            using var path = RoundedRectangle(card, radius);
-            using var fill = new SolidBrush(Color.FromArgb(248, background));
+            graphics.Restore(shadowClip);
+            using var fill = new SolidBrush(ApplyOpacity(background, appearance.Opacity));
             graphics.FillPath(fill, path);
-            using var border = new Pen(Color.FromArgb(45, text), 1);
-            graphics.DrawPath(border, path);
             graphics.TranslateTransform(shadow, shadow);
             WidgetText(graphics, date.ToString("yyyy年M月d日", CultureInfo.InvariantCulture), new(padding, 10, 140, 22), text, 14, bold: true);
             WidgetText(graphics, date.ToString("dddd", CultureInfo.GetCultureInfo("zh-CN")), new(width - padding - 40, 10, 40, 22), muted, 11, centered: true);
@@ -100,13 +125,21 @@ internal sealed partial class DesktopBoxForm
         _calendarToolTipBounds = new((float)(client.X / _scale), (float)(client.Y / _scale),
             (float)(bitmap.Width / _scale), (float)(bitmap.Height / _scale));
         AccessibleDescription = details.ToolTipText;
+        _calendarToolTipMotion.Stop();
+        _calendarToolTipProgress = _runtime.State.Settings.Appearance.AnimationEnabled && System.Windows.SystemParameters.ClientAreaAnimation ? 0 : 1;
+        _calendarToolTipStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_calendarToolTipProgress < 1) _calendarToolTipMotion.Start();
         RequestVisualLayerRender();
     }
 
     private void DrawCalendarToolTip(Graphics graphics)
     {
-        if (_calendarToolTipBitmap is not null)
-            graphics.DrawImage(_calendarToolTipBitmap, _calendarToolTipBounds);
+        if (_calendarToolTipBitmap is not { } bitmap) return;
+        var bounds = CalendarToolTipVisualBounds;
+        using var attributes = new System.Drawing.Imaging.ImageAttributes();
+        attributes.SetColorMatrix(new System.Drawing.Imaging.ColorMatrix { Matrix33 = CalendarToolTipOpacity });
+        graphics.DrawImage(bitmap, new[] { bounds.Location, new PointF(bounds.Right, bounds.Top), new PointF(bounds.Left, bounds.Bottom) },
+            new RectangleF(0, 0, bitmap.Width, bitmap.Height), GraphicsUnit.Pixel, attributes);
     }
 
     private static RectangleF CalendarBodyRectangle(DesktopWidget widget)
@@ -178,6 +211,7 @@ internal sealed partial class DesktopBoxForm
     {
         if (_hoveredCalendarDate is null && _calendarToolTipBitmap is null) return;
         _calendarToolTipTimer.Stop(); _calendarToolTipText = string.Empty;
+        _calendarToolTipMotion.Stop();
         _calendarToolTipWidgetId = null; _hoveredCalendarDate = null;
         _calendarToolTipBitmap?.Dispose(); _calendarToolTipBitmap = null;
         _calendarToolTipBounds = RectangleF.Empty;

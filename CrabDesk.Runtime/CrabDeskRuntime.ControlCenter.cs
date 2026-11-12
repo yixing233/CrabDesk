@@ -24,6 +24,7 @@ public sealed partial class CrabDeskRuntime
     private string _pendingControlDisplayId = "";
     private int _controlWriting;
     private long _controlCommandVersion;
+    private long _controlBrightnessDisplayVersion;
     private Task? _controlWriteTask;
     private DesktopWidget? ControlCenterWidget => State.Widgets.FirstOrDefault(w => w.Kind == DesktopWidgetKind.ControlCenter);
 
@@ -87,7 +88,7 @@ public sealed partial class CrabDeskRuntime
         while (true)
         {
             await Task.Delay(150).ConfigureAwait(false);
-            double? volume, brightness; bool? muted; DesktopWidget? widget; long version; string displayId;
+            double? volume, brightness; bool? muted; DesktopWidget? widget; long version, displayVersion; string displayId;
             lock (ControlQueueGate)
             {
                 volume = _pendingControlVolume; brightness = _pendingControlBrightness; widget = _pendingControlWidget;
@@ -95,15 +96,25 @@ public sealed partial class CrabDeskRuntime
                 _pendingControlVolume = _pendingControlBrightness = null;
                 _pendingControlMuted = null;
                 version = Volatile.Read(ref _controlCommandVersion);
+                displayVersion = Volatile.Read(ref _controlBrightnessDisplayVersion);
                 displayId = _pendingControlDisplayId;
                 if (volume is null && brightness is null && muted is null) { Volatile.Write(ref _controlWriting, 0); return; }
             }
-            if (widget is null || _disposed || IsPaused) continue;
+            if (widget is null || _disposed || IsPaused || !State.Widgets.Contains(widget)) continue;
             var source = _controlMonitor!;
             ControlCenterSnapshot? read = null; var error = "";
             await ControlIoGate.WaitAsync().ConfigureAwait(false);
             try
             {
+                if (_disposed || IsPaused || !State.Widgets.Contains(widget)) continue;
+                // A target change cancels brightness already dequeued while slow
+                // hardware I/O was busy. Keep any independent audio changes.
+                if (displayVersion != Volatile.Read(ref _controlBrightnessDisplayVersion))
+                {
+                    brightness = null;
+                    displayId = ResolveControlBrightnessDisplay(widget);
+                }
+                if (volume is null && brightness is null && muted is null) continue;
                 source.BrightnessDisplayId = displayId;
                 var volumeWritten = volume is not { } v || source.SetVolume(v);
                 if (!volumeWritten) error = "无法调整音量";
@@ -140,7 +151,7 @@ public sealed partial class CrabDeskRuntime
             await ControlIoGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_disposed || IsPaused) return;
+                if (_disposed || IsPaused || !State.Widgets.Contains(widget)) return;
                 source.BrightnessDisplayId = displayId;
                 if (!await command(source).ConfigureAwait(false)) error = failure;
                 snapshot = await source.ReadAsync().ConfigureAwait(false);
@@ -174,6 +185,7 @@ public sealed partial class CrabDeskRuntime
         {
             _pendingControlBrightness = null;
             _pendingControlDisplayId = displayId;
+            Interlocked.Increment(ref _controlBrightnessDisplayVersion);
             Interlocked.Increment(ref _controlCommandVersion);
         }
         if (widget.Controls is { } current) widget.Controls = current with { BrightnessPercent = null };

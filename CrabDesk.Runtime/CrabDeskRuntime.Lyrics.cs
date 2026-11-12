@@ -57,15 +57,15 @@ public sealed partial class CrabDeskRuntime
             : snapshot with { Document = cached.Document, IsLoading = false, Error = "" };
     }
 
-    public void SetLyricsOptions(DesktopWidget widget, int lines, double fontSize, int offsetMilliseconds, bool wordHighlight)
+    public void SetLyricsOptions(DesktopWidget widget, double lineSpacing, double fontSize, int offsetMilliseconds, bool wordHighlight)
     {
         if (_disposed || widget.Kind != DesktopWidgetKind.Lyrics || !State.Widgets.Contains(widget)) return;
-        lines = WidgetLyricsSettings.NormalizeLineCount(lines);
+        lineSpacing = WidgetLyricsSettings.NormalizeLineSpacing(lineSpacing);
         fontSize = WidgetLyricsSettings.NormalizeFontSize(fontSize);
         offsetMilliseconds = WidgetLyricsSettings.NormalizeOffset(offsetMilliseconds);
-        if (widget.LyricsLineCount == lines && widget.LyricsFontSize == fontSize &&
+        if (widget.LyricsLineSpacing == lineSpacing && widget.LyricsFontSize == fontSize &&
             widget.LyricsOffsetMilliseconds == offsetMilliseconds && widget.LyricsWordHighlight == wordHighlight) return;
-        widget.LyricsLineCount = lines;
+        widget.LyricsLineSpacing = lineSpacing;
         widget.LyricsFontSize = fontSize;
         widget.LyricsOffsetMilliseconds = offsetMilliseconds;
         widget.LyricsWordHighlight = wordHighlight;
@@ -95,8 +95,9 @@ public sealed partial class CrabDeskRuntime
     public void SetLyricsTransparentBackground(DesktopWidget widget, bool transparent)
     {
         if (_disposed || widget.Kind != DesktopWidgetKind.Lyrics || !State.Widgets.Contains(widget) ||
-            widget.LyricsTransparentBackground == transparent) return;
+            widget.LyricsTransparentBackground == transparent && widget.BackgroundMaterial == WidgetBackgroundMaterial.Acrylic) return;
         widget.LyricsTransparentBackground = transparent;
+        widget.BackgroundMaterial = WidgetBackgroundMaterial.Acrylic;
         WidgetChanged(widget);
     }
 

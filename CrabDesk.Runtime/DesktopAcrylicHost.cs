@@ -11,7 +11,8 @@ using Forms = System.Windows.Forms;
 
 namespace CrabDesk.Runtime;
 
-internal readonly record struct AcrylicBoxRegion(Guid Id, RectangleF ScreenBounds, float CornerRadius);
+internal readonly record struct AcrylicBoxRegion(Guid Id, RectangleF ScreenBounds, float CornerRadius, float DpiScale = 1,
+    float Opacity = 1, float? BlurStrength = null);
 
 /// <summary>
 /// Hosts the live backdrop and sharp box pixels in one explicitly committed
@@ -20,6 +21,7 @@ internal readonly record struct AcrylicBoxRegion(Guid Id, RectangleF ScreenBound
 internal sealed class DesktopAcrylicHost : Forms.Form
 {
     private readonly IntPtr _desktopView;
+    private readonly Func<Compositor, CompositionEffectFactory>? _createBlurFactory;
     private readonly Forms.Panel _anchor = new() { Visible = false, Size = new Size(1, 1) };
     private readonly Forms.Timer _orderTimer = new() { Interval = 500 };
     private readonly Dictionary<Guid, BoxVisual> _boxes = [];
@@ -32,6 +34,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     private CompositionBitmapDevice? _bitmapDevice;
     private readonly Dictionary<string, ForegroundFrame> _foregrounds = [];
     private CompositionBackdropBrush? _backdrop;
+    private CompositionEffectFactory? _blurFactory;
+    private float _blurStrength = 50;
     private Windows.System.DispatcherQueueController? _queueController;
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
     private DesktopDropForwarder? _dropForwarder;
@@ -48,9 +52,11 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     internal bool EffectsEnabled => _effectsEnabled;
     internal Action? EffectsChanged { get; set; }
 
-    internal DesktopAcrylicHost(IntPtr desktopView, IReadOnlyList<MonitorLayout> monitors)
+    internal DesktopAcrylicHost(IntPtr desktopView, IReadOnlyList<MonitorLayout> monitors,
+        Func<Compositor, CompositionEffectFactory>? createBlurFactory = null)
     {
         _desktopView = desktopView;
+        _createBlurFactory = createBlurFactory;
         _screenBounds = monitors.Select(m => Rectangle.Round(new RectangleF(
                 (float)m.PixelBounds.X, (float)m.PixelBounds.Y,
                 (float)m.PixelBounds.Width, (float)m.PixelBounds.Height)))
@@ -103,11 +109,21 @@ internal sealed class DesktopAcrylicHost : Forms.Form
         _root.Children.InsertAtBottom(_backdropRoot);
         _bitmapDevice = new CompositionBitmapDevice(_compositor);
         _backdrop = _compositor.CreateHostBackdropBrush();
+        _blurFactory = _createBlurFactory?.Invoke(_compositor);
         _target.Root = _root;
         _effectsEnabled = _uiSettings.AdvancedEffectsEnabled && !Forms.SystemInformation.HighContrast;
         _backdropRoot.IsVisible = _effectsEnabled;
         _ = AnchorHandle;
         _controller.Commit();
+    }
+
+    internal void SetBlurStrength(double strength)
+    {
+        var normalized = (float)Math.Clamp(strength, 0, 100);
+        if (_blurStrength == normalized) return;
+        _blurStrength = normalized;
+        foreach (var box in _boxes.Values) box.UpdateBlur(normalized);
+        _controller?.Commit();
     }
 
     private void Synchronize(IEnumerable<AcrylicBoxRegion> regions)
@@ -120,11 +136,11 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             if (!seen.Add(region.Id)) continue;
             if (!_boxes.TryGetValue(region.Id, out var box))
             {
-                box = new BoxVisual(_compositor, _backdrop!);
+                box = new BoxVisual(_compositor, _backdrop!, _blurFactory);
                 _boxes.Add(region.Id, box);
                 _backdropRoot!.Children.InsertAtTop(box.Visual);
             }
-            box.Update(region, _screenBounds.Location);
+            box.Update(region, _screenBounds.Location, _blurStrength);
         }
         foreach (var id in _boxes.Keys.Where(id => !seen.Contains(id)).ToArray())
         {
@@ -350,6 +366,8 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             _boxes.Clear();
             if (_target is not null) _target.Root = null;
             _backdrop?.Dispose();
+            _blurFactory?.Dispose();
+            _blurFactory = null;
             _backdropRoot?.Dispose();
             _root?.Dispose();
             _target?.Dispose();
@@ -427,18 +445,21 @@ internal sealed class DesktopAcrylicHost : Forms.Form
     private sealed class BoxVisual : IDisposable
     {
         internal readonly SpriteVisual Visual;
+        private readonly CompositionEffectBrush? _blurBrush;
         private readonly CompositionRoundedRectangleGeometry _geometry;
         private readonly CompositionGeometricClip _clip;
         private AcrylicBoxRegion? _previous;
-        internal BoxVisual(Compositor compositor, CompositionBrush brush)
+        internal BoxVisual(Compositor compositor, CompositionBrush brush, CompositionEffectFactory? factory)
         {
             Visual = compositor.CreateSpriteVisual();
-            Visual.Brush = brush;
+            _blurBrush = factory?.CreateBrush();
+            _blurBrush?.SetSourceParameter("Backdrop", brush);
+            Visual.Brush = _blurBrush ?? brush;
             _geometry = compositor.CreateRoundedRectangleGeometry();
             _clip = compositor.CreateGeometricClip(_geometry);
             Visual.Clip = _clip;
         }
-        internal void Update(AcrylicBoxRegion region, Point origin)
+        internal void Update(AcrylicBoxRegion region, Point origin, float strength)
         {
             if (_previous == region) return;
             _previous = region;
@@ -446,8 +467,21 @@ internal sealed class DesktopAcrylicHost : Forms.Form
             Visual.Offset = new Vector3(bounds.X - origin.X, bounds.Y - origin.Y, 0);
             Visual.Size = _geometry.Size = new Vector2(bounds.Width, bounds.Height);
             _geometry.CornerRadius = new Vector2(Math.Min(region.CornerRadius, Math.Min(bounds.Width, bounds.Height) / 2));
+            UpdateBlur(strength);
         }
-        public void Dispose() { Visual.Dispose(); _clip.Dispose(); _geometry.Dispose(); }
+
+        internal void UpdateBlur(float strength)
+        {
+            strength = _previous?.BlurStrength ?? strength;
+            // HostBackdropBrush already contains the system blur. Fade it over
+            // the clear desktop below native strength, then increase the blur
+            // kernel above native strength. Foreground pixels stay separate.
+            Visual.Opacity = Math.Clamp(strength / 50f, 0, 1) * (_previous?.Opacity ?? 1);
+            _blurBrush?.Properties.InsertScalar("BackdropBlur.BlurAmount",
+                Math.Max(0, strength - 50) * .6f * (_previous?.DpiScale ?? 1));
+        }
+
+        public void Dispose() { Visual.Dispose(); _blurBrush?.Dispose(); _clip.Dispose(); _geometry.Dispose(); }
     }
 
     [StructLayout(LayoutKind.Sequential)]

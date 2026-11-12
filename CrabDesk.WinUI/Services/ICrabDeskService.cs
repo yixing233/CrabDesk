@@ -113,6 +113,7 @@ public interface ICrabDeskService
     IReadOnlyList<OrganizationRuleConflict> GetOrganizationRuleConflicts();
     void SetCornerRadius(double value);
     void SetAcrylicBoxes(bool enabled);
+    void SetAcrylicBlurStrength(double value);
     void SetShowBoxBorder(bool enabled);
     void SetBoxBorderWidth(double value);
     void SetBoxBorderColor(string value);

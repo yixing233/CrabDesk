@@ -1618,6 +1618,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             _calendarToolTipBitmap?.Dispose();
             _calendarToolTipBitmap = null;
             _calendarToolTipTimer.Dispose();
+            _calendarToolTipMotion.Dispose();
             _translationInput?.Dispose();
             _translationInput = null;
             _translationResultInput?.Dispose();
@@ -1995,9 +1996,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         // while moving a box.
         if (IsHandleCreated && !DesktopWindowTools.ApplyRoundedRegion(
                 Handle,
-                currentRectangles,
+                currentRectangles.Select((bounds, index) => (bounds,
+                    index < desktopBoxes.Length ? _runtime.State.Settings.Appearance.CornerRadius : WidgetCornerRadius)),
                 _scale,
-                _runtime.State.Settings.Appearance.CornerRadius,
                 out var regionDiagnostic,
                 redraw: !UsesLayeredPresentation))
         {

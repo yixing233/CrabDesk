@@ -11,6 +11,35 @@ public sealed class ControlQuickActionsTests
         [QuickAction.WiFi, QuickAction.Bluetooth, QuickAction.NightLight, QuickAction.Display];
 
     [Fact]
+    public void NetworkAdaptersCanBeSelectedAndSavedWithoutRenumberingExistingActions()
+    {
+        Assert.Equal(8, (int)QuickAction.Settings);
+        Assert.Equal(9, (int)QuickAction.NetworkAdapters);
+        Assert.Equal("网卡", ControlQuickActions.Label(QuickAction.NetworkAdapters));
+        Assert.Equal("启用 / 禁用", ControlQuickActions.Status(QuickAction.NetworkAdapters, null));
+        Assert.Null(ControlQuickActions.Toggle(QuickAction.NetworkAdapters));
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.ControlCenter,
+            ControlCenterQuickActions = [QuickAction.NetworkAdapters, QuickAction.WiFi]
+        };
+        var restored = JsonSerializer.Deserialize<DesktopWidget>(JsonSerializer.Serialize(widget))!;
+        Assert.Equal(widget.ControlCenterQuickActions, ControlQuickActions.For(restored));
+    }
+
+    [Theory]
+    [InlineData(true, "深色", "系统主题")]
+    [InlineData(false, "浅色", "系统主题")]
+    [InlineData(null, "系统主题", "不可用")]
+    public void ThemeActionDescribesTheCurrentMode(bool? dark, string label, string status)
+    {
+        var snapshot = new ControlCenterSnapshot { NightLightEnabled = dark };
+        Assert.Equal(label, ControlQuickActions.Label(QuickAction.NightLight, snapshot));
+        Assert.Equal(status, ControlQuickActions.Status(QuickAction.NightLight, snapshot));
+        Assert.Equal("系统主题", ControlQuickActions.Label(QuickAction.NightLight));
+    }
+
+    [Fact]
     public void NewControlCenterUsesTheFourDefaultActionsInOrder()
     {
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter };
@@ -149,7 +178,11 @@ public sealed class ControlQuickActionsTests
             var arrow = ControlCenterPresentation.QuickActionDetails(tile);
 
             Assert.Equal(main, ControlCenterPresentation.TargetAt(body, tile.X + 8, tile.Y + 14, actions));
+            Assert.Equal(main, ControlCenterPresentation.TargetAt(body, tile.X + tile.Width / 2, tile.Y + 14, actions));
             Assert.Equal(details, ControlCenterPresentation.TargetAt(body, arrow.X + arrow.Width / 2, arrow.Y + arrow.Height / 2, actions));
+            Assert.Equal(details, ControlCenterPresentation.TargetAt(body, tile.X + tile.Width - 22, tile.Y + 14, actions));
+            Assert.Equal(details, ControlCenterPresentation.TargetAt(body, tile.X + tile.Width - 10, tile.Y + 30, actions));
+            Assert.Equal(details, ControlCenterPresentation.TargetAt(body, tile.X + tile.Width - 10, tile.Y + 1, actions));
             Assert.Equal(main, ControlCenterPresentation.TargetAt(body, arrow.X + arrow.Width / 2, tile.Y + tile.Height - 8, actions));
         }
     }
@@ -187,6 +220,7 @@ public sealed class ControlQuickActionsTests
     [InlineData(QuickAction.ApplicationVolume, Target.VolumeMixer)]
     [InlineData(QuickAction.ScreenCapture, Target.ScreenCapture)]
     [InlineData(QuickAction.Settings, Target.SystemSettings)]
+    [InlineData(QuickAction.NetworkAdapters, Target.NetworkAdapters)]
     public void NonRadioActionsUseTheEntireTileForTheirOwnCommand(QuickAction action, Target expected)
     {
         var body = Body();

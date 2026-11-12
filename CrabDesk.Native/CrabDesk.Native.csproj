@@ -19,6 +19,7 @@
     <!-- Brightness is reachable only through WMI's monitor provider: Windows has
          no Win32 API for panel backlight. -->
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.8" />
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <InternalsVisibleTo Include="CrabDesk.WinUI.Tests" />
     <InternalsVisibleTo Include="CrabDesk.Tests" />

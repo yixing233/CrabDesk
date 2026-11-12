@@ -9,7 +9,7 @@ public sealed class WidgetControlCenterTests
     [InlineData(0)] [InlineData(8)] [InlineData(20)]
     public void CompactMediaLayoutKeepsArtworkTextProgressAndButtonsSeparate(double corners)
     {
-        var body = WidgetMonitorPresentation.Body(372, 292, corners);
+        var body = ControlCenterPresentation.Body(372, 292, corners);
         var panel = ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body));
         var regions = new[] { ControlCenterPresentation.MediaArtwork(panel), ControlCenterPresentation.MediaTitle(panel),
             ControlCenterPresentation.MediaArtist(panel), ControlCenterPresentation.MediaProgressHitArea(panel), ControlCenterPresentation.MediaTime(panel) }
@@ -113,7 +113,7 @@ public sealed class WidgetControlCenterTests
     public void CardLayoutKeepsEveryControlInsideTheCardWithoutOverlap()
     {
         var (width, height) = DesktopWidgets.Dimensions(DesktopWidgetSize.Panel);
-        var body = WidgetMonitorPresentation.Body(width, height, 8);
+        var body = ControlCenterPresentation.Body(width, height, 8);
 
         Assert.Equal(ControlCenterPresentation.CardWidth, width);
         Assert.Equal(ControlCenterPresentation.CardHeight, height);
@@ -261,7 +261,7 @@ public sealed class WidgetControlCenterTests
     [Fact]
     public void HitTestFindsEachControlAtItsOwnCentre()
     {
-        var body = WidgetMonitorPresentation.Body(
+        var body = ControlCenterPresentation.Body(
             ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
 
         for (var index = 0; index < 3; index++)
@@ -306,7 +306,7 @@ public sealed class WidgetControlCenterTests
     [Fact]
     public void MuteButtonAndVolumeTrackHaveSeparateHitTargets()
     {
-        var body = WidgetMonitorPresentation.Body(
+        var body = ControlCenterPresentation.Body(
             ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
         var button = ControlCenterPresentation.VolumeMuteButton(body);
         var sliders = ControlCenterPresentation.SliderArea(body);
@@ -321,7 +321,7 @@ public sealed class WidgetControlCenterTests
     [Fact]
     public void HitTestReportsNothingOutsideAControl()
     {
-        var body = WidgetMonitorPresentation.Body(
+        var body = ControlCenterPresentation.Body(
             ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
 
         // The gap between the sliders and the output row belongs to no control.
@@ -336,7 +336,7 @@ public sealed class WidgetControlCenterTests
     [Fact]
     public void OutputRowAnchorSitsAtTheRowsBottomEdgeInScreenCoordinates()
     {
-        var body = WidgetMonitorPresentation.Body(
+        var body = ControlCenterPresentation.Body(
             ControlCenterPresentation.CardWidth, ControlCenterPresentation.CardHeight, 8);
         var row = ControlCenterPresentation.OutputRow(ControlCenterPresentation.MediaArea(body));
         var cardX = 80d;

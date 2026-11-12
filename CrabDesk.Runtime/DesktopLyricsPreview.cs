@@ -15,7 +15,7 @@ public static class DesktopLyricsPreview
         var snapshot = widget.Lyrics ?? Sample(now);
         if (widget.LyricsLightText is { } light) ink = light ? Color.White : Color.FromArgb(31, 35, 41);
         visual.Draw(graphics, snapshot, new(0, 0, bitmap.Width, bitmap.Height), ink, accent,
-            widget.LyricsLineCount, widget.LyricsFontSize, widget.LyricsOffsetMilliseconds,
+            widget.LyricsLineSpacing, widget.LyricsFontSize, widget.LyricsOffsetMilliseconds,
             widget.LyricsWordHighlight, false, 1, now, widget.LyricsFontFamily, widget.LyricsFontWeight, widget.LyricsFontStyle);
         using var output = new MemoryStream();
         bitmap.Save(output, ImageFormat.Png);

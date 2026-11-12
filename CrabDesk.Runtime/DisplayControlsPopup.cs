@@ -19,8 +19,10 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
     internal event Action<string>? ExternalActionFailed;
     internal Task PendingOperation { get; private set; } = Task.CompletedTask;
 
-    internal DisplayControlsPopup(IDisplayControl source, bool dark, Color accent, double scale)
-        : base("投影", dark, accent, scale, 344, 330)
+    internal DisplayControlsPopup(IDisplayControl source, bool dark, Color accent, double scale, Color? background = null,
+        bool animationsEnabled = true)
+        : base("投影", dark, accent, scale, 344, 330, animationsEnabled: animationsEnabled, background: background,
+            skeleton: PopupSkeletonLayout.Display)
     {
         _source = source;
         var stack = new WpfControls.StackPanel();
@@ -97,12 +99,13 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
         _singleScreenHint.Visibility = snapshot.DisplayCount < 2 ? Wpf.Visibility.Visible : Wpf.Visibility.Collapsed;
         SetStatus("");
         UpdateButtons();
+        Loading!.ShowContent();
     }
 
     internal async Task RefreshAsync()
     {
         if (_busy || IsClosing) return;
-        SetBusy(true, "正在读取显示配置…");
+        SetBusy(true, Loading!.IsLoading ? "" : "正在读取显示配置…");
         try
         {
             var snapshot = await Task.Run(_source.Read);
@@ -169,6 +172,7 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
         _count.Text = "";
         _singleScreenHint.Visibility = Wpf.Visibility.Collapsed;
         SetStatus(message);
+        Loading!.ShowContent();
         UpdateButtons();
     }
 

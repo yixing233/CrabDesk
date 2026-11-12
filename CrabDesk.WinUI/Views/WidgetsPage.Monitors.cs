@@ -11,9 +11,10 @@ public sealed partial class WidgetsPage
 {
     private void Runtime_WidgetMonitorUpdated(object? sender, EventArgs args)
     {
-        // Monitoring updates are only needed by the open editor's status fields.
+        // Keep the open editor's status and network preview in sync with live readings.
         if (!IsLoaded || !_editing) return;
         UpdateMonitorStatus();
+        if (!_appearanceOpen && _selected?.Kind == DesktopWidgetKind.Network) RefreshEditorPreview();
     }
 
     private void LoadMonitorSettings(DesktopWidget widget)
@@ -25,7 +26,7 @@ public sealed partial class WidgetsPage
         NetworkDisplayModePicker.ItemsSource = DesktopWidgets.OfferedNetworkDisplayModes
             .Select(mode => new NetworkDisplayChoice(mode, DesktopWidgets.NetworkDisplayName(mode))).ToArray();
         SyncNetworkDisplaySettings(widget);
-        var choices = new List<NetworkAdapterChoice> { new("", "自动选择活动适配器") };
+        var choices = new List<NetworkAdapterChoice> { new("", "自动选择联网适配器") };
         choices.AddRange(WidgetNetworkMonitor.GetAdapters().Select(adapter => new NetworkAdapterChoice(adapter.Id, $"{adapter.Name} · {adapter.NetworkType}")));
         if (!choices.Any(choice => choice.Id == widget.NetworkAdapterId))
             choices.Add(new(widget.NetworkAdapterId, "已保存的适配器（当前不可用）"));
@@ -39,7 +40,7 @@ public sealed partial class WidgetsPage
     {
         var sizes = DesktopWidgets.SupportedSizes(widget);
         if (!SizePicker.Items.OfType<SizeChoice>().Select(choice => choice.Size).SequenceEqual(sizes))
-            SizePicker.ItemsSource = sizes.Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(size))).ToArray();
+            SizePicker.ItemsSource = sizes.Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(widget, size))).ToArray();
         SizePicker.SelectedItem = SizePicker.Items.OfType<SizeChoice>().FirstOrDefault(choice => choice.Size == widget.Size);
     }
 
@@ -48,6 +49,21 @@ public sealed partial class WidgetsPage
         if (widget.Kind != DesktopWidgetKind.Network) return;
         var choice = NetworkDisplayModePicker.Items.OfType<NetworkDisplayChoice>().FirstOrDefault(item => item.Mode == widget.NetworkDisplayMode);
         if (!ReferenceEquals(NetworkDisplayModePicker.SelectedItem, choice)) NetworkDisplayModePicker.SelectedItem = choice;
+        NetworkProcessOptions.Visibility = Show(widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Details);
+        NetworkProcessSortPicker.SelectedIndex = widget.NetworkProcessSort == NetworkProcessSort.Upload ? 1 : 0;
+    }
+
+    private void NetworkProcessSortPicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (_loading || _selected is not { Kind: DesktopWidgetKind.Network } widget ||
+            NetworkProcessSortPicker.SelectedIndex is < 0 or > 1) return;
+        var direction = NetworkProcessSortPicker.SelectedIndex == 1 ? NetworkProcessSort.Upload : NetworkProcessSort.Download;
+        if (direction == widget.NetworkProcessSort) return;
+        _saving = true;
+        try { _runtime.SetNetworkProcessSort(widget, direction); }
+        finally { _saving = false; }
+        RefreshGallery(changedWidget: widget);
+        UpdateMonitorStatus();
     }
 
     private void NetworkDisplayModePicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
@@ -77,13 +93,14 @@ public sealed partial class WidgetsPage
         }
         if (widget.Kind != DesktopWidgetKind.Network) return;
         NetworkSummary.Text = widget.Network is { } network
-            ? $"{WidgetMonitorPresentation.ConnectionText(network)}\nIPv4：{Address(network.IPv4)}\nIPv6：{Address(network.IPv6)}\n延迟：{(network.LatencyMilliseconds is { } latency ? latency + " ms" : network.LatencyStatus)} · {Address(network.LatencyTarget)}"
+            ? $"{WidgetMonitorPresentation.ConnectionText(network)}\n下载 {WidgetMonitorMetrics.Speed(network.DownloadBytesPerSecond)} · 上传 {WidgetMonitorMetrics.Speed(network.UploadBytesPerSecond)}\n延迟：{(network.LatencyMilliseconds is { } latency ? latency + " ms" : network.LatencyStatus)} · {Address(network.LatencyTarget)}"
             : string.IsNullOrEmpty(widget.MonitorError) ? "正在等待网络采样…" : widget.MonitorError;
-        NetworkPublicIpStatus.Text = "公网 IP：" + (widget.IsPublicIpLoading ? "正在查询…" :
-            !string.IsNullOrEmpty(widget.PublicIpError) ? widget.PublicIpError :
-            !string.IsNullOrEmpty(widget.PublicIp) ? widget.PublicIp : "尚未查询");
-        QueryPublicIpButton.IsEnabled = !widget.IsPublicIpLoading;
-        QueryPublicIpButton.Content = string.IsNullOrEmpty(widget.PublicIp) ? "查询公网 IP" : "刷新公网 IP";
+        var processes = widget.Network?.Processes ?? WidgetNetworkProcesses.Waiting;
+        var top = processes.Top(widget.NetworkProcessSort);
+        NetworkProcessSummary.Text = processes.Status != NetworkProcessStatus.Ready || top.Count == 0
+            ? processes.Message(widget.NetworkProcessSort)
+            : string.Join("\n", top.Select((process, index) =>
+                $"{index + 1}. {process.Name} · PID {process.ProcessId} · {WidgetMonitorMetrics.Speed(process.Rate(widget.NetworkProcessSort))}"));
     }
 
     private static string Address(string value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
@@ -119,15 +136,6 @@ public sealed partial class WidgetsPage
         finally { _saving = false; }
         RefreshGallery(changedWidget: widget);
         UpdateMonitorStatus();
-    }
-
-    private async void QueryPublicIp_Click(object sender, RoutedEventArgs args)
-    {
-        if (_selected is not { Kind: DesktopWidgetKind.Network } widget || widget.IsPublicIpLoading) return;
-        var work = _runtime.QueryWidgetPublicIpAsync(widget);
-        UpdateMonitorStatus();
-        await work;
-        if (IsLoaded && _selected == widget) UpdateMonitorStatus();
     }
 
     private sealed record NetworkAdapterChoice(string Id, string Label);

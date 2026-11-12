@@ -145,6 +145,12 @@ public sealed class BoxAppearance
     public string Background { get; set; } = "#FF2A2D32";
     public string Accent { get; set; } = "#FF4EA1D3";
     public double Opacity { get; set; } = 1;
+    // Missing values retain the tint of configurations saved before this control.
+    public double? BackgroundOpacity { get; set; }
+
+    public double ResolveBackgroundOpacity(bool acrylic) => BackgroundOpacity is { } opacity
+        ? Math.Clamp(opacity, 0, 1)
+        : Math.Clamp(Opacity, 0.35, 1) * (acrylic ? 0.72 : 1);
     public double IconSize { get; set; } = 42;
     public string LabelFontFamily { get; set; } = DefaultFontFamily;
     public double LabelFontSize { get; set; } = 8.5;
@@ -720,7 +726,15 @@ public sealed class DesktopBehaviorSettings
 public sealed class GlobalAppearanceSettings
 {
     public bool UseAcrylicBoxes { get; set; }
+    public double AcrylicBlurStrength { get; set; } = 50;
+    public WidgetAcrylicSettings WidgetAcrylic { get; set; } = new();
     public double CornerRadius { get; set; } = 8;
+    public double? WidgetCornerRadius { get; set; }
+    public double ResolveWidgetCornerRadius()
+    {
+        var value = WidgetCornerRadius ?? CornerRadius;
+        return double.IsFinite(value) ? Math.Clamp(value, 0, 20) : 8;
+    }
     public bool ShowBorder { get; set; } = true;
     // "Auto" derives the outline from each box's own background; any other
     // value is a #RRGGBB/#AARRGGBB color used as-is.
@@ -733,7 +747,7 @@ public sealed class GlobalAppearanceSettings
     public double IconVerticalSpacing { get; set; } = 80;
     public string SelectionColor { get; set; } = "#FF4A5BB1";
     public bool HoverFeedback { get; set; } = true;
-    public double IconHoverCornerRadius { get; set; } = 8;
+    public double IconHoverCornerRadius { get; set; } = 1;
     public bool AnimationEnabled { get; set; } = true;
     // A concrete family and size keep the desktop labels on Microsoft YaHei UI
     // like the rest of the box text. Both must be set: the renderer only honours

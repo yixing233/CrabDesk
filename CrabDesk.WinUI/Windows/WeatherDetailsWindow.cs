@@ -43,6 +43,7 @@ public sealed partial class WeatherDetailsWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         { presenter.SetBorderAndTitleBar(false, false); presenter.IsResizable = false; presenter.IsMinimizable = false; presenter.IsMaximizable = false; }
         var hwnd = WindowNative.GetWindowHandle(this);
+        CrabDesk.Native.DesktopPopupWindow.Track(hwnd);
         // The presenter leaves WS_DLGFRAME behind even with HasBorder=false.
         // Remove that non-client frame so it cannot surround the XAML card.
         var style = GetWindowLongPtr(hwnd, -16).ToInt64();
@@ -109,15 +110,14 @@ public sealed partial class WeatherDetailsWindow : Window
                 var color = Converters.HexColor.TryParse(appearance.Background, out var parsed) ? parsed : global::Windows.UI.Color.FromArgb(255, 42, 45, 50);
                 var isDark = color.R * .299 + color.G * .587 + color.B * .114 < 150;
                 _root.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
-                var stroke = BoxBorderStyle.ResolveStroke(System.Drawing.Color.FromArgb(color.R, color.G, color.B), isDark, settings.BorderColor, settings.BorderOpacity);
-                color.A = settings.UseAcrylicBoxes ? (byte)(255 * Math.Clamp(appearance.Opacity * .8, .35, .9)) : (byte)255;
+                color.A = (byte)Math.Round(255 * appearance.ResolveBackgroundOpacity(settings.UseAcrylicBoxes));
                 _locationsShell!.Background = new SolidColorBrush(color);
                 _locationsShell.CornerRadius = new CornerRadius(WindowCornerRadius(settings.CornerRadius));
-                _locationsShell.BorderThickness = new Thickness(settings.ShowBorder ? Math.Clamp(settings.BorderWidth, 1, 6) : 0);
-                _locationsShell.BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
+                _locationsShell.BorderThickness = new Thickness(0);
             }
             else View.Update(_widget, appearance, settings, WindowCornerRadius(settings.CornerRadius));
             UpdateLocations();
+            ApplyLocationsMaterial(appearance, settings);
             if (_acrylic != settings.UseAcrylicBoxes)
             {
                 _acrylic = settings.UseAcrylicBoxes;

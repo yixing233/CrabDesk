@@ -16,6 +16,153 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class ConnectionDetailsPopupTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EntranceFadesAndMovesTheWholeWindowThenSettlesAtItsAnchor(bool animationsEnabled)
+    {
+        OnSta(() =>
+        {
+            var state = Snapshot(ControlConnectionKind.WiFi);
+            var source = Source(ControlConnectionKind.WiFi, () => state);
+            using var controller = new ConnectionDetailsController(source.Object);
+            using var popup = new ConnectionDetailsPopup(controller, false, Color.RoyalBlue, 1, _ => { }, animationsEnabled);
+            popup.Location = new Point(-12000, -12000);
+            var surface = Assert.IsType<WpfControls.Border>(popup.ContentView);
+            var content = Assert.IsType<WpfControls.Grid>(surface.Child);
+            var target = popup.Bounds;
+            popup.Show();
+            var samples = new List<double>();
+            var positions = new List<Point>();
+            PumpFrames(TimeSpan.FromMilliseconds(550), () =>
+            {
+                Assert.False(popup.IsDisposed);
+                Assert.Equal(target.Size, popup.Size);
+                Assert.Equal(1, surface.Opacity);
+                Assert.Equal(1, content.Opacity);
+                samples.Add(popup.Opacity);
+                positions.Add(popup.Location);
+            });
+            Assert.Equal(0, DwmGetWindowAttribute(popup.Handle, 14, out var cloaked, sizeof(int)));
+            Assert.Equal(0, cloaked);
+            Assert.Equal(1, content.Opacity);
+            Assert.Equal(1, popup.Opacity);
+            Assert.Equal(target, popup.Bounds);
+            if (animationsEnabled && Wpf.SystemParameters.ClientAreaAnimation)
+            {
+                Assert.Contains(samples, opacity => opacity > 0 && opacity < 1);
+                Assert.Contains(positions, position => position != target.Location);
+            }
+            else
+            {
+                Assert.All(samples, opacity => Assert.Equal(1, opacity));
+                Assert.All(positions, position => Assert.Equal(target.Location, position));
+            }
+            Assert.True(controller.RefreshAsync().IsCompletedSuccessfully);
+            Assert.Equal(1, content.Opacity);
+            popup.Dismiss();
+            VerifyNoCommands(source);
+        });
+    }
+
+    [Fact]
+    public void ClosingBeforeTheFirstFrameDoesNotRevealOrKeepTheCardAlive()
+    {
+        OnSta(() =>
+        {
+            var source = Source(ControlConnectionKind.Bluetooth, () => Snapshot(ControlConnectionKind.Bluetooth));
+            using var controller = new ConnectionDetailsController(source.Object);
+            using var popup = new ConnectionDetailsPopup(controller, true, Color.RoyalBlue, 1, _ => { });
+            popup.Location = new Point(-12000, -12000);
+            popup.Show();
+            popup.Dismiss();
+            PumpFrames(TimeSpan.FromMilliseconds(100), () => Assert.False(popup.Visible));
+            Assert.True(popup.IsDisposed);
+            VerifyNoCommands(source);
+        });
+    }
+
+    private static void PumpFrames(TimeSpan duration, Action sample)
+    {
+        var dispatcher = Wpf.Threading.Dispatcher.CurrentDispatcher;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        while (elapsed.Elapsed < duration)
+        {
+            System.Windows.Forms.Application.DoEvents();
+            dispatcher.Invoke(() => { }, Wpf.Threading.DispatcherPriority.Background);
+            sample();
+            Thread.Sleep(8);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
+
+    [Theory]
+    [InlineData(ControlConnectionKind.WiFi, false, false)]
+    [InlineData(ControlConnectionKind.WiFi, true, false)]
+    [InlineData(ControlConnectionKind.Bluetooth, false, false)]
+    [InlineData(ControlConnectionKind.Bluetooth, true, false)]
+    [InlineData(ControlConnectionKind.WiFi, false, true)]
+    [InlineData(ControlConnectionKind.WiFi, true, true)]
+    [InlineData(ControlConnectionKind.Bluetooth, false, true)]
+    [InlineData(ControlConnectionKind.Bluetooth, true, true)]
+    public async Task SwitchKeepsRequestedStateWhileBusyAndUsesTheConfirmedResult(
+        ControlConnectionKind kind, bool initiallyEnabled, bool fail)
+    {
+        var state = Snapshot(kind) with { Enabled = initiallyEnabled };
+        var source = Source(kind, () => state);
+        var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.Setup(service => service.SetEnabledAsync(!initiallyEnabled, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await completed.Task;
+                if (!fail) state = state with { Enabled = !initiallyEnabled };
+                return fail ? new(false, "系统拒绝切换无线设备") : ControlOperationResult.Success;
+            });
+        using var controller = new ConnectionDetailsController(source.Object);
+        await controller.RefreshAsync(true);
+        OnSta(() =>
+        {
+            var previous = SynchronizationContext.Current;
+            SynchronizationContext.SetSynchronizationContext(
+                new Wpf.Threading.DispatcherSynchronizationContext(Wpf.Threading.Dispatcher.CurrentDispatcher));
+            try
+            {
+                using var popup = new ConnectionDetailsPopup(controller, initiallyEnabled, Color.RoyalBlue, 1, _ => { });
+                var view = Layout(popup);
+                var radio = Switch(view);
+                Assert.Equal(initiallyEnabled, radio.IsChecked);
+                Assert.False(radio.IsThreeState);
+                Assert.Equal(48, radio.Width);
+                Toggle(radio);
+                Assert.False(radio.IsEnabled);
+                Assert.Equal(!initiallyEnabled, radio.IsChecked);
+                popup.ApplySnapshot();
+                Assert.Equal(!initiallyEnabled, radio.IsChecked);
+                completed.SetResult(true);
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                while (!radio.IsEnabled)
+                {
+                    Assert.True(timer.ElapsedMilliseconds < 5000, "Radio switch did not finish its operation.");
+                    Wpf.Threading.Dispatcher.CurrentDispatcher.Invoke(() => { }, Wpf.Threading.DispatcherPriority.Background);
+                    Thread.Sleep(1);
+                }
+                Assert.Equal(fail ? initiallyEnabled : !initiallyEnabled, radio.IsChecked);
+                Assert.Equal(radio.IsChecked is true ? "已开启" : "已关闭", Automation.GetItemStatus(radio));
+                if (fail)
+                    Assert.Contains(Descendants<WpfControls.TextBlock>(view), label => label.Text == "系统拒绝切换无线设备");
+            }
+            finally
+            {
+                completed.TrySetResult(true);
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+        });
+        source.Verify(service => service.SetEnabledAsync(!initiallyEnabled, It.IsAny<CancellationToken>()), Times.Once);
+        source.Verify(service => service.SetEnabledAsync(initiallyEnabled, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
     [InlineData(ControlConnectionKind.WiFi, false)]
     [InlineData(ControlConnectionKind.WiFi, true)]
     [InlineData(ControlConnectionKind.Bluetooth, false)]
@@ -35,15 +182,15 @@ public sealed class ConnectionDetailsPopupTests
             var scroll = Assert.Single(Descendants<WpfControls.ScrollViewer>(view), control => control.Content is WpfControls.StackPanel);
             var rows = (WpfControls.StackPanel)scroll.Content;
             var originalRows = rows.Children.Cast<Wpf.UIElement>().ToArray();
-            var radio = Button(view, kind == ControlConnectionKind.WiFi ? "关闭 Wi-Fi" : "关闭 蓝牙");
-            var radioContent = radio.Content;
+            var radio = Switch(view);
+            var radioTemplate = radio.Template;
             var settings = Button(view, kind == ControlConnectionKind.WiFi ? "网络设置" : "添加 / 管理设备");
             var settingsContent = settings.Content;
             scroll.ScrollToVerticalOffset(100); view.UpdateLayout();
             var offset = scroll.VerticalOffset;
             Assert.True(offset > 0);
-            var updates = new List<(Wpf.UIElement[] Rows, object Radio, object Settings, bool Enabled, bool Updating)>();
-            controller.Changed += () => updates.Add((rows.Children.Cast<Wpf.UIElement>().ToArray(), radio.Content, settings.Content,
+            var updates = new List<(Wpf.UIElement[] Rows, WpfControls.ControlTemplate Radio, object Settings, bool Enabled, bool Updating)>();
+            controller.Changed += () => updates.Add((rows.Children.Cast<Wpf.UIElement>().ToArray(), radio.Template, settings.Content,
                 radio.IsEnabled && rows.Children.Cast<Wpf.DependencyObject>().SelectMany(Descendants<WpfControls.Button>).All(button => button.IsEnabled),
                 Descendants<WpfControls.TextBlock>(view).Any(label => label.Text == "正在更新连接…")));
 
@@ -53,7 +200,7 @@ public sealed class ConnectionDetailsPopupTests
             {
                 Assert.Equal(originalRows.Length, update.Rows.Length);
                 for (var index = 0; index < originalRows.Length; index++) Assert.Same(originalRows[index], update.Rows[index]);
-                Assert.Same(radioContent, update.Radio);
+                Assert.Same(radioTemplate, update.Radio);
                 Assert.Same(settingsContent, update.Settings);
                 Assert.True(update.Enabled);
                 Assert.False(update.Updating);
@@ -146,8 +293,8 @@ public sealed class ConnectionDetailsPopupTests
             try
             {
                 var refresh = controller.RefreshAsync();
-                var radio = Button(view, "关闭 Wi-Fi");
-                Click(radio);
+                var radio = Switch(view);
+                Toggle(radio);
                 Assert.Equal(0, writes);
                 Assert.False(radio.IsEnabled);
                 state = state with { Enabled = false };
@@ -181,8 +328,9 @@ public sealed class ConnectionDetailsPopupTests
         await controller.RefreshAsync(true);
         OnSta(() =>
         {
+            var background = dark ? Color.FromArgb(28, 37, 53) : Color.FromArgb(241, 245, 249);
             using var popup = new ConnectionDetailsPopup(controller, dark, Color.FromArgb(79, 100, 154), 1,
-                _ => throw new InvalidOperationException("Rendering must not open settings."));
+                _ => throw new InvalidOperationException("Rendering must not open settings."), background: background);
             var view = Layout(popup);
             Assert.False(popup.Visible);
             Assert.Equal(new Size(344, 408), popup.ClientSize);
@@ -194,7 +342,8 @@ public sealed class ConnectionDetailsPopupTests
             Assert.Contains(Descendants<WpfControls.Button>(view), button =>
                 Automation.GetName(button) == (kind == ControlConnectionKind.WiFi ? "刷新Wi-Fi列表" : "刷新蓝牙列表"));
             var surface = Assert.IsType<Media.SolidColorBrush>(Assert.IsType<WpfControls.Border>(view).Background);
-            Assert.Equal(dark ? Media.Color.FromRgb(36, 39, 45) : Media.Color.FromRgb(248, 249, 251), surface.Color);
+            Assert.Equal(background.ToArgb(), popup.BackColor.ToArgb());
+            Assert.Equal(Media.Color.FromRgb(background.R, background.G, background.B), surface.Color);
             SaveImage(view, $"connection-details-{(kind == ControlConnectionKind.WiFi ? "wifi" : "bluetooth")}-{(dark ? "dark" : "light")}.png");
         });
 
@@ -224,12 +373,12 @@ public sealed class ConnectionDetailsPopupTests
             Assert.Contains(Descendants<WpfControls.TextBlock>(view), label => label.Text == empty);
             if (denied)
             {
-                Assert.False(Button(view, "开启 Wi-Fi").IsEnabled);
+                Assert.False(Switch(view).IsEnabled);
                 Assert.NotNull(Button(view, "位置权限"));
                 Assert.Contains(Descendants<WpfControls.TextBlock>(view), label => label.Text == state.Status && label.Visibility == Wpf.Visibility.Visible);
             }
             else
-                Assert.True(Button(view, kind == ControlConnectionKind.WiFi ? "关闭 Wi-Fi" : "关闭 蓝牙").IsEnabled);
+                Assert.True(Switch(view).IsEnabled);
         });
         VerifyNoCommands(source);
     }
@@ -436,6 +585,19 @@ public sealed class ConnectionDetailsPopupTests
 
     private static WpfControls.Button Button(Wpf.DependencyObject view, string name) =>
         Assert.Single(Descendants<WpfControls.Button>(view), button => Automation.GetName(button) == name);
+
+    private static WpfControls.Primitives.ToggleButton Switch(Wpf.DependencyObject view) =>
+        Assert.Single(Descendants<WpfControls.Primitives.ToggleButton>(view),
+            toggle => Automation.GetName(toggle) is "Wi-Fi 开关" or "蓝牙 开关");
+
+    private static void Toggle(WpfControls.Primitives.ToggleButton toggle)
+    {
+        Assert.True(toggle.IsEnabled);
+        var peer = new Wpf.Automation.Peers.ToggleButtonAutomationPeer(toggle);
+        var provider = Assert.IsAssignableFrom<Wpf.Automation.Provider.IToggleProvider>(
+            peer.GetPattern(Wpf.Automation.Peers.PatternInterface.Toggle));
+        provider.Toggle();
+    }
 
     private static void Click(WpfControls.Button button)
     {

@@ -65,7 +65,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
         IReadOnlyList<MonitorLayout> monitors)
     {
         _runtime = runtime;
-        AcrylicRequested = runtime.State.Settings.Appearance.UseAcrylicBoxes;
+        AcrylicRequested = WidgetAppearance.RequiresAcrylic(runtime.State);
         _host = host;
         _desktopListView = host.DesktopListView;
         _iconSurfaceAnchor = host.DesktopListView;
@@ -88,11 +88,12 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
             var iconParentHandle = host.DesktopView;
             var boxParentHandle = host.DesktopView;
-            if (runtime.State.Settings.Appearance.UseAcrylicBoxes && DesktopAcrylicHost.IsSupported)
+            if (AcrylicRequested && DesktopAcrylicHost.IsSupported)
             {
                 try
                 {
-                    _acrylicHost = new DesktopAcrylicHost(host.DesktopView, monitors);
+                    _acrylicHost = new DesktopAcrylicHost(host.DesktopView, monitors, runtime.AcrylicBlurFactory);
+                    _acrylicHost.SetBlurStrength(runtime.State.Settings.Appearance.AcrylicBlurStrength);
                     _acrylicHost.InitializeComposition();
                     boxParentHandle = _acrylicHost.Handle;
                     _boxSurfaceAnchor = _acrylicHost.AnchorHandle;
@@ -152,6 +153,10 @@ internal sealed class DesktopSurfaceManager : IDisposable
                         surface.PrepareIconLayerComposition();
                     }
                     surface.SetAcrylicBackground(_acrylicHost?.EffectsEnabled == true);
+                    // A host started only for a widget's own acrylic keeps boxes and
+                    // cards following boxes on their ordinary path.
+                    surface.SetWidgetAcrylicHost(_acrylicHost is not null &&
+                        !runtime.State.Settings.Appearance.UseAcrylicBoxes);
                     if (_acrylicHost is not null)
                     {
                         surface.SetAcrylicFramePresenter((bitmap, origin, regions) =>
@@ -260,6 +265,12 @@ internal sealed class DesktopSurfaceManager : IDisposable
         foreach (var surface in _surfaces) surface.RefreshWidgets();
     }
 
+    internal void RefreshBackdrop()
+    {
+        _acrylicHost?.SetBlurStrength(_runtime.State.Settings.Appearance.AcrylicBlurStrength);
+        foreach (var surface in _surfaces) surface.RefreshBackdrop();
+    }
+
     internal void RefreshMonitorVisuals()
     {
         foreach (var surface in _surfaces) surface.RefreshMonitorVisuals();
@@ -267,6 +278,7 @@ internal sealed class DesktopSurfaceManager : IDisposable
 
     internal void Refresh()
     {
+        _acrylicHost?.SetBlurStrength(_runtime.State.Settings.Appearance.AcrylicBlurStrength);
         var anyFailure = false;
         foreach (var iconSurface in _iconSurfaces)
         {

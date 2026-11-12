@@ -12,11 +12,12 @@ using Imaging = System.Windows.Media.Imaging;
 
 namespace CrabDesk.Runtime;
 
-/// <summary>Cached lyric masks, real word timing, and transparent depth/edge treatment.</summary>
+/// <summary>Cached lyric rendering with real word timing and a gradient blur at the viewport edges.</summary>
 internal sealed class DesktopLyricsVisual : IDisposable
 {
     private const double TransitionMilliseconds = 350;
     private const int MaximumCachedLines = 24;
+    private int _maximumCachedLines = MaximumCachedLines;
     private readonly Dictionary<int, LineRaster> _lines = new();
     private WidgetLyricsDocument? _document;
     private LayoutKey? _layout;
@@ -24,7 +25,10 @@ internal sealed class DesktopLyricsVisual : IDisposable
     private Bitmap? _staticBefore;
     private Bitmap? _staticAfter;
     private StaticFrameKey? _staticFrameKey;
-    private byte[] _framePixels = Array.Empty<byte>();
+    private readonly DesktopLyricsEdgeBlur _edgeBlur = new();
+    private Bitmap? _scrollRow;
+    private byte[] _scrollRowPixels = Array.Empty<byte>();
+    private int[] _scrollSampleX = Array.Empty<int>();
     private double _fromAnchor;
     private int _targetAnchor = -1;
     private int _previousActive = -1;
@@ -35,25 +39,24 @@ internal sealed class DesktopLyricsVisual : IDisposable
     private readonly record struct LayoutKey(double Width, double FontSize, double Scale, int Ink, int Accent,
         string FontFamily, int FontWeight, WidgetLyricsFontStyle FontStyle);
     private readonly record struct WordSpan(WidgetLyricWord Word, RectangleF Bounds, bool RightToLeft);
-    private readonly record struct StaticFrameKey(int Anchor, int Active, int Rows, int ExpiredLines, float Width, float Height);
-    private readonly record struct LinePlacement(LineRaster Raster, RectangleF Destination, float Scale, float Opacity, float Depth);
+    private readonly record struct StaticFrameKey(int Anchor, int Active, int Rows, int ExpiredLines, float Width, float Height, double Spacing);
+    private readonly record struct LinePlacement(LineRaster Raster, RectangleF Destination);
 
     private sealed class LineRaster : IDisposable
     {
         internal required Bitmap Sharp;
-        internal required Bitmap Soft;
-        internal required Bitmap Distant;
+        internal required byte[] SharpAlpha;
         internal required float Width;
         internal required float Height;
         internal required WordSpan[] Words;
         internal long LastUse;
-        public void Dispose() { Sharp.Dispose(); Soft.Dispose(); Distant.Dispose(); }
+        public void Dispose() => Sharp.Dispose();
     }
 
     internal bool NeedsAnimation { get; private set; }
 
     internal void Draw(Graphics graphics, WidgetLyricsSnapshot snapshot, RectangleF bounds,
-        Color ink, Color accent, int lineCount, double fontSize, int offsetMilliseconds,
+        Color ink, Color accent, double lineSpacing, double fontSize, int offsetMilliseconds,
         bool wordHighlight, bool animationsEnabled, double scale, DateTimeOffset now,
         string? fontFamily = null, int fontWeight = 600, WidgetLyricsFontStyle fontStyle = WidgetLyricsFontStyle.Normal)
     {
@@ -61,7 +64,10 @@ internal sealed class DesktopLyricsVisual : IDisposable
         if (bounds.Width < 1 || bounds.Height < 1) return;
         scale = double.IsFinite(scale) ? Math.Clamp(scale, .5, 4) : 1;
         fontSize = WidgetLyricsSettings.NormalizeFontSize(fontSize);
-        lineCount = WidgetLyricsSettings.NormalizeLineCount(lineCount);
+        var spacing = fontSize * WidgetLyricsSettings.NormalizeLineSpacing(lineSpacing);
+        var radius = Math.Max(0, (int)Math.Floor((bounds.Height - fontSize) / (2 * spacing)));
+        var lineCount = radius * 2 + 1;
+        _maximumCachedLines = Math.Max(MaximumCachedLines, lineCount + 4);
         var layout = new LayoutKey(Math.Round(bounds.Width, 2), fontSize, scale, ink.ToArgb(), accent.ToArgb(),
             WidgetLyricsSettings.NormalizeFontFamily(fontFamily), WidgetLyricsSettings.NormalizeFontWeight(fontWeight),
             WidgetLyricsSettings.NormalizeFontStyle(fontStyle));
@@ -87,8 +93,8 @@ internal sealed class DesktopLyricsVisual : IDisposable
                 // Status strings share the same bounded cache as lyric lines.
                 var statusKey = StringComparer.Ordinal.GetHashCode(status);
                 var raster = GetLine(statusKey, new WidgetLyricLine(status, 0, 0), Math.Min(fontSize, 16), scale);
-                DrawMask(canvas, raster, new RectangleF((bounds.Width - raster.Width) / 2,
-                    (bounds.Height - raster.Height) / 2, raster.Width, raster.Height), ink, .65f, 0);
+                DrawScrollingRow(canvas, raster, new RectangleF((bounds.Width - raster.Width) / 2,
+                    (bounds.Height - raster.Height) / 2, raster.Width, raster.Height), ink, .65f, bounds);
             }
             else
             {
@@ -113,12 +119,11 @@ internal sealed class DesktopLyricsVisual : IDisposable
                 if (!transitioning) _previousActive = -1;
                 var before = (lineCount - 1) / 2;
                 var after = lineCount - before - 1;
-                var spacing = Math.Min(fontSize * 1.75, bounds.Height / (2 * Math.Max(before, after) + 1));
                 var start = Math.Max(0, (int)Math.Floor(visualAnchor) - before - 1);
                 var end = Math.Min(document.Lines.Count - 1, (int)Math.Ceiling(visualAnchor) + after + 1);
                 if (!transitioning)
                 {
-                    PrepareStaticRows(document, start, end, anchor, active, lineCount, before, after, spacing,
+                    PrepareStaticRows(document, start, end, anchor, active, lineCount, spacing,
                         bounds, fontSize, scale, position, ink);
                     CopyStaticFrame(canvas, _staticBefore!, bounds);
                 }
@@ -127,23 +132,19 @@ internal sealed class DesktopLyricsVisual : IDisposable
                     if (!transitioning && index != active) continue;
                     var line = document.Lines[index];
                     var leaving = transitioning && _previousActive == index && active >= 0;
-                    if (PlaceLine(index, line, visualAnchor, before, after, spacing, bounds, fontSize, scale,
+                    if (PlaceLine(index, line, visualAnchor, spacing, bounds, fontSize, scale,
                             position, index == active || leaving) is not { } placement) continue;
                     var raster = placement.Raster;
                     var destination = placement.Destination;
-                    var size = placement.Scale;
-                    var opacity = placement.Opacity;
-                    var depth = placement.Depth;
-                    var magnitude = Math.Abs(index - visualAnchor);
-                    DrawMask(canvas, raster, destination, ink, opacity * (active == index ? .78f : .72f), depth);
+                    DrawScrollingRow(canvas, raster, destination, ink, .78f, bounds);
 
                     if (index != active && !leaving) continue;
-                    var highlightOpacity = opacity * (float)Math.Exp(-.3 * magnitude);
+                    var highlightOpacity = 1f;
                     if (leaving) highlightOpacity *= (float)(1 - Math.Clamp(
                         (now - _transitionStarted).TotalMilliseconds / TransitionMilliseconds, 0, 1));
                     if (!wordHighlight || line.Words is not { Count: > 0 })
                     {
-                        DrawMask(canvas, raster, destination, accent, highlightOpacity, depth);
+                        DrawScrollingRow(canvas, raster, destination, accent, highlightOpacity, bounds);
                         continue;
                     }
                     using var coveragePath = new GraphicsPath(FillMode.Winding);
@@ -151,17 +152,17 @@ internal sealed class DesktopLyricsVisual : IDisposable
                     {
                         var coverage = WordProgress(word.Word, position);
                         if (coverage <= 0) continue;
-                        var clip = new RectangleF(destination.X + word.Bounds.X * size,
-                            destination.Y + word.Bounds.Y * size, word.Bounds.Width * size * (float)coverage,
-                            word.Bounds.Height * size);
-                        if (word.RightToLeft) clip.X += word.Bounds.Width * size - clip.Width;
+                        var clip = new RectangleF(destination.X + word.Bounds.X,
+                            destination.Y + word.Bounds.Y, word.Bounds.Width * (float)coverage,
+                            word.Bounds.Height);
+                        if (word.RightToLeft) clip.X += word.Bounds.Width - clip.Width;
                         coveragePath.AddRectangle(clip);
                     }
                     if (coveragePath.PointCount > 0)
                     {
                         var state = canvas.Save();
                         canvas.SetClip(coveragePath, CombineMode.Intersect);
-                        DrawMask(canvas, raster, destination, accent, highlightOpacity, depth);
+                        DrawScrollingRow(canvas, raster, destination, accent, highlightOpacity, bounds);
                         canvas.Restore(state);
                     }
                 }
@@ -170,8 +171,17 @@ internal sealed class DesktopLyricsVisual : IDisposable
                 NeedsAnimation = transitioning || snapshot.Media?.IsPlaying == true && position < lastEnd;
             }
         }
-        FadeEdges(_frame!, lineCount == 1 ? .18 : .16);
-        graphics.DrawImage(_frame!, bounds, new RectangleF(0, 0, _frame!.Width, _frame.Height), GraphicsUnit.Pixel);
+        _edgeBlur.Apply(_frame!, scale);
+        var outputState = graphics.Save();
+        try
+        {
+            // The frame already contains device-sized, antialiased glyphs.
+            // Fractional DIP bounds otherwise trigger another full-frame
+            // interpolation pass on every animation tick.
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.DrawImage(_frame!, bounds, new RectangleF(0, 0, _frame!.Width, _frame.Height), GraphicsUnit.Pixel);
+        }
+        finally { graphics.Restore(outputState); }
     }
 
     private static Graphics CreateCanvas(Bitmap bitmap, RectangleF bounds)
@@ -179,8 +189,12 @@ internal sealed class DesktopLyricsVisual : IDisposable
         var canvas = Graphics.FromImage(bitmap);
         canvas.Clear(Color.Transparent);
         canvas.ScaleTransform(bitmap.Width / bounds.Width, bitmap.Height / bounds.Height);
-        canvas.CompositingQuality = CompositingQuality.HighQuality;
-        canvas.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        // The glyph layers already use premultiplied alpha. Gamma correction
+        // would convert every pixel again for each cached layer and row.
+        canvas.CompositingQuality = CompositingQuality.AssumeLinear;
+        // Rows are sampled at device pixel centers by DrawScrollingRow.
+        // Cached frames and rows only need compositing here.
+        canvas.InterpolationMode = InterpolationMode.NearestNeighbor;
         canvas.PixelOffsetMode = PixelOffsetMode.HighQuality;
         return canvas;
     }
@@ -190,13 +204,13 @@ internal sealed class DesktopLyricsVisual : IDisposable
             new RectangleF(0, 0, bitmap.Width, bitmap.Height), GraphicsUnit.Pixel);
 
     private void PrepareStaticRows(WidgetLyricsDocument document, int start, int end, int anchor, int active,
-        int rows, int before, int after, double spacing, RectangleF bounds, double fontSize, double scale,
+        int rows, double spacing, RectangleF bounds, double fontSize, double scale,
         double position, Color ink)
     {
         var expired = 0;
         for (var index = start; index <= end; index++)
-            if (index != active && position >= document.Lines[index].EndMilliseconds) expired |= 1 << (index - start);
-        var key = new StaticFrameKey(anchor, active, rows, expired, bounds.Width, bounds.Height);
+            if (index != active && position >= document.Lines[index].EndMilliseconds) expired++;
+        var key = new StaticFrameKey(anchor, active, rows, expired, bounds.Width, bounds.Height, spacing);
         if (_staticFrameKey == key) return;
         _staticBefore ??= new Bitmap(_frame!.Width, _frame.Height, PixelFormat.Format32bppPArgb);
         _staticAfter ??= new Bitmap(_frame!.Width, _frame.Height, PixelFormat.Format32bppPArgb);
@@ -205,32 +219,28 @@ internal sealed class DesktopLyricsVisual : IDisposable
         for (var index = start; index <= end; index++)
         {
             if (index == active) continue;
-            if (PlaceLine(index, document.Lines[index], anchor, before, after, spacing, bounds,
+            if (PlaceLine(index, document.Lines[index], anchor, spacing, bounds,
                     fontSize, scale, position, scrolling: false) is not { } placement) continue;
             // Preserve row paint order even when large fonts make adjacent masks overlap.
-            DrawMask(index < active ? earlier : later, placement.Raster, placement.Destination,
-                ink, placement.Opacity * .72f, placement.Depth);
+            DrawScrollingRow(index < active ? earlier : later, placement.Raster, placement.Destination,
+                ink, .78f, bounds);
         }
         _staticFrameKey = key;
     }
 
-    private LinePlacement? PlaceLine(int index, WidgetLyricLine line, double anchor, int before, int after,
+    private LinePlacement? PlaceLine(int index, WidgetLyricLine line, double anchor,
         double spacing, RectangleF bounds, double fontSize, double scale, double position, bool scrolling)
     {
         var distance = index - anchor;
-        var magnitude = Math.Abs(distance);
-        var window = Math.Clamp(distance < 0 ? before + 1 + distance : after + 1 - distance, 0, 1);
-        if (window <= 0) return null;
-        var size = (float)Math.Max(.55, Math.Exp(-.135 * magnitude));
-        var opacity = (float)(Math.Exp(-.47 * magnitude) * window);
         var raster = GetLine(index, line, fontSize, scale);
-        var viewportWidth = bounds.Width / size;
+        var viewportWidth = bounds.Width;
         var overflow = Math.Max(0, raster.Width - viewportWidth);
         var offset = scrolling ? HorizontalOffset(raster, line, position, viewportWidth)
             : position >= line.EndMilliseconds ? overflow : 0;
-        var destination = new RectangleF(overflow > 0 ? -offset * size : (bounds.Width - raster.Width * size) / 2,
-            (float)(bounds.Height / 2 + distance * spacing - raster.Height * size / 2), raster.Width * size, raster.Height * size);
-        return new(raster, destination, size, opacity, (float)Math.Min(2, magnitude * .7));
+        var destination = new RectangleF(overflow > 0 ? -offset : (bounds.Width - raster.Width) / 2,
+            (float)(bounds.Height / 2 + distance * spacing - raster.Height / 2), raster.Width, raster.Height);
+        if (destination.Bottom < -4 * scale || destination.Top > bounds.Height + 4 * scale) return null;
+        return new(raster, destination);
     }
 
     /// <summary>Half-open intervals keep prelude, inter-line gaps and the ending unhighlighted.</summary>
@@ -320,7 +330,7 @@ internal sealed class DesktopLyricsVisual : IDisposable
     private LineRaster GetLine(int index, WidgetLyricLine line, double fontSize, double scale)
     {
         if (_lines.TryGetValue(index, out var cached)) { cached.LastUse = ++_useCounter; return cached; }
-        if (_lines.Count >= MaximumCachedLines)
+        while (_lines.Count >= _maximumCachedLines)
         {
             var oldest = 0;
             var age = long.MaxValue;
@@ -379,8 +389,7 @@ internal sealed class DesktopLyricsVisual : IDisposable
         return new LineRaster
         {
             Sharp = bitmap,
-            Soft = BlurMask(bitmap, Math.Max(1, (int)Math.Round(scale * .65)), 2),
-            Distant = BlurMask(bitmap, Math.Max(1, (int)Math.Round(scale * 1.6)), 3),
+            SharpAlpha = ReadAlpha(bitmap),
             Width = (float)(width / scale), Height = (float)(height / scale), Words = words.ToArray()
         };
     }
@@ -395,76 +404,82 @@ internal sealed class DesktopLyricsVisual : IDisposable
         return false;
     }
 
-    private static void DrawMask(Graphics graphics, LineRaster raster, RectangleF destination, Color color, float opacity, float depth)
+    private static byte[] ReadAlpha(Bitmap bitmap)
     {
-        if (opacity <= 0) return;
-        if (depth < 1)
-        {
-            Draw(raster.Sharp, 1 - depth);
-            Draw(raster.Soft, depth);
-        }
-        else
-        {
-            Draw(raster.Soft, 2 - depth);
-            Draw(raster.Distant, depth - 1);
-        }
-        void Draw(Bitmap bitmap, float weight)
-        {
-            if (weight <= .001) return;
-            using var attributes = new ImageAttributes();
-            attributes.SetWrapMode(WrapMode.Clamp);
-            attributes.SetColorMatrix(new ColorMatrix
-            {
-                Matrix00 = color.R / 255f, Matrix11 = color.G / 255f, Matrix22 = color.B / 255f,
-                Matrix33 = Math.Clamp(opacity * weight * color.A / 255f, 0, 1), Matrix44 = 1
-            });
-            PointF[] points = [new(destination.Left, destination.Top), new(destination.Right, destination.Top), new(destination.Left, destination.Bottom)];
-            graphics.DrawImage(bitmap, points, new RectangleF(0, 0, bitmap.Width, bitmap.Height), GraphicsUnit.Pixel, attributes);
-        }
+        var alpha = new byte[bitmap.Width * bitmap.Height];
+        var pixels = new byte[bitmap.Width * bitmap.Height * 4];
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        try { Marshal.Copy(data.Scan0, pixels, 0, pixels.Length); }
+        finally { bitmap.UnlockBits(data); }
+        for (var index = 0; index < alpha.Length; index++) alpha[index] = pixels[index * 4 + 3];
+        return alpha;
     }
 
-    private static Bitmap BlurMask(Bitmap original, int radius, int passes)
+    private void DrawScrollingRow(Graphics graphics, LineRaster raster, RectangleF destination,
+        Color color, float opacity, RectangleF bounds)
     {
-        var width = original.Width;
-        var height = original.Height;
-        var bytes = new byte[width * height * 4];
-        var data = original.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
-        try { Marshal.Copy(data.Scan0, bytes, 0, bytes.Length); }
-        finally { original.UnlockBits(data); }
-        var alpha = new byte[width * height];
-        var horizontal = new byte[alpha.Length];
-        for (var index = 0; index < alpha.Length; index++) alpha[index] = bytes[index * 4 + 3];
-        var divisor = radius * 2 + 1;
-        for (var pass = 0; pass < passes; pass++)
+        if (opacity <= 0) return;
+        var scaleX = _frame!.Width / bounds.Width;
+        var scaleY = _frame.Height / bounds.Height;
+        var left = Math.Max(0, (int)Math.Floor(destination.Left * scaleX));
+        var top = Math.Max(0, (int)Math.Floor(destination.Top * scaleY));
+        var right = Math.Min(_frame.Width, (int)Math.Ceiling(destination.Right * scaleX));
+        var bottom = Math.Min(_frame.Height, (int)Math.Ceiling(destination.Bottom * scaleY));
+        var width = right - left;
+        var height = bottom - top;
+        if (width <= 0 || height <= 0) return;
+        var rowHeight = Math.Max(height, raster.Sharp.Height + 2);
+        if (_scrollRow is null || _scrollRow.Width != _frame.Width || _scrollRow.Height < rowHeight)
         {
-            for (var y = 0; y < height; y++)
-            {
-                var sum = 0;
-                for (var x = -radius; x < width; x++)
-                {
-                    if (x + radius < width) sum += alpha[y * width + x + radius];
-                    if (x - radius - 1 >= 0) sum -= alpha[y * width + x - radius - 1];
-                    if (x >= 0) horizontal[y * width + x] = (byte)(sum / divisor);
-                }
-            }
+            _scrollRow?.Dispose();
+            _scrollRow = new Bitmap(_frame.Width, rowHeight, PixelFormat.Format32bppPArgb);
+            _scrollRowPixels = new byte[_scrollRow.Width * _scrollRow.Height * 4];
+            _scrollSampleX = new int[_scrollRow.Width];
+        }
+        // Sample at device pixel centers, then copy an already sized and
+        // colored row. GDI+ only composites it; it does not transform the
+        // entire off-screen source text.
+        var sourceWidth = raster.Sharp.Width;
+        var sourceHeight = raster.Sharp.Height;
+        var stepX = sourceWidth / (destination.Width * scaleX);
+        var stepY = sourceHeight / (destination.Height * scaleY);
+        for (var x = 0; x < width; x++)
+            _scrollSampleX[x] = (int)Math.Floor(((left + x + .5f - destination.X * scaleX) * stepX - .5f) * 256);
+        var inkOpacity = opacity * color.A / 255f;
+        var stride = _scrollRow.Width * 4;
+        for (var y = 0; y < height; y++)
+        {
+            var sourceY = (int)Math.Floor(((top + y + .5f - destination.Y * scaleY) * stepY - .5f) * 256);
+            var row = Math.Clamp(sourceY >> 8, 0, sourceHeight - 1) * sourceWidth;
+            var nextRow = Math.Clamp((sourceY >> 8) + 1, 0, sourceHeight - 1) * sourceWidth;
+            var fractionY = sourceY & 255;
             for (var x = 0; x < width; x++)
             {
-                var sum = 0;
-                for (var y = -radius; y < height; y++)
-                {
-                    if (y + radius < height) sum += horizontal[(y + radius) * width + x];
-                    if (y - radius - 1 >= 0) sum -= horizontal[(y - radius - 1) * width + x];
-                    if (y >= 0) alpha[y * width + x] = (byte)(sum / divisor);
-                }
+                var sourceX = _scrollSampleX[x];
+                var column = Math.Clamp(sourceX >> 8, 0, sourceWidth - 1);
+                var nextColumn = Math.Clamp((sourceX >> 8) + 1, 0, sourceWidth - 1);
+                var fractionX = sourceX & 255;
+                var alpha = (int)Math.Clamp(Math.Round(SampleAlpha(raster.SharpAlpha,
+                    row, nextRow, column, nextColumn, fractionX, fractionY) * inkOpacity), 0, 255);
+                var pixel = y * stride + x * 4;
+                _scrollRowPixels[pixel] = (byte)((color.B * alpha + 127) / 255);
+                _scrollRowPixels[pixel + 1] = (byte)((color.G * alpha + 127) / 255);
+                _scrollRowPixels[pixel + 2] = (byte)((color.R * alpha + 127) / 255);
+                _scrollRowPixels[pixel + 3] = (byte)alpha;
             }
         }
-        for (var index = 0; index < alpha.Length; index++)
-            bytes[index * 4] = bytes[index * 4 + 1] = bytes[index * 4 + 2] = bytes[index * 4 + 3] = alpha[index];
-        var result = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
-        data = result.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
-        try { Marshal.Copy(bytes, 0, data.Scan0, bytes.Length); }
-        finally { result.UnlockBits(data); }
-        return result;
+        var data = _scrollRow.LockBits(new Rectangle(0, 0, _scrollRow.Width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+        try { Marshal.Copy(_scrollRowPixels, 0, data.Scan0, stride * height); }
+        finally { _scrollRow.UnlockBits(data); }
+        graphics.DrawImage(_scrollRow, new RectangleF(left / scaleX, top / scaleY, width / scaleX, height / scaleY),
+            new RectangleF(0, 0, width, height), GraphicsUnit.Pixel);
+    }
+
+    private static float SampleAlpha(byte[] alpha, int row, int nextRow, int column, int nextColumn, int fractionX, int fractionY)
+    {
+        var earlier = alpha[row + column] * (256 - fractionX) + alpha[row + nextColumn] * fractionX;
+        var later = alpha[nextRow + column] * (256 - fractionX) + alpha[nextRow + nextColumn] * fractionX;
+        return (earlier * (256 - fractionY) + later * fractionY) / 65536f;
     }
 
     private void EnsureFrame(RectangleF bounds, double scale)
@@ -477,45 +492,6 @@ internal sealed class DesktopLyricsVisual : IDisposable
         _staticAfter?.Dispose(); _staticAfter = null;
         _staticFrameKey = null;
         _frame = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
-        _framePixels = new byte[width * height * 4];
-    }
-
-    private void FadeEdges(Bitmap bitmap, double fraction)
-    {
-        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppPArgb);
-        try
-        {
-            // Multiplying premultiplied RGB along with alpha keeps the fade transparent on any desktop.
-            Marshal.Copy(data.Scan0, _framePixels, 0, _framePixels.Length);
-            var edge = Math.Max(1, bitmap.Height * fraction);
-            for (var y = 0; y < bitmap.Height; y++)
-            {
-                var t = Math.Clamp(Math.Min(y, bitmap.Height - 1 - y) / edge, 0, 1);
-                if (t >= 1) continue;
-                var factor = t * t * (3 - 2 * t);
-                var start = y * data.Stride;
-                var end = start + bitmap.Width * 4;
-                for (var index = start; index < end; index++) _framePixels[index] = (byte)(_framePixels[index] * factor);
-            }
-            var side = Math.Max(1, bitmap.Width * .03);
-            for (var x = 0; x < side; x++)
-            {
-                var t = x / side;
-                var factor = t * t * (3 - 2 * t);
-                for (var y = 0; y < bitmap.Height; y++)
-                {
-                    var left = y * data.Stride + x * 4;
-                    var right = y * data.Stride + (bitmap.Width - 1 - x) * 4;
-                    for (var channel = 0; channel < 4; channel++)
-                    {
-                        _framePixels[left + channel] = (byte)(_framePixels[left + channel] * factor);
-                        _framePixels[right + channel] = (byte)(_framePixels[right + channel] * factor);
-                    }
-                }
-            }
-            Marshal.Copy(_framePixels, 0, data.Scan0, _framePixels.Length);
-        }
-        finally { bitmap.UnlockBits(data); }
     }
 
     private void ClearLines()
@@ -529,10 +505,13 @@ internal sealed class DesktopLyricsVisual : IDisposable
         ClearLines();
         _frame?.Dispose();
         _frame = null;
+        _scrollRow?.Dispose(); _scrollRow = null;
+        _scrollRowPixels = Array.Empty<byte>();
+        _scrollSampleX = Array.Empty<int>();
+        _edgeBlur.Dispose();
         _staticBefore?.Dispose(); _staticBefore = null;
         _staticAfter?.Dispose(); _staticAfter = null;
         _staticFrameKey = null;
-        _framePixels = Array.Empty<byte>();
         NeedsAnimation = false;
     }
 }

@@ -26,8 +26,8 @@ public sealed class QuickActionsEditorPopupTests
         Layout(popup);
 
         var checkboxes = Descendants<WpfControls.CheckBox>(popup.ContentView).ToArray();
-        Assert.Equal(9, checkboxes.Length);
-        Assert.Equal(new[] { "设置", "蓝牙", "显示", "投屏", "麦克风", "Wi-Fi", "夜间", "应用音量", "截图" },
+        Assert.Equal(10, checkboxes.Length);
+        Assert.Equal(new[] { "设置", "蓝牙", "显示", "投屏", "麦克风", "Wi-Fi", "系统主题", "应用音量", "截图", "网卡" },
             checkboxes.Select(Automation.GetName));
         Assert.Equal(6, checkboxes.Count(check => check.IsChecked == true));
         Assert.All(checkboxes, check => Assert.True(check.ActualWidth > 180));
@@ -58,13 +58,13 @@ public sealed class QuickActionsEditorPopupTests
 
         Assert.Equal(new[] { QuickAction.WiFi, QuickAction.Bluetooth, QuickAction.NightLight, QuickAction.Display, QuickAction.Cast },
             Assert.Single(updates));
-        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "夜间", "显示", "投屏" }, SelectedNames(popup));
+        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "系统主题", "显示", "投屏" }, SelectedNames(popup));
 
         CheckBox(popup, "蓝牙").IsChecked = false;
 
         Assert.Equal(2, updates.Count);
         Assert.Equal(new[] { QuickAction.WiFi, QuickAction.NightLight, QuickAction.Display, QuickAction.Cast }, updates[1]);
-        Assert.Equal(new[] { "Wi-Fi", "夜间", "显示", "投屏", "蓝牙", "麦克风", "应用音量", "截图", "设置" },
+        Assert.Equal(new[] { "Wi-Fi", "系统主题", "显示", "投屏", "蓝牙", "麦克风", "应用音量", "截图", "设置", "网卡" },
             Descendants<WpfControls.CheckBox>(popup.ContentView).Select(Automation.GetName));
         Assert.Equal(Wpf.Visibility.Hidden, Button(popup, "下移 蓝牙").Visibility);
     });
@@ -155,7 +155,7 @@ public sealed class QuickActionsEditorPopupTests
         Click(Button(popup, "恢复默认"));
 
         Assert.Equal(ControlQuickActions.Defaults, Assert.Single(updates));
-        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "夜间", "显示" }, SelectedNames(popup));
+        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "系统主题", "显示" }, SelectedNames(popup));
         Assert.False(Button(popup, "恢复默认").IsEnabled);
         Click(Button(popup, "恢复默认"));
         Assert.Single(updates);
@@ -168,7 +168,7 @@ public sealed class QuickActionsEditorPopupTests
         var updates = new List<IReadOnlyList<QuickAction>>();
         using var popup = new QuickActionsEditorPopup(input, updates.Add, false, Color.RoyalBlue, 1);
         input.Clear();
-        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "夜间", "显示" }, SelectedNames(popup));
+        Assert.Equal(new[] { "Wi-Fi", "蓝牙", "系统主题", "显示" }, SelectedNames(popup));
 
         CheckBox(popup, "投屏").IsChecked = true;
         var first = Assert.Single(updates);

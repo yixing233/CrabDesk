@@ -37,7 +37,7 @@ internal sealed partial class DesktopBoxForm
         graphics.FillPath(brush, clip);
         if (_controlArtwork is not { } artwork)
         {
-            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Music, RectangleF.Inflate(bounds, -9, -9), ink, 18);
+            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Music, RectangleF.Inflate(bounds, -7, -7), ink, 24);
             return;
         }
         var state = graphics.Save();

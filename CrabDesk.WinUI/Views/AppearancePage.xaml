@@ -50,7 +50,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="背景颜色" FontWeight="Medium" />
-                                        <TextBlock Text="桌面盒子的基础底色" Style="{StaticResource CaptionTextBlockStyle}" />
+                                        <TextBlock Text="盒子及“跟随盒子”组件的基础底色" Style="{StaticResource CaptionTextBlockStyle}" />
                                     </StackPanel>
                                     <Button Grid.Column="1" Style="{StaticResource ColorPickerButtonStyle}"
                                             HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -124,7 +124,7 @@
                                     </Button>
                                 </Grid>
 
-                                <!-- 染色强度 / 不透明度 -->
+                                <!-- 背景不透明度 -->
                                 <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -132,13 +132,13 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding OpacityLabel}" FontWeight="Medium" />
-                                        <TextBlock Text="调整盒子表面背景的色彩浓度与透光程度" Style="{StaticResource CaptionTextBlockStyle}" />
+                                        <TextBlock Text="0% 透出背景，100% 显示纯底色；文字与图标保持清晰" Style="{StaticResource CaptionTextBlockStyle}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
                                         <Slider x:Name="OpacitySlider"
                                                 Width="200"
                                                 Style="{StaticResource ParameterSliderStyle}"
-                                                Minimum="35" Maximum="100" StepFrequency="1"
+                                                Minimum="0" Maximum="100" StepFrequency="1"
                                                 Value="{Binding Opacity, Mode=TwoWay}"
                                                 AutomationProperties.Name="{Binding OpacityLabel}" />
                                         <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
@@ -154,8 +154,8 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="亚克力背景效果" FontWeight="Medium" />
-                                        <TextBlock Text="实时模糊盒子后方的动态壁纸内容（需要 Windows 11 并开启系统透明效果）"
+                                        <TextBlock Text="盒子亚克力背景" FontWeight="Medium" />
+                                        <TextBlock Text="用于盒子及“跟随盒子”的组件；组件亚克力在组件页统一调节（需要 Windows 11 并开启系统透明效果）"
                                                    Style="{StaticResource CaptionTextBlockStyle}" />
                                     </StackPanel>
                                     <ToggleSwitch Grid.Column="1"
@@ -163,7 +163,29 @@
                                                   IsEnabled="{Binding IsAcrylicSupported}"
                                                   OnContent="" OffContent=""
                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                  AutomationProperties.Name="亚克力背景效果" />
+                                                  AutomationProperties.Name="盒子亚克力背景" />
+                                </Grid>
+
+                                <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="模糊强度" FontWeight="Medium" />
+                                        <TextBlock Text="从清晰透视到柔和磨砂" Style="{StaticResource CaptionTextBlockStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                        <Slider x:Name="AcrylicBlurStrengthSlider" Width="200"
+                                                Style="{StaticResource ParameterSliderStyle}"
+                                                Minimum="0" Maximum="100" StepFrequency="1"
+                                                Value="{Binding AcrylicBlurStrength, Mode=TwoWay}"
+                                                IsEnabled="{Binding UseAcrylicBoxes}"
+                                                AutomationProperties.Name="背景模糊强度" />
+                                        <TextBlock Width="44" TextAlignment="Right" VerticalAlignment="Center" Style="{StaticResource ParameterValueTextStyle}">
+                                            <Run Text="{Binding Value, ElementName=AcrylicBlurStrengthSlider}" /><Run Text="%" />
+                                        </TextBlock>
+                                    </StackPanel>
                                 </Grid>
                             </StackPanel>
                         </Border>

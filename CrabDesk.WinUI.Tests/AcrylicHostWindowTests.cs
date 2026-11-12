@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using CrabDesk.Native;
 using CrabDesk.Runtime;
 using CrabDesk.Core;
+using Moq;
 using Xunit;
 
 namespace CrabDesk.WinUI.Tests;
@@ -533,6 +534,92 @@ public sealed class AcrylicHostWindowTests
             Assert.Equal(ordinary.Handle, GetActiveWindow());
             Assert.False(input.Visible);
         });
+    }
+
+    [Theory]
+    [InlineData("wifi", false)]
+    [InlineData("wifi", true)]
+    [InlineData("bluetooth", false)]
+    [InlineData("bluetooth", true)]
+    [InlineData("audio", false)]
+    [InlineData("audio", true)]
+    [InlineData("shortcuts", false)]
+    [InlineData("shortcuts", true)]
+    public void ClosingWidgetPopupKeepsTheHostAboveTheDesktopDuringFocusReturn(string kind, bool directClose)
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            desktop.Show();
+            SetWindowLongPtr(desktop.Handle, -8, IntPtr.Zero);
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+            var previousOwner = GetWindow(host.Handle, 4);
+            using var popup = CreateClosingPopup(kind);
+            popup.Location = new Point(-12000, -12000);
+            popup.Show();
+            Application.DoEvents();
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            if (directClose) popup.Close();
+            else if (popup is ControlCenterPopup controls) controls.Dismiss();
+            else ((AudioMixerPopup)popup).Dismiss();
+            Assert.True(popup.IsDisposed);
+            // Return focus/reorder as Explorer does after a popup is destroyed.
+            // Check before any queued WinEvent repair can cover the missing frame.
+            Assert.True(SetWindowPos(desktop.Handle, IntPtr.Zero, 0, 0, 0, 0, SwpNoActivate | SwpNoMove | SwpNoSize));
+            Assert.True(DesktopAcrylicWindowTools.IsReadyAtDesktop(host.Handle, desktop.Handle));
+            DesktopAcrylicWindowTools.FinishShowDesktopTransition(host.Handle, force: true);
+            Assert.Equal(previousOwner, GetWindow(host.Handle, 4));
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(host.Handle, GwlExStyle) & WsExTopmost);
+        });
+    }
+
+    [Theory]
+    [InlineData("wifi")]
+    [InlineData("bluetooth")]
+    [InlineData("audio")]
+    [InlineData("shortcuts")]
+    public void PopupDeactivationLeavesTheNewApplicationAndDesktopOwnershipAlone(string kind)
+    {
+        RunInSta(() =>
+        {
+            using var desktop = TestWindow();
+            using var ordinary = TestWindow();
+            desktop.Show(); ordinary.Show();
+            using var host = new DesktopAcrylicHost(desktop.Handle, [TestMonitor()]);
+            DesktopAcrylicWindowTools.Initialize(host.Handle, desktop.Handle);
+            host.ShowAtDesktop();
+            var previousOwner = GetWindow(host.Handle, 4);
+            using var popup = CreateClosingPopup(kind);
+            popup.Location = new Point(-12000, -12000);
+            popup.Show(); Application.DoEvents();
+            ordinary.Activate(); Application.DoEvents();
+            Assert.True(popup.IsDisposed);
+            // These off-screen STA windows may lose foreground rights while
+            // destroying the active HWND. The desktop host must never take them.
+            Assert.NotEqual(host.Handle, GetActiveWindow());
+            Assert.NotEqual(host.Handle, GetForegroundWindow());
+            Assert.Equal(previousOwner, GetWindow(host.Handle, 4));
+            Assert.True(IsAbove(ordinary.Handle, host.Handle));
+        });
+    }
+
+    private static Form CreateClosingPopup(string kind)
+    {
+        if (kind == "shortcuts")
+            return new QuickActionsEditorPopup([ControlCenterQuickAction.WiFi], _ => { }, false, Color.RoyalBlue, 1);
+        if (kind == "audio")
+        {
+            var audio = new Mock<IAudioMixer>();
+            audio.Setup(source => source.Read()).Returns(AudioMixerSnapshot.Empty);
+            return new AudioMixerPopup(new AudioMixerController(audio.Object), false, Color.RoyalBlue, 1);
+        }
+        var connection = new Mock<IControlConnectionService>();
+        connection.SetupGet(source => source.Kind).Returns(kind == "wifi" ? ControlConnectionKind.WiFi : ControlConnectionKind.Bluetooth);
+        connection.Setup(source => source.ReadAsync(It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ControlConnectionSnapshot(true, []));
+        return new ConnectionDetailsPopup(new ConnectionDetailsController(connection.Object), false, Color.RoyalBlue, 1, _ => { }, false);
     }
 
     private static void RunInSta(Action action)

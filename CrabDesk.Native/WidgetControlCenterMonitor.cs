@@ -23,6 +23,7 @@ public interface IWidgetControlCenterMonitor
     bool SetBrightness(double percent);
     bool SetMuted(bool muted);
     bool SetOutputDevice(string deviceId);
+    /// <summary>Sets Windows system and application dark mode for the Night action.</summary>
     bool SetNightLight(bool enabled);
     Task<bool> SetRadioAsync(ControlCenterToggle toggle, bool enabled, CancellationToken token = default);
     Task<bool> SeekMediaAsync(ControlCenterMedia media, TimeSpan position, CancellationToken token = default);
@@ -71,8 +72,7 @@ public sealed partial class WidgetControlCenterMonitor : IWidgetControlCenterMon
             BluetoothConnectionName = radio.Bluetooth is true ? await BluetoothConnectionService.ReadConnectedLabelAsync(token).ConfigureAwait(false) : ""
         };
 
-        var nightLight = NightLightState.Read();
-        snapshot = snapshot with { NightLightEnabled = nightLight };
+        snapshot = snapshot with { NightLightEnabled = SystemThemeState.Read() };
 
         var audio = AudioSession.Read();
         snapshot = snapshot with
@@ -190,7 +190,7 @@ public sealed partial class WidgetControlCenterMonitor : IWidgetControlCenterMon
     public bool SetMuted(bool muted) => AudioSession.SetMuted(muted);
     public bool SetOutputDevice(string deviceId) => AudioSession.SetDefaultOutput(deviceId);
     public bool SetBrightness(double percent) => BrightnessControl.Write(percent, BrightnessDisplayId);
-    public bool SetNightLight(bool enabled) => NightLightState.Write(enabled);
+    public bool SetNightLight(bool enabled) => SystemThemeState.Write(enabled);
 
     public void Dispose()
     {

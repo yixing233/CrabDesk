@@ -20,7 +20,7 @@ internal sealed partial class DesktopBoxForm
         WidgetText(graphics, title, new(bounds.X + 34, bounds.Y + 7, bounds.Width - 72, 22), Color.FromArgb(180, text), 11);
         if (!_lyricsVisuals.TryGetValue(widget.Id, out var visual)) _lyricsVisuals[widget.Id] = visual = new DesktopLyricsVisual();
         var area = new RectangleF(bounds.X + 12, bounds.Y + 35, Math.Max(1, bounds.Width - 24), Math.Max(1, bounds.Height - 47));
-        visual.Draw(graphics, snapshot, area, text, accent, widget.LyricsLineCount, widget.LyricsFontSize,
+        visual.Draw(graphics, snapshot, area, text, accent, widget.LyricsLineSpacing, widget.LyricsFontSize,
             widget.LyricsOffsetMilliseconds, widget.LyricsWordHighlight, _runtime.State.Settings.Appearance.AnimationEnabled,
             _scale, DateTimeOffset.Now, widget.LyricsFontFamily, widget.LyricsFontWeight, widget.LyricsFontStyle);
         UpdateLyricsAnimationTimer();
@@ -34,7 +34,7 @@ internal sealed partial class DesktopBoxForm
         if (!active) { _lyricsAnimationTimer?.Stop(); return; }
         if (_lyricsAnimationTimer is null)
         {
-            _lyricsAnimationTimer = new Forms.Timer { Interval = 33 };
+            _lyricsAnimationTimer = new Forms.Timer { Interval = DesktopAnimationFrameClock.IntervalMilliseconds };
             _lyricsAnimationTimer.Tick += (_, _) =>
             {
                 UpdateLyricsAnimationTimer();
@@ -61,20 +61,12 @@ internal sealed partial class DesktopBoxForm
 
     private void AddLyricsContextMenu(FluentContextMenuStrip menu, DesktopWidget widget)
     {
-        var lines = new FluentToolStripMenuItem("显示行数");
-        for (var count = 1; count <= 9; count++)
-        {
-            var value = count;
-            var item = new FluentToolStripMenuItem($"{count} 行") { Checked = widget.LyricsLineCount == count };
-            item.Click += (_, _) => _runtime.SetLyricsOptions(widget, value, widget.LyricsFontSize, widget.LyricsOffsetMilliseconds, widget.LyricsWordHighlight);
-            lines.DropDownItems.Add(item);
-        }
-        menu.Items.Add(lines);
+        menu.Items.Add(BuildLyricsSpacingMenu(widget));
         var font = new FluentToolStripMenuItem("歌词字号");
         foreach (var size in new[] { 18, 20, 24, 28, 32, 36 })
         {
             var item = new FluentToolStripMenuItem($"{size}") { Checked = widget.LyricsFontSize == size };
-            item.Click += (_, _) => _runtime.SetLyricsOptions(widget, widget.LyricsLineCount, size, widget.LyricsOffsetMilliseconds, widget.LyricsWordHighlight);
+            item.Click += (_, _) => _runtime.SetLyricsOptions(widget, widget.LyricsLineSpacing, size, widget.LyricsOffsetMilliseconds, widget.LyricsWordHighlight);
             font.DropDownItems.Add(item);
         }
         menu.Items.Add(font);
@@ -113,14 +105,10 @@ internal sealed partial class DesktopBoxForm
         transparent.Click += (_, _) => _runtime.SetLyricsTransparentBackground(widget, !widget.LyricsTransparentBackground);
         menu.Items.Add(transparent);
         var highlight = new FluentToolStripMenuItem("逐字覆盖动画") { Checked = widget.LyricsWordHighlight };
-        highlight.Click += (_, _) => _runtime.SetLyricsOptions(widget, widget.LyricsLineCount, widget.LyricsFontSize,
+        highlight.Click += (_, _) => _runtime.SetLyricsOptions(widget, widget.LyricsLineSpacing, widget.LyricsFontSize,
             widget.LyricsOffsetMilliseconds, !widget.LyricsWordHighlight);
         menu.Items.Add(highlight);
-        var timing = new FluentToolStripMenuItem($"歌词校准（{widget.LyricsOffsetMilliseconds / 1000d:+0.00;-0.00;0.00} s）");
-        timing.DropDownItems.Add("歌词提前 0.25 秒", null, (_, _) => SetLyricsOffset(widget, widget.LyricsOffsetMilliseconds + 250));
-        timing.DropDownItems.Add("歌词延后 0.25 秒", null, (_, _) => SetLyricsOffset(widget, widget.LyricsOffsetMilliseconds - 250));
-        timing.DropDownItems.Add("重置校准", null, (_, _) => SetLyricsOffset(widget, 0));
-        menu.Items.Add(timing);
+        menu.Items.Add(BuildLyricsTimingMenu(widget));
         menu.Items.Add("重新匹配歌词", null, (_, _) => _runtime.UseAutomaticLyrics(widget));
         menu.Items.Add("导入本地歌词…", null, async (_, _) =>
         {
@@ -129,6 +117,106 @@ internal sealed partial class DesktopBoxForm
         });
     }
 
+    private FluentToolStripMenuItem BuildLyricsTimingMenu(DesktopWidget widget)
+    {
+        var timing = new FluentToolStripMenuItem("歌词校准");
+        AddLyricsSliderCard(timing, () =>
+        {
+            var card = new LyricsSliderCard("歌词校准", "重置校准", -1000, 1000, 1, 10,
+                Math.Round(WidgetLyricsSettings.NormalizeOffset(widget.LyricsOffsetMilliseconds) / 10d, MidpointRounding.AwayFromZero), 0,
+                "延后 10 秒", "提前 10 秒", value => $"{value / 100:+0.00;-0.00;0.00} 秒",
+                _runtime.IsDarkTheme, LyricsSliderAccent(), _scale);
+            card.ValueChanged += value =>
+            {
+                SetLyricsOffset(widget, (int)Math.Round(value) * 10);
+                UpdateLabel();
+            };
+            return card;
+        });
+        UpdateLabel();
+        return timing;
+
+        void UpdateLabel()
+        {
+            var offset = $"{widget.LyricsOffsetMilliseconds / 1000d:+0.00;-0.00;0.00} 秒";
+            timing.Text = "歌词校准（" + offset + "）";
+        }
+    }
+
+    private FluentToolStripMenuItem BuildLyricsSpacingMenu(DesktopWidget widget)
+    {
+        var menu = new FluentToolStripMenuItem("行间距");
+        AddLyricsSliderCard(menu, () =>
+        {
+            var card = new LyricsSliderCard("行间距", "恢复默认", 100, 300, 5, 25,
+                Math.Round(WidgetLyricsSettings.NormalizeLineSpacing(widget.LyricsLineSpacing) * 100), 175,
+                "紧凑 · 1.00 倍", "宽松 · 3.00 倍", value => $"{value / 100:0.00} 倍",
+                _runtime.IsDarkTheme, LyricsSliderAccent(), _scale);
+            card.ValueChanged += value =>
+            {
+                _runtime.SetLyricsOptions(widget, value / 100,
+                    widget.LyricsFontSize, widget.LyricsOffsetMilliseconds, widget.LyricsWordHighlight);
+                UpdateLabel();
+            };
+            return card;
+        });
+        UpdateLabel();
+        return menu;
+
+        void UpdateLabel()
+        {
+            var spacing = $"{widget.LyricsLineSpacing:0.00} 倍";
+            menu.Text = "行间距（" + spacing + "）";
+        }
+    }
+
+    private Color LyricsSliderAccent()
+    {
+        var background = _runtime.IsDarkTheme ? Color.FromArgb(37, 40, 45) : Color.FromArgb(252, 252, 252);
+        return ResolveAccentColor(background, ParseOpaqueColor(ResolveWidgetSurface(
+            DesktopWidgetItems.FirstOrDefault(w => w.Kind == DesktopWidgetKind.Lyrics) ?? new DesktopWidget { Kind = DesktopWidgetKind.Lyrics }).Accent));
+    }
+
+    private void AddLyricsSliderCard(FluentToolStripMenuItem menu, Func<LyricsSliderCard> createCard)
+    {
+        var dropdown = menu.DropDown;
+        // ToolStripDropDownMenu reserves arrow space even for control hosts.
+        // Fix the card-only popup size so menu stretching cannot feed that
+        // space back into the host width on every layout/opening pass.
+        dropdown.AutoSize = false;
+        var size = new Size((int)Math.Round(LyricsSliderCard.CardWidth * _scale), (int)Math.Round(LyricsSliderCard.CardHeight * _scale));
+        dropdown.Size = new(size.Width + dropdown.Padding.Horizontal, size.Height + dropdown.Padding.Vertical);
+        // A lightweight placeholder preserves the submenu arrow and fixed
+        // metrics without creating WPF hosts before the submenu is used.
+        var placeholder = new Forms.ToolStripControlHost(new Forms.Panel { Size = size })
+        {
+            AutoSize = false, Size = size, Margin = Forms.Padding.Empty, Padding = Forms.Padding.Empty
+        };
+        dropdown.Items.Add(placeholder);
+        LyricsSliderCard? card = null;
+        menu.DropDownOpening += (_, _) =>
+        {
+            if (card is not null) return;
+            dropdown.SuspendLayout();
+            try
+            {
+                card = createCard();
+                dropdown.Items.Remove(placeholder);
+                placeholder.Dispose();
+                dropdown.Items.Add(new Forms.ToolStripControlHost(card)
+                {
+                    AutoSize = false, Size = size, Margin = Forms.Padding.Empty, Padding = Forms.Padding.Empty
+                });
+                var lyrics = DesktopWidgetItems.FirstOrDefault(w => w.Kind == DesktopWidgetKind.Lyrics) ?? new DesktopWidget { Kind = DesktopWidgetKind.Lyrics };
+                var appearance = WidgetBoxAppearance(lyrics, out var acrylic);
+                card.ApplyPopupMaterial(dropdown, appearance,
+                    _runtime.State.Settings.Appearance, acrylic);
+            }
+            finally { dropdown.ResumeLayout(performLayout: true); }
+        };
+        dropdown.Closed += (_, _) => card?.FinishAdjustment();
+    }
+
     private void SetLyricsOffset(DesktopWidget widget, int offset) => _runtime.SetLyricsOptions(widget,
-        widget.LyricsLineCount, widget.LyricsFontSize, offset, widget.LyricsWordHighlight);
+        widget.LyricsLineSpacing, widget.LyricsFontSize, offset, widget.LyricsWordHighlight);
 }

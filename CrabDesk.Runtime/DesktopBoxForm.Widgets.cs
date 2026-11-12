@@ -6,6 +6,7 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
+    private double WidgetCornerRadius => _runtime.State.Settings.Appearance.ResolveWidgetCornerRadius();
     private Forms.Timer? _widgetTimer;
     private string _lastWidgetClockTick = string.Empty;
     private Guid? _hoveredWidgetId;
@@ -25,6 +26,7 @@ internal sealed partial class DesktopBoxForm
     private void InitializeWidgets()
     {
         _calendarToolTipTimer.Tick += ShowCalendarToolTip;
+        _calendarToolTipMotion.Tick += AnimateCalendarToolTip;
         VisibleChanged += (_, _) => { if (!Visible) { DismissWidgetInputs(); HideCalendarHover(); } UpdateLyricsAnimationTimer(); };
         _widgetTimer = new Forms.Timer { Interval = 1000 };
         _widgetTimer.Tick += (_, _) =>
@@ -34,6 +36,8 @@ internal sealed partial class DesktopBoxForm
             if (items.Length == 0) return;
             if (items.Any(widget => DesktopWidgets.RequiresMonitoring(widget.Kind)))
                 _ = _runtime.RefreshMonitorWidgetsAsync();
+            if (items.Any(widget => widget.Kind == DesktopWidgetKind.FileShelf))
+                _ = _runtime.RefreshFileShelfAvailabilityAsync();
             var now = DateTime.Now;
             var tick = now.ToString(items.Any(w => w.Kind == DesktopWidgetKind.Clock && w.ShowSeconds) ? "yyyyMMddHHmmss" : "yyyyMMddHHmm");
             if (_lastWidgetClockTick != tick)
@@ -70,6 +74,8 @@ internal sealed partial class DesktopBoxForm
         foreach (var id in _widgetScroll.Keys.Where(id => !ids.Contains(id)).ToArray()) _widgetScroll.Remove(id);
         foreach (var id in _translationSourceScroll.Keys.Where(id => !ids.Contains(id)).ToArray()) _translationSourceScroll.Remove(id);
         foreach (var id in _widgetMonths.Keys.Where(id => !ids.Contains(id)).ToArray()) _widgetMonths.Remove(id);
+        foreach (var id in _fileShelfSelections.Keys.Where(id => !ids.Contains(id)).ToArray()) _fileShelfSelections.Remove(id);
+        foreach (var id in _fileShelfSelectionAnchors.Keys.Where(id => !ids.Contains(id)).ToArray()) _fileShelfSelectionAnchors.Remove(id);
         _expandedTodoWidgets.RemoveWhere(id => !_runtime.State.Widgets.Any(widget => widget.Id == id && widget.Tasks.Any(task => task.IsCompleted)));
         UpdateWindowRegion();
         RequestLayerRender();
@@ -88,10 +94,11 @@ internal sealed partial class DesktopBoxForm
         var widget = WidgetAt(point);
         if (widget is null) return false;
         ClearHoverState();
+        if (widget.Kind == DesktopWidgetKind.FileShelf && HandleFileShelfMouseDown(widget, args, point)) return true;
         if (args.Button == Forms.MouseButtons.Right) { ShowWidgetMenu(widget, args.Location); return true; }
         if (args.Button != Forms.MouseButtons.Left) return true;
         _widgetResizeEdges = WidgetSizing.HitTest(widget, point.X, point.Y);
-        if (_widgetResizeEdges == WidgetResizeEdges.None && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
+        if (_widgetResizeEdges == WidgetResizeEdges.None && WidgetMenuRectangle(widget, WidgetCornerRadius).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
         // Show the press immediately rather than waiting for the click to finish:
         // that delay is what made the card's buttons feel inert.
         if (widget.Kind == DesktopWidgetKind.ControlCenter) BeginControlCenterPress(widget, point);
@@ -102,11 +109,13 @@ internal sealed partial class DesktopBoxForm
         _widgetResizing = false;
         _widgetCanDrag = _widgetResizeEdges == WidgetResizeEdges.None && !widget.IsLocked && !IsWeatherLocationPoint(widget, point) && !IsCalendarNavigationPoint(widget, point) &&
             !(widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)) &&
-            (widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Lyrics || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds || point.Y < widget.Bounds.Y + 28 ||
+            !(widget.Kind == DesktopWidgetKind.FileShelf && GetFileShelfLayout(widget, WidgetCornerRadius).Add.Contains(point)) &&
+            !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, WidgetCornerRadius).Contains(point)) &&
+            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, WidgetCornerRadius).Contains(point)) &&
+            (widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Lyrics || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds ||
+             point.Y < widget.Bounds.Y + (widget.Kind == DesktopWidgetKind.ControlCenter ? MonitorBody(widget).Y : 28) ||
              widget.Kind == DesktopWidgetKind.Weather &&
-             (GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, _runtime.State.Settings.Appearance.CornerRadius).Icon.Contains(point))) &&
+             (GetWeatherLayout(widget, WidgetCornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, WidgetCornerRadius).Icon.Contains(point))) &&
             // A slider must not drag the card: pressing one and moving adjusts the
             // level, and the pointer routinely leaves the control while dragging,
             // which used to start moving the whole widget instead.
@@ -119,6 +128,7 @@ internal sealed partial class DesktopBoxForm
     {
         if (_pressedWidget is { } pressed)
         {
+            if (TryBeginFileShelfDrag(pressed, point)) return true;
             if (_widgetResizeEdges != WidgetResizeEdges.None)
             {
                 UpdateWidgetResize(pressed, point);
@@ -142,11 +152,14 @@ internal sealed partial class DesktopBoxForm
             return true;
         }
         var widget = WidgetAt(point);
-        var menuId = widget is not null && WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
+        var fileShelfItem = widget?.Kind == DesktopWidgetKind.FileShelf ? FileShelfItemAt(widget, point)?.Id : null;
+        UpdateFileShelfHover(widget, point);
+        if (_hoveredFileShelfItemId != fileShelfItem) { _hoveredFileShelfItemId = fileShelfItem; RequestVisualLayerRender(); }
+        var menuId = widget is not null && WidgetMenuRectangle(widget, WidgetCornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         UpdateCalendarHover(widget, point);
         // Only the control centre has per-button hover state; other cards skip this.
         UpdateControlCenterHover(widget, point);
-        var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ? widget.Id : (Guid?)null;
+        var locationId = widget?.Kind == DesktopWidgetKind.Weather && WeatherLocationButtonRectangle(widget, WidgetCornerRadius).Contains(point) ? widget.Id : (Guid?)null;
         var calendarButton = RectangleF.Empty;
         var translationButton = RectangleF.Empty;
         if (widget?.Kind == DesktopWidgetKind.Translation)
@@ -184,17 +197,24 @@ internal sealed partial class DesktopBoxForm
         ClearHoverState();
         var resizeEdges = WidgetSizing.HitTest(widget, point.X, point.Y);
         if (resizeEdges != WidgetResizeEdges.None) { Cursor = WidgetResizeCursor(resizeEdges); return true; }
+        if (widget.Kind == DesktopWidgetKind.FileShelf && (GetFileShelfLayout(widget, WidgetCornerRadius).Add.Contains(point) || WidgetBodyRectangle(widget).Contains(point)))
+        {
+            Cursor = widget.FileShelfBusy ? Forms.Cursors.WaitCursor :
+                !_hoveredFileShelfButton.IsEmpty || fileShelfItem is not null ? Forms.Cursors.Hand : Forms.Cursors.Default;
+            return true;
+        }
         if (widget.Kind == DesktopWidgetKind.Translation)
         {
             var layout = GetTranslationLayout(widget);
             if (layout.Source.Contains(point) || layout.Result.Contains(point) && !string.IsNullOrEmpty(widget.Translation))
             { Cursor = Forms.Cursors.IBeam; return true; }
         }
-        Cursor = WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) || IsWeatherLocationPoint(widget, point) || IsCalendarNavigationPoint(widget, point) ||
-            widget.Kind == DesktopWidgetKind.Network && NetworkPublicIpRectangle(widget).Contains(point) ||
+        Cursor = WidgetMenuRectangle(widget, WidgetCornerRadius).Contains(point) || IsWeatherLocationPoint(widget, point) || IsCalendarNavigationPoint(widget, point) ||
+            widget.Kind == DesktopWidgetKind.ControlCenter && ControlCenterTargetAt(widget, point) != ControlCenterPresentation.ControlCenterTarget.None ||
+            widget.Kind == DesktopWidgetKind.Network && (NetworkSortRectangle(widget, false).Contains(point) || NetworkSortRectangle(widget, true).Contains(point)) ||
             widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point) || WidgetBodyRectangle(widget).Contains(point)
-            || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)
-            || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point)
+            || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, WidgetCornerRadius).Contains(point)
+            || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, WidgetCornerRadius).Contains(point)
             ? Forms.Cursors.Hand : !widget.IsLocked ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
         return true;
     }
@@ -242,11 +262,12 @@ internal sealed partial class DesktopBoxForm
 
     private void HandleWidgetClick(DesktopWidget widget, PointF point)
     {
+        if (widget.Kind == DesktopWidgetKind.FileShelf && HandleFileShelfClick(widget, point)) return;
         var bounds = WidgetRectangle(widget);
         if (IsWeatherLocationPoint(widget, point)) { LocateWeatherFromCard(widget); return; }
-        if (widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point))
+        if (widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, WidgetCornerRadius).Contains(point))
         { _runtime.OpenWidgetWeatherLocations(widget); return; }
-        if (widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point))
+        if (widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, WidgetCornerRadius).Contains(point))
         { ShowWeatherCityMenu(widget); return; }
         if (widget.Kind == DesktopWidgetKind.ControlCenter && HandleControlCenterClick(widget, point)) return;
         if (widget.Kind == DesktopWidgetKind.Note && WidgetBodyRectangle(widget).Contains(point))
@@ -254,7 +275,7 @@ internal sealed partial class DesktopBoxForm
         if (widget.Kind == DesktopWidgetKind.Translation) { HandleTranslationWidgetClick(widget, point); return; }
         if (widget.Kind == DesktopWidgetKind.Weather && widget.Cities.Count > 1)
         {
-            var layout = WeatherPresentation(widget, _runtime.State.Settings.Appearance.CornerRadius);
+            var layout = WeatherPresentation(widget, WidgetCornerRadius);
             var previous = WeatherRectangle(widget, layout.Previous);
             var next = WeatherRectangle(widget, layout.Next);
             if (previous.Contains(point) || next.Contains(point))
@@ -281,8 +302,12 @@ internal sealed partial class DesktopBoxForm
             return;
         }
         if (widget.Kind == DesktopWidgetKind.Todo) { HandleTodoWidgetClick(widget, point); return; }
-        if (widget.Kind == DesktopWidgetKind.Network && NetworkPublicIpRectangle(widget).Contains(point))
-        { _ = _runtime.QueryWidgetPublicIpAsync(widget); return; }
+        if (widget.Kind == DesktopWidgetKind.Network)
+        {
+            if (NetworkSortRectangle(widget, false).Contains(point)) _runtime.SetNetworkProcessSort(widget, NetworkProcessSort.Download);
+            else if (NetworkSortRectangle(widget, true).Contains(point)) _runtime.SetNetworkProcessSort(widget, NetworkProcessSort.Upload);
+            return;
+        }
         if (widget.Kind == DesktopWidgetKind.Weather && WidgetBodyRectangle(widget).Contains(point))
             _runtime.OpenWidgetWeatherDetails(widget);
     }
@@ -291,6 +316,14 @@ internal sealed partial class DesktopBoxForm
     {
         var widget = WidgetAt(point);
         if (widget is null) return false;
+        if (widget.Kind == DesktopWidgetKind.FileShelf)
+        {
+            _widgetScroll[widget.Id] = Math.Clamp(FileShelfStart(widget) + (delta > 0 ? -1 : 1), 0,
+                Math.Max(0, widget.FileShelfItems.Count - GetFileShelfLayout(widget, WidgetCornerRadius).Rows));
+            _hoveredFileShelfItemId = FileShelfItemAt(widget, point)?.Id;
+            RequestVisualLayerRender();
+            return true;
+        }
         if (widget.Kind is DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Todo)
         {
             if (widget.Kind == DesktopWidgetKind.Translation && GetTranslationLayout(widget).Source.Contains(point))
@@ -315,7 +348,12 @@ internal sealed partial class DesktopBoxForm
 
     private void ShowWidgetMenu(DesktopWidget widget, Point location)
     {
-        var menu = new FluentContextMenuStrip { PreferredDpiScale = (float)_scale };
+        var menu = new FluentContextMenuStrip
+        {
+            PreferredDpiScale = (float)_scale,
+            ConfigureSubmenusOnOpening = widget.Kind == DesktopWidgetKind.Lyrics
+        };
+        var constructionStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         menu.Opening += (_, _) => _runtime.ApplyContextMenuTheme(menu);
         menu.Closed += (_, _) => { if (!IsDisposed && IsHandleCreated) BeginInvoke((Action)menu.Dispose); else menu.Dispose(); };
         menu.Items.Add("组件设置", null, (_, _) => _runtime.OpenWidgetEditor(widget.Id));
@@ -324,7 +362,7 @@ internal sealed partial class DesktopBoxForm
         var sizes = new FluentToolStripMenuItem("尺寸");
         foreach (var size in DesktopWidgets.SupportedSizes(widget))
         {
-            var item = new FluentToolStripMenuItem(DesktopWidgets.SizeLabel(size)) { Checked = widget.Size == size };
+            var item = new FluentToolStripMenuItem(DesktopWidgets.SizeLabel(widget, size)) { Checked = widget.Size == size };
             item.Click += (_, _) => TryAction(() =>
             {
                 _runtime.ResizeWidget(widget, size);
@@ -333,6 +371,7 @@ internal sealed partial class DesktopBoxForm
             sizes.DropDownItems.Add(item);
         }
         menu.Items.Add(sizes);
+        if (widget.Kind == DesktopWidgetKind.FileShelf) AddFileShelfContextMenu(menu, widget);
         if (widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network) AddMonitorContextMenu(menu, widget);
         if (widget.Kind == DesktopWidgetKind.Lyrics) AddLyricsContextMenu(menu, widget);
         if (widget.Kind == DesktopWidgetKind.ControlCenter)
@@ -340,7 +379,7 @@ internal sealed partial class DesktopBoxForm
             menu.Items.Add(BuildControlCenterInkMenu(widget));
             menu.Items.Add("自定义快捷区…", null, (_, _) => ShowQuickActionsEditor(widget));
             menu.Items.Add("显示控制…", null, (_, _) => ShowDisplayControls(widget,
-                WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius)));
+                WidgetMenuRectangle(widget, WidgetCornerRadius)));
         }
 
         if (widget.Kind == DesktopWidgetKind.Note)
@@ -371,6 +410,7 @@ internal sealed partial class DesktopBoxForm
         }
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("管理小组件", null, (_, _) => _runtime.OpenWidgetEditor());
+        menu.ConstructionDuration = System.Diagnostics.Stopwatch.GetElapsedTime(constructionStarted);
         menu.Show(this, location);
     }
 }

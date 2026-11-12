@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="calendar-title">
+<title id="calendar-title">月历 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="calendar-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#F07478"/><stop offset="1" stop-color="#F07478" stop-opacity=".84"/></linearGradient></defs>
+<rect x="8" y="11" width="48" height="45" rx="9" fill="#D9E5F3"/><rect x="8" y="9" width="48" height="44" rx="9" fill="#FFF9F1"/><path d="M17 9h30a9 9 0 0 1 9 9v7H8v-7a9 9 0 0 1 9-9" fill="url(#calendar-main)"/><path d="M21 6v10M43 6v10" stroke="#C05265" stroke-width="4.2" stroke-linecap="round"/><path d="M21 6v6M43 6v6" stroke="#F6C8C9" stroke-width="3" stroke-linecap="round"/><path d="M20 33l4-2v14M35 32h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" stroke="#477FD9" stroke-width="3.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

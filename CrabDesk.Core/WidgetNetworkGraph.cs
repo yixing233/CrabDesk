@@ -80,8 +80,9 @@ public static class WidgetNetworkGraph
         var inset = 12 + Math.Clamp(radius, 0, 20) * .2;
         if (width < 300)
         {
-            var row = (height - 2 * inset) / 2;
-            return (new(inset, inset, width - 2 * inset, row), new(inset, inset + row, width - 2 * inset, row));
+            var gap = Math.Min(6, Math.Max(0, height - 2 * inset));
+            var row = Math.Max(0, (height - 2 * inset - gap) / 2);
+            return (new(inset, inset, width - 2 * inset, row), new(inset, inset + row + gap, width - 2 * inset, row));
         }
         var half = (width - inset * 2 - 16) / 2;
         return (new(inset, (height - 40) / 2, half, 40), new(inset + half + 16, (height - 40) / 2, half, 40));

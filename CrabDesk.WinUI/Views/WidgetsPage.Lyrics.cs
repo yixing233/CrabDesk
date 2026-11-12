@@ -1,6 +1,7 @@
 using CrabDesk.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace CrabDesk.WinUI.Views;
 
@@ -17,11 +18,10 @@ public sealed partial class WidgetsPage
         LyricsFontStyle.SelectedIndex = (int)widget.LyricsFontStyle;
         LyricsFontWeight.ItemsSource = Enumerable.Range(1, 9).Select(value => WidgetLyricsSettings.FontWeightLabel(value * 100)).ToArray();
         LyricsFontWeight.SelectedIndex = widget.LyricsFontWeight / 100 - 1;
-        LyricsLines.ItemsSource = Enumerable.Range(1, 9).Select(value => $"{value} 行").ToArray();
-        LyricsLines.SelectedIndex = widget.LyricsLineCount - 1;
+        LoadLyricsSpacing(widget);
         LyricsFont.Value = widget.LyricsFontSize;
         LyricsWords.IsOn = widget.LyricsWordHighlight;
-        LyricsOffset.Value = widget.LyricsOffsetMilliseconds;
+        LoadLyricsOffset(widget);
         LyricsInk.SelectedIndex = widget.LyricsLightText switch { true => 1, false => 2, _ => 0 };
         LyricsTransparentBackground.IsOn = widget.LyricsTransparentBackground;
         UpdateLyricsStatus();
@@ -36,17 +36,46 @@ public sealed partial class WidgetsPage
             : snapshot?.IsLoading == true ? "正在匹配歌词…" : snapshot?.Media is null ? "播放音乐后自动匹配歌词。" : "暂无匹配歌词，可导入本地文件。";
     }
 
-    private void SaveLyricsOptions()
+    private void LoadLyricsOffset(DesktopWidget widget)
     {
-        if (_loading || _selected is not { Kind: DesktopWidgetKind.Lyrics } widget || LyricsLines.SelectedIndex < 0 ||
-            !double.IsFinite(LyricsFont.Value) || !double.IsFinite(LyricsOffset.Value)) return;
-        _saving = true;
-        try { _runtime.SetLyricsOptions(widget, LyricsLines.SelectedIndex + 1, LyricsFont.Value, (int)Math.Round(LyricsOffset.Value), LyricsWords.IsOn); }
-        finally { _saving = false; }
-        RefreshGallery(changedWidget: widget);
+        LyricsOffset.Value = widget.LyricsOffsetMilliseconds / 1000d;
+        LyricsOffset.Header = $"歌词校准（{widget.LyricsOffsetMilliseconds / 1000d:+0.00;-0.00;0.00} 秒）";
     }
 
-    private void LyricsLines_SelectionChanged(object sender, SelectionChangedEventArgs args) => SaveLyricsOptions();
+    private void LoadLyricsSpacing(DesktopWidget widget)
+    {
+        LyricsSpacing.Value = widget.LyricsLineSpacing;
+        LyricsSpacing.Header = $"行间距（{widget.LyricsLineSpacing:0.00} 倍）";
+    }
+
+    private void SaveLyricsOptions(bool refreshPreviews = true)
+    {
+        if (_loading || _selected is not { Kind: DesktopWidgetKind.Lyrics } widget || !double.IsFinite(LyricsSpacing.Value) ||
+            !double.IsFinite(LyricsFont.Value) || !double.IsFinite(LyricsOffset.Value)) return;
+        _saving = true;
+        try { _runtime.SetLyricsOptions(widget, Math.Round(LyricsSpacing.Value * 20, MidpointRounding.AwayFromZero) / 20, LyricsFont.Value,
+            (int)Math.Round(LyricsOffset.Value * 100, MidpointRounding.AwayFromZero) * 10, LyricsWords.IsOn); }
+        finally { _saving = false; }
+        RefreshGallery(refreshPreviews: refreshPreviews, changedWidget: widget);
+    }
+
+    private void LyricsOffset_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
+    {
+        ((Slider)sender).Header = $"歌词校准（{args.NewValue:+0.00;-0.00;0.00} 秒）";
+        SaveLyricsOptions(refreshPreviews: false);
+    }
+
+    private void LyricsOffsetReset_Click(object sender, RoutedEventArgs args)
+    {
+        LyricsOffset.Value = 0;
+        SaveLyricsOptions(refreshPreviews: false);
+    }
+
+    private void LyricsSpacing_ValueChanged(object sender, RangeBaseValueChangedEventArgs args)
+    {
+        ((Slider)sender).Header = $"行间距（{args.NewValue:0.00} 倍）";
+        SaveLyricsOptions(refreshPreviews: false);
+    }
     private void LyricsNumber_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => SaveLyricsOptions();
     private void LyricsWords_Toggled(object sender, RoutedEventArgs args) => SaveLyricsOptions();
     private void LyricsTypography_SelectionChanged(object sender, SelectionChangedEventArgs args)

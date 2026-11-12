@@ -27,8 +27,12 @@ public sealed class MicrophonePopupTests
         await controller.RefreshAsync();
         OnSta(() =>
         {
-            using var popup = new MicrophonePopup(controller, dark, Color.FromArgb(79, 100, 154), 1);
+            var background = dark ? Color.FromArgb(28, 37, 53) : Color.FromArgb(241, 245, 249);
+            using var popup = new MicrophonePopup(controller, dark, Color.FromArgb(79, 100, 154), 1, background: background);
             var view = popup.ContentView;
+            Assert.Equal(background.ToArgb(), popup.BackColor.ToArgb());
+            var surface = Assert.IsType<Media.SolidColorBrush>(Assert.IsType<WpfControls.Border>(view).Background);
+            Assert.Equal(Media.Color.FromRgb(background.R, background.G, background.B), surface.Color);
             view.Measure(new Wpf.Size(320, 194)); view.Arrange(new Wpf.Rect(0, 0, 320, 194)); view.UpdateLayout();
             var slider = Assert.Single(Descendants<WpfControls.Slider>(view));
             Assert.Equal(!unavailable, slider.IsEnabled);

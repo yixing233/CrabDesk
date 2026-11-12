@@ -10,7 +10,8 @@ public static class WidgetMonitorPresentation
     public readonly record struct Metric(string Label, string Value, string Detail, double? Percentage,
         double? TemperatureCelsius = null);
     public readonly record struct NetworkLayout(LayoutRect Download, LayoutRect Upload, LayoutRect Connection,
-        LayoutRect Latency, LayoutRect IPv4, LayoutRect IPv6, LayoutRect PublicIp);
+        LayoutRect Latency, LayoutRect RankingTitle, LayoutRect SortDownload, LayoutRect SortUpload,
+        IReadOnlyList<LayoutRect> Processes);
 
     public static string ConnectionText(WidgetNetworkSnapshot? snapshot) => snapshot is null ? "正在采样…" :
         !snapshot.IsConnected ? "未连接网络" : string.IsNullOrEmpty(snapshot.InterfaceName) || snapshot.InterfaceName == snapshot.NetworkType
@@ -97,9 +98,11 @@ public static class WidgetMonitorPresentation
     public static NetworkLayout NetworkFields(LayoutRect body)
     {
         var width = (body.Width - 12) / 2;
-        return new(new(body.X, body.Y, width, 40), new(body.X + width + 12, body.Y, width, 40),
-            new(body.X, body.Y + 44, body.Width - 104, 18), new(body.X + body.Width - 104, body.Y + 44, 104, 18),
-            new(body.X, body.Y + 66, body.Width, 18), new(body.X, body.Y + 86, body.Width, 18),
-            new(body.X, body.Y + 106, body.Width, 22));
+        return new(new(body.X, body.Y, width, 30), new(body.X + width + 12, body.Y, width, 30),
+            new(body.X, body.Y + 34, body.Width - 104, 16), new(body.X + body.Width - 104, body.Y + 34, 104, 16),
+            new(body.X, body.Y + 54, body.Width - 100, 18),
+            new(body.X + body.Width - 96, body.Y + 54, 46, 18),
+            new(body.X + body.Width - 46, body.Y + 54, 46, 18),
+            Enumerable.Range(0, 3).Select(index => new LayoutRect(body.X, body.Y + 72 + index * 18, body.Width, 18)).ToArray());
     }
 }

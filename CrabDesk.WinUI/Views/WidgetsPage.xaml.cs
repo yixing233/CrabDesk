@@ -19,14 +19,21 @@ public sealed partial class WidgetsPage : Page
     private bool _saving;
     private bool _editing;
     private bool _galleryRefreshQueued;
-    private bool _galleryIsCatalog;
     private readonly ObservableCollection<WidgetGalleryItem> _galleryItems = [];
+    private readonly Dictionary<Guid, WidgetGalleryItem> _galleryCache = [];
+    private readonly Dictionary<DesktopWidgetKind, DesktopWidget> _gallerySamples = [];
     private readonly Dictionary<Guid, CheckBox> _taskChecks = [];
     private readonly Dictionary<Guid, TextBlock> _taskDateLabels = [];
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _editorSaveTimer;
+    private readonly HashSet<DesktopWidget> _pendingEditorChanges = [];
 
     public WidgetsPage()
     {
         InitializeComponent();
+        _editorSaveTimer = DispatcherQueue.CreateTimer();
+        _editorSaveTimer.Interval = TimeSpan.FromMilliseconds(120);
+        _editorSaveTimer.IsRepeating = false;
+        _editorSaveTimer.Tick += (_, _) => FlushEditorChanges();
         WidgetGallery.ItemsSource = _galleryItems;
         Loaded += (_, _) =>
         {
@@ -37,6 +44,7 @@ public sealed partial class WidgetsPage : Page
         };
         Unloaded += (_, _) =>
         {
+            FlushEditorChanges();
             _runtime.Changed -= Runtime_Changed;
             _runtime.WidgetMonitorUpdated -= Runtime_WidgetMonitorUpdated;
             _citySearch?.Cancel();
@@ -59,6 +67,7 @@ public sealed partial class WidgetsPage : Page
 
     private void ReloadInstances()
     {
+        LoadGlobalWidgetAppearance();
         if (_runtime.TryConsumeWidgetNavigation(out var requestedId))
         {
             var requested = _runtime.State.Widgets.FirstOrDefault(w => w.Id == requestedId);
@@ -75,54 +84,51 @@ public sealed partial class WidgetsPage : Page
 
     private void RefreshGallery(bool refreshPreviews = true, DesktopWidget? changedWidget = null)
     {
-        var catalog = GalleryTabs.SelectedItem == AddWidgetsTab;
         var appearance = PreviewAppearance();
-        if (catalog != _galleryIsCatalog)
+        var entries = new List<WidgetGalleryItem>();
+        var instances = _runtime.State.Widgets.ToLookup(widget => widget.Kind);
+        foreach (var kind in Enum.GetValues<DesktopWidgetKind>())
         {
-            _galleryItems.Clear();
-            _galleryIsCatalog = catalog;
-        }
-        var widgets = catalog
-            ? Enum.GetValues<DesktopWidgetKind>().Select(kind => _galleryItems.FirstOrDefault(item => item.Widget.Kind == kind)?.Widget ?? CreateSample(kind)).ToArray()
-            : _runtime.State.Widgets.ToArray();
-        for (var index = 0; index < widgets.Length; index++)
-        {
-            var widget = widgets[index];
-            var item = _galleryItems.FirstOrDefault(entry => ReferenceEquals(entry.Widget, widget));
-            var caption = catalog ? widget.Kind switch
+            var added = instances[kind].ToArray();
+            var catalog = added.Length == 0;
+            if (catalog && !_gallerySamples.ContainsKey(kind)) _gallerySamples[kind] = CreateSample(kind);
+            foreach (var widget in catalog ? [_gallerySamples[kind]] : added)
             {
-                DesktopWidgetKind.Clock => "黑白表盘与可选秒针", DesktopWidgetKind.Calendar => "浏览月份，标记今天",
-                DesktopWidgetKind.Note => "随手记下灵感", DesktopWidgetKind.Todo => "记录并完成每一件事",
-                DesktopWidgetKind.Translation => "随时翻译一段文字", DesktopWidgetKind.Weather => "关心城市的阴晴冷暖",
-                DesktopWidgetKind.Performance => "实时查看 CPU、GPU、内存与磁盘",
-                DesktopWidgetKind.ControlCenter => "开关、音量、亮度与媒体控制",
-                DesktopWidgetKind.Lyrics => "随音乐滚动，逐字点亮歌词",
-                _ => "完整信息、仅速度或实时曲线"
-            } : (widget.Kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " : "") + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
-            var count = catalog ? _runtime.State.Widgets.Count(existing => existing.Kind == widget.Kind) : 0;
-            if (item is null)
-            {
-                item = new WidgetGalleryItem(widget, appearance, catalog, caption, count);
-                _galleryItems.Insert(index, item);
-            }
-            else
-            {
-                var previousIndex = _galleryItems.IndexOf(item);
-                if (previousIndex != index) _galleryItems.Move(previousIndex, index);
-                item.Refresh(appearance, caption, count, refreshPreviews && (changedWidget is null || item.Widget == changedWidget));
+                var caption = catalog ? WidgetGalleryItem.Description(kind)
+                    : (kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " :
+                        kind == DesktopWidgetKind.FileShelf ? $"{widget.FileShelfItems.Count} 个文件 · " : "")
+                        + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
+                if (!_galleryCache.TryGetValue(widget.Id, out var item))
+                    _galleryCache[widget.Id] = item = new WidgetGalleryItem(widget, appearance, catalog, caption, added.Length);
+                else
+                    item.Refresh(appearance, caption, added.Length, refreshPreviews && (changedWidget is null || widget == changedWidget));
+                entries.Add(item);
             }
         }
-        while (_galleryItems.Count > widgets.Length) _galleryItems.RemoveAt(_galleryItems.Count - 1);
+        var retainedIds = entries.Select(item => item.Widget.Id).ToHashSet();
+        foreach (var id in _galleryCache.Keys.Where(id => !retainedIds.Contains(id)).ToArray()) _galleryCache.Remove(id);
+        bool? isAdded = WidgetFilter.SelectedIndex switch { 1 => true, 2 => false, _ => null };
+        var visible = entries.Where(item => item.Matches(WidgetSearch.Text, isAdded)).ToArray();
+        for (var index = 0; index < visible.Length; index++)
+        {
+            var item = visible[index];
+            var previousIndex = _galleryItems.IndexOf(item);
+            if (previousIndex < 0) _galleryItems.Insert(index, item);
+            else if (previousIndex != index) _galleryItems.Move(previousIndex, index);
+        }
+        while (_galleryItems.Count > visible.Length) _galleryItems.RemoveAt(_galleryItems.Count - 1);
         UpdateGallerySelection();
-        WidgetGallery.Visibility = Show(widgets.Length > 0);
-        EmptyState.Visibility = Show(!catalog && widgets.Length == 0);
-        GalleryCaption.Text = catalog ? "选择组件，添加到桌面"
-            : $"已添加 {widgets.Length} 个组件";
+        WidgetGallery.Visibility = Show(visible.Length > 0);
+        EmptyState.Visibility = Show(visible.Length == 0);
+        EmptyStateTitle.Text = !string.IsNullOrWhiteSpace(WidgetSearch.Text) ? "没有匹配的组件"
+            : isAdded == true ? "还没有已添加的组件" : "所有组件均已添加";
+        GalleryCaption.Text = $"显示 {visible.Length} 项 · 已添加 {_runtime.State.Widgets.Count} 个组件";
+        if (refreshPreviews && (changedWidget is null || changedWidget == _selected)) RefreshEditorPreview();
     }
 
     private void UpdateGallerySelection()
     {
-        foreach (var item in _galleryItems) item.IsSelected = !item.IsCatalog && item.Widget == _selected;
+        foreach (var item in _galleryCache.Values) item.IsSelected = !item.IsCatalog && item.Widget == _selected;
         WidgetGallery.SelectedItem = _galleryItems.FirstOrDefault(item => item.IsSelected);
     }
 
@@ -136,9 +142,19 @@ public sealed partial class WidgetsPage : Page
             Translation = "你好，世界。\n让沟通更简单。", TargetLanguage = "简体中文",
             Location = new("北京", "北京市", "中国", 39.9, 116.4), Weather = new(22, 16, 25, 2, DateTimeOffset.Now) { Provider = WidgetWeatherService.ProviderName },
             Performance = kind == DesktopWidgetKind.Performance ? new(DateTimeOffset.Now, 24, 12, 9L << 30, 16L << 30, 8, 2.4 * (1 << 20), 384 * 1024, 240L << 30, 512L << 30) : null,
-            Network = kind == DesktopWidgetKind.Network ? new(DateTimeOffset.Now) { IsConnected = true, InterfaceName = "以太网", NetworkType = "以太网", DownloadBytesPerSecond = 2.4 * (1 << 20), UploadBytesPerSecond = 384 * 1024, IPv4 = "192.168.1.100", IPv6 = "2001:db8::10", LatencyMilliseconds = 18, LatencyTarget = "1.1.1.1", LatencyStatus = "" } : null,
+            Network = kind == DesktopWidgetKind.Network ? new(DateTimeOffset.Now)
+            {
+                IsConnected = true, InterfaceName = "以太网", NetworkType = "以太网",
+                DownloadBytesPerSecond = 2.4 * (1 << 20), UploadBytesPerSecond = 384 * 1024,
+                LatencyMilliseconds = 18, LatencyTarget = "1.1.1.1", LatencyStatus = "",
+                Processes = new(NetworkProcessStatus.Ready,
+                    [new(100, "msedge", 1.6 * (1 << 20), 28 * 1024),
+                     new(200, "OneDrive", 640 * 1024, 320 * 1024),
+                     new(300, "steam", 180 * 1024, 36 * 1024)])
+            } : null,
             PublicIp = kind == DesktopWidgetKind.Network ? "203.0.113.24" : ""
         };
+        WidgetAppearance.ApplyNewDefaults(sample);
         if (kind == DesktopWidgetKind.Network)
         {
             var now = DateTimeOffset.Now;
@@ -147,48 +163,62 @@ public sealed partial class WidgetsPage : Page
                     (1.4 + Math.Sin(index * .24) * .7 + Math.Sin(index * .73) * .25) * (1 << 20),
                     (240 + Math.Sin(index * .18) * 110 + Math.Cos(index * .51) * 45) * 1024)));
         }
+        if (kind == DesktopWidgetKind.Weather && sample.Weather is { } weather)
+        {
+            var now = DateTimeOffset.Now;
+            var nextHour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Offset).AddHours(1);
+            sample.Weather = weather with { AirQuality = 42,
+                Hourly = Enumerable.Range(0, 6).Select(index => new WidgetHourlyWeather(nextHour.AddHours(index),
+                    22 - index, index < 2 ? "多云" : index < 4 ? "小雨" : "阴", 42)).ToArray() };
+        }
+        if (kind == DesktopWidgetKind.FileShelf) sample.FileShelfItems = FileShelfSettingsPresentation.SampleItems();
         return sample;
     }
 
     private void CloseEditor()
     {
+        FlushEditorChanges();
         _citySearch?.Cancel();
         CityQuery.IsSuggestionListOpen = false;
         _lifetime?.Cancel(); _lifetime?.Dispose(); _lifetime = null;
         _selected = null;
         _editing = false;
-        EditorHost.IsPaneOpen = false;
-        EditorView.Visibility = Visibility.Collapsed;
+        _appearanceOpen = false;
+        UpdatePageNavigation();
         WidgetGallery.SelectedItem = null;
         UpdateGallerySelection();
     }
 
-    private void ShowOverview()
+    private void ShowOverview() => CloseEditor();
+
+    private void ClearGalleryFilters_Click(object sender, RoutedEventArgs args)
     {
-        CloseEditor();
-        GalleryTabs.SelectedItem = MyWidgetsTab;
+        WidgetSearch.Text = string.Empty;
+        WidgetFilter.SelectedIndex = 0;
+        RefreshGallery(refreshPreviews: false);
     }
 
-    private void BackToGallery_Click(object sender, RoutedEventArgs args) => ShowOverview();
-    private void BrowseWidgets_Click(object sender, RoutedEventArgs args) => GalleryTabs.SelectedItem = AddWidgetsTab;
-    private void GalleryTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    { if (IsLoaded) { CloseEditor(); RefreshGallery(); } }
+    private void WidgetSearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    { if (IsLoaded) RefreshGallery(refreshPreviews: false); }
 
-    private void EditorHost_PaneClosed(SplitView sender, object args)
-    { if (_editing && !EditorHost.IsPaneOpen) CloseEditor(); }
+    private void WidgetFilter_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    { if (IsLoaded) RefreshGallery(refreshPreviews: false); }
 
-    private void EditorHost_SizeChanged(object sender, SizeChangedEventArgs args)
+    private void GalleryToolbar_SizeChanged(object sender, SizeChangedEventArgs args)
     {
-        EditorHost.DisplayMode = args.NewSize.Width >= 800 ? SplitViewDisplayMode.Inline : SplitViewDisplayMode.Overlay;
-        EditorHost.OpenPaneLength = Math.Min(372, Math.Max(280, args.NewSize.Width - 24));
-        EditorPane.Margin = EditorHost.DisplayMode == SplitViewDisplayMode.Inline ? new Thickness(16, 0, 0, 0) : new Thickness(0);
+        var narrow = args.NewSize.Width < 440;
+        Grid.SetColumnSpan(WidgetSearch, narrow ? 2 : 1);
+        Grid.SetColumn(WidgetFilter, narrow ? 0 : 1);
+        Grid.SetRow(WidgetFilter, narrow ? 1 : 0);
+        Grid.SetColumnSpan(WidgetFilter, narrow ? 2 : 1);
+        WidgetFilter.Width = narrow ? double.NaN : 160;
+        WidgetFilter.HorizontalAlignment = HorizontalAlignment.Stretch;
+        WidgetFilter.Margin = narrow ? new Thickness(0, 12, 0, 0) : new Thickness(0);
     }
 
     private void WidgetGallery_ItemClick(object sender, ItemClickEventArgs args)
     {
         if (args.ClickedItem is not WidgetGalleryItem item) return;
-        if (item.IsCatalog && _runtime.State.Widgets.Count(widget => widget.Kind == item.Widget.Kind) > 1)
-        { ShowOverview(); return; }
         Try(() => LoadEditor(item.IsCatalog ? _runtime.AddWidget(item.Widget.Kind) : item.Widget));
     }
 
@@ -202,54 +232,62 @@ public sealed partial class WidgetsPage : Page
     private void LoadEditor(DesktopWidget? widget)
     {
         if (widget is null) { ShowOverview(); return; }
-        GalleryTabs.SelectedItem = MyWidgetsTab;
+        FlushEditorChanges();
         _citySearch?.Cancel();
         _lifetime?.Cancel(); _lifetime?.Dispose();
         _lifetime = new CancellationTokenSource();
         _selected = widget;
         _editing = true;
-        EditorView.Visibility = Visibility.Visible;
-        EditorHost.IsPaneOpen = true;
+        _appearanceOpen = false;
+        UpdatePageNavigation();
         EditorName.Text = widget.DisplayTitle;
-        CardSettings.IsExpanded = DesktopWidgets.SupportsFreeResize(widget.Kind);
+        EditorIcon.AssetName = WidgetIconCatalog.GetName(widget.Kind);
         Notice.IsOpen = false;
         _loading = true;
-        TitleInput.Text = widget.Title;
-        SizePicker.ItemsSource = DesktopWidgets.SupportedSizes(widget).Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(size))).ToArray();
-        SizePicker.DisplayMemberPath = nameof(SizeChoice.Label);
-        SizePicker.SelectedItem = SizePicker.Items.Cast<SizeChoice>().First(s => s.Size == widget.Size);
-        MonitorPicker.ItemsSource = _runtime.Monitors.Select((monitor, index) => new MonitorChoice(monitor.Id, $"显示器 {index + 1}" + (monitor.IsPrimary ? "（主显示器）" : ""))).ToArray();
-        MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
-        PositionLock.IsOn = widget.IsLocked;
-        Seconds.IsOn = widget.ShowSeconds;
-        var translation = _runtime.State.Settings.WidgetTranslation;
-        TranslationBaseUrl.Text = translation.BaseUrl;
-        TranslationApiKey.Password = translation.ApiKey;
-        TranslationModel.Text = translation.Model;
-        TranslationPrompt.Text = translation.PromptTemplate;
-        TranslationReuseConversation.IsOn = translation.ReuseConversation;
-        TranslationConversationIdle.Value = translation.ConversationIdleMinutes;
-        TranslationConversationIdle.IsEnabled = translation.ReuseConversation;
-        NewTaskInput.Text = string.Empty;
-        CityQuery.Text = string.Empty;
-        CityQuery.ItemsSource = null;
-        CityQuery.IsSuggestionListOpen = false;
-        CitySearchStatus.Text = string.Empty;
-        LocationSettings.Visibility = Visibility.Collapsed;
-        ClockEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Clock);
-        CalendarHelp.Visibility = Show(widget.Kind == DesktopWidgetKind.Calendar);
-        NoteHelp.Visibility = Show(widget.Kind == DesktopWidgetKind.Note);
-        TodoEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Todo);
-        TranslationEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Translation);
-        WeatherEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Weather);
-        PerformanceEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Performance);
-        NetworkEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Network);
-        LoadLyricsSettings(widget);
-        LoadMonitorSettings(widget);
-        _loading = false;
+        try
+        {
+            TitleInput.Text = widget.Title;
+            SizePicker.ItemsSource = DesktopWidgets.SupportedSizes(widget).Select(size => new SizeChoice(size, DesktopWidgets.SizeLabel(widget, size))).ToArray();
+            SizePicker.DisplayMemberPath = nameof(SizeChoice.Label);
+            SizePicker.SelectedItem = SizePicker.Items.Cast<SizeChoice>().First(s => s.Size == widget.Size);
+            MonitorPicker.ItemsSource = _runtime.Monitors.Select((monitor, index) => new MonitorChoice(monitor.Id, $"显示器 {index + 1}" + (monitor.IsPrimary ? "（主显示器）" : ""))).ToArray();
+            MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
+            PositionLock.IsOn = widget.IsLocked;
+            Seconds.IsOn = widget.ShowSeconds;
+            var translation = _runtime.State.Settings.WidgetTranslation;
+            TranslationBaseUrl.Text = translation.BaseUrl;
+            TranslationApiKey.Password = translation.ApiKey;
+            TranslationModel.Text = translation.Model;
+            TranslationPrompt.Text = translation.PromptTemplate;
+            TranslationReuseConversation.IsOn = translation.ReuseConversation;
+            TranslationConversationIdle.Value = translation.ConversationIdleMinutes;
+            TranslationConversationIdle.IsEnabled = translation.ReuseConversation;
+            NewTaskInput.Text = string.Empty;
+            CityQuery.Text = string.Empty;
+            CityQuery.ItemsSource = null;
+            CityQuery.IsSuggestionListOpen = false;
+            CitySearchStatus.Text = string.Empty;
+            LocationSettings.Visibility = Visibility.Collapsed;
+            ClockEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Clock);
+            CalendarHelp.Visibility = Show(widget.Kind == DesktopWidgetKind.Calendar);
+            NoteHelp.Visibility = Show(widget.Kind == DesktopWidgetKind.Note);
+            TodoEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Todo);
+            TranslationEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Translation);
+            WeatherEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Weather);
+            PerformanceEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Performance);
+            NetworkEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Network);
+            FileShelfEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.FileShelf);
+            LoadWidgetAppearance(widget);
+            LoadLyricsSettings(widget);
+            LoadWidgetTypography(widget);
+            LoadMonitorSettings(widget);
+            LoadFileShelfSettings(widget);
+        }
+        finally { _loading = false; }
         RenderTasks();
         UpdateOnlineStatus();
         EditorScroll.ChangeView(null, 0, null, true);
+        RefreshEditorPreview();
         RefreshGallery(refreshPreviews: false);
     }
 
@@ -258,11 +296,27 @@ public sealed partial class WidgetsPage : Page
     {
         if (_loading || _selected is not { } widget) return;
         change(widget);
-        _saving = true;
-        try { _runtime.WidgetChanged(widget); }
-        finally { _saving = false; }
+        _pendingEditorChanges.Add(widget);
+        _editorSaveTimer.Stop();
+        _editorSaveTimer.Start();
         EditorName.Text = widget.DisplayTitle;
-        RefreshGallery(changedWidget: widget);
+        UpdatePageNavigation();
+        RefreshGallery(refreshPreviews: false);
+    }
+
+    private void FlushEditorChanges()
+    {
+        _editorSaveTimer.Stop();
+        if (_pendingEditorChanges.Count == 0) return;
+        var widgets = _pendingEditorChanges.ToArray();
+        _pendingEditorChanges.Clear();
+        _saving = true;
+        try
+        {
+            foreach (var widget in widgets) _runtime.WidgetChanged(widget);
+        }
+        finally { _saving = false; }
+        if (IsLoaded) RefreshGallery(changedWidget: widgets.Length == 1 ? widgets[0] : null);
     }
 
     private void Error(string message) { Notice.Message = message; Notice.IsOpen = true; }
@@ -472,9 +526,16 @@ public sealed partial class WidgetsPage : Page
         UpdateMonitorStatus();
         _loading = true;
         PositionLock.IsOn = widget.IsLocked;
+        if (widget.Kind == DesktopWidgetKind.Lyrics)
+        {
+            LoadLyricsOffset(widget);
+            LoadLyricsSpacing(widget);
+        }
         SyncSizeChoices(widget);
         SyncCustomSizeSettings(widget);
         SyncNetworkDisplaySettings(widget);
+        LoadFileShelfSettings(widget);
+        RemoveWidgetButton.IsEnabled = widget.Kind != DesktopWidgetKind.FileShelf || !widget.FileShelfBusy;
         MonitorPicker.SelectedItem = MonitorPicker.Items.OfType<MonitorChoice>().FirstOrDefault(m => m.Id == widget.MonitorId);
         foreach (var task in widget.Tasks)
         {
@@ -510,9 +571,18 @@ public sealed partial class WidgetsPage : Page
     private async void RemoveWidget_Click(object sender, RoutedEventArgs args)
     {
         if (_selected is not { } widget) return;
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "移除组件？", Content = $"将从桌面移除“{widget.DisplayTitle}”及其保存的内容。",
-            PrimaryButtonText = "移除", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary) { _runtime.RemoveWidget(widget); ReloadInstances(); }
+        if (widget.Kind == DesktopWidgetKind.FileShelf && !CanChangeFileShelf(widget)) return;
+        try
+        {
+            var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "移除组件？", Content = widget.Kind == DesktopWidgetKind.FileShelf
+                ? FileShelfSettingsPresentation.RemovalMessage(widget, clear: false) : $"将从桌面移除“{widget.DisplayTitle}”及其保存的内容。",
+                PrimaryButtonText = "移除", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            if (widget.Kind == DesktopWidgetKind.FileShelf && !CanChangeFileShelf(widget)) return;
+            _runtime.RemoveWidget(widget);
+            ReloadInstances();
+        }
+        catch (Exception exception) { Error(exception.Message); }
     }
 
     private sealed record SizeChoice(DesktopWidgetSize Size, string Label);

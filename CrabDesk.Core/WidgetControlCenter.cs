@@ -12,8 +12,8 @@ public enum ControlCenterToggle { WiFi, Bluetooth, NightLight }
 ///
 /// Every field is nullable because the corresponding capability can be missing:
 /// a desktop has no brightness slider, a machine without a radio reports no
-/// WiFi, and the night-light interface is undocumented enough that reading it
-/// can fail. A null means "no reading", never "off" — the card draws those
+/// WiFi, and system preferences may be inaccessible. A null means "no reading",
+/// never "off" — the card draws those
 /// controls as unavailable instead of pretending they are switched off.
 /// </summary>
 public sealed record ControlCenterSnapshot
@@ -22,6 +22,7 @@ public sealed record ControlCenterSnapshot
     public bool? BluetoothEnabled { get; init; }
     public string WiFiConnectionName { get; init; } = "";
     public string BluetoothConnectionName { get; init; } = "";
+    /// <summary>Windows dark mode selected by the Night quick action.</summary>
     public bool? NightLightEnabled { get; init; }
     public double? VolumePercent { get; init; }
     public bool? VolumeMuted { get; init; }
@@ -93,6 +94,13 @@ public static class ControlCenterPresentation
     /// </summary>
     public const double CardHeight = 292;
 
+    /// <summary>Uniform card insets for the control grid.</summary>
+    public static LayoutRect Body(double width, double height, double cornerRadius)
+    {
+        var inset = WidgetMonitorPresentation.Body(width, height, cornerRadius).X;
+        return new(inset, inset, width - inset * 2, height - inset * 2);
+    }
+
     private const int ToggleCount = 4;
     private const double ToggleGap = 8;
 
@@ -114,7 +122,12 @@ public static class ControlCenterPresentation
         return new(body.X + index * (width + ToggleGap), body.Y, width, 56);
     }
 
-    public static LayoutRect QuickActionDetails(LayoutRect tile) => new(tile.X + tile.Width - 20, tile.Y + 2, 20, 24);
+    public static LayoutRect QuickActionDetails(LayoutRect tile)
+    {
+        // Keep the centre available for the main action even with six tiles.
+        var width = Math.Min(28, tile.Width / 2 - 1);
+        return new(tile.X + tile.Width - width, tile.Y, width, 32);
+    }
 
     public static LayoutRect SliderArea(LayoutRect body) =>
         new(body.X, body.Y + 64, body.Width, 46);
@@ -207,7 +220,7 @@ public static class ControlCenterPresentation
         ToggleWiFi, ToggleBluetooth, ToggleNightLight,
         VolumeSlider, BrightnessSlider, OutputRow, BrightnessDisplayRow,
         MediaPrevious, MediaPlayPause, MediaNext, VolumeMute, VolumeMixer, Microphone, MediaProgress,
-        DisplayControls, Cast, ScreenCapture, SystemSettings, WiFiDetails, BluetoothDetails
+        DisplayControls, Cast, ScreenCapture, SystemSettings, WiFiDetails, BluetoothDetails, NetworkAdapters
     }
 
     public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y, IReadOnlyList<ControlCenterQuickAction>? actions = null)
@@ -269,7 +282,7 @@ public static class ControlCenterPresentation
     {
         ControlCenterToggle.WiFi => "WiFi",
         ControlCenterToggle.Bluetooth => "蓝牙",
-        _ => "夜间"
+        _ => "系统主题"
     };
 
     /// <summary>

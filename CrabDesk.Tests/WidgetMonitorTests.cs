@@ -85,7 +85,8 @@ public sealed class WidgetMonitorTests
         }
         if (width < 300) return;
         var network = WidgetMonitorPresentation.NetworkFields(body);
-        var regions = new[] { network.Download, network.Upload, network.Connection, network.Latency, network.IPv4, network.IPv6, network.PublicIp };
+        var regions = new[] { network.Download, network.Upload, network.Connection, network.Latency,
+            network.RankingTitle, network.SortDownload, network.SortUpload }.Concat(network.Processes).ToArray();
         for (var index = 0; index < regions.Length; index++)
         {
             Assert.True(regions[index].Y + regions[index].Height <= body.Y + body.Height + .01);

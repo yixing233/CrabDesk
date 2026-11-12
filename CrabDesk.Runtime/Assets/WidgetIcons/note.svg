@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="note-title">
+<title id="note-title">便签 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="note-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#F6BD4F"/><stop offset="1" stop-color="#F6BD4F" stop-opacity=".84"/></linearGradient></defs>
+<path d="M15 8h25l14 14v26a8 8 0 0 1-8 8H15a7 7 0 0 1-7-7V15a7 7 0 0 1 7-7" fill="url(#note-main)"/><path d="M40 8v10a4 4 0 0 0 4 4h10" fill="#FFEAC0"/><path d="M40 8v10a4 4 0 0 0 4 4h10" fill="none" stroke="#EBA63C" stroke-width="1.2"/><path d="M18 30h25M18 38h25M18 46h16" stroke="#B67A2E" stroke-opacity=".7" stroke-width="3.2" stroke-linecap="round"/><rect x="18" y="5" width="18" height="7" rx="2" fill="#E99F40" opacity=".5"/>
+</svg>

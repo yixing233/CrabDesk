@@ -36,7 +36,7 @@ public static class WidgetLyricsSettings
         100 => "纤细（100）", 200 => "特细（200）", 300 => "细体（300）", 400 => "常规（400）",
         500 => "中等（500）", 600 => "半粗（600）", 700 => "粗体（700）", 800 => "特粗（800）", _ => "黑体（900）"
     };
-    public static int NormalizeLineCount(int value) => Math.Clamp(value, 1, 9);
+    public static double NormalizeLineSpacing(double value) => double.IsFinite(value) ? Math.Clamp(value, 1, 3) : 1.75;
     public static double NormalizeFontSize(double value) => double.IsFinite(value) ? Math.Clamp(value, 14, 48) : 24;
     public static int NormalizeOffset(int value) => Math.Clamp(value, -10000, 10000);
     public static string TrackKey(ControlCenterMedia media) => string.Join("\n", media.Title.Trim(), media.Artist.Trim(), media.Album.Trim());

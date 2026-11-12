@@ -56,6 +56,7 @@ public sealed record WidgetNetworkSnapshot(DateTimeOffset CapturedAt)
     public long? LatencyMilliseconds { get; init; }
     public string LatencyTarget { get; init; } = "";
     public string LatencyStatus { get; init; } = "等待测量";
+    public WidgetNetworkProcesses Processes { get; init; } = WidgetNetworkProcesses.Waiting;
 }
 
 public sealed record WidgetNetworkAdapter(string Id, string Name, string NetworkType);

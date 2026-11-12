@@ -27,6 +27,7 @@ internal sealed class FluentToolStripDropDownMenu : ToolStripDropDownMenu
     private const int GwlpHwndParent = -8;
 
     internal int ExtendedWindowStyleForTesting => CreateParams.ExStyle;
+    internal void PrepareCardPainting() => SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.DoubleBuffer, false);
 
     protected override Padding DefaultPadding =>
         FluentContextMenuStrip.CalculateOuterPadding(DeviceDpi);
@@ -108,10 +109,13 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
     internal bool OpacityAnimationAllowed { get; init; } = true;
     internal float? PreferredDpiScale { get; init; }
     internal bool AnimationsEnabled { get; set; } = true;
+    internal bool CardOwnsPresentation { get; set; }
     internal TimeSpan? ConstructionDuration { get; set; }
+    internal bool ConfigureSubmenusOnOpening { get; init; }
     // Optional screen-pixel bounds of the row that toggles this menu.
     internal Rectangle? ToggleSourceBounds { get; set; }
     internal ToolStripItem? PointerHoveredItem => _pointerHoveredItem;
+    internal void PrepareCardPainting() => SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.DoubleBuffer, false);
 
     protected override Padding DefaultPadding => CalculateOuterPadding(DeviceDpi);
 
@@ -227,7 +231,7 @@ internal sealed class FluentContextMenuStrip : ContextMenuStrip
         {
             StartOpacityAnimation(1, 90, false);
         }
-        else
+        else if (!CardOwnsPresentation)
         {
             Opacity = 1;
         }

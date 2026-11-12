@@ -172,6 +172,12 @@ public sealed class JsonLayoutStore : ILayoutStore
         state.Settings.Backup.IntervalHours = Math.Clamp(state.Settings.Backup.IntervalHours, 1, 8760);
         state.Settings.Backup.RetentionDays = Math.Clamp(state.Settings.Backup.RetentionDays, 1, 365);
         state.Settings.Appearance.CornerRadius = Math.Clamp(state.Settings.Appearance.CornerRadius, 0, 20);
+        state.Settings.Appearance.WidgetCornerRadius = state.Settings.Appearance.ResolveWidgetCornerRadius();
+        state.Settings.Appearance.AcrylicBlurStrength = Math.Clamp(state.Settings.Appearance.AcrylicBlurStrength, 0, 100);
+        state.Settings.Appearance.WidgetAcrylic ??= new WidgetAcrylicSettings();
+        state.Settings.Appearance.WidgetAcrylic.Normalize();
+        state.Settings.DefaultBoxAppearance.BackgroundOpacity = state.Settings.DefaultBoxAppearance
+            .ResolveBackgroundOpacity(state.Settings.Appearance.UseAcrylicBoxes);
         state.Settings.Appearance.IconHoverCornerRadius = Math.Clamp(state.Settings.Appearance.IconHoverCornerRadius, 0, 20);
         state.Settings.Appearance.BorderWidth = Math.Clamp(state.Settings.Appearance.BorderWidth, 1, 6);
         state.Settings.Appearance.BorderOpacity = Math.Clamp(state.Settings.Appearance.BorderOpacity, 0, 100);
@@ -420,6 +426,7 @@ public sealed class JsonLayoutStore : ILayoutStore
             {
                 box.Appearance.Background = "#FF" + box.Appearance.Background[3..];
             }
+            box.Appearance.BackgroundOpacity = box.Appearance.ResolveBackgroundOpacity(state.Settings.Appearance.UseAcrylicBoxes);
             box.Appearance.Opacity = Math.Clamp(box.Appearance.Opacity, 0.35, 1);
             box.Appearance.IconSize = Math.Clamp(box.Appearance.IconSize, 24, 96);
             box.Appearance.LabelFontFamily = NormalizeFontFamily(box.Appearance.LabelFontFamily);

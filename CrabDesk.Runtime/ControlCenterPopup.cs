@@ -10,27 +10,32 @@ using Automation = System.Windows.Automation.AutomationProperties;
 
 namespace CrabDesk.Runtime;
 
-internal abstract class ControlCenterPopup : DesktopWidgetInputForm
+internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
 {
     private readonly WpfControls.Border _content;
+    private readonly bool _detailCard, _dark;
     private readonly Wpf.Style _buttonStyle;
     protected readonly WpfControls.Grid Body = new();
     protected readonly WpfControls.StackPanel Footer = new();
     protected readonly Media.Brush ForegroundInk, SecondaryInk, AccentInk, HoverInk, TrackInk;
     private readonly WpfControls.TextBlock _status;
     protected bool IsClosing { get; private set; }
+    protected virtual bool CanDismissOnDeactivate => true;
     internal Wpf.FrameworkElement ContentView => _content;
 
     protected ControlCenterPopup(string title, bool dark, Color accent, double scale, int width, int height,
-        LucideRuntimeIcon? titleIcon = null)
+        LucideRuntimeIcon? titleIcon = null, bool detailCard = false, bool animationsEnabled = true, Color? background = null,
+        PopupSkeletonLayout? skeleton = null)
     {
+        _detailCard = detailCard;
+        _dark = dark;
         Text = AccessibleName = title;
         FormBorderStyle = Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = Forms.FormStartPosition.Manual;
         AutoScaleMode = Forms.AutoScaleMode.None;
         ClientSize = new((int)Math.Round(width * scale), (int)Math.Round(height * scale));
-        BackColor = dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251);
+        BackColor = background ?? (dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251));
         ForegroundInk = Brush(dark ? Color.FromArgb(242, 244, 248) : Color.FromArgb(31, 35, 41));
         SecondaryInk = Brush(dark ? Color.FromArgb(176, 183, 195) : Color.FromArgb(102, 110, 124));
         AccentInk = Brush(accent);
@@ -42,25 +47,26 @@ internal abstract class ControlCenterPopup : DesktopWidgetInputForm
         grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
-        var header = new WpfControls.Grid { Height = 26, Margin = new Wpf.Thickness(0, 0, 0, 8) };
-        var titleLabel = TextLabel(title, 14, true);
+        var header = new WpfControls.Grid { Height = detailCard ? 34 : 26, Margin = new Wpf.Thickness(0, 0, 0, detailCard ? 12 : 8) };
+        var titleLabel = TextLabel(title, detailCard ? 18 : 14, true);
         if (titleIcon is { } icon)
         {
             var heading = new WpfControls.StackPanel { Orientation = WpfControls.Orientation.Horizontal };
             var glyph = Glyph(icon, 18);
-            glyph.Foreground = SecondaryInk;
-            glyph.Margin = new Wpf.Thickness(0, 0, 8, 0);
+            glyph.Foreground = detailCard ? AccentInk : SecondaryInk;
+            glyph.Margin = new Wpf.Thickness(0, 0, detailCard ? 10 : 8, 0);
             heading.Children.Add(glyph);
             heading.Children.Add(titleLabel);
             header.Children.Add(heading);
         }
         else header.Children.Add(titleLabel);
-        var close = IconButton(LucideRuntimeIcon.X, "关闭" + title, 24);
+        var close = IconButton(LucideRuntimeIcon.X, "关闭" + title, detailCard ? 30 : 24);
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
         grid.Children.Add(header);
-        WpfControls.Grid.SetRow(Body, 1); grid.Children.Add(Body);
+        Wpf.FrameworkElement body = skeleton is { } layout ? CreatePopupLoading(Body, dark, animationsEnabled, layout) : Body;
+        WpfControls.Grid.SetRow(body, 1); grid.Children.Add(body);
         Footer.Margin = new Wpf.Thickness(0, 8, 0, 0);
         WpfControls.Grid.SetRow(Footer, 2); grid.Children.Add(Footer);
         _status = TextLabel("", 11); _status.Foreground = SecondaryInk;
@@ -68,17 +74,18 @@ internal abstract class ControlCenterPopup : DesktopWidgetInputForm
         _status.Visibility = Wpf.Visibility.Collapsed;
         _status.Margin = new Wpf.Thickness(0, 6, 0, 0);
         WpfControls.Grid.SetRow(_status, 3); grid.Children.Add(_status);
-        _content = new WpfControls.Border { CornerRadius = new Wpf.CornerRadius(12), Padding = new Wpf.Thickness(12, 10, 12, 10),
-            Background = Brush(BackColor), BorderThickness = new Wpf.Thickness(1),
-            BorderBrush = Brush(dark ? Color.FromArgb(64, 69, 79) : Color.FromArgb(216, 222, 230)), Child = grid };
+        _content = new WpfControls.Border { CornerRadius = new Wpf.CornerRadius(detailCard ? 8 : 12),
+            UseLayoutRounding = detailCard, SnapsToDevicePixels = detailCard,
+            Padding = detailCard ? new Wpf.Thickness(16) : new Wpf.Thickness(12, 10, 12, 10),
+            Background = Brush(BackColor), Child = grid };
+        InitializePopupEntrance(_content, animationsEnabled);
         _content.Resources["MixerAccent"] = AccentInk;
         _content.Resources["MixerTrack"] = TrackInk;
         _content.Resources["MixerHover"] = HoverInk;
         _content.Resources["MixerScrollThumb"] = Brush(dark ? Color.FromArgb(105, 116, 135) : Color.FromArgb(169, 179, 196));
         _content.Resources[typeof(WpfControls.Primitives.ScrollBar)] = Wpf.Markup.XamlReader.Parse(AudioMixerPopup.ScrollBarStyle);
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
-        Controls.Add(new System.Windows.Forms.Integration.ElementHost { Dock = Forms.DockStyle.Fill, Child = _content });
-        Deactivate += (_, _) => Dismiss();
+        Deactivate += (_, _) => { if (CanDismissOnDeactivate) Dismiss(); };
     }
 
     protected WpfControls.TextBlock TextLabel(string text, double size = 12, bool bold = false) => new()
@@ -166,17 +173,29 @@ internal abstract class ControlCenterPopup : DesktopWidgetInputForm
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        CrabDesk.Native.DesktopPopupWindow.Track(Handle);
         var corners = 2;
         _ = DwmSetWindowAttribute(Handle, 33, ref corners, sizeof(int));
+        if (_detailCard)
+        {
+            var dark = _dark ? 1 : 0;
+            _ = DwmSetWindowAttribute(Handle, 20, ref dark, sizeof(int));
+            var border = unchecked((int)0xFFFFFFFE);
+            _ = DwmSetWindowAttribute(Handle, 34, ref border, sizeof(int));
+        }
+        ApplyNativePopupMaterial();
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) IsClosing = true;
+        if (disposing)
+        {
+            IsClosing = true;
+        }
         base.Dispose(disposing);
     }
 
-    private static Media.SolidColorBrush Brush(Color color)
+    protected static Media.SolidColorBrush Brush(Color color)
     {
         var brush = new Media.SolidColorBrush(Media.Color.FromArgb(color.A, color.R, color.G, color.B));
         brush.Freeze(); return brush;

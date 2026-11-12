@@ -7,11 +7,31 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
+    // The global acrylic preference, i.e. "boxes and every card may blur".
     private bool _usesAcrylicBackground;
+    // A live host that exists only because one card asked for acrylic. Boxes and
+    // boxes stay exactly as they were when widgets use independent acrylic.
+    private bool _widgetAcrylicHost;
+    // Boxes are only translucent when the global switch is on. A host raised for
+    // one card's acrylic must not change how boxes are painted.
+    private bool BoxesUseAcrylic => _usesAcrylicBackground && !_widgetAcrylicHost;
+    // The global widget source determines whether cards follow box acrylic
+    // or request their own shared material.
+    private bool UsesWidgetAcrylic(DesktopWidget widget) => WidgetAppearance.UsesAcrylic(widget, !_widgetAcrylicHost,
+        _runtime.State.Settings.Appearance.WidgetAcrylic);
+    private double WidgetBlurStrength(DesktopWidget widget) =>
+        _runtime.State.Settings.Appearance.WidgetAcrylic.FollowBoxAppearance
+            ? _runtime.State.Settings.Appearance.AcrylicBlurStrength
+            : _runtime.State.Settings.Appearance.WidgetAcrylic.BlurStrength;
     private Action<Bitmap, Point, IReadOnlyList<AcrylicBoxRegion>>? _acrylicFramePresenter;
     private Action<Bitmap, Rectangle>? _acrylicPartialFramePresenter;
     private Action? _acrylicEmptyFramePresenter;
     private Bitmap? _acrylicFrameBitmap;
+
+    internal void RefreshBackdrop()
+    {
+        if (!IsDisposed && !_resourcesDisposed) RequestLayerRender();
+    }
 
     internal void SetAcrylicFramePresenter(Action<Bitmap, Point, IReadOnlyList<AcrylicBoxRegion>> presenter) =>
         _acrylicFramePresenter = presenter;
@@ -87,14 +107,26 @@ internal sealed partial class DesktopBoxForm
         foreach (var id in _heightAnimationVisualCaches.Keys.ToArray()) ReleaseHeightAnimationVisualCache(id);
     }
 
+    /// <summary>
+    /// Marks a host that exists only for a widget's own acrylic choice. Boxes and
+    /// cards following boxes keep their ordinary appearance in that mode.
+    /// </summary>
+    internal void SetWidgetAcrylicHost(bool widgetOnly)
+    {
+        if (_widgetAcrylicHost == widgetOnly) return;
+        _widgetAcrylicHost = widgetOnly;
+        ReleaseMovingBoxVisualCache();
+        RequestLayerRender();
+    }
+
     internal IEnumerable<AcrylicBoxRegion> GetAcrylicRegions()
     {
         if (IsDisposed || _resourcesDisposed) yield break;
         EnsureGeometry();
         var transform = _movingBox ?? _resizingBox;
-        foreach (var widget in DesktopWidgetItems.Where(DesktopWidgets.HasBackground))
+        foreach (var widget in DesktopWidgetItems.Where(UsesWidgetAcrylic))
             yield return CreateAcrylicRegion(widget.Id, WidgetRectangle(widget), _monitor,
-                (float)_runtime.State.Settings.Appearance.CornerRadius);
+                (float)WidgetCornerRadius) with { BlurStrength = (float)WidgetBlurStrength(widget) };
         foreach (var geometry in _boxes)
         {
             if (geometry.Box.Id == transform?.Id || IsIncomingBoxTransform(geometry.Box.Id)) continue;
@@ -107,6 +139,15 @@ internal sealed partial class DesktopBoxForm
         // the incoming box as collapsed, even though its content is expanded.
         foreach (var source in IncomingBoxTransforms)
             if (source.GetTransformAcrylicRegion() is { } incoming) yield return incoming;
+        if (_calendarToolTipBitmap is not null)
+        {
+            var bounds = RectangleF.Inflate(CalendarToolTipVisualBounds, -5, -5);
+            var region = CreateAcrylicRegion(_calendarToolTipBackdropId, bounds, _monitor,
+                (float)Math.Min(12, WidgetCornerRadius));
+            var owner = DesktopWidgetItems.FirstOrDefault(widget => widget.Id == _calendarToolTipWidgetId);
+            yield return region with { Opacity = CalendarToolTipOpacity,
+                BlurStrength = owner is null ? null : (float)WidgetBlurStrength(owner) };
+        }
     }
 
     private AcrylicBoxRegion? GetTransformAcrylicRegion()
@@ -128,7 +169,7 @@ internal sealed partial class DesktopBoxForm
         return new AcrylicBoxRegion(id, new RectangleF(
             (float)monitor.PixelBounds.X + bounds.X * scale,
             (float)monitor.PixelBounds.Y + bounds.Y * scale,
-            bounds.Width * scale, bounds.Height * scale), radius * scale);
+            bounds.Width * scale, bounds.Height * scale), radius * scale, scale);
     }
 
     private void PaintAcrylicFrame(Bitmap bitmap)
@@ -141,9 +182,10 @@ internal sealed partial class DesktopBoxForm
         foreach (var widget in DesktopWidgetItems.Where(widget => WidgetRectangle(widget).IntersectsWith(clipBounds)))
         {
             var bounds = WidgetRectangle(widget);
-            if (DesktopWidgets.HasBackground(widget))
+            if (UsesWidgetAcrylic(widget))
                 AcrylicOverlapBlur.Apply(bitmap, bounds,
-                    (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind);
+                    (float)WidgetCornerRadius, _scale, behind,
+                    WidgetBlurStrength(widget));
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 graphics.CompositingMode = CompositingMode.SourceOver;
@@ -158,8 +200,10 @@ internal sealed partial class DesktopBoxForm
         {
             // No Graphics is open while the previous pixels are sampled.
             // Follow the same back-to-front geometry order as painting/input.
-            AcrylicOverlapBlur.Apply(bitmap, box.Bounds,
-                (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind);
+            if (BoxesUseAcrylic)
+                AcrylicOverlapBlur.Apply(bitmap, box.Bounds,
+                    (float)_runtime.State.Settings.Appearance.CornerRadius, _scale, behind,
+                    _runtime.State.Settings.Appearance.AcrylicBlurStrength);
             using (var graphics = Graphics.FromImage(bitmap))
             {
                 graphics.CompositingMode = CompositingMode.SourceOver;
@@ -180,7 +224,4 @@ internal sealed partial class DesktopBoxForm
             DrawCalendarToolTip(graphics);
         }
     }
-    internal static double ResolveBoxTintOpacity(double opacity, bool acrylic) =>
-        Math.Clamp(opacity, 0.35, 1) * (acrylic ? 0.72 : 1);
-
 }

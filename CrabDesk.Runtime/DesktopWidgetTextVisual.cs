@@ -13,7 +13,7 @@ namespace CrabDesk.Runtime;
 internal sealed class DesktopWidgetTextVisual : IDisposable
 {
     private readonly record struct LayoutKey(string Text, int Width, int Height, double Scale, int Color,
-        double FontSize, Wpf.Thickness Insets, bool SingleLine, bool Strike);
+        double FontSize, string FontFamily, int FontWeight, bool Italic, Wpf.Thickness Insets, bool SingleLine, bool Strike);
     private LayoutKey? _key;
     private Media.FormattedText? _text;
     private Bitmap? _bitmap;
@@ -24,18 +24,25 @@ internal sealed class DesktopWidgetTextVisual : IDisposable
         double fontSize = 13, Wpf.Thickness? insets = null, bool singleLine = false, bool strike = false)
     {
         using var transform = graphics.Transform;
+        var widget = WidgetTextRendering.Current(graphics);
+        fontSize *= WidgetTypography.NormalizeScale(widget?.FontScale ?? 1);
+        var family = WidgetTypography.NormalizeFamily(widget?.FontFamily);
+        var weight = widget?.FontWeight ?? 0;
+        var italic = widget?.FontItalic == true;
         var scale = (double)transform.Elements[0];
         var width = Math.Max(1, (int)Math.Round(field.Width * scale));
         var height = Math.Max(1, (int)Math.Round(field.Height * scale));
         var padding = insets ?? new Wpf.Thickness(10, 8, 10, 8);
-        var key = new LayoutKey(value, width, height, scale, color.ToArgb(), fontSize, padding, singleLine, strike);
+        var key = new LayoutKey(value, width, height, scale, color.ToArgb(), fontSize, family, weight, italic, padding, singleLine, strike);
         var content = new Wpf.Rect(padding.Left, padding.Top, Math.Max(1, width / scale - padding.Left - padding.Right),
             Math.Max(1, height / scale - padding.Top - padding.Bottom));
         if (_key != key)
         {
             var ink = new Media.SolidColorBrush(Media.Color.FromArgb(color.A, color.R, color.G, color.B));
             _text = new Media.FormattedText(value, CultureInfo.CurrentUICulture, Wpf.FlowDirection.LeftToRight,
-                new Media.Typeface(BoxAppearance.DefaultFontFamily), fontSize, ink, null, Media.TextFormattingMode.Display, scale)
+                new Media.Typeface(new Media.FontFamily(family), italic ? Wpf.FontStyles.Italic : Wpf.FontStyles.Normal,
+                    weight == 700 ? Wpf.FontWeights.Bold : Wpf.FontWeights.Normal, Wpf.FontStretches.Normal),
+                fontSize, ink, null, Media.TextFormattingMode.Display, scale)
                 { MaxTextWidth = content.Width, Trimming = singleLine ? Wpf.TextTrimming.CharacterEllipsis : Wpf.TextTrimming.None };
             if (singleLine) _text.MaxLineCount = 1;
             if (strike) _text.SetTextDecorations(Wpf.TextDecorations.Strikethrough);
@@ -46,6 +53,7 @@ internal sealed class DesktopWidgetTextVisual : IDisposable
         if (_bitmap is null || _offset != offset)
         {
             var visual = new Media.DrawingVisual();
+            Media.TextOptions.SetTextRenderingMode(visual, Media.TextRenderingMode.Grayscale);
             Media.VisualTreeHelper.SetRootDpi(visual, new Wpf.DpiScale(scale, scale));
             using (var drawing = visual.RenderOpen())
             {

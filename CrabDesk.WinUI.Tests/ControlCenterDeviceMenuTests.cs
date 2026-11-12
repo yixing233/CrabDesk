@@ -198,7 +198,7 @@ public sealed class ControlCenterDeviceMenuTests
 
     private static RectangleF Row(DesktopWidget widget, bool display)
     {
-        var body = WidgetMonitorPresentation.Body(widget.Bounds.Width, widget.Bounds.Height, 8);
+        var body = ControlCenterPresentation.Body(widget.Bounds.Width, widget.Bounds.Height, 8);
         var row = display ? ControlCenterPresentation.BrightnessDisplayRow(body) :
             ControlCenterPresentation.OutputRow(ControlCenterPresentation.MediaArea(body));
         return new((float)(widget.Bounds.X + row.X), (float)(widget.Bounds.Y + row.Y), (float)row.Width, (float)row.Height);

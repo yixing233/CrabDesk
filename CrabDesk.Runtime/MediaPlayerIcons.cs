@@ -33,7 +33,7 @@ internal static class MediaPlayerIcons
         var player = Resolve(sourceAppId);
         if (player is null)
         {
-            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Music, bounds, fallbackColor, bounds.Height);
+            WidgetColorIcons.Draw(graphics, "content-music", bounds);
             return;
         }
         var state = graphics.Save();

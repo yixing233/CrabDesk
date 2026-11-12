@@ -31,7 +31,7 @@ public sealed class TodoDatesWindow : Window
     private WidgetTodoItem? _task;
     private bool _visible;
     private bool _presenting;
-    private bool _firstFrameReady;
+    private readonly DetailPopupEntrance _entrance;
 
     public TodoDatesWindow(CrabDeskRuntime runtime)
     {
@@ -58,7 +58,7 @@ public sealed class TodoDatesWindow : Window
         actions.Children.Add(cancel); actions.Children.Add(_save); footer.Children.Add(actions); Grid.SetColumn(actions, 1);
         _save.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
         _save.Click += (_, _) => SaveDates(); _content.Children.Add(footer);
-        _shell = new Border { Padding = new Thickness(20), CornerRadius = new CornerRadius(12), Child = _content, BorderThickness = new Thickness(1) };
+        _shell = new Border { Padding = new Thickness(20), CornerRadius = new CornerRadius(8), Child = _content };
         Content = _shell;
         AutomationProperties.SetName(_start, "开始日期"); AutomationProperties.SetAutomationId(_start, "TodoStartDate");
         AutomationProperties.SetName(_end, "截止日期"); AutomationProperties.SetAutomationId(_end, "TodoEndDate");
@@ -70,17 +70,17 @@ public sealed class TodoDatesWindow : Window
         { presenter.SetBorderAndTitleBar(false, false); presenter.IsResizable = false; presenter.IsMinimizable = false; presenter.IsMaximizable = false; }
         AppWindow.IsShownInSwitchers = false;
         _hwnd = WindowNative.GetWindowHandle(this);
+        DesktopPopupWindow.Track(_hwnd);
         SetWindowLongPtr(_hwnd, -16, new IntPtr(GetWindowLongPtr(_hwnd, -16).ToInt64() & ~0x00400000L));
         SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0037);
         DesktopInputProxy.Register(_hwnd);
-        var cloak = 1; _ = DwmSetWindowAttribute(_hwnd, 13, ref cloak, 4);
-        _shell.Loaded += (_, _) => CompositionTarget.Rendered += RevealFirstFrame;
+        _entrance = new DetailPopupEntrance(this, _shell, () => _runtime.State.Settings.Appearance.AnimationEnabled);
         Activated += (_, args) =>
         {
             if (!_presenting && _visible && args.WindowActivationState == WindowActivationState.Deactivated && !_start.IsCalendarOpen && !_end.IsCalendarOpen) Dismiss();
         };
         _runtime.Changed += RuntimeChanged;
-        Closed += (_, _) => { _runtime.Changed -= RuntimeChanged; CompositionTarget.Rendered -= RevealFirstFrame; DesktopInputProxy.Unregister(_hwnd); };
+        Closed += (_, _) => { _runtime.Changed -= RuntimeChanged; _entrance.Dispose(); DesktopInputProxy.Unregister(_hwnd); };
     }
 
     public void Present(DesktopWidget widget, WidgetTodoItem task)
@@ -102,8 +102,8 @@ public sealed class TodoDatesWindow : Window
             if (x + width > area.X + area.Width) x = monitor.PixelBounds.X + widget.Bounds.X * scale - width - 12;
             var y = monitor.PixelBounds.Y + widget.Bounds.Y * scale;
             AppWindow.MoveAndResize(new RectInt32((int)Math.Clamp(x, area.X, area.X + area.Width - width), (int)Math.Clamp(y, area.Y, area.Y + area.Height - height), (int)width, (int)height));
+            _entrance.Prepare();
             _visible = true; AppWindow.Show(); Activate();
-            if (_firstFrameReady) { var cloak = 0; _ = DwmSetWindowAttribute(_hwnd, 13, ref cloak, 4); }
         }
         finally { _presenting = false; }
     }
@@ -115,12 +115,11 @@ public sealed class TodoDatesWindow : Window
         var color = Converters.HexColor.TryParse(appearance.Background, out var parsed) ? parsed : global::Windows.UI.Color.FromArgb(255, 42, 45, 50);
         var dark = color.R * .299 + color.G * .587 + color.B * .114 < 150;
         _shell.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
-        var stroke = BoxBorderStyle.ResolveStroke(System.Drawing.Color.FromArgb(color.R, color.G, color.B), dark, settings.BorderColor, settings.BorderOpacity);
-        color.A = settings.UseAcrylicBoxes ? (byte)(255 * Math.Clamp(appearance.Opacity * .8, .35, .9)) : (byte)255;
+        color.A = (byte)Math.Round(255 * appearance.ResolveBackgroundOpacity(settings.UseAcrylicBoxes));
         _shell.Background = new SolidColorBrush(color);
-        _shell.BorderBrush = new SolidColorBrush(global::Windows.UI.Color.FromArgb(stroke.A, stroke.R, stroke.G, stroke.B));
+        _shell.CornerRadius = new CornerRadius(settings.CornerRadius > 0 ? 8 : 0);
         SystemBackdrop = settings.UseAcrylicBoxes ? new DesktopAcrylicBackdrop() : null;
-        var nativeDark = dark ? 1 : 0; var corner = 2; var noBorder = unchecked((int)0xFFFFFFFE);
+        var nativeDark = dark ? 1 : 0; var corner = settings.CornerRadius > 0 ? 2 : 1; var noBorder = unchecked((int)0xFFFFFFFE);
         _ = DwmSetWindowAttribute(_hwnd, 20, ref nativeDark, 4);
         _ = DwmSetWindowAttribute(_hwnd, 33, ref corner, 4);
         _ = DwmSetWindowAttribute(_hwnd, 34, ref noBorder, 4);
@@ -147,17 +146,12 @@ public sealed class TodoDatesWindow : Window
         _save.Focus(FocusState.Programmatic); _ = SetFocus(IntPtr.Zero);
         SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0297);
         AppWindow.Hide(); _widget = null; _task = null;
+        _entrance.Cancel();
     }
 
     private void RuntimeChanged(object? sender, EventArgs args)
     {
         if (_visible && (_widget is null || !_runtime.State.Widgets.Contains(_widget) || _task is null || !_widget.Tasks.Contains(_task) || _runtime.IsPaused)) Dismiss();
-    }
-    private void RevealFirstFrame(object? sender, RenderedEventArgs args)
-    {
-        CompositionTarget.Rendered -= RevealFirstFrame;
-        _firstFrameReady = true;
-        if (_visible) { var cloak = 0; _ = DwmSetWindowAttribute(_hwnd, 13, ref cloak, 4); }
     }
     private static DateTimeOffset? ToOffset(DateOnly? date) => date is { } value ? new DateTimeOffset(value.ToDateTime(TimeOnly.MinValue)) : null;
     private static DateOnly? ToDate(DateTimeOffset? date) => date is { } value ? DateOnly.FromDateTime(value.DateTime) : null;

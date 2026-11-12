@@ -63,7 +63,8 @@ internal sealed partial class DesktopBoxForm
         // a translucent white, which let the wallpaper through and turned a light
         // backdrop into a pale surface that white text could not be read on.
         var surfaceInk = ResolveAutoTextColor(background);
-        var panel = PanelFill(background, surfaceInk);
+        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var panel = PanelFill(background, surfaceInk, solid);
 
         var actions = ControlQuickActions.For(widget);
         for (var index = 0; index < actions.Count; index++)
@@ -75,18 +76,22 @@ internal sealed partial class DesktopBoxForm
         var sliders = MonitorRectangle(widget, ControlCenterPresentation.SliderArea(body));
         var half = (sliders.Width - 14) / 2;
         DrawControlCenterSlider(graphics, new RectangleF(sliders.X, sliders.Y, half, sliders.Height),
-            "音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent, surfaceInk, muted, accent, labelInset: 26, valueInset: 26);
+            "音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent, surfaceInk, muted, ContentTone("content-volume", text), labelInset: 26, valueInset: 26);
         DrawControlCenterMuteButton(graphics, widget,
             MonitorRectangle(widget, ControlCenterPresentation.VolumeMuteButton(body)), text, muted, accent, background);
         DrawControlCenterMixerButton(graphics, widget,
             MonitorRectangle(widget, ControlCenterPresentation.VolumeMixerButton(body)), text, accent, background);
         DrawControlCenterSlider(graphics, new RectangleF(sliders.X + half + 14, sliders.Y, half, sliders.Height),
-            "亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent, surfaceInk, muted, accent);
+            "亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent, surfaceInk, muted, ContentTone("content-brightness", text), labelInset: 20);
+        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Sun, new(sliders.X + half + 14, sliders.Y, 16, 16),
+            snapshot?.BrightnessPercent is null ? Color.FromArgb(100, muted) : text, 16);
 
         var displayTarget = ControlCenterPresentation.ControlCenterTarget.BrightnessDisplayRow;
         DrawControlCenterDevice(graphics, MonitorRectangle(widget, ControlCenterPresentation.BrightnessDisplayRow(body)),
             new ControlCenterSnapshot { OutputDeviceName = "亮度 · " + _runtime.ControlBrightnessDisplayLabel(widget) }, text, muted,
-            Mix(panel, surfaceInk, IsControlPressed(widget, displayTarget) ? .22 : IsControlHovered(widget, displayTarget) ? .18 : .14),
+            Mix(panel, surfaceInk, solid
+                ? IsControlPressed(widget, displayTarget) ? .12 : IsControlHovered(widget, displayTarget) ? .08 : .04
+                : IsControlPressed(widget, displayTarget) ? .22 : IsControlHovered(widget, displayTarget) ? .18 : .14),
             leadingIcon: LucideRuntimeIcon.Monitor, forceChoice: true);
 
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
@@ -95,7 +100,7 @@ internal sealed partial class DesktopBoxForm
         var outputHovered = IsControlHovered(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
         var outputPressed = IsControlPressed(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
         DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted,
-            Mix(panel, surfaceInk, outputPressed ? 0.22 : outputHovered ? 0.18 : 0.14));
+            Mix(panel, surfaceInk, solid ? outputPressed ? .12 : outputHovered ? .08 : .04 : outputPressed ? .22 : outputHovered ? .18 : .14));
         DrawMicrophoneButton(graphics, widget, text, accent, background);
         var panelBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
             ControlCenterPresentation.MediaArea(body)));
@@ -115,30 +120,48 @@ internal sealed partial class DesktopBoxForm
             _ => false
         };
         using var path = RoundedRectangle(cell, 8);
-        // An on tile is filled with the accent; an unavailable one is faded so it
-        // reads as disabled before the label is even read.
-        // Pressed sinks a shade below hovered; an unavailable tile does not react
-        // at all, since clicking it does nothing.
+        var asset = WidgetContentVisuals.ControlAsset(action, snapshot);
+        var tone = ContentTone(asset, surfaceInk);
         var target = ControlQuickActions.Target(action);
         var details = action == ControlCenterQuickAction.WiFi ? ControlCenterPresentation.ControlCenterTarget.WiFiDetails :
             action == ControlCenterQuickAction.Bluetooth ? ControlCenterPresentation.ControlCenterTarget.BluetoothDetails : ControlCenterPresentation.ControlCenterTarget.None;
         var hovered = available && IsControlHovered(widgetRef, target);
         var pressed = available && IsControlPressed(widgetRef, target);
         var fill = on
-            ? (pressed ? Mix(accent, Color.Black, 0.18) : hovered ? Mix(accent, Color.White, 0.12) : accent)
-            : Mix(panel, surfaceInk, available ? (pressed ? 0.26 : hovered ? 0.21 : 0.16) : 0.06);
+            ? Mix(panel, tone, pressed ? .42 : hovered ? .36 : .30)
+            : Mix(panel, available ? tone : surfaceInk, available ? (pressed ? .25 : hovered ? .20 : .12) : .06);
+        var solid = widgetRef.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        if (solid)
+        {
+            var active = Mix(ColorTranslator.FromHtml(WidgetContentVisuals.Tone(asset, false)), Color.Black, .12);
+            fill = on
+                ? Mix(active, pressed ? Color.Black : Color.White, pressed ? .10 : hovered ? .06 : 0)
+                : Mix(panel, surfaceInk, pressed ? .11 : hovered ? .07 : .03);
+        }
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
-        var labelInk = !available ? muted : on && widgetRef.ControlCenterLightText is null ? ResolveAutoTextColor(accent) : text;
+        var labelInk = solid && on ? Color.White : available ? text : muted;
         // The glyph carries the meaning at a glance; the words underneath say
         // which switch it is and what state it is in.
-        var icon = ControlQuickActionIcon(action, snapshot);
-        var iconSize = 18f;
+        var iconSize = 22f;
+        var icon = action switch
+        {
+            ControlCenterQuickAction.WiFi => snapshot?.WiFiEnabled is false ? LucideRuntimeIcon.WifiOff : LucideRuntimeIcon.Wifi,
+            ControlCenterQuickAction.Bluetooth => LucideRuntimeIcon.Bluetooth,
+            ControlCenterQuickAction.NightLight => snapshot?.NightLightEnabled is false ? LucideRuntimeIcon.Sun : LucideRuntimeIcon.Moon,
+            ControlCenterQuickAction.Display => LucideRuntimeIcon.Monitor,
+            ControlCenterQuickAction.Cast => LucideRuntimeIcon.Cast,
+            ControlCenterQuickAction.Microphone => LucideRuntimeIcon.Mic,
+            ControlCenterQuickAction.ApplicationVolume => LucideRuntimeIcon.SlidersHorizontal,
+            ControlCenterQuickAction.ScreenCapture => LucideRuntimeIcon.ScanLine,
+            ControlCenterQuickAction.NetworkAdapters => LucideRuntimeIcon.Network,
+            _ => LucideRuntimeIcon.Cog
+        };
         LucideRuntimeIcons.Draw(graphics, icon,
-            new RectangleF(cell.X + (cell.Width - iconSize) / 2 - (ControlQuickActions.HasDetails(action) ? 6 : 0), cell.Y + 5, iconSize, iconSize),
-            labelInk, iconSize);
-        WidgetText(graphics, ControlQuickActions.Label(action),
+            new RectangleF(cell.X + (cell.Width - iconSize) / 2, cell.Y + 3, iconSize, iconSize),
+            solid && on ? Color.White : available ? tone : Color.FromArgb(115, muted), iconSize);
+        WidgetText(graphics, ControlQuickActions.Label(action, snapshot),
             new RectangleF(cell.X, cell.Y + 27, cell.Width, 15), labelInk, 11f, bold: true, centered: true);
         WidgetText(graphics, ControlQuickActions.Status(action, snapshot),
             new RectangleF(cell.X + 3, cell.Y + 42, cell.Width - 6, 13), labelInk, 9f, centered: true);
@@ -152,7 +175,7 @@ internal sealed partial class DesktopBoxForm
                 graphics.FillPath(hoverBrush, hoverPath);
             }
             LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronRight,
-                new(bounds.X + 5, bounds.Y + 6, 10, 12), labelInk, 12);
+                new(cell.X + cell.Width - 15, cell.Y + 8, 10, 12), labelInk, 12);
         }
     }
 
@@ -176,7 +199,7 @@ internal sealed partial class DesktopBoxForm
         var size = pressed ? 13f : 14f;
         LucideRuntimeIcons.Draw(graphics, isMuted ? LucideRuntimeIcon.VolumeX : LucideRuntimeIcon.Volume2,
             new RectangleF(bounds.X + (bounds.Width - size) / 2, bounds.Y + (bounds.Height - size) / 2, size, size),
-            enabled ? text : Color.FromArgb(90, muted), size);
+            enabled ? text : Color.FromArgb(100, muted), size);
     }
 
     private static void DrawControlCenterSlider(Graphics graphics, RectangleF cell, string label, string value,
@@ -218,12 +241,6 @@ internal sealed partial class DesktopBoxForm
         var icon = leadingIcon ?? (name.Contains("耳机") || name.Contains("headphone", StringComparison.OrdinalIgnoreCase) || name.Contains("headset", StringComparison.OrdinalIgnoreCase)
             ? LucideRuntimeIcon.Headphones : LucideRuntimeIcon.Volume2);
         LucideRuntimeIcons.Draw(graphics, icon, speaker, text, 14);
-        if (leadingIcon == LucideRuntimeIcon.Monitor)
-        {
-            using var badge = new SolidBrush(rowFill);
-            graphics.FillEllipse(badge, bounds.X + 17, bounds.Y + 13, 10, 10);
-            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Sun, new(bounds.X + 18, bounds.Y + 14, 8, 8), text, 8);
-        }
         var hasChoice = forceChoice || snapshot?.OutputDevices.Count > 1;
         var textWidth = Math.Max(0, bounds.Width - 30 - (hasChoice ? 16 : 0));
         WidgetText(graphics, name,
@@ -315,9 +332,7 @@ internal sealed partial class DesktopBoxForm
             graphics.FillPath(brush, path);
             graphics.DrawPath(border, path);
         }
-        var iconInk = widgetRef.ControlCenterLightText is not null ? text : accent;
-        var ink = !enabled ? Color.FromArgb(90, muted)
-            : hovered || pressed ? Mix(iconInk, text, 0.20) : iconInk;
+        var ink = enabled ? text : Color.FromArgb(90, muted);
         var size = pressed ? 14f : 15f;
         LucideRuntimeIcons.Draw(graphics, icon,
             new RectangleF(bounds.X + (bounds.Width - size) / 2, bounds.Y + (bounds.Height - size) / 2, size, size),
@@ -325,7 +340,7 @@ internal sealed partial class DesktopBoxForm
     }
 
     /// <summary>Opaque shade of the card colour, used as the surface for inner panels.</summary>
-    private static Color PanelFill(Color background, Color text) => Mix(background, text, 0.10);
+    private static Color PanelFill(Color background, Color text, bool solid = false) => Mix(background, text, solid ? .04 : .10);
 
     /// <summary>Linear blend of two colours, always opaque.</summary>
     private static Color Mix(Color from, Color to, double amount)
@@ -374,8 +389,8 @@ internal sealed partial class DesktopBoxForm
     private ControlCenterPresentation.ControlCenterTarget ControlCenterTargetAt(DesktopWidget widget, PointF point)
     {
         var bounds = WidgetRectangle(widget);
-        var body = WidgetMonitorPresentation.Body(bounds.Width, bounds.Height,
-            _runtime.State.Settings.Appearance.CornerRadius);
+        var body = ControlCenterPresentation.Body(bounds.Width, bounds.Height,
+            WidgetCornerRadius);
         return ControlCenterPresentation.TargetAt(body, point.X - bounds.X, point.Y - bounds.Y, ControlQuickActions.For(widget));
     }
 
@@ -413,8 +428,8 @@ internal sealed partial class DesktopBoxForm
         if (target == ControlCenterPresentation.ControlCenterTarget.MediaProgress) { UpdateControlSeek(widget, point); return true; }
         if (target is not (ControlCenterPresentation.ControlCenterTarget.VolumeSlider
             or ControlCenterPresentation.ControlCenterTarget.BrightnessSlider)) return false;
-        var body = WidgetMonitorPresentation.Body(
-            WidgetRectangle(widget).Width, WidgetRectangle(widget).Height, _runtime.State.Settings.Appearance.CornerRadius);
+        var body = ControlCenterPresentation.Body(
+            WidgetRectangle(widget).Width, WidgetRectangle(widget).Height, WidgetCornerRadius);
         var sliders = ControlCenterPresentation.SliderArea(body);
         var half = (sliders.Width - 14) / 2;
         var bounds = WidgetRectangle(widget);
@@ -534,7 +549,7 @@ internal sealed partial class DesktopBoxForm
 
     internal ToolStripMenuItem BuildControlCenterInkMenu(DesktopWidget widget)
     {
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var lightText = widget.ControlCenterLightText ?? UsesLightText(ParseOpaqueColor(appearance.Background));
         var menu = new FluentToolStripMenuItem("文字和图标颜色");
         foreach (var light in new[] { true, false })

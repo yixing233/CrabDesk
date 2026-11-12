@@ -165,6 +165,15 @@ public sealed class WidgetLocationTests
         var header = DesktopBoxForm.WeatherLocationButtonRectangle(widget);
         var empty = DesktopBoxForm.WeatherEmptyLocationRectangle(widget);
         var card = DesktopBoxForm.WidgetRectangle(widget);
+        if (width >= 300)
+        {
+            // Wide cards drop the header location controls and keep the empty
+            // card call to action.
+            Assert.Equal(0, header.Width);
+            Assert.Equal(0, DesktopBoxForm.WeatherLocationsButtonRectangle(widget).Width);
+            Assert.True(card.Contains(empty));
+            return;
+        }
         Assert.True(card.Contains(header));
         Assert.True(card.Contains(empty));
         Assert.False(header.IntersectsWith(empty));

@@ -89,7 +89,15 @@ internal enum LucideRuntimeIcon
     ScanLine,
     Smartphone,
     Keyboard,
-    Mouse
+    Mouse,
+    ArrowDownToLine,
+    ArrowUpToLine,
+    Network,
+    Clock,
+    Square,
+    SquareCheck,
+    CalendarDays,
+    ChevronDown
 }
 
 internal static class LucideRuntimeIcons
@@ -117,6 +125,14 @@ internal static class LucideRuntimeIcons
         LucideRuntimeIcon.ArrowDownAz => "\uE415",
         LucideRuntimeIcon.ArrowRight => "\uE049",
         LucideRuntimeIcon.ArrowUp => "\uE04A",
+        LucideRuntimeIcon.ArrowDownToLine => "\uE455",
+        LucideRuntimeIcon.ArrowUpToLine => "\uE45B",
+        LucideRuntimeIcon.Network => "\uE125",
+        LucideRuntimeIcon.Clock => "\uE087",
+        LucideRuntimeIcon.Square => "\uE167",
+        LucideRuntimeIcon.SquareCheck => "\uE559",
+        LucideRuntimeIcon.CalendarDays => "\uE2B9",
+        LucideRuntimeIcon.ChevronDown => "\uE06D",
         LucideRuntimeIcon.BringToFront => "\uE4EF",
         LucideRuntimeIcon.Check => "\uE06C",
         LucideRuntimeIcon.ChevronsUpDown => "\uE211",

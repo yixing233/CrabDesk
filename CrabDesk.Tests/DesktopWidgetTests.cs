@@ -334,6 +334,28 @@ public sealed class DesktopWidgetTests : IDisposable
     }
 
     [Fact]
+    public async Task WeatherDescribesEveryXiaomiConditionCodeInsteadOfFallingBackToUnknown()
+    {
+        // The provider keeps extending its table past the sandstorm range; 53
+        // (haze) is common on hazy winter days and used to render "天气未知".
+        var expected = new Dictionary<int, string>
+        {
+            [0] = "晴", [7] = "小雨", [18] = "雾", [20] = "沙尘暴", [30] = "扬沙",
+            [31] = "强沙尘暴", [32] = "霾", [53] = "霾", [54] = "中度霾", [55] = "重度霾",
+            [56] = "严重霾", [57] = "大雾", [58] = "特大雾"
+        };
+        foreach (var (code, description) in expected)
+        {
+            using var client = new HttpClient(new Handler(_ => Json(
+                $"{{\"current\":{{\"temperature\":{{\"value\":13}},\"weather\":\"{code}\"}},\"forecastDaily\":{{\"temperature\":{{\"value\":[{{\"from\":\"13\",\"to\":\"2\"}}]}}}}}}")));
+            using var service = new WidgetWeatherService(client);
+            var weather = await service.GetWeatherAsync(new("西安", "", "中国", 34.1, 108.9) { ProviderKey = "test" });
+            Assert.Equal(description, weather.Description);
+            Assert.NotEqual("天气未知", weather.Description);
+        }
+    }
+
+    [Fact]
     public async Task LegacyWeatherCoordinatesResolveTheirXiaomiKeyBeforeForecast()
     {
         var calls = new List<string>();

@@ -60,6 +60,34 @@ public static class DesktopAcrylicWindowTools
         }
     }
 
+    internal static void PrepareForPopupClose(IntPtr popup, IntPtr activationTarget)
+    {
+        var foreground = NativeMethods.GetForegroundWindow();
+        var active = GetActiveWindow();
+        foreach (var (hwnd, transition) in Transitions)
+        {
+            lock (transition)
+            {
+                if (activationTarget != IntPtr.Zero &&
+                    NativeMethods.GetAncestor(activationTarget, 2) != transition.DesktopRoot) continue;
+                // A popup deactivated by another app must leave that app's
+                // focus and ordering alone. Active also covers local UI focus
+                // while Windows is still handing off global foreground rights.
+                if (foreground != popup && active != popup && foreground != transition.DesktopRoot) continue;
+                if (transition.ExpiresAt != 0 || !IsVisibleAndRestored(hwnd) ||
+                    !NativeMethods.IsWindow(transition.DesktopRoot)) continue;
+                transition.PreviousOwner = NativeMethods.GetWindow(hwnd, 4);
+                transition.ClosingPopup = popup;
+                transition.ReturningToDesktop = true;
+                transition.DesktopActivatedAt = foreground == transition.DesktopRoot ? Environment.TickCount64 : 0;
+                transition.ExpiresAt = Environment.TickCount64 + 1500;
+                // Windows now moves the desktop and its composition host in
+                // the same transaction, before a compositor frame can expose it.
+                NativeMethods.SetWindowLongPtr(hwnd, -8, transition.DesktopRoot);
+            }
+        }
+    }
+
     public static void FinishShowDesktopTransition(IntPtr hwnd, bool force = false)
     {
         if (!Transitions.TryGetValue(hwnd, out var transition)) return;
@@ -78,10 +106,13 @@ public static class DesktopAcrylicWindowTools
             var completed = transition.ReturningToDesktop
                 ? transition.DesktopActivatedAt != 0 && (ordinaryForeground || now - transition.DesktopActivatedAt >= 200)
                 : ordinaryForeground;
+            if (transition.ClosingPopup != IntPtr.Zero && foreground != transition.ClosingPopup && ordinaryForeground)
+                completed = true;
             if (!force && !completed && now < transition.ExpiresAt) return;
             if (NativeMethods.IsWindow(hwnd) && NativeMethods.GetWindow(hwnd, 4) == transition.DesktopRoot)
                 NativeMethods.SetWindowLongPtr(hwnd, -8, transition.PreviousOwner);
             transition.ExpiresAt = 0;
+            transition.ClosingPopup = IntPtr.Zero;
         }
     }
 
@@ -89,6 +120,7 @@ public static class DesktopAcrylicWindowTools
     {
         internal readonly IntPtr DesktopRoot = desktopRoot;
         internal IntPtr PreviousOwner;
+        internal IntPtr ClosingPopup;
         internal long ExpiresAt;
         internal long DesktopActivatedAt;
         internal bool ReturningToDesktop;
@@ -242,4 +274,6 @@ public static class DesktopAcrylicWindowTools
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetActiveWindow();
 }

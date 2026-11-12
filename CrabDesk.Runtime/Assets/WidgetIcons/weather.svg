@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="weather-title">
+<title id="weather-title">天气 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="weather-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#FFC95F"/><stop offset="1" stop-color="#FFC95F" stop-opacity=".84"/></linearGradient><linearGradient id="weather-cloud" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#CADFFF"/><stop offset="1" stop-color="#7BAEF0"/></linearGradient></defs>
+<path d="M22 4v4M22 38v4M3 23h4M37 23h4M8 9l3 3M33 34l3 3M8 37l3-3M33 12l3-3" stroke="#F2BA4D" stroke-width="3.2" stroke-linecap="round"/><circle cx="22" cy="23" r="12" fill="url(#weather-main)"/><path d="M21 51a12 12 0 1 1 2-23 15 15 0 0 1 28 5h1a9 9 0 0 1 0 18Z" fill="url(#weather-cloud)"/><path d="M21 31a12 12 0 0 1 2 0 15 15 0 0 1 28 5h1a9 9 0 0 1 4 1" fill="none" stroke="#D8E9FF" stroke-width="2" stroke-linecap="round"/>
+</svg>

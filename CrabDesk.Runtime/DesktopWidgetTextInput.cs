@@ -60,9 +60,14 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
     internal void Present(Rectangle bounds, string text, Color background, Color foreground, Color accent,
         Action<string> changed, Action? submit = null, Action<double>? dismissed = null, double? verticalOffset = null,
         double? cornerRadius = null, bool readOnly = false, PointF? caretPoint = null, bool singleLine = false, Action? cancelled = null,
-        Wpf.Thickness? contentPadding = null, bool showFocusBorder = true, double? borderThickness = null)
+        Wpf.Thickness? contentPadding = null, bool showFocusBorder = true, double? borderThickness = null,
+        DesktopWidget? typography = null, double fontSize = 13)
     {
         _changed = null;
+        InputBox.FontFamily = new Media.FontFamily(WidgetTypography.NormalizeFamily(typography?.FontFamily));
+        InputBox.FontSize = fontSize * WidgetTypography.NormalizeScale(typography?.FontScale ?? 1);
+        InputBox.FontWeight = typography?.FontWeight == 700 ? Wpf.FontWeights.Bold : Wpf.FontWeights.Normal;
+        InputBox.FontStyle = typography?.FontItalic == true ? Wpf.FontStyles.Italic : Wpf.FontStyles.Normal;
         var sameText = DesktopWidgets.NormalizeText(InputBox.Text) == DesktopWidgets.NormalizeText(text);
         var selectionStart = InputBox.SelectionStart;
         var selectionLength = sameText ? InputBox.SelectionLength : 0;

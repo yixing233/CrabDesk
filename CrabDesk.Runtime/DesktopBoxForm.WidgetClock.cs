@@ -7,14 +7,21 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
-    internal static void DrawClockWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted, DateTime now)
+    internal static void DrawClockWidget(Graphics graphics, DesktopWidget widget, RectangleF body, Color text, Color muted, DateTime now,
+        Color? background = null, Color? accent = null)
     {
+        using var typography = WidgetTextRendering.Begin(graphics, widget);
         var local = WidgetClockPresentation.Face(body.Width, body.Height);
         if (local.Width <= 0) return;
         var face = new LayoutRect(body.X + local.X, body.Y + local.Y, local.Width, local.Height);
         var circle = new RectangleF((float)face.X, (float)face.Y, (float)face.Width, (float)face.Height);
-        using var fill = new SolidBrush(text.GetBrightness() > .5f ? Color.FromArgb(26, 26, 26) : Color.FromArgb(250, 250, 250));
-        using var rim = new Pen(Color.FromArgb(35, text), 1);
+        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var dialColor = solid && background is { } card
+            ? Mix(card, text, .06)
+            : text.GetBrightness() > .5f ? Color.FromArgb(26, 26, 26) : Color.FromArgb(250, 250, 250);
+        var handColor = solid ? accent ?? ContentTone("content-cpu", text) : Color.FromArgb(230, text);
+        using var fill = new SolidBrush(dialColor);
+        using var rim = new Pen(solid ? Color.FromArgb(65, handColor) : Color.FromArgb(35, text), 1);
         graphics.FillEllipse(fill, circle); graphics.DrawEllipse(rim, circle);
         PointF Point(double degrees, double fraction)
         {
@@ -24,7 +31,7 @@ internal sealed partial class DesktopBoxForm
         for (var tick = 0; tick < 60; tick++)
         {
             var major = tick % 5 == 0;
-            using var pen = new Pen(Color.FromArgb(major ? 150 : 65, text), major ? 1.5f : .8f)
+            using var pen = new Pen(Color.FromArgb(major ? solid ? 220 : 150 : 65, major && solid ? handColor : text), major ? 1.5f : .8f)
                 { StartCap = LineCap.Round, EndCap = LineCap.Round };
             graphics.DrawLine(pen, Point(tick * 6, major ? .79 : .85), Point(tick * 6, .9));
         }
@@ -39,16 +46,16 @@ internal sealed partial class DesktopBoxForm
         var hands = WidgetClockPresentation.Hands(now);
         var center = Point(0, 0);
         using var hourPen = new Pen(text, (float)Math.Clamp(face.Width * .027, 2.2, 4)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        using var minutePen = new Pen(Color.FromArgb(230, text), (float)Math.Clamp(face.Width * .018, 1.6, 2.8)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var minutePen = new Pen(handColor, (float)Math.Clamp(face.Width * .018, 1.6, 2.8)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         graphics.DrawLine(hourPen, center, Point(hands.Hour, .46));
         graphics.DrawLine(minutePen, center, Point(hands.Minute, .72));
         if (widget.ShowSeconds)
         {
-            using var secondPen = new Pen(Color.FromArgb(160, text), 1.1f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var secondPen = new Pen(solid ? ContentTone("content-muted", text) : Color.FromArgb(160, text), 1.1f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             graphics.DrawLine(secondPen, Point(hands.Second, -.17), Point(hands.Second, .82));
         }
         var pivot = (float)Math.Clamp(face.Width * .024, 2.2, 3.5);
-        using var pivotFill = new SolidBrush(text);
+        using var pivotFill = new SolidBrush(solid ? handColor : text);
         graphics.FillEllipse(pivotFill, center.X - pivot, center.Y - pivot, pivot * 2, pivot * 2);
         using var pivotCenter = new SolidBrush(ResolveAutoTextColor(text));
         graphics.FillEllipse(pivotCenter, center.X - 1, center.Y - 1, 2, 2);

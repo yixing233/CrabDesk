@@ -1644,6 +1644,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void OnMouseDoubleClick(object? sender, Forms.MouseEventArgs eventArgs)
     {
+        var shelf = WidgetAt(ToDip(eventArgs.Location));
+        if (eventArgs.Button == Forms.MouseButtons.Left && shelf?.Kind == DesktopWidgetKind.FileShelf &&
+            FileShelfItemAt(shelf, ToDip(eventArgs.Location)) is { } staged)
+        { _ = OpenFileShelfItemAsync(shelf, staged, false); return; }
         if (WidgetAt(ToDip(eventArgs.Location)) is not null) return;
         if (eventArgs.Button != Forms.MouseButtons.Left)
         {

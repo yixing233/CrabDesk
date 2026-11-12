@@ -26,7 +26,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
     internal Wpf.FrameworkElement ContentView => _content;
 
     internal MicrophonePopup(MicrophoneController controller, bool dark, Color accent, double scale,
-        Action<Forms.ContextMenuStrip>? themeMenu = null)
+        Action<Forms.ContextMenuStrip>? themeMenu = null, Color? background = null, bool animationsEnabled = true)
     {
         _controller = controller;
         Text = AccessibleName = "麦克风";
@@ -35,7 +35,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         StartPosition = Forms.FormStartPosition.Manual;
         AutoScaleMode = Forms.AutoScaleMode.None;
         ClientSize = new((int)Math.Round(320 * scale), (int)Math.Round(194 * scale));
-        BackColor = dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251);
+        BackColor = background ?? (dark ? Color.FromArgb(36, 39, 45) : Color.FromArgb(248, 249, 251));
         _foreground = Brush(dark ? Color.FromArgb(242, 244, 248) : Color.FromArgb(31, 35, 41));
         _secondary = Brush(dark ? Color.FromArgb(176, 183, 195) : Color.FromArgb(102, 110, 124));
         _buttonStyle = (Wpf.Style)Wpf.Markup.XamlReader.Parse(AudioMixerPopup.ButtonStyle);
@@ -46,6 +46,10 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
             else _devices.Renderer = new FluentMenuRenderer(dark);
         };
 
+        var grid = new Controls.Grid();
+        grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
+        grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
+        grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         var stack = new Controls.StackPanel();
         var header = new Controls.Grid { Height = 24, Margin = new Wpf.Thickness(0, 0, 0, 6) };
         header.Children.Add(Label("麦克风", 14, true));
@@ -53,7 +57,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
-        stack.Children.Add(header);
+        grid.Children.Add(header);
 
         _deviceName = Label("正在读取麦克风…", 12);
         _deviceName.Margin = new Wpf.Thickness(8, 0, 28, 0);
@@ -111,16 +115,19 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         stack.Children.Add(_levelTrack);
         _status = Label("", 11); _status.Foreground = _secondary;
         _status.Margin = new Wpf.Thickness(0, 8, 0, 0);
-        stack.Children.Add(_status);
+        System.Windows.Controls.Grid.SetRow(_status, 2);
+        grid.Children.Add(_status);
+        var loading = CreatePopupLoading(stack, dark, animationsEnabled, PopupSkeletonLayout.Microphone);
+        System.Windows.Controls.Grid.SetRow(loading, 1);
+        grid.Children.Add(loading);
 
         _content = new Controls.Border { CornerRadius = new Wpf.CornerRadius(12), Padding = new Wpf.Thickness(12, 10, 12, 10),
-            Background = Brush(BackColor), BorderThickness = new Wpf.Thickness(1),
-            BorderBrush = Brush(dark ? Color.FromArgb(64, 69, 79) : Color.FromArgb(216, 222, 230)), Child = stack };
+            Background = Brush(BackColor), Child = grid };
+        InitializePopupEntrance(_content, animationsEnabled);
         _content.Resources["MixerAccent"] = Brush(accent);
         _content.Resources["MixerTrack"] = Brush(dark ? Color.FromArgb(88, 95, 109) : Color.FromArgb(191, 198, 211));
         _content.Resources["MixerHover"] = Brush(dark ? Color.FromArgb(61, 67, 80) : Color.FromArgb(228, 233, 242));
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
-        base.Controls.Add(new System.Windows.Forms.Integration.ElementHost { Dock = Forms.DockStyle.Fill, Child = _content });
         _controller.Changed += OnChanged;
         _refresh.Tick += async (_, _) => await _controller.RefreshAsync();
         Shown += async (_, _) => { _refresh.Start(); await _controller.RefreshAsync(); if (!_closing) _volume.Focus(); };
@@ -173,6 +180,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
             _status.Visibility = string.IsNullOrEmpty(_status.Text) ? Wpf.Visibility.Collapsed : Wpf.Visibility.Visible;
         }
         finally { _updating = false; }
+        if (_controller.HasSnapshot) Loading!.ShowContent();
     }
 
     private void UpdateLevel()
@@ -206,6 +214,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         base.OnHandleCreated(e);
         var corners = 2;
         _ = DwmSetWindowAttribute(Handle, 33, ref corners, sizeof(int));
+        ApplyNativePopupMaterial();
     }
 
     protected override void Dispose(bool disposing)

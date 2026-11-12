@@ -25,7 +25,7 @@ internal sealed partial class DesktopBoxForm
         _noteEditingBounds = widget.Bounds;
         var region = NoteFieldRectangle(widget);
         var location = PointToScreen(new Point(ToPixel(region.X), ToPixel(region.Y)));
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         _noteInput.Present(new Rectangle(location, new Size(ToPixel(region.Width), ToPixel(region.Height))), widget.Text,
             background, ResolveAutoTextColor(background), ParseOpaqueColor(appearance.Accent),
@@ -36,8 +36,8 @@ internal sealed partial class DesktopBoxForm
                 _widgetScroll[widget.Id] = (float)offset;
                 RequestVisualLayerRender();
             }, verticalOffset: _widgetScroll.GetValueOrDefault(widget.Id),
-            cornerRadius: Math.Min(8, _runtime.State.Settings.Appearance.CornerRadius),
-            contentPadding: new System.Windows.Thickness(6), showFocusBorder: false, borderThickness: 0);
+            cornerRadius: Math.Min(8, WidgetCornerRadius),
+            contentPadding: new System.Windows.Thickness(6), showFocusBorder: false, borderThickness: 0, typography: widget);
     }
 
     internal void DismissWidgetInputs()

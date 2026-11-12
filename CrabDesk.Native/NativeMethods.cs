@@ -118,7 +118,7 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool EnableWindow(IntPtr hwnd, bool enable);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern IntPtr SendMessageTimeout(
         IntPtr hwnd,
         uint message,

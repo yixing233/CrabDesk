@@ -31,6 +31,7 @@ public sealed class DesktopWidgetRuntimeTests
     [Theory]
     [InlineData(DesktopWidgetKind.Note, 1)] [InlineData(DesktopWidgetKind.Note, 1.25)]
     [InlineData(DesktopWidgetKind.Todo, 2)]
+    [InlineData(DesktopWidgetKind.Lyrics, 1)] [InlineData(DesktopWidgetKind.Lyrics, 1.25)]
     public void WidgetCornerResizeUsesFinalReleasePositionAndSavesOnce(DesktopWidgetKind kind, double scale) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture(scale);
@@ -46,7 +47,8 @@ public sealed class DesktopWidgetRuntimeTests
         Call(surface, "HandleWidgetMouseUp", mouse, new PointF(465, 283));
         Assert.Equal(new LayoutRect(40, 50, 432, 240), widget.Bounds); Assert.Equal(1, changes);
         Assert.Equal(DesktopWidgetSize.Custom, widget.Size); Assert.False(surface.Capture);
-        Assert.Null(typeof(DesktopBoxForm).GetField(kind == DesktopWidgetKind.Note ? "_noteEditingWidget" : "_todoEditingWidget", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(surface));
+        if (kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo)
+            Assert.Null(typeof(DesktopBoxForm).GetField(kind == DesktopWidgetKind.Note ? "_noteEditingWidget" : "_todoEditingWidget", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(surface));
     });
 
     [Fact]
@@ -555,16 +557,21 @@ public sealed class DesktopWidgetRuntimeTests
         using var surface = new DesktopBoxForm(runtime, monitor);
         surface.Location = new(-12000, -12000); _ = surface.Handle;
         var locations = DesktopBoxForm.WeatherLocationsButtonRectangle(widget);
-        Assert.True(DesktopBoxForm.WidgetRectangle(widget).Contains(locations));
-        Assert.False(locations.IntersectsWith(DesktopBoxForm.WeatherLocationButtonRectangle(widget)));
-        Assert.False(locations.IntersectsWith(new RectangleF(DesktopBoxForm.WidgetRectangle(widget).Right - 32, (float)widget.Bounds.Y, 28, 28)));
         DesktopWidget? requested = null;
         runtime.WidgetWeatherLocationsRequested += selected => requested = selected;
-        var point = new PointF(locations.X + 12, locations.Y + 12);
-        Call(surface, "HandleWidgetClick", widget, point); Assert.Same(widget, requested);
-        Call(surface, "HandleWidgetMouseDown", new System.Windows.Forms.MouseEventArgs(System.Windows.Forms.MouseButtons.Left, 1, (int)point.X, (int)point.Y, 0), point);
-        Assert.False((bool)typeof(DesktopBoxForm).GetField("_widgetCanDrag", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!);
-        Call(surface, "FinishWidgetPress", false);
+        // Wide cards carry no header location buttons; the hover menu owns them.
+        Assert.Equal(width < 300, locations.Width > 0);
+        if (locations.Width > 0)
+        {
+            Assert.True(DesktopBoxForm.WidgetRectangle(widget).Contains(locations));
+            Assert.False(locations.IntersectsWith(DesktopBoxForm.WeatherLocationButtonRectangle(widget)));
+            Assert.False(locations.IntersectsWith(new RectangleF(DesktopBoxForm.WidgetRectangle(widget).Right - 32, (float)widget.Bounds.Y, 28, 28)));
+            var point = new PointF(locations.X + 12, locations.Y + 12);
+            Call(surface, "HandleWidgetClick", widget, point); Assert.Same(widget, requested);
+            Call(surface, "HandleWidgetMouseDown", new System.Windows.Forms.MouseEventArgs(System.Windows.Forms.MouseButtons.Left, 1, (int)point.X, (int)point.Y, 0), point);
+            Assert.False((bool)typeof(DesktopBoxForm).GetField("_widgetCanDrag", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!);
+            Call(surface, "FinishWidgetPress", false);
+        }
         using var cities = (System.Windows.Forms.ContextMenuStrip)Call(surface, "ShowWeatherCityMenu", widget)!;
         var entries = cities.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().ToArray();
         Assert.True(entries.Single(item => item.Text == first.DisplayName).Checked);
@@ -694,6 +701,7 @@ public sealed class DesktopWidgetRuntimeTests
     public void CalendarDetailsAreIncludedInTheDesktopFrameAndDoNotChangeTheInputRegion(bool acrylic, double scale) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture(scale);
+        runtime.State.Settings.Appearance.AnimationEnabled = false;
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.Calendar, MonitorId = monitor.Id, Bounds = new(20, 20, 180, 180) };
         runtime.State.Widgets.Add(widget);
         using var parent = new System.Windows.Forms.Form { StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = Point.Empty };
@@ -713,7 +721,9 @@ public sealed class DesktopWidgetRuntimeTests
             Assert.False(bounds.Contains(new PointF(100, 100)));
             var x = (int)((bounds.Right - 16) * scale); var y = (int)((bounds.Bottom - 16) * scale);
             Assert.Equal(0, before.GetPixel(x, y).A);
-            Assert.InRange(frame!.GetPixel(x, y).A, 240, 255);
+            var appearance = runtime.State.Settings.DefaultBoxAppearance;
+            var expectedAlpha = (int)Math.Round(255 * appearance.ResolveBackgroundOpacity(acrylic));
+            Assert.InRange((int)frame!.GetPixel(x, y).A, expectedAlpha - 1, expectedAlpha + 1);
             Assert.Contains("春节", surface.AccessibleDescription);
             Assert.True(surface.ValidateWindowRegion());
             using var iconFrame = new Bitmap(frame.Width, frame.Height);
@@ -722,7 +732,7 @@ public sealed class DesktopWidgetRuntimeTests
                 graphics.ScaleTransform((float)scale, (float)scale);
                 surface.RenderStaticOnIconLayer(graphics, new(0, 0, 1000, 700));
             }
-            Assert.InRange(iconFrame.GetPixel(x, y).A, 240, 255);
+            Assert.InRange((int)iconFrame.GetPixel(x, y).A, expectedAlpha - 1, expectedAlpha + 1);
             Call(surface, "HideCalendarHover");
             Assert.Equal(0, frame!.GetPixel(x, y).A);
             Assert.Null(surface.AccessibleDescription);
@@ -733,6 +743,33 @@ public sealed class DesktopWidgetRuntimeTests
 
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowRgn")]
     private static extern int RecoveryTestSetWindowRgn(IntPtr hwnd, IntPtr region, bool redraw);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CalendarDetailsFadeTheirBackdropTogetherWithTheirContent(bool animate) => OnSta(() =>
+    {
+        var (runtime, monitor) = Fixture();
+        runtime.State.Settings.Appearance.AnimationEnabled = animate;
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Calendar, MonitorId = monitor.Id, Bounds = new(20, 20, 180, 180) };
+        runtime.State.Widgets.Add(widget);
+        using var surface = new DesktopBoxForm(runtime, monitor);
+        _ = surface.Handle;
+        Call(surface, "PresentCalendarToolTip", widget, new DateOnly(2026, 2, 17), new PointF(100, 100));
+        var initial = surface.GetAcrylicRegions().Last();
+        var enabled = animate && System.Windows.SystemParameters.ClientAreaAnimation;
+        Assert.Equal(enabled ? 0 : 1, initial.Opacity);
+        if (enabled)
+        {
+            Set(surface, "_calendarToolTipStarted", System.Diagnostics.Stopwatch.GetTimestamp() - System.Diagnostics.Stopwatch.Frequency / 10);
+            Call(surface, "AnimateCalendarToolTip", null!, EventArgs.Empty);
+            var middle = surface.GetAcrylicRegions().Last();
+            Assert.InRange(middle.Opacity, .1f, .9f);
+            Assert.True(middle.ScreenBounds.Y < initial.ScreenBounds.Y);
+        }
+        Call(surface, "HideCalendarHover");
+        Assert.Single(surface.GetAcrylicRegions());
+    });
 
     [Fact]
     public void LostInputRegionRecoversWithoutRestartingOrLosingTheSurfaceParent() => OnSta(() =>
@@ -845,7 +882,7 @@ public sealed class DesktopWidgetRuntimeTests
     private static void ConfirmTodoDeletion(DesktopBoxForm surface)
     {
         TodoDeleteMenu(surface).AnimationsEnabled = false;
-        TodoDeleteCard(surface).DeleteButton.PerformClick();
+        TodoDeleteCard(surface).DeleteButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         System.Windows.Forms.Application.DoEvents();
     }
 
@@ -871,12 +908,12 @@ public sealed class DesktopWidgetRuntimeTests
         Call(surface, "HandleWidgetClick", widget, new PointF(anchor.X + 12, anchor.Y + 12));
         var menu = TodoDeleteMenu(surface); var card = TodoDeleteCard(surface);
         Assert.True(menu.Visible); Assert.Equal(new[] { target, other }, widget.Tasks);
-        Assert.Contains(card.Controls.OfType<System.Windows.Forms.Label>(), label => label.Text == target.Text);
+        Assert.Equal(target.Text, card.TaskText.Text);
         Assert.True(new Rectangle((int)monitor.PixelWorkArea.X, (int)monitor.PixelWorkArea.Y,
             (int)monitor.PixelWorkArea.Width, (int)monitor.PixelWorkArea.Height).Contains(menu.Bounds));
         switch (action)
         {
-            case "cancel": card.CancelButton.PerformClick(); break;
+            case "cancel": card.CancelButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent)); break;
             case "escape": typeof(System.Windows.Forms.ToolStripDropDown).GetMethod("ProcessDialogKey", BindingFlags.NonPublic | BindingFlags.Instance)!
                     .Invoke(menu, [System.Windows.Forms.Keys.Escape]); break;
             case "outside": menu.Close(System.Windows.Forms.ToolStripDropDownCloseReason.AppClicked); break;
@@ -885,7 +922,7 @@ public sealed class DesktopWidgetRuntimeTests
             case "paused": typeof(CrabDeskRuntime).GetProperty(nameof(CrabDeskRuntime.IsPaused))!.SetValue(runtime, true); surface.RefreshWidgets(); break;
         }
         Assert.False(menu.Visible);
-        card.DeleteButton.PerformClick();
+        card.DeleteButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         Assert.Equal(action == "removed" ? new[] { other } : new[] { target, other }, widget.Tasks);
         Assert.Equal(new DateOnly(2026, 11, 3), other.EndDate);
         System.Windows.Forms.Application.DoEvents();
@@ -908,9 +945,52 @@ public sealed class DesktopWidgetRuntimeTests
     });
 
     [Theory]
+    [InlineData(1d)]
+    [InlineData(1.25d)]
+    [InlineData(1.5d)]
+    [InlineData(2d)]
+    public void TodoHeaderCountSharesTheTitleBaseline(double scale) => OnSta(() =>
+    {
+        var (runtime, monitor) = Fixture(scale);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Todo, Title = "Todo", FontFamily = "Segoe UI",
+            MonitorId = monitor.Id, Bounds = new(0, 0, 372, 180),
+            Tasks = Enumerable.Range(0, 9).Select(_ => new WidgetTodoItem { Text = "Task" }).ToList() };
+        runtime.State.Widgets.Add(widget);
+        using var surface = new DesktopBoxForm(runtime, monitor);
+        using var bitmap = new Bitmap((int)(372 * scale), (int)(180 * scale));
+        float split;
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            graphics.Clear(Color.FromArgb(42, 45, 50));
+            graphics.ScaleTransform((float)scale, (float)scale);
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var typography = WidgetTextRendering.Begin(graphics, widget);
+            split = 12 + DesktopBoxForm.MeasureWidgetText(graphics, widget.DisplayTitle, 13.333f, true) + 4;
+            Call(surface, "DrawWidget", graphics, widget);
+        }
+        int InkBottom(double left, double right)
+        {
+            var bottom = -1;
+            for (var y = (int)(4 * scale); y < 28 * scale; y++)
+            for (var x = (int)(left * scale); x < right * scale; x++)
+                if (bitmap.GetPixel(x, y).R > 180) bottom = Math.Max(bottom, y);
+            Assert.True(bottom >= 0);
+            return bottom;
+        }
+        var titleBottom = InkBottom(12, split);
+        var countBottom = InkBottom(split, 110);
+        if (Environment.GetEnvironmentVariable("CRABDESK_WIDGET_CONTENT_OUTPUT") is { Length: > 0 } output)
+        {
+            Directory.CreateDirectory(output);
+            bitmap.Save(Path.Combine(output, $"todo-header-{scale}.png"));
+        }
+        Assert.InRange(Math.Abs(titleBottom - countBottom), 0, 1);
+    });
+
+    [Theory]
     [InlineData(180)]
     [InlineData(372)]
-    public void TodoRowsStayTransparentUntilHoveredAndUseRoundedChecks(int width) => OnSta(() =>
+    public void TodoRowsStayTransparentUntilHoveredAndKeepCheckboxesOutlined(int width) => OnSta(() =>
     {
         var (runtime, monitor) = Fixture();
         runtime.State.Settings.Appearance.CornerRadius = 20;
@@ -938,7 +1018,8 @@ public sealed class DesktopWidgetRuntimeTests
         using var idle = Render("idle");
         var background = idle.GetPixel((int)list.Right - 84, (int)list.Bottom - 1);
         Assert.Equal(background, idle.GetPixel((int)list.Right - 84, (int)list.Top + 15));
-        Assert.Equal(background, idle.GetPixel((int)list.X + 5, (int)list.Y + 8));
+        Assert.Equal(background, idle.GetPixel((int)list.X + 12, (int)list.Y + 15));
+        Assert.NotEqual(background, idle.GetPixel((int)list.X + 5, (int)list.Y + 15));
         Call(surface, "HandleWidgetMouseMove", new PointF(list.X + 32, list.Y + 15));
         using var hovered = Render("hovered");
         Assert.NotEqual(background, hovered.GetPixel((int)list.Right - 84, (int)list.Top + 15));
@@ -1681,7 +1762,8 @@ public sealed class DesktopWidgetRuntimeTests
         using var visual = new DesktopWidgetTextVisual();
         using (var graphics = Graphics.FromImage(displayed))
         {
-            graphics.Clear(Color.FromArgb(32, 32, 32)); graphics.ScaleTransform((float)scale, (float)scale);
+            var fieldFill = Assert.IsType<System.Windows.Media.SolidColorBrush>(actualFrame.Background).Color;
+            graphics.Clear(Color.FromArgb(fieldFill.R, fieldFill.G, fieldFill.B)); graphics.ScaleTransform((float)scale, (float)scale);
             graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             graphics.TextContrast = 4;
             typeof(DesktopBoxForm).GetMethod("DrawTranslationField", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null,
@@ -1852,17 +1934,21 @@ public sealed class DesktopWidgetRuntimeTests
     // and the card looked like it was jittering between samples.
     //
     // The contract is two fixed edges, measured over the widest reading the card
-    // can show: the number's right edge and the unit's left edge never move, so
-    // a value that gains digits grows leftwards inside its own slot.
+    // can show: the number's right edge and the unit's slot never move, so a
+    // value that gains digits grows leftwards inside its own slot.
     [Theory]
-    [InlineData(DesktopWidgetSize.Small)]
-    [InlineData(DesktopWidgetSize.Wide)]
-    public void SpeedValuesKeepTheNumberAndUnitEdgesFixed(DesktopWidgetSize size) => OnSta(() =>
+    [InlineData(DesktopWidgetSize.Small, 8d)]
+    [InlineData(DesktopWidgetSize.Small, 20d)]
+    [InlineData(DesktopWidgetSize.Wide, 8d)]
+    [InlineData(DesktopWidgetSize.Wide, 20d)]
+    public void SpeedValuesKeepTheNumberAndUnitEdgesFixed(DesktopWidgetSize size, double radius) => OnSta(() =>
     {
-        var (width, height) = DesktopWidgets.Dimensions(size);
-        var layout = WidgetNetworkGraph.SpeedLayout(width, height, 8);
-        var bounds = new RectangleF((float)layout.Download.X, (float)layout.Download.Y,
-            (float)layout.Download.Width, (float)layout.Download.Height);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds, Size = size };
+        var (width, height) = DesktopWidgets.Dimensions(widget);
+        var layout = WidgetNetworkGraph.SpeedLayout(width, height, radius);
+        var iconInset = width < 300 ? 22f : 0f;
+        var bounds = new RectangleF((float)layout.Download.X + iconInset, (float)layout.Download.Y,
+            (float)layout.Download.Width - iconInset, (float)layout.Download.Height);
         using var bitmap = new Bitmap((int)width + 8, (int)height + 8);
         using var graphics = Graphics.FromImage(bitmap);
 
@@ -1872,7 +1958,9 @@ public sealed class DesktopWidgetRuntimeTests
             {
                 using var probe = new Bitmap(4, 4);
                 using var probeGraphics = Graphics.FromImage(probe);
-                var slot = DesktopBoxForm.MeasureSpeedSlots(probeGraphics, bounds, 18);
+                var slot = DesktopBoxForm.MeasureSpeedSlots(probeGraphics, bounds, 18, rightAligned: width < 300);
+                using var font = slot.Font;
+                Assert.Equal(18f, font.Size);
                 return (NumberWidth: slot.NumberWidth, Gap: slot.Gap);
             })
             .ToArray();
@@ -1886,7 +1974,7 @@ public sealed class DesktopWidgetRuntimeTests
             .Select(bytes =>
             {
                 graphics.Clear(Color.Black);
-                DesktopBoxForm.DrawSpeedValue(graphics, bytes, bounds, Color.White, 18);
+                DesktopBoxForm.DrawSpeedValue(graphics, bytes, bounds, Color.White, 18, rightAligned: width < 300);
                 // Rightmost lit pixel left of the unit's origin is the number.
                 var unitOrigin = bounds.X + slots[0].NumberWidth + slots[0].Gap;
                 var right = 0;
@@ -1897,14 +1985,26 @@ public sealed class DesktopWidgetRuntimeTests
                         if (bitmap.GetPixel(x, y).R > 96) { right = Math.Max(right, x); break; }
                     }
                 }
-                return right;
+                var unitRight = 0;
+                for (var y = (int)bounds.Y; y < (int)(bounds.Y + bounds.Height); y++)
+                for (var x = (int)bounds.Right - 1; x >= (int)unitOrigin; x--)
+                {
+                    if (bitmap.GetPixel(x, y).R > 96) { unitRight = Math.Max(unitRight, x); break; }
+                }
+                return (Number: right, Unit: unitRight);
             })
             .ToArray();
 
         // One pixel of slack: antialiasing on the last glyph can light a
         // neighbouring column. Drift from a changing digit count was 9 to 30 px,
         // so this still separates "held still" from "following the value".
-        Assert.All(numberRights, right => Assert.InRange(right, numberRights.Min() - 1, numberRights.Min() + 1));
+        var minimumNumberRight = numberRights.Min(edges => edges.Number);
+        Assert.All(numberRights, edges => Assert.InRange(edges.Number, minimumNumberRight - 1, minimumNumberRight + 1));
+        if (width < 300)
+        {
+            var minimumUnitRight = numberRights.Min(edges => edges.Unit);
+            Assert.All(numberRights, edges => Assert.InRange(edges.Unit, minimumUnitRight - 1, minimumUnitRight + 1));
+        }
     });
 
     private static void OnSta(Action action)

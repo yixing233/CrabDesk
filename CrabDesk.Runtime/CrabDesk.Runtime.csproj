@@ -24,6 +24,7 @@
   <ItemGroup>
     <Content Include="Assets\lucide.ttf" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets\MediaPlayers\*.png" />
+    <EmbeddedResource Include="Assets\WidgetIcons\*.png" />
   </ItemGroup>
 
 </Project>

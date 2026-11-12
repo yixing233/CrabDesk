@@ -46,10 +46,10 @@ internal sealed partial class DesktopBoxForm
         _translationCopiedId = null;
         var source = result ? GetTranslationLayout(widget).Result : GetTranslationLayout(widget).Source;
         var location = PointToScreen(new Point(ToPixel(source.X), ToPixel(source.Y)));
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         var textColor = TranslationTextColor(ResolveAutoTextColor(background));
-        background = TranslationFieldBackground(textColor);
+        background = TranslationContentBackground(textColor, result);
         input.Present(new Rectangle(location, new Size(ToPixel(source.Width), ToPixel(source.Height))), result ? widget.Translation : widget.Text,
             background, textColor, textColor,
             text => { if (!result) _runtime.UpdateWidgetTranslationInput(widget, text); },
@@ -61,9 +61,9 @@ internal sealed partial class DesktopBoxForm
                 else _translationSourceScroll[widget.Id] = (float)offset;
                 RequestVisualLayerRender();
             }, verticalOffset: result ? _widgetScroll.GetValueOrDefault(widget.Id) : _translationSourceScroll.GetValueOrDefault(widget.Id),
-            cornerRadius: Math.Min(8, _runtime.State.Settings.Appearance.CornerRadius), readOnly: result,
+            cornerRadius: Math.Min(8, WidgetCornerRadius), readOnly: result,
             caretPoint: point is { } click ? new PointF(click.X - source.X, click.Y - source.Y) : null,
-            contentPadding: new System.Windows.Thickness(7), showFocusBorder: false);
+            contentPadding: new System.Windows.Thickness(7), showFocusBorder: false, typography: widget);
     }
 
     internal void DismissWidgetTranslationInput()
@@ -132,13 +132,16 @@ internal sealed partial class DesktopBoxForm
         text = TranslationTextColor(text);
         var muted = text.GetBrightness() > .5f ? Color.FromArgb(205, 205, 205) : Color.FromArgb(90, 90, 90);
         var layout = GetTranslationLayout(widget);
-        WidgetText(graphics, "原文", new(body.X, body.Y - 4, layout.Source.Width - 36, 28), text, 11);
-        WidgetText(graphics, $"{widget.TargetLanguage} ▾", layout.Language, text, 11);
+        DrawContentIcon(graphics, "content-source", new(body.X, body.Y + 2, 16, 16));
+        WidgetText(graphics, "原文", new(body.X + 22, body.Y - 4, Math.Max(0, layout.Source.Width - 58), 28), text, 11);
+        DrawContentIcon(graphics, "content-translation", new(layout.Language.X, layout.Language.Y + 6, 16, 16));
+        WidgetText(graphics, $"{widget.TargetLanguage} ▾", new(layout.Language.X + 22, layout.Language.Y, Math.Max(0, layout.Language.Width - 22), layout.Language.Height), text, 11);
         foreach (var field in new[] { layout.Source, layout.Result })
         {
-            using var path = RoundedRectangle(field, (float)Math.Min(8, _runtime.State.Settings.Appearance.CornerRadius));
-            using var fill = new SolidBrush(TranslationFieldBackground(text));
-            using var border = new Pen(Color.FromArgb(50, text), 1);
+            using var path = RoundedRectangle(field, (float)Math.Min(8, WidgetCornerRadius));
+            var tone = ContentTone(field == layout.Source ? "content-source" : "content-translation", text);
+            using var fill = new SolidBrush(TranslationContentBackground(text, field == layout.Result));
+            using var border = new Pen(Color.FromArgb(85, tone), 1);
             graphics.FillPath(fill, path); graphics.DrawPath(border, path);
         }
         DesktopWidgetTextVisual Visual(bool result)
@@ -186,6 +189,9 @@ internal sealed partial class DesktopBoxForm
     private static Color TranslationFieldBackground(Color foreground) => foreground.GetBrightness() > .5f
         ? Color.FromArgb(32, 32, 32) : Color.FromArgb(250, 250, 250);
 
+    private static Color TranslationContentBackground(Color foreground, bool result) => Mix(TranslationFieldBackground(foreground),
+        ContentTone(result ? "content-translation" : "content-source", foreground), .07);
+
     private static Color TranslationFieldColor(Color background, Color foreground, int alpha) => Color.FromArgb(
         (background.R * (255 - alpha) + foreground.R * alpha) / 255,
         (background.G * (255 - alpha) + foreground.G * alpha) / 255,
@@ -195,7 +201,7 @@ internal sealed partial class DesktopBoxForm
     {
         if (enabled && hovered)
         {
-            using var path = RoundedRectangle(bounds, (float)Math.Min(6, _runtime.State.Settings.Appearance.CornerRadius));
+            using var path = RoundedRectangle(bounds, (float)Math.Min(6, WidgetCornerRadius));
             using var wash = new SolidBrush(Color.FromArgb(24, text));
             graphics.FillPath(wash, path);
         }
@@ -209,7 +215,7 @@ internal sealed partial class DesktopBoxForm
         var background = Color.FromArgb(enabled ? hovered ? 38 : 24 : 10, text);
         var foreground = enabled ? text
             : dark ? Color.FromArgb(170, 170, 170) : Color.FromArgb(110, 110, 110);
-        using var path = RoundedRectangle(bounds, (float)Math.Min(6, _runtime.State.Settings.Appearance.CornerRadius));
+        using var path = RoundedRectangle(bounds, (float)Math.Min(6, WidgetCornerRadius));
         using var fill = new SolidBrush(background);
         using var border = new Pen(Color.FromArgb(enabled ? 32 : 14, text), 1);
         graphics.FillPath(fill, path);

@@ -22,22 +22,25 @@ public sealed class WidgetNetworkMonitor : IDisposable
     private bool _latencyRunning;
     private long? _latency;
     private string _latencyStatus = "等待测量";
+    private WidgetNetworkProcessMonitor? _processes;
 
     public static IReadOnlyList<WidgetNetworkAdapter> GetAdapters() => ReadAdapters()
         .OrderBy(adapter => adapter.Name, StringComparer.CurrentCultureIgnoreCase)
         .Select(adapter => new WidgetNetworkAdapter(adapter.Id, adapter.Name, NetworkType(adapter)))
         .ToArray();
 
-    public WidgetNetworkSnapshot Sample(string adapterId, string latencyTarget)
+    public WidgetNetworkSnapshot Sample(string adapterId, string latencyTarget, bool includeProcesses = false)
     {
         lock (_gate)
         {
             if (_disposed) return new WidgetNetworkSnapshot(DateTimeOffset.Now);
+            if (!includeProcesses) StopProcessMonitoring();
+            var processes = includeProcesses ? (_processes ??= new()).Sample() : WidgetNetworkProcesses.Waiting;
             var adapter = SelectAdapter(adapterId);
             try
             {
                 if (adapter is null || adapter.OperationalStatus != OperationalStatus.Up)
-                    return Disconnected(adapterId, adapter);
+                    return Disconnected(adapterId, adapter) with { Processes = processes };
 
                 var properties = adapter.GetIPProperties();
                 var gateway = Gateway(properties);
@@ -59,10 +62,11 @@ public sealed class WidgetNetworkMonitor : IDisposable
                     UploadBytesPerSecond = upload,
                     LatencyTarget = target,
                     LatencyMilliseconds = _latency,
-                    LatencyStatus = _latencyStatus
+                    LatencyStatus = _latencyStatus,
+                    Processes = processes
                 };
             }
-            catch (NetworkInformationException) { return Disconnected(adapterId, adapter); }
+            catch (NetworkInformationException) { return Disconnected(adapterId, adapter) with { Processes = processes }; }
         }
     }
 
@@ -152,7 +156,17 @@ public sealed class WidgetNetworkMonitor : IDisposable
             if (_disposed) return;
             _disposed = true;
             _lifetime.Cancel();
+            StopProcessMonitoring();
             _lifetime.Dispose();
+        }
+    }
+
+    public void StopProcessMonitoring()
+    {
+        lock (_gate)
+        {
+            _processes?.Dispose();
+            _processes = null;
         }
     }
 
@@ -191,21 +205,41 @@ public sealed class WidgetNetworkMonitor : IDisposable
         if (!string.IsNullOrWhiteSpace(adapterId))
             return adapters.FirstOrDefault(adapter => string.Equals(adapter.Id, adapterId, StringComparison.OrdinalIgnoreCase));
         var active = adapters.Where(adapter => adapter.OperationalStatus == OperationalStatus.Up).ToArray();
+        string? routedId = null;
         try
         {
             // 1.1.1.1 is only a route-table lookup: no packet is sent here.
             if (GetBestInterface(0x01010101, out var index) == 0)
             {
                 var best = active.FirstOrDefault(adapter => adapter.GetIPProperties().GetIPv4Properties()?.Index == index);
-                if (best is not null) return best;
+                routedId = best?.Id;
             }
         }
         catch (NetworkInformationException) { }
         catch (DllNotFoundException) { }
         catch (EntryPointNotFoundException) { }
-        return active.OrderByDescending(HasGateway)
-            .ThenByDescending(adapter => adapter.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211)
-            .ThenBy(adapter => adapter.Id, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+        var selectedId = SelectAutomaticAdapterId(active.Select(adapter =>
+            new AdapterCandidate(adapter.Id, adapter.NetworkInterfaceType, HasGateway(adapter))).ToArray(), routedId);
+        return active.FirstOrDefault(adapter => adapter.Id == selectedId);
+    }
+
+    internal readonly record struct AdapterCandidate(string Id, NetworkInterfaceType Type, bool HasGateway);
+
+    internal static string? SelectAutomaticAdapterId(IReadOnlyList<AdapterCandidate> active, string? routedId)
+    {
+        static bool InternetLink(AdapterCandidate adapter) => adapter.HasGateway && adapter.Type is
+            NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211 or NetworkInterfaceType.GigabitEthernet or
+            NetworkInterfaceType.FastEthernetFx or NetworkInterfaceType.FastEthernetT or NetworkInterfaceType.Wwanpp or NetworkInterfaceType.Wwanpp2;
+
+        // VPN/TUN routes describe the logical path. Their virtual byte counters
+        // can mirror both directions; prefer the link carrying Internet traffic.
+        var link = active.Where(InternetLink)
+            .OrderByDescending(adapter => adapter.Id == routedId)
+            .ThenBy(adapter => adapter.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (link.Length > 0) return link[0].Id;
+        if (routedId is not null && active.Any(adapter => adapter.Id == routedId)) return routedId;
+        return active.OrderByDescending(adapter => adapter.HasGateway)
+            .ThenBy(adapter => adapter.Id, StringComparer.OrdinalIgnoreCase).Select(adapter => adapter.Id).FirstOrDefault();
     }
 
     private static bool HasGateway(NetworkInterface adapter)

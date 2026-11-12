@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="performance-title">
+<title id="performance-title">性能监控 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="performance-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#4D89C6"/><stop offset="1" stop-color="#4D89C6" stop-opacity=".84"/></linearGradient></defs>
+<rect x="5" y="10" width="54" height="38" rx="8" fill="url(#performance-main)"/><rect x="10" y="15" width="44" height="27" rx="4" fill="#203C61"/><rect x="17" y="28" width="6" height="10" rx="2" fill="#65D4CA"/><rect x="29" y="22" width="6" height="16" rx="2" fill="#A2EEE0"/><rect x="41" y="18" width="6" height="20" rx="2" fill="#65D4CA"/><path d="M27 48h10v7H27Z" fill="#789DBF"/><rect x="20" y="53" width="24" height="5" rx="2.5" fill="#A6BED7"/>
+</svg>

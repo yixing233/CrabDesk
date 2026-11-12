@@ -398,7 +398,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         bool includeCompositedHeaderActions = false)
     {
         var baseColor = ParseOpaqueColor(geometry.Box.Appearance.Background);
-        var opacity = ResolveBoxTintOpacity(geometry.Box.Appearance.Opacity, _usesAcrylicBackground);
+        var opacity = geometry.Box.Appearance.ResolveBackgroundOpacity(BoxesUseAcrylic);
         var boxColor = ApplyOpacity(baseColor, opacity);
         var textColor = ResolveAutoTextColor(baseColor);
         var isDarkSurface = UsesLightText(baseColor);

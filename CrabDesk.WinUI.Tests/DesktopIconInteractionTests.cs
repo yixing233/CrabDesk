@@ -87,9 +87,11 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Fact]
-    public void WeatherIconsUseTheSameLucideGlyphsOnTheDesktopAndInPreviews()
+    public void WidgetIconsUseTheSameLucideGlyphsOnTheDesktopAndInPreviews()
     {
-        var names = new[] { "Sun", "CloudSun", "Cloud", "CloudRain", "CloudSnow", "CloudLightning", "CloudFog", "Haze", "CloudHail", "CloudOff", "Droplets", "Wind", "Thermometer", "Gauge" };
+        var names = new[] { "Sun", "CloudSun", "Cloud", "CloudRain", "CloudSnow", "CloudLightning", "CloudFog", "Haze", "CloudHail", "CloudOff", "Droplets", "Wind", "Thermometer", "Gauge",
+            "ArrowDownToLine", "ArrowUpToLine", "Network", "Clock",
+            "Square", "SquareCheck", "CalendarDays", "ChevronDown", "ChevronRight" };
         foreach (var name in names)
             Assert.Equal(LucideGlyphs.ToGlyph(Enum.Parse<LucideIconName>(name)), LucideRuntimeIcons.GetGlyph(Enum.Parse<LucideRuntimeIcon>(name)));
     }

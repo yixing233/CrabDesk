@@ -563,9 +563,18 @@ public static class DesktopWindowTools
         double scale,
         double cornerRadius,
         out string diagnostic,
+        bool redraw = true) =>
+        ApplyRoundedRegion(hwnd, rectangles.Select(bounds => (bounds, cornerRadius)), scale, out diagnostic, redraw);
+
+    public static bool ApplyRoundedRegion(
+        IntPtr hwnd,
+        IEnumerable<(LayoutRect Bounds, double CornerRadius)> regions,
+        double scale,
+        out string diagnostic,
         bool redraw = true)
     {
-        var deviceRectangles = ToDeviceRectangles(rectangles, scale).ToArray();
+        var deviceRegions = regions.SelectMany(region => ToDeviceRectangles([region.Bounds], scale)
+            .Select(rectangle => (Rectangle: rectangle, region.CornerRadius))).ToArray();
         var destination = NativeMethods.CreateRectRgn(0, 0, 0, 0);
         if (destination == IntPtr.Zero)
         {
@@ -574,9 +583,10 @@ public static class DesktopWindowTools
         }
         try
         {
-            var diameter = Math.Max(1, (int)Math.Round(cornerRadius * scale * 2));
-            foreach (var rectangle in deviceRectangles)
+            foreach (var region in deviceRegions)
             {
+                var rectangle = region.Rectangle;
+                var diameter = Math.Max(1, (int)Math.Round(region.CornerRadius * scale * 2));
                 var source = NativeMethods.CreateRoundRectRgn(
                     rectangle.Left,
                     rectangle.Top,
@@ -609,7 +619,7 @@ public static class DesktopWindowTools
                 return false;
             }
             destination = IntPtr.Zero;
-            return VerifyRoundedRegion(hwnd, deviceRectangles, out diagnostic);
+            return VerifyRoundedRegion(hwnd, deviceRegions.Select(region => region.Rectangle).ToArray(), out diagnostic);
         }
         finally
         {

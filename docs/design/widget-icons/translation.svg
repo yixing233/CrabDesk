@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="translation-title">
+<title id="translation-title">翻译 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="translation-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#669BEC"/><stop offset="1" stop-color="#669BEC" stop-opacity=".84"/></linearGradient></defs>
+<path d="M9 9h26a6 6 0 0 1 6 6v25a6 6 0 0 1-6 6H19l-9 8v-8H9a6 6 0 0 1-6-6V15a6 6 0 0 1 6-6" fill="url(#translation-main)"/><path d="M30 21h25a6 6 0 0 1 6 6v23a6 6 0 0 1-6 6h-1v6l-8-6H30a6 6 0 0 1-6-6V27a6 6 0 0 1 6-6" fill="#A48EE9"/><path d="m12 35 7-17 7 17M15 29h8" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M43 30v3M34 35h18M37 35c2 7 6 11 13 14M49 35c-2 7-6 11-13 14" stroke="#FFF" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+</svg>

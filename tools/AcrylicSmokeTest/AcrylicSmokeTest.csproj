@@ -9,6 +9,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
     <ProjectReference Include="../../CrabDesk.Runtime/CrabDesk.Runtime.csproj" />
   </ItemGroup>
 </Project>

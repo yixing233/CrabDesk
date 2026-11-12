@@ -124,7 +124,6 @@ internal sealed partial class DesktopBoxForm
         DismissWidgetInputs();
         _runtime.CommitActiveDesktopInlineRename();
         _todoInput ??= new DesktopWidgetTextInput("待办事项", 500);
-        _todoInput.InputBox.FontSize = 12.5;
         _todoInput.InputBox.ToolTip = "Enter 保存 · Esc 取消";
         _todoInput.InputBox.IsUndoEnabled = false;
         _todoInput.InputBox.IsUndoEnabled = true;
@@ -138,7 +137,7 @@ internal sealed partial class DesktopBoxForm
         _widgetScroll[widget.Id] = start;
         var field = TodoTextRectangle(widget, index - start);
         var location = PointToScreen(new Point(ToPixel(field.X), ToPixel(field.Y)));
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         var foreground = ResolveAutoTextColor(background);
         RequestVisualLayerRender();
@@ -150,8 +149,8 @@ internal sealed partial class DesktopBoxForm
                 if (!_todoInputCancelled && !_resourcesDisposed && !IsDisposed)
                     _runtime.SaveWidgetTask(widget, task?.Id, _todoDraft);
                 if (!_resourcesDisposed && !IsDisposed) RequestVisualLayerRender();
-            }, cornerRadius: Math.Min(6, _runtime.State.Settings.Appearance.CornerRadius), singleLine: true,
-            cancelled: () => _todoInputCancelled = true, showFocusBorder: false, borderThickness: 0);
+            }, cornerRadius: Math.Min(6, WidgetCornerRadius), singleLine: true,
+            cancelled: () => _todoInputCancelled = true, showFocusBorder: false, borderThickness: 0, typography: widget, fontSize: 12.5);
     }
 
     private void DismissWidgetTodoInput()
@@ -213,14 +212,20 @@ internal sealed partial class DesktopBoxForm
     private void ShowTodoDeleteConfirmation(DesktopWidget widget, WidgetTodoItem task, RectangleF anchor)
     {
         DismissWidgetInputs();
-        var dark = UsesLightText(ParseOpaqueColor((_runtime.State.Boxes.FirstOrDefault()?.Appearance ??
-            _runtime.State.Settings.DefaultBoxAppearance).Background));
+        var dark = UsesLightText(ParseOpaqueColor(ResolveWidgetSurface(widget).Background));
         var menu = new FluentContextMenuStrip { PreferredDpiScale = (float)_scale, ShowImageMargin = false,
             ShowCheckMargin = false, Renderer = new FluentMenuRenderer(dark),
+            OpacityAnimationAllowed = false, Padding = Forms.Padding.Empty,
             AnimationsEnabled = _runtime.State.Settings.Appearance.AnimationEnabled && Forms.SystemInformation.IsMenuAnimationEnabled && Forms.SystemInformation.IsMenuFadeEnabled };
         var card = new TodoDeleteConfirmationCard(task.Text, dark, _scale);
         menu.BackColor = card.BackColor; menu.ForeColor = card.ForeColor;
         menu.Items.Add(new Forms.ToolStripControlHost(card) { AutoSize = false, Size = card.Size, Margin = Forms.Padding.Empty, Padding = Forms.Padding.Empty });
+        _ = new PopupCardMaterial(menu, card, new BoxAppearance
+            {
+                Background = ResolveWidgetSurface(widget).Background,
+                Accent = ResolveWidgetSurface(widget).Accent
+            },
+            _runtime.State.Settings.Appearance, menu.AnimationsEnabled);
         _todoDeleteMenu = menu; _todoDeleteCard = card; _todoDeletion = (widget, task.Id, widget.Bounds);
         card.CancelButton.Click += (_, _) => DismissTodoDeleteConfirmation();
         card.DeleteButton.Click += (_, _) =>
@@ -264,7 +269,7 @@ internal sealed partial class DesktopBoxForm
         var addHovered = _hoveredTodoAddId == widget.Id;
         if (addHovered)
         {
-            using var addPath = RoundedRectangle(layout.Add, (float)Math.Min(6, _runtime.State.Settings.Appearance.CornerRadius));
+            using var addPath = RoundedRectangle(layout.Add, (float)Math.Min(6, WidgetCornerRadius));
             using var addFill = new SolidBrush(Color.FromArgb(20, text)); graphics.FillPath(addFill, addPath);
         }
         LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Plus, layout.Add, accent, 14);
@@ -272,12 +277,26 @@ internal sealed partial class DesktopBoxForm
         var status = $"· {widget.Tasks.Count(task => !task.IsCompleted)}";
         var headerLeft = bounds.X + 12;
         var headerWidth = layout.Add.Left - headerLeft - 12;
-        using var statusFont = new Font(BoxAppearance.DefaultFontFamily, 10.5f, GraphicsUnit.Pixel);
-        var statusWidth = (float)Math.Ceiling(graphics.MeasureString(status, statusFont).Width);
-        using var titleFont = new Font(BoxAppearance.DefaultFontFamily, 13.333f, FontStyle.Bold, GraphicsUnit.Pixel);
-        var titleWidth = Math.Min(graphics.MeasureString(widget.DisplayTitle, titleFont).Width, Math.Max(0, headerWidth - statusWidth - 8));
-        WidgetText(graphics, widget.DisplayTitle, new(headerLeft, bounds.Y + 4, titleWidth, 24), text, 13.333f, bold: true);
-        WidgetText(graphics, status, new(headerLeft + titleWidth + 8, bounds.Y + 4, statusWidth, 24), muted, 10.5f);
+        using var headerFormat = new StringFormat(StringFormat.GenericTypographic)
+        {
+            LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter,
+            FormatFlags = StringFormatFlags.NoWrap
+        };
+        using var statusFont = WidgetTextRendering.CreateFont(widget, 13.333f);
+        var statusWidth = (float)Math.Ceiling(graphics.MeasureString(status, statusFont, int.MaxValue, headerFormat).Width);
+        using var titleFont = WidgetTextRendering.CreateFont(widget, 13.333f, bold: true);
+        var titleWidth = Math.Min(graphics.MeasureString(widget.DisplayTitle, titleFont, int.MaxValue, headerFormat).Width, Math.Max(0, headerWidth - statusWidth - 8));
+        static float CenteredBaseline(Font font) => font.Size
+            * (font.FontFamily.GetCellAscent(font.Style) - font.FontFamily.GetLineSpacing(font.Style) / 2f)
+            / font.FontFamily.GetEmHeight(font.Style);
+        var statusOffset = CenteredBaseline(titleFont) - CenteredBaseline(statusFont);
+        using (var titleBrush = new SolidBrush(text))
+        using (var statusBrush = new SolidBrush(muted))
+        {
+            graphics.DrawString(widget.DisplayTitle, titleFont, titleBrush, new RectangleF(headerLeft, bounds.Y + 4, titleWidth, 24), headerFormat);
+            graphics.DrawString(status, statusFont, statusBrush, new RectangleF(headerLeft + titleWidth + 8, bounds.Y + 4 + statusOffset, statusWidth, 24), headerFormat);
+        }
         var adding = _todoEditingWidget == widget && _todoEditingTaskId is null;
         if (widget.Tasks.Count == 0 && !adding)
             WidgetText(graphics, "点击顶栏 + 添加待办", new(layout.List.X, layout.List.Y + 6, layout.List.Width, 40), muted, 11.5f, multiline: true);
@@ -290,7 +309,7 @@ internal sealed partial class DesktopBoxForm
                 (item.IsCompletedHeader ? _hoveredTodoGroupId == widget.Id : task is not null && _hoveredTodoTaskId == task.Id);
             if (hovered || editing)
             {
-                using var rowPath = RoundedRectangle(RectangleF.Inflate(slot, 0, -1), (float)Math.Min(6, _runtime.State.Settings.Appearance.CornerRadius));
+                using var rowPath = RoundedRectangle(RectangleF.Inflate(slot, 0, -1), (float)Math.Min(6, WidgetCornerRadius));
                 using var rowFill = new SolidBrush(Color.FromArgb(14, text));
                 graphics.FillPath(rowFill, rowPath);
             }
@@ -301,23 +320,16 @@ internal sealed partial class DesktopBoxForm
                     using var divider = new Pen(Color.FromArgb(20, text), 1);
                     graphics.DrawLine(divider, slot.Left + 4, slot.Top, slot.Right - 6, slot.Top);
                 }
-                using var chevron = new Pen(muted, 1.3f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round };
-                var x = slot.X + 12; var y = slot.Y + 14;
-                graphics.DrawLines(chevron, _expandedTodoWidgets.Contains(widget.Id)
-                    ? new[] { new PointF(x - 4, y - 2), new PointF(x, y + 2), new PointF(x + 4, y - 2) }
-                    : new[] { new PointF(x - 2, y - 4), new PointF(x + 2, y), new PointF(x - 2, y + 4) });
+                LucideRuntimeIcons.Draw(graphics, _expandedTodoWidgets.Contains(widget.Id)
+                    ? LucideRuntimeIcon.ChevronDown : LucideRuntimeIcon.ChevronRight,
+                    new(slot.X + 4, slot.Y + 6, 16, 16), muted, 12);
                 WidgetText(graphics, $"已完成 · {widget.Tasks.Count(value => value.IsCompleted)}", new(slot.X + 28, slot.Y + 2, slot.Width - 36, 24), muted, 11);
                 continue;
             }
-            var check = new RectangleF(slot.X + 5, slot.Y + 7.5f, 15, 15);
-            using var checkPath = RoundedRectangle(check, (float)Math.Min(5, _runtime.State.Settings.Appearance.CornerRadius));
-            using var checkPen = new Pen(task?.IsCompleted == true ? accent : Color.FromArgb(155, text), 1.1f);
-            if (task?.IsCompleted == true)
-            {
-                using var completed = new SolidBrush(accent); graphics.FillPath(completed, checkPath);
-                LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Check, check, ResolveAutoTextColor(accent), 11);
-            }
-            graphics.DrawPath(checkPen, checkPath);
+            var check = new RectangleF(slot.X + 3.5f, slot.Y + 6, 18, 18);
+            LucideRuntimeIcons.Draw(graphics, task?.IsCompleted == true
+                ? LucideRuntimeIcon.SquareCheck : LucideRuntimeIcon.Square, check,
+                task?.IsCompleted == true ? accent : muted, 18);
             var actionsVisible = task is not null && hovered && !editing;
             var key = (widget.Id, task?.Id ?? Guid.Empty);
             if (!_todoTextVisuals.TryGetValue(key, out var visual)) _todoTextVisuals[key] = visual = new();
@@ -325,11 +337,11 @@ internal sealed partial class DesktopBoxForm
                 task?.IsCompleted == true ? Color.FromArgb(150, muted) : text, 0, fontSize: 12.5,
                 insets: new System.Windows.Thickness(2, 0, 2, 0), singleLine: true, strike: task?.IsCompleted == true);
             if (task?.HasDateRange == true)
-                WidgetText(graphics, WidgetTodoPresentation.DateLabel(task, DateTime.Today.Year), new(slot.X + 28, slot.Y + 28, slot.Width - 36, 14), Color.FromArgb(170, text), 10.5f);
+                WidgetText(graphics, WidgetTodoPresentation.DateLabel(task, DateTime.Today.Year), new(slot.X + 28, slot.Y + 28, slot.Width - 36, 14), ContentTone("content-check", text), 10.5f);
             if (actionsVisible)
             {
                 LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Pencil, TodoEditRectangle(widget, row), muted, 12);
-                DrawTodoDateButton(graphics, TodoDatesRectangle(widget, row), task!.HasDateRange ? accent : muted);
+                LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.CalendarDays, TodoDatesRectangle(widget, row), task!.HasDateRange ? accent : muted, 14);
                 LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.Trash2, TodoDeleteRectangle(widget, row), muted, 12);
             }
         }
@@ -348,13 +360,4 @@ internal sealed partial class DesktopBoxForm
         }
     }
 
-    private static void DrawTodoDateButton(Graphics graphics, RectangleF bounds, Color color)
-    {
-        using var pen = new Pen(color, 1.2f);
-        var icon = new RectangleF(bounds.X + 6, bounds.Y + 6, 12, 12);
-        using var path = RoundedRectangle(icon, 2); graphics.DrawPath(pen, path);
-        graphics.DrawLine(pen, icon.Left, icon.Top + 4, icon.Right, icon.Top + 4);
-        graphics.DrawLine(pen, icon.Left + 3, icon.Top - 2, icon.Left + 3, icon.Top + 2);
-        graphics.DrawLine(pen, icon.Right - 3, icon.Top - 2, icon.Right - 3, icon.Top + 2);
-    }
 }

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="network-title">
+<title id="network-title">网络监控 · CrabDesk 彩色图标设计</title>
+<defs><linearGradient id="network-main" x1="0" y1="0" x2="0.8" y2="1"><stop stop-color="#4E9EEE"/><stop offset="1" stop-color="#4E9EEE" stop-opacity=".84"/></linearGradient></defs>
+<path d="M15 8a5 5 0 0 1 10 0v22h7L20 44 8 30h7Z" fill="url(#network-main)"/><path d="M39 56a5 5 0 0 0 10 0V34h7L44 20 32 34h7Z" fill="#968AE8"/><path d="M8 52h20M36 12h20" stroke="#C0D1E9" stroke-width="5" stroke-linecap="round"/>
+</svg>

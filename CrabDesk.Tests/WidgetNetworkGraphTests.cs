@@ -127,7 +127,8 @@ public sealed class WidgetNetworkGraphTests
     [InlineData(DesktopWidgetSize.Small)] [InlineData(DesktopWidgetSize.Wide)]
     public void SpeedOnlyLayoutStaysInsideRoundedCard(DesktopWidgetSize size)
     {
-        var (width, height) = DesktopWidgets.Dimensions(size);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds, Size = size };
+        var (width, height) = DesktopWidgets.Dimensions(widget);
         var layout = WidgetNetworkGraph.SpeedLayout(width, height, 20);
         Assert.False(layout.Download.Intersects(layout.Upload));
         foreach (var rect in new[] { layout.Download, layout.Upload })
@@ -135,5 +136,26 @@ public sealed class WidgetNetworkGraphTests
             Assert.True(rect.X >= 16 && rect.Y >= 16);
             Assert.True(rect.X + rect.Width <= width - 16 && rect.Y + rect.Height <= height - 16);
         }
+    }
+
+    [Theory]
+    [InlineData(164)]
+    [InlineData(180)]
+    public void CompactSpeedPresetUsesStandardWidgetWidthAfterLoading(double savedWidth)
+    {
+        var widget = new DesktopWidget
+        {
+            Kind = DesktopWidgetKind.Network, NetworkDisplayMode = NetworkWidgetDisplayMode.Speeds,
+            Size = DesktopWidgetSize.Small, Bounds = new(40, 50, savedWidth, 84)
+        };
+
+        DesktopWidgets.Normalize(new() { Widgets = [widget] });
+
+        Assert.Equal(new LayoutRect(40, 50, 180, 84), widget.Bounds);
+        Assert.Equal(DesktopWidgets.Dimensions(DesktopWidgetSize.Medium).Width, widget.Bounds.Width);
+        Assert.Equal("180 × 84 DIP", DesktopWidgets.SizeLabel(widget));
+        Assert.Equal("180 × 84 DIP", DesktopWidgets.SizeLabel(widget, DesktopWidgetSize.Small));
+        Assert.Equal("372 × 84 DIP", DesktopWidgets.SizeLabel(widget, DesktopWidgetSize.Wide));
+        Assert.Equal((180d, 84d), DesktopWidgets.Dimensions(DesktopWidgetSize.Small));
     }
 }

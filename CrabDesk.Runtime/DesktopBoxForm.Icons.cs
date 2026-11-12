@@ -51,7 +51,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
 
     private void QueueIconBitmapLoad(IconBitmapKey key)
     {
-        if (_iconCache.ContainsKey(key) ||
+        if (_runtime.IconProvider is null || _resourcesDisposed || IsDisposed ||
+            _iconCache.ContainsKey(key) ||
             (_iconLoadRetries.TryGetValue(key, out var retry) &&
              DateTimeOffset.UtcNow < retry.RetryAfter) ||
             !_pendingIconLoads.Add(key))
@@ -253,6 +254,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .SelectMany(box => GetCachedItemsForBox(box.Id)
                 .SelectMany(item => CreateNeighborIconBitmapKeys(item, (float)box.Appearance.IconSize)))
             .ToHashSet();
+        activeKeys.UnionWith(DesktopWidgetItems
+            .Where(widget => widget.Kind == DesktopWidgetKind.FileShelf)
+            .SelectMany(widget => widget.FileShelfItems
+                .Select(item => GetFileShelfIconItem(widget, item)))
+            .OfType<DesktopItemRef>()
+            .SelectMany(item => CreateNeighborIconBitmapKeys(item, FileShelfIconSize)));
         foreach (var key in _iconCache.Keys.Where(key => !activeKeys.Contains(key)).ToArray())
         {
             _iconCache[key]?.Dispose();
@@ -274,7 +281,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             yield return new IconBitmapKey(
                 item.ParsingName,
                 Math.Clamp(center + offset, 16, 256),
-                _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0),
+                _runtime.IconProvider?.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0)
+                    ?? item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
                 0);
         }
     }
@@ -290,7 +298,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return new IconBitmapKey(
             item.ParsingName,
             QuantizeIconPixelSize((int)Math.Round(iconSize * _scale)),
-            _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0),
+            _runtime.IconProvider?.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0)
+                ?? item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
             0);
     }
 
@@ -310,6 +319,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .Aggregate((RectangleF?)null, (current, candidate) => current is { } existing
                 ? RectangleF.Union(existing, candidate)
                 : candidate);
+        if (GetFileShelfIconDirtyBounds(key) is { } widgetBounds)
+        {
+            dirtyBounds = dirtyBounds is { } boxBounds
+                ? RectangleF.Union(boxBounds, widgetBounds)
+                : widgetBounds;
+        }
         if (dirtyBounds is null)
         {
             return;

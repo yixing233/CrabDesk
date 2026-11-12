@@ -3,11 +3,12 @@ using CrabDesk.Core;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows;
 using WpfControls = System.Windows.Controls;
+using Media = System.Windows.Media;
 using Automation = System.Windows.Automation.AutomationProperties;
 
 namespace CrabDesk.Runtime;
 
-internal sealed class ConnectionDetailsPopup : ControlCenterPopup
+internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
 {
     private readonly ConnectionDetailsController _controller;
     private readonly Action<string> _openSettings;
@@ -16,15 +17,17 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
     private readonly Dictionary<string, ConnectionRow> _rows = new(StringComparer.Ordinal);
     private readonly WpfControls.TextBlock _empty;
     private readonly WpfControls.TextBlock _summary, _passwordTitle;
-    private readonly WpfControls.Button _radio, _scan, _settings, _connect;
+    private readonly WpfControls.Primitives.ToggleButton _radio;
+    private readonly WpfControls.Button _scan, _settings, _connect;
     private readonly WpfControls.StackPanel _passwordPanel;
     private readonly WpfControls.PasswordBox _password;
+    private readonly Media.Brush _rowFill, _rowBorder, _connectedFill, _connectedBorder;
     private string? _passwordNetwork;
-    private bool _commandPending;
-    private bool? _radioState;
+    private bool _commandPending, _updatingRadio;
+    private bool? _requestedRadioState;
     private string _settingsLabel = "";
 
-    private sealed record ConnectionRow(WpfControls.Border Root, WpfControls.TextBlock Glyph,
+    private sealed record ConnectionRow(WpfControls.Border Root, WpfControls.Border IconSurface, WpfControls.TextBlock Glyph,
         WpfControls.TextBlock Name, WpfControls.TextBlock Detail, WpfControls.Button Button, WpfControls.TextBlock Action)
     {
         public ControlConnectionItem? Item { get; set; }
@@ -32,38 +35,45 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
 
     private bool CommandBusy => _commandPending || _controller.Busy && !_controller.Refreshing;
 
-    internal ConnectionDetailsPopup(ConnectionDetailsController controller, bool dark, Color accent, double scale, Action<string> openSettings)
+    internal ConnectionDetailsPopup(ConnectionDetailsController controller, bool dark, Color accent, double scale, Action<string> openSettings,
+        bool animationsEnabled = true, Color? background = null)
         : base(controller.Kind == ControlConnectionKind.WiFi ? "Wi-Fi" : "蓝牙", dark, accent, scale, 344, 408,
-            controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.Bluetooth)
+            controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.Bluetooth,
+            detailCard: true, animationsEnabled: animationsEnabled, background: background, skeleton: PopupSkeletonLayout.Connections)
     {
         _controller = controller;
         _openSettings = openSettings;
+        _rowFill = Brush(dark ? Color.FromArgb(10, 255, 255, 255) : Color.FromArgb(160, 255, 255, 255));
+        _rowBorder = Brush(dark ? Color.FromArgb(14, 255, 255, 255) : Color.FromArgb(14, 31, 35, 41));
+        _connectedFill = Brush(Color.FromArgb(dark ? 42 : 22, accent));
+        _connectedBorder = Brush(Color.FromArgb(dark ? 100 : 72, accent));
         Body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         Body.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         Body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
-        var header = new WpfControls.Grid { Height = 32, Margin = new Wpf.Thickness(0, 0, 0, 6) };
-        _summary = TextLabel("正在读取…", 11); _summary.Foreground = SecondaryInk;
-        _summary.Margin = new Wpf.Thickness(0, 0, 84, 0);
+        var header = new WpfControls.Grid { Height = 34, Margin = new Wpf.Thickness(0, 0, 0, 12) };
+        _summary = TextLabel("正在读取…", 12); _summary.Foreground = SecondaryInk;
+        _summary.Margin = new Wpf.Thickness(0, 0, 60, 0);
         header.Children.Add(_summary);
-        _radio = TextButton("开启", "切换" + Text + "开关", LucideRuntimeIcon.Power);
-        _radio.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
-        _radio.Click += async (_, _) =>
-        {
-            var enabled = _controller.Snapshot.Enabled is not true;
-            await RunCommandAsync(async () =>
-            {
-                var result = await _controller.SetEnabledAsync(enabled);
-                if (!IsClosing && result.Succeeded && enabled && _controller.Kind == ControlConnectionKind.WiFi)
-                    await _controller.RefreshAsync(scan: true);
-            });
-        };
+        _radio = CreateRadioSwitch(animationsEnabled);
+        _radio.Checked += OnRadioToggled;
+        _radio.Unchecked += OnRadioToggled;
         header.Children.Add(_radio);
         Body.Children.Add(header);
         var scroll = ScrollContent(_items);
         WpfControls.Grid.SetRow(scroll, 1); Body.Children.Add(scroll);
+        // The default ScrollViewer template reserves the system scrollbar
+        // width even though our indicator is narrow. Keep its gutter compact.
+        scroll.Padding = new Wpf.Thickness(0);
+        scroll.Resources[Wpf.SystemParameters.VerticalScrollBarWidthKey] = 8.0;
+        var scrollbar = new Wpf.Style(typeof(WpfControls.Primitives.ScrollBar),
+            (Wpf.Style)scroll.FindResource(typeof(WpfControls.Primitives.ScrollBar)));
+        scrollbar.Setters.Add(new Wpf.Setter(Wpf.FrameworkElement.MarginProperty, new Wpf.Thickness(2, 0, 0, 0)));
+        scroll.Resources[typeof(WpfControls.Primitives.ScrollBar)] = scrollbar;
         _empty = TextLabel("", 12);
         _empty.Foreground = SecondaryInk;
-        _empty.Margin = new Wpf.Thickness(6, 16, 6, 16);
+        _empty.Margin = new Wpf.Thickness(12, 24, 12, 24);
+        _empty.TextWrapping = Wpf.TextWrapping.Wrap;
+        _empty.TextAlignment = Wpf.TextAlignment.Center;
 
         _passwordPanel = new WpfControls.StackPanel { Margin = new Wpf.Thickness(0, 8, 0, 0), Visibility = Wpf.Visibility.Collapsed };
         _passwordTitle = TextLabel("网络密码", 11);
@@ -102,7 +112,8 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
         _scan.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         _scan.Click += async (_, _) => await _controller.RefreshAsync(scan: true);
         footer.Children.Add(_scan);
-        Footer.Children.Add(footer);
+        Footer.Children.Add(new WpfControls.Border { Child = footer, BorderBrush = _rowBorder,
+            BorderThickness = new Wpf.Thickness(0, 1, 0, 0), Padding = new Wpf.Thickness(0, 10, 0, 0) });
         _controller.Changed += OnChanged;
         _refresh.Tick += async (_, _) => { if (!CommandBusy) await _controller.RefreshAsync(); };
         Shown += async (_, _) => { _refresh.Start(); await _controller.RefreshAsync(scan: true); };
@@ -112,24 +123,43 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
     private string DefaultSettings => _controller.Kind == ControlConnectionKind.WiFi ? "ms-settings:network-wifi" : "ms-settings:bluetooth";
     private void OnChanged() => Post(ApplySnapshot);
 
+    private async void OnRadioToggled(object sender, Wpf.RoutedEventArgs args)
+    {
+        if (_updatingRadio || IsClosing) return;
+        if (CommandBusy || _controller.Snapshot.Enabled is null) { ApplySnapshot(); return; }
+        var enabled = _radio.IsChecked is true;
+        _requestedRadioState = enabled;
+        try
+        {
+            await RunCommandAsync(async () =>
+            {
+                var result = await _controller.SetEnabledAsync(enabled);
+                if (!IsClosing && result.Succeeded && enabled && _controller.Kind == ControlConnectionKind.WiFi)
+                    await _controller.RefreshAsync(scan: true);
+            });
+        }
+        finally
+        {
+            _requestedRadioState = null;
+            if (!IsClosing) ApplySnapshot();
+        }
+    }
+
     internal void ApplySnapshot()
     {
         var snapshot = _controller.Snapshot;
         var busy = CommandBusy;
-        _summary.Text = busy ? "正在更新连接…" : !_controller.HasSnapshot && _controller.Busy ? "正在读取…" : snapshot.Enabled switch
+        _summary.Text = busy ? "正在更新连接…" : !_controller.HasSnapshot && string.IsNullOrEmpty(_controller.Error) ? "正在读取…" : snapshot.Enabled switch
         {
             true => snapshot.Items.Any(item => item.Connected) ? $"已连接 {snapshot.Items.Count(item => item.Connected)} 个" : "已开启",
             false => "已关闭", _ => "暂不可用"
         };
-        if (_radioState != snapshot.Enabled)
-        {
-            _radio.Content = ButtonContent(snapshot.Enabled is true ? "关闭" : "开启", LucideRuntimeIcon.Power);
-            _radioState = snapshot.Enabled;
-        }
-        _radio.Width = 68;
-        _radio.Background = snapshot.Enabled is true ? HoverInk : null;
+        _updatingRadio = true;
+        try { _radio.IsChecked = _requestedRadioState ?? (snapshot.Enabled is true); }
+        finally { _updatingRadio = false; }
         _radio.IsEnabled = snapshot.Enabled is not null && !busy;
-        Automation.SetName(_radio, (snapshot.Enabled is true ? "关闭 " : "开启 ") + Text);
+        _radio.ToolTip = snapshot.Enabled is null ? Text + "暂不可用" : (_radio.IsChecked is true ? "关闭 " : "开启 ") + Text;
+        Automation.SetItemStatus(_radio, snapshot.Enabled is null ? "暂不可用" : _radio.IsChecked is true ? "已开启" : "已关闭");
         _scan.IsEnabled = !_controller.Busy && !busy;
         _password.IsEnabled = !busy;
         _connect.IsEnabled = !busy && _password.Password.Length > 0;
@@ -145,12 +175,13 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
         UpdateRows(snapshot.Items, busy);
         if (snapshot.Items.Count == 0)
         {
-            _empty.Text = !_controller.HasSnapshot && _controller.Busy ? "正在读取连接信息…" :
+            _empty.Text = !_controller.HasSnapshot && string.IsNullOrEmpty(_controller.Error) ? "正在读取连接信息…" :
                 _controller.Kind == ControlConnectionKind.WiFi ? "暂无可用网络" : "暂无已配对设备";
             if (!_items.Children.Contains(_empty)) _items.Children.Add(_empty);
         }
         if (_passwordNetwork is not null && !snapshot.Items.Any(item => item.Id == _passwordNetwork && !item.Connected)) HidePassword();
         SetStatus(string.IsNullOrEmpty(_controller.Error) ? snapshot.Status : _controller.Error);
+        if (_controller.HasSnapshot || !string.IsNullOrEmpty(_controller.Error)) Loading!.ShowContent();
     }
 
     private void UpdateRows(IReadOnlyList<ControlConnectionItem> items, bool busy)
@@ -176,23 +207,29 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
     private ConnectionRow CreateRow()
     {
         var row = new WpfControls.Grid { MinHeight = 42 };
-        row.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(25) });
+        row.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(32) });
         row.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         row.ColumnDefinitions.Add(new() { Width = Wpf.GridLength.Auto });
         var glyph = Glyph(LucideRuntimeIcon.Bluetooth, 17);
-        row.Children.Add(glyph);
-        var text = new WpfControls.StackPanel { VerticalAlignment = Wpf.VerticalAlignment.Center, Margin = new Wpf.Thickness(2, 0, 6, 0) };
-        var name = TextLabel("", 12);
+        var iconSurface = new WpfControls.Border { Child = glyph, Width = 32, Height = 32,
+            CornerRadius = new Wpf.CornerRadius(8), VerticalAlignment = Wpf.VerticalAlignment.Center };
+        row.Children.Add(iconSurface);
+        var text = new WpfControls.StackPanel { VerticalAlignment = Wpf.VerticalAlignment.Center, Margin = new Wpf.Thickness(10, 0, 6, 0) };
+        var name = TextLabel("", 13);
         text.Children.Add(name);
-        var detail = TextLabel("", 10);
+        var detail = TextLabel("", 11);
+        detail.Margin = new Wpf.Thickness(0, 3, 0, 0);
         detail.Foreground = SecondaryInk;
         text.Children.Add(detail);
         WpfControls.Grid.SetColumn(text, 1); row.Children.Add(text);
         var button = TextButton("");
         WpfControls.Grid.SetColumn(button, 2); row.Children.Add(button);
-        var root = new WpfControls.Border { Child = row, CornerRadius = new Wpf.CornerRadius(6),
-            Padding = new Wpf.Thickness(5, 3, 3, 3), Margin = new Wpf.Thickness(0, 0, 0, 3) };
-        var entry = new ConnectionRow(root, glyph, name, detail, button, (WpfControls.TextBlock)button.Content);
+        button.Height = 30;
+        var root = new WpfControls.Border { Child = row, CornerRadius = new Wpf.CornerRadius(10), BorderThickness = new Wpf.Thickness(1),
+            Padding = new Wpf.Thickness(8, 7, 6, 7), Margin = new Wpf.Thickness(0, 0, 0, 8) };
+        var entry = new ConnectionRow(root, iconSurface, glyph, name, detail, button, (WpfControls.TextBlock)button.Content);
+        root.MouseEnter += (_, _) => { if (entry.Item?.Connected is not true) root.Background = HoverInk; };
+        root.MouseLeave += (_, _) => root.Background = entry.Item?.Connected is true ? _connectedFill : _rowFill;
         button.Click += async (_, _) =>
         {
             if (entry.Item is not { } selected) return;
@@ -232,6 +269,7 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
         };
         row.Glyph.Text = LucideRuntimeIcons.GetGlyph(icon);
         row.Glyph.Foreground = item.Connected ? AccentInk : SecondaryInk;
+        row.IconSurface.Background = item.Connected ? _connectedFill : _rowBorder;
         row.Name.Text = item.Name; row.Name.ToolTip = item.Name;
         row.Name.FontWeight = item.Connected ? Wpf.FontWeights.SemiBold : Wpf.FontWeights.Normal;
         row.Detail.Text = item.Detail + (item.SignalPercent is { } signal ? $" · {signal}%" : "");
@@ -239,7 +277,8 @@ internal sealed class ConnectionDetailsPopup : ControlCenterPopup
         var label = item.Connected && item.CanDisconnect ? "断开" : item.CanConnect ? "连接" : "管理";
         row.Action.Text = label;
         Automation.SetName(row.Button, label + " " + item.Name);
-        row.Root.Background = item.Connected ? HoverInk : null;
+        row.Root.Background = item.Connected ? _connectedFill : row.Root.IsMouseOver ? HoverInk : _rowFill;
+        row.Root.BorderBrush = item.Connected ? _connectedBorder : _rowBorder;
     }
 
     private async Task RunCommandAsync(Func<Task> command)

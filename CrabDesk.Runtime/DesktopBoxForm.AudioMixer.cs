@@ -38,9 +38,11 @@ internal sealed partial class DesktopBoxForm
             return;
         }
         DismissWidgetInputs();
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
-        var popup = new AudioMixerPopup(new AudioMixerController(new AudioMixer()), _runtime.IsDarkTheme,
-            ParseOpaqueColor(appearance.Accent), _scale);
+        var appearance = WidgetBoxAppearance(widget, out var acrylic);
+        var background = ParseOpaqueColor(appearance.Background);
+        var popup = new AudioMixerPopup(new AudioMixerController(new AudioMixer()), UsesLightText(background),
+            ParseOpaqueColor(appearance.Accent), _scale, background, _runtime.State.Settings.Appearance.AnimationEnabled);
+        popup.ApplyPopupMaterial(appearance, _runtime.State.Settings.Appearance, acrylic);
         _controlMixerPopup = popup;
         _controlMixerWidget = widget;
         _controlMixerBounds = widget.Bounds;

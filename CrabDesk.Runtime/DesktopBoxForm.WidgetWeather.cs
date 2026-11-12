@@ -44,7 +44,7 @@ internal sealed partial class DesktopBoxForm
         }
         if (widget.Cities.Count > 0) menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("添加 / 管理位置", null, (_, _) => _runtime.OpenWidgetWeatherLocations(widget));
-        var anchor = WeatherCityButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius);
+        var anchor = WeatherCityButtonRectangle(widget, WidgetCornerRadius);
         menu.Show(this, new Point(ToPixel(anchor.X), ToPixel(anchor.Bottom)));
         return menu;
     }
@@ -56,15 +56,15 @@ internal sealed partial class DesktopBoxForm
     }
 
     private bool IsWeatherLocationPoint(DesktopWidget widget, PointF point) => widget.Kind == DesktopWidgetKind.Weather &&
-        (WeatherLocationButtonRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point) ||
-         widget.Location is null && WeatherEmptyLocationRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius).Contains(point));
+        (WeatherLocationButtonRectangle(widget, WidgetCornerRadius).Contains(point) ||
+         widget.Location is null && WeatherEmptyLocationRectangle(widget, WidgetCornerRadius).Contains(point));
 
     private void LocateWeatherFromCard(DesktopWidget widget)
     {
         if (widget.IsLocating) return;
         var body = WidgetBodyRectangle(widget);
         var location = PointToScreen(new Point(ToPixel(body.X), ToPixel(body.Y)));
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         var anchor = new WidgetLocationAnchor(new(location, new Size(ToPixel(body.Width), ToPixel(body.Height))), background, ResolveAutoTextColor(background));
         _ = _runtime.LocateWidgetWeatherAsync(widget, anchor);
@@ -72,31 +72,36 @@ internal sealed partial class DesktopBoxForm
 
     private void DrawWeatherLocationButton(Graphics graphics, DesktopWidget widget, Color text, Color accent)
     {
-        var radius = _runtime.State.Settings.Appearance.CornerRadius;
+        var radius = WidgetCornerRadius;
         var button = WeatherLocationButtonRectangle(widget, radius);
-        var hovered = _hoveredWeatherLocationId == widget.Id;
-        if (hovered)
+        // The wide card drops the header location controls; its city name is the
+        // only header affordance and the hover menu owns locating and locations.
+        if (button.Width > 0)
         {
-            using var path = RoundedRectangle(RectangleF.Inflate(button, -2, -2), 6);
-            using var fill = new SolidBrush(Color.FromArgb(20, text));
-            graphics.FillPath(fill, path);
+            var hovered = _hoveredWeatherLocationId == widget.Id;
+            if (hovered)
+            {
+                using var path = RoundedRectangle(RectangleF.Inflate(button, -2, -2), 6);
+                using var fill = new SolidBrush(Color.FromArgb(20, text));
+                graphics.FillPath(fill, path);
+            }
+            var color = widget.IsLocating || hovered ? accent : text;
+            using var pen = new Pen(Color.FromArgb(widget.IsLocating || hovered ? 240 : 190, color), 1.3f);
+            var x = button.X + button.Width / 2;
+            var y = button.Y + button.Height / 2;
+            graphics.DrawEllipse(pen, x - 4.5f, y - 4.5f, 9, 9);
+            graphics.DrawLine(pen, x - 8, y, x - 4.5f, y);
+            graphics.DrawLine(pen, x + 4.5f, y, x + 8, y);
+            graphics.DrawLine(pen, x, y - 8, x, y - 4.5f);
+            graphics.DrawLine(pen, x, y + 4.5f, x, y + 8);
+            LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MapPin, WeatherLocationsButtonRectangle(widget, radius), accent, 15);
         }
-        var color = widget.IsLocating || hovered ? accent : text;
-        using var pen = new Pen(Color.FromArgb(widget.IsLocating || hovered ? 240 : 190, color), 1.3f);
-        var x = button.X + button.Width / 2;
-        var y = button.Y + button.Height / 2;
-        graphics.DrawEllipse(pen, x - 4.5f, y - 4.5f, 9, 9);
-        graphics.DrawLine(pen, x - 8, y, x - 4.5f, y);
-        graphics.DrawLine(pen, x + 4.5f, y, x + 8, y);
-        graphics.DrawLine(pen, x, y - 8, x, y - 4.5f);
-        graphics.DrawLine(pen, x, y + 4.5f, x, y + 8);
-        LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.MapPin, WeatherLocationsButtonRectangle(widget, radius), accent, 15);
         var city = WeatherCityButtonRectangle(widget, radius);
         WidgetText(graphics, widget.Location?.Name ?? widget.DisplayTitle,
             new(city.X, city.Y, city.Width - 14, city.Height), text, 13, bold: true);
         if (widget.Location is not null)
         {
-            using var font = new Font(BoxAppearance.DefaultFontFamily, 13, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var font = WidgetTextRendering.CreateFont(graphics, 13, bold: true);
             var arrowX = Math.Min(city.Right - 12, city.X + graphics.MeasureString(widget.Location.Name, font).Width + 2);
             LucideRuntimeIcons.Draw(graphics, LucideRuntimeIcon.ChevronsUpDown,
                 new(arrowX, city.Y, 12, city.Height), text, 10);
@@ -105,7 +110,9 @@ internal sealed partial class DesktopBoxForm
 
     private static void DrawWeatherMetric(Graphics graphics, LucideRuntimeIcon icon, string value, RectangleF bounds, Color color)
     {
-        LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), color, 13);
+        var asset = icon switch { LucideRuntimeIcon.Thermometer => "content-temperature", LucideRuntimeIcon.Droplets => "content-humidity", LucideRuntimeIcon.Wind => "content-wind", _ => null };
+        if (asset is null) LucideRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y, 14, bounds.Height), color, 13);
+        else DrawContentIcon(graphics, asset, new(bounds.X, bounds.Y, 16, bounds.Height));
         WidgetText(graphics, value, new(bounds.X + 19, bounds.Y, bounds.Width - 19, bounds.Height), color, 12.5f);
     }
 }

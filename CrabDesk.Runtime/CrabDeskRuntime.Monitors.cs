@@ -32,6 +32,7 @@ public sealed partial class CrabDeskRuntime
         var performance = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Performance);
         var network = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Network);
         var controls = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.ControlCenter);
+        if (network is null) _networkMonitor?.StopProcessMonitoring();
         if (performance is null && network is null && controls is null) return;
         var now = Stopwatch.GetTimestamp();
         if (!force && _monitorLastTick != 0 && Stopwatch.GetElapsedTime(_monitorLastTick, now).TotalMilliseconds < 900) return;
@@ -48,6 +49,7 @@ public sealed partial class CrabDeskRuntime
         _monitorLifetime ??= new();
         var token = _monitorLifetime.Token;
         var adapter = network?.NetworkAdapterId ?? ""; var target = network?.NetworkLatencyTarget ?? "";
+        var includeProcesses = network?.NetworkDisplayMode == NetworkWidgetDisplayMode.Details;
         if (performance is not null) _performanceMonitor ??= new();
         if (network is not null) _networkMonitor ??= new();
         // The control centre polls slower than the charts: switch states change
@@ -73,12 +75,15 @@ public sealed partial class CrabDeskRuntime
                 var machineError = ""; var networkError = ""; var controlError = "";
                 try { if (performance is not null) machine = performanceSource!.Sample(); }
                 catch (Exception exception) { machineError = "性能采样失败：" + exception.Message; }
-                try { if (network is not null) connection = networkSource!.Sample(adapter, target); }
+                try { if (network is not null) connection = networkSource!.Sample(adapter, target, includeProcesses); }
                 catch (Exception exception) { networkError = "网络采样失败：" + exception.Message; }
                 try { if (controlDue) controls = await ReadControlSnapshotAsync(controlSource!, token, controlDisplayId).ConfigureAwait(false); }
                 catch (Exception exception) { controlError = "控制中心采样失败：" + exception.Message; }
                 return (machine, connection, controls, machineError, networkError, controlError);
             }, token);
+            if (IsPaused || network is null || !State.Widgets.Contains(network) ||
+                network.NetworkDisplayMode != NetworkWidgetDisplayMode.Details)
+                networkSource?.StopProcessMonitoring();
             if (controlDue) _controlLastTick = Stopwatch.GetTimestamp();
             if (network is not null && networkSource is not null && !token.IsCancellationRequested && !IsPaused &&
                 State.Widgets.Contains(network) && network.NetworkAdapterId == adapter && network.NetworkLatencyTarget == target)
@@ -134,11 +139,20 @@ public sealed partial class CrabDeskRuntime
         var size = mode == NetworkWidgetDisplayMode.Speeds
             ? (widget.Size is DesktopWidgetSize.Small or DesktopWidgetSize.Wide ? widget.Size : DesktopWidgetSize.Small)
             : DesktopWidgetSize.Large;
-        var (width, height) = DesktopWidgets.Dimensions(size);
+        var (width, height) = DesktopWidgets.Dimensions(widget, size);
         var area = WidgetWorkArea(monitor);
         if (area.Width < width || area.Height < height) throw new InvalidOperationException("当前显示器工作区无法容纳此样式。");
         widget.NetworkDisplayMode = mode; widget.Size = size;
         widget.Bounds = new LayoutRect(widget.Bounds.X, widget.Bounds.Y, width, height).Clamp(area, width, height);
+        if (mode != NetworkWidgetDisplayMode.Details) _networkMonitor?.StopProcessMonitoring();
+        WidgetChanged(widget);
+    }
+
+    public void SetNetworkProcessSort(DesktopWidget widget, NetworkProcessSort direction)
+    {
+        if (_disposed || widget.Kind != DesktopWidgetKind.Network || !State.Widgets.Contains(widget) ||
+            !Enum.IsDefined(direction) || widget.NetworkProcessSort == direction) return;
+        widget.NetworkProcessSort = direction;
         WidgetChanged(widget);
     }
 
@@ -193,6 +207,7 @@ public sealed partial class CrabDeskRuntime
     private void PauseMonitorSampling()
     {
         _monitorPingCancellation?.Cancel();
+        _networkMonitor?.StopProcessMonitoring();
         if (_publicIpRequests is not null) foreach (var source in _publicIpRequests.Values.ToArray()) source.Cancel();
         foreach (var widget in State.Widgets) widget.IsPublicIpLoading = false;
     }

@@ -1,10 +1,32 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using CrabDesk.Native;
 
 namespace CrabDesk.Tests;
 
 public sealed class WidgetMonitorNetworkTests
 {
+    [Fact]
+    public void AutomaticSelectionUsesInternetLinkInsteadOfVirtualTunnelRoute()
+    {
+        WidgetNetworkMonitor.AdapterCandidate[] adapters =
+        [new("tunnel", (NetworkInterfaceType)53, true), new("ethernet", NetworkInterfaceType.Ethernet, true),
+            new("local-switch", NetworkInterfaceType.Ethernet, false)];
+        Assert.Equal("ethernet", WidgetNetworkMonitor.SelectAutomaticAdapterId(adapters, "tunnel"));
+        Assert.Equal("ethernet", WidgetNetworkMonitor.SelectAutomaticAdapterId(adapters, "ethernet"));
+    }
+
+    [Fact]
+    public void AutomaticSelectionPrefersRoutedLinkAndKeepsTunnelOnlyFallback()
+    {
+        WidgetNetworkMonitor.AdapterCandidate[] adapters =
+        [new("ethernet", NetworkInterfaceType.Ethernet, true), new("wifi", NetworkInterfaceType.Wireless80211, true),
+            new("tunnel", (NetworkInterfaceType)53, true)];
+        Assert.Equal("wifi", WidgetNetworkMonitor.SelectAutomaticAdapterId(adapters, "wifi"));
+        Assert.Equal("tunnel", WidgetNetworkMonitor.SelectAutomaticAdapterId([adapters[2]], "tunnel"));
+        Assert.Null(WidgetNetworkMonitor.SelectAutomaticAdapterId([], null));
+    }
+
     [Fact]
     public void RatesUseActualElapsedTimeAndKeepDirectionsSeparate()
     {

@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace CrabDesk.Core;
 
-public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter, Lyrics }
+public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter, Lyrics, FileShelf }
 public enum DesktopWidgetSize
 {
     Small, Medium, Wide, Large, Compact, Landscape, Custom,
@@ -23,6 +23,8 @@ public enum NetworkWidgetDisplayMode
     Curve = 3
 }
 
+public enum NetworkProcessSort { Download, Upload }
+
 public sealed class DesktopWidget
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -32,16 +34,28 @@ public sealed class DesktopWidget
     public LayoutRect Bounds { get; set; } = new(32, 32, 180, 180);
     public DesktopWidgetSize Size { get; set; } = DesktopWidgetSize.Medium;
     public bool IsLocked { get; set; }
+    public WidgetBackgroundMaterial BackgroundMaterial { get; set; }
+    public WidgetColorTheme ColorTheme { get; set; }
+    public string FontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
+    public double FontScale { get; set; } = 1;
+    public int FontWeight { get; set; }
+    public bool FontItalic { get; set; }
     public bool Use24HourClock { get; set; } = true;
     public bool ShowSeconds { get; set; }
     public string Text { get; set; } = string.Empty;
     public List<WidgetTodoItem> Tasks { get; set; } = [];
+    public WidgetFileShelfMode FileShelfMode { get; set; } = WidgetFileShelfMode.Reference;
+    public List<WidgetFileShelfItem> FileShelfItems { get; set; } = [];
+    public FileShelfFloatingSettings FileShelfFloating { get; set; } = new();
+    [JsonIgnore] public bool FileShelfBusy { get; set; }
+    [JsonIgnore] public string FileShelfStatus { get; set; } = string.Empty;
     public string TargetLanguage { get; set; } = "简体中文";
     public string Translation { get; set; } = string.Empty;
     public string ControlBrightnessDisplayId { get; set; } = string.Empty;
     public string NetworkAdapterId { get; set; } = string.Empty;
     public string NetworkLatencyTarget { get; set; } = "1.1.1.1";
     public NetworkWidgetDisplayMode NetworkDisplayMode { get; set; }
+    public NetworkProcessSort NetworkProcessSort { get; set; }
     [JsonIgnore] public List<WidgetNetworkRatePoint> NetworkHistory { get; } = [];
     [JsonIgnore] public WidgetPerformanceSnapshot? Performance { get; set; }
     [JsonIgnore] public WidgetNetworkSnapshot? Network { get; set; }
@@ -53,7 +67,7 @@ public sealed class DesktopWidget
     /// </summary>
     public bool? ControlCenterLightText { get; set; }
     public List<ControlCenterQuickAction>? ControlCenterQuickActions { get; set; }
-    public int LyricsLineCount { get; set; } = 5;
+    public double LyricsLineSpacing { get; set; } = 1.75;
     public double LyricsFontSize { get; set; } = 24;
     public string LyricsFontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
     public int LyricsFontWeight { get; set; } = 600;
@@ -147,13 +161,17 @@ public sealed record WidgetWeatherSnapshot(double Temperature, double Minimum, d
     public IReadOnlyList<WidgetWeatherIndex> Indices { get; init; } = [];
     public string Provider { get; init; } = "Open-Meteo";
     public string? Condition { get; init; }
+    /// <summary>True when the provider code fell back to the unknown placeholder.</summary>
+    public const string UnknownCondition = "天气未知";
     public string Description => Condition ?? (WeatherCode switch
     {
         0 => "晴", 1 => "大部晴朗", 2 => "多云", 3 => "阴", 45 or 48 => "雾",
         51 or 53 or 55 => "毛毛雨", 56 or 57 => "冻毛毛雨", 61 or 63 or 65 => "雨",
         66 or 67 => "冻雨", 71 or 73 or 75 or 77 => "雪", 80 or 81 or 82 => "阵雨",
-        85 or 86 => "阵雪", 95 or 96 or 99 => "雷雨", _ => "天气未知"
+        85 or 86 => "阵雪", 95 or 96 or 99 => "雷雨", _ => UnknownCondition
     });
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasUnknownCondition => Description == UnknownCondition;
 }
 
 public sealed record WidgetHourlyWeather(DateTimeOffset Time, double Temperature, string Condition, double? AirQuality);
@@ -232,6 +250,7 @@ public static class DesktopWidgets
     public static string GetName(DesktopWidgetKind kind) => kind switch
     {
         DesktopWidgetKind.Lyrics => "桌面歌词",
+        DesktopWidgetKind.FileShelf => "文件中转站",
         DesktopWidgetKind.Clock => "时钟", DesktopWidgetKind.Calendar => "月历", DesktopWidgetKind.Note => "便签",
         DesktopWidgetKind.Todo => "待办", DesktopWidgetKind.Translation => "翻译", DesktopWidgetKind.Weather => "天气",
         DesktopWidgetKind.Performance => "性能监控", DesktopWidgetKind.Network => "网络监控",
@@ -243,7 +262,7 @@ public static class DesktopWidgets
         DesktopWidgetKind.Lyrics => DesktopWidgetSize.Panel,
         DesktopWidgetKind.ControlCenter => DesktopWidgetSize.Panel,
         DesktopWidgetKind.Clock => DesktopWidgetSize.Medium,
-        DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Network => DesktopWidgetSize.Large,
+        DesktopWidgetKind.Note or DesktopWidgetKind.Translation or DesktopWidgetKind.Network or DesktopWidgetKind.FileShelf => DesktopWidgetSize.Large,
         _ => DesktopWidgetSize.Medium
     };
 
@@ -252,6 +271,7 @@ public static class DesktopWidgets
         DesktopWidgetKind.Lyrics => [DesktopWidgetSize.Large, DesktopWidgetSize.Panel, DesktopWidgetSize.Custom],
         DesktopWidgetKind.Clock => [DesktopWidgetSize.Medium, DesktopWidgetSize.Landscape],
         DesktopWidgetKind.Calendar => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
+        DesktopWidgetKind.FileShelf => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large],
         DesktopWidgetKind.Note or DesktopWidgetKind.Todo => [DesktopWidgetSize.Medium, DesktopWidgetSize.Large, DesktopWidgetSize.Custom],
         DesktopWidgetKind.Translation or DesktopWidgetKind.Network => [DesktopWidgetSize.Large],
         DesktopWidgetKind.ControlCenter => [DesktopWidgetSize.Panel],
@@ -299,10 +319,12 @@ public static class DesktopWidgets
 
     public static bool SupportsFreeResize(DesktopWidgetKind kind) => kind is DesktopWidgetKind.Note or DesktopWidgetKind.Todo or DesktopWidgetKind.Lyrics;
 
-    public static (double Width, double Height) Dimensions(DesktopWidget widget)
+    public static (double Width, double Height) Dimensions(DesktopWidget widget) => Dimensions(widget, widget.Size);
+
+    public static (double Width, double Height) Dimensions(DesktopWidget widget, DesktopWidgetSize size)
     {
-        var preset = Dimensions(widget.Size);
-        return widget.Size == DesktopWidgetSize.Custom && SupportsFreeResize(widget.Kind)
+        var preset = Dimensions(size);
+        return size == DesktopWidgetSize.Custom && SupportsFreeResize(widget.Kind)
             ? (double.IsFinite(widget.Bounds.Width) && widget.Bounds.Width > 0 ? widget.Bounds.Width : preset.Width,
                double.IsFinite(widget.Bounds.Height) && widget.Bounds.Height > 0 ? widget.Bounds.Height : preset.Height)
             : preset;
@@ -318,7 +340,14 @@ public static class DesktopWidgets
     public static string SizeLabel(DesktopWidget widget)
     {
         var (width, height) = Dimensions(widget);
-        return widget.Size == DesktopWidgetSize.Custom ? $"{width:0.#} × {height:0.#} DIP · 自定义" : SizeLabel(widget.Size);
+        return widget.Size == DesktopWidgetSize.Custom ? $"{width:0.#} × {height:0.#} DIP · 自定义" : SizeLabel(widget, widget.Size);
+    }
+
+    public static string SizeLabel(DesktopWidget widget, DesktopWidgetSize size)
+    {
+        if (size == DesktopWidgetSize.Custom) return SizeLabel(size);
+        var (width, height) = Dimensions(widget, size);
+        return $"{width} × {height} DIP";
     }
 
     public static IReadOnlyList<DateOnly> CalendarDays(DateOnly month)
@@ -337,11 +366,13 @@ public static class DesktopWidgets
         {
             if (widget.Id == Guid.Empty || !ids.Add(widget.Id)) { widget.Id = Guid.NewGuid(); ids.Add(widget.Id); }
             widget.Title ??= string.Empty;
+            WidgetTypography.Normalize(widget);
+            WidgetAppearance.Normalize(widget);
             widget.Text = NormalizeText(widget.Text);
             widget.Translation = NormalizeText(widget.Translation);
             widget.MonitorId ??= string.Empty;
             widget.NetworkAdapterId ??= string.Empty;
-            widget.LyricsLineCount = WidgetLyricsSettings.NormalizeLineCount(widget.LyricsLineCount);
+            widget.LyricsLineSpacing = WidgetLyricsSettings.NormalizeLineSpacing(widget.LyricsLineSpacing);
             widget.LyricsFontSize = WidgetLyricsSettings.NormalizeFontSize(widget.LyricsFontSize);
             widget.LyricsFontFamily = WidgetLyricsSettings.NormalizeFontFamily(widget.LyricsFontFamily);
             widget.LyricsFontWeight = WidgetLyricsSettings.NormalizeFontWeight(widget.LyricsFontWeight);
@@ -360,10 +391,12 @@ public static class DesktopWidgets
                 widget.NetworkDisplayMode = NetworkWidgetDisplayMode.Curve;
             }
             if (!Enum.IsDefined(widget.NetworkDisplayMode)) widget.NetworkDisplayMode = NetworkWidgetDisplayMode.Details;
+            if (!Enum.IsDefined(widget.NetworkProcessSort)) widget.NetworkProcessSort = NetworkProcessSort.Download;
             widget.NetworkLatencyTarget = (widget.NetworkLatencyTarget ?? "1.1.1.1").Trim();
             if (!WidgetMonitorMetrics.IsValidLatencyTarget(widget.NetworkLatencyTarget)) widget.NetworkLatencyTarget = "1.1.1.1";
             if (string.IsNullOrWhiteSpace(widget.TargetLanguage)) widget.TargetLanguage = "简体中文";
             widget.Tasks ??= [];
+            WidgetFileShelf.Normalize(widget);
             NormalizeWeatherCities(widget);
             widget.Tasks.RemoveAll(task => task is null);
             var taskIds = new HashSet<Guid>();

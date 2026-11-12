@@ -1,6 +1,7 @@
 using CrabDesk.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace CrabDesk.WinUI.Windows;
 
@@ -12,6 +13,27 @@ public sealed partial class WeatherDetailsWindow
     private CancellationTokenSource? _locationSearch;
     private bool _showLocationsOnLoad, _locationsClosed;
     private Guid? _locationActiveId;
+    private (string Background, double Opacity, bool Acrylic, double Radius)? _locationsMaterial;
+
+    private void ApplyLocationsMaterial(BoxAppearance appearance, GlobalAppearanceSettings settings)
+    {
+        if (_locationsOnly) return;
+        var material = (appearance.Background, appearance.ResolveBackgroundOpacity(settings.UseAcrylicBoxes),
+            settings.UseAcrylicBoxes, WindowCornerRadius(settings.CornerRadius));
+        if (_locationsMaterial == material) return;
+        _locationsMaterial = material;
+        var color = Converters.HexColor.TryParse(appearance.Background, out var parsed) ? parsed :
+            global::Windows.UI.Color.FromArgb(255, 42, 45, 50);
+        Brush fill;
+        if (settings.UseAcrylicBoxes)
+            fill = new AcrylicBrush { TintColor = color, TintOpacity = material.Item2, FallbackColor = color };
+        else { color.A = (byte)Math.Round(255 * material.Item2); fill = new SolidColorBrush(color); }
+        var style = new Style(typeof(FlyoutPresenter));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, fill));
+        style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(material.Item4)));
+        _locationsFlyout.FlyoutPresenterStyle = style;
+    }
 
     private void InitializeLocations()
     {

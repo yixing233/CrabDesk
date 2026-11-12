@@ -105,6 +105,7 @@ public sealed partial class CrabDeskRuntime
             found = true;
         }
         var widget = new DesktopWidget { Kind = kind, Size = size, MonitorId = monitor.Id, Bounds = bounds };
+        WidgetAppearance.ApplyNewDefaults(widget);
         State.Widgets.Add(widget);
         WidgetChanged(widget);
         if (_surfaceManager is not null && DesktopWidgets.RequiresMonitoring(kind)) _ = RefreshMonitorWidgetsAsync(true);
@@ -114,16 +115,29 @@ public sealed partial class CrabDeskRuntime
     internal static LayoutRect WidgetWorkArea(MonitorLayout monitor) => new(
         monitor.WorkArea.X - monitor.Bounds.X, monitor.WorkArea.Y - monitor.Bounds.Y, monitor.WorkArea.Width, monitor.WorkArea.Height);
 
+    private void RefreshWidgetSurfaces()
+    {
+        if (_surfaceManager is null) return;
+        if (_surfaceManager.AcrylicRequested != WidgetAppearance.RequiresAcrylic(State))
+            NotifyWorkspaceChanged(true);
+        else _surfaceManager.RefreshWidgets();
+    }
+
     public void WidgetChanged(DesktopWidget widget)
     {
         if (_disposed || !State.Widgets.Contains(widget)) return;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
 
     public void RemoveWidget(DesktopWidget widget)
     {
+        if (widget.Kind == DesktopWidgetKind.FileShelf)
+        {
+            if (widget.FileShelfBusy) return;
+            if (widget.FileShelfItems.Count > 0) { _ = RemoveFileShelfWidgetAsync(widget); return; }
+        }
         if (!State.Widgets.Remove(widget)) return;
         if (widget.Kind == DesktopWidgetKind.Lyrics)
         {
@@ -132,12 +146,16 @@ public sealed partial class CrabDeskRuntime
         }
         CancelPublicIpRequest(widget.Id);
         widget.IsPublicIpLoading = false;
-        if (widget.Kind == DesktopWidgetKind.Network) _monitorPingCancellation?.Cancel();
+        if (widget.Kind == DesktopWidgetKind.Network)
+        {
+            _monitorPingCancellation?.Cancel();
+            _networkMonitor?.StopProcessMonitoring();
+        }
         CancelWidgetRequest(widget.Id);
         if (widget.Kind == DesktopWidgetKind.Translation) _widgetTranslationService?.ResetConversation();
         _weatherRetryAt.Remove(widget.Id);
         if (RequestedWidgetId == widget.Id) RequestedWidgetId = null;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
@@ -148,7 +166,7 @@ public sealed partial class CrabDeskRuntime
         if (size == DesktopWidgetSize.Custom) { ResizeWidget(widget, widget.Bounds.Width, widget.Bounds.Height); return; }
         var monitor = Monitors.FirstOrDefault(m => m.Id == widget.MonitorId);
         if (monitor is null) return;
-        var (width, height) = DesktopWidgets.Dimensions(size);
+        var (width, height) = DesktopWidgets.Dimensions(widget, size);
         var area = WidgetWorkArea(monitor);
         if (area.Width < width || area.Height < height) throw new InvalidOperationException("当前显示器工作区无法容纳此尺寸。");
         widget.Size = size;
@@ -301,8 +319,11 @@ public sealed partial class CrabDeskRuntime
         if (_disposed || widget.Kind != DesktopWidgetKind.Weather || widget.Location is null || widget.IsLoading || widget.IsLocating || !State.Widgets.Contains(widget)) return;
         // Older snapshots kept only two indices and have no source types. Refresh
         // them once so the completed life-index cards do not wait for cache expiry.
+        // Snapshots whose condition fell back to the unknown placeholder are stale
+        // too: they were created before the provider table covered that code.
         if (!force && (widget.Weather is { } cached && cached.Provider == WidgetWeatherService.ProviderName &&
-            cached.Indices.All(index => !string.IsNullOrEmpty(index.Type)) && DateTimeOffset.Now - cached.FetchedAt < TimeSpan.FromMinutes(30) ||
+            cached.Indices.All(index => !string.IsNullOrEmpty(index.Type)) && !cached.HasUnknownCondition &&
+            DateTimeOffset.Now - cached.FetchedAt < TimeSpan.FromMinutes(30) ||
             _weatherRetryAt.TryGetValue(widget.Id, out var retry) && DateTimeOffset.Now < retry)) return;
         var location = widget.Location;
         var cityId = widget.ActiveCityId;
@@ -421,6 +442,9 @@ public sealed partial class CrabDeskRuntime
 
     private void DisposeWidgets()
     {
+        _fileShelfLifetime?.Cancel();
+        _fileShelfLifetime?.Dispose();
+        _fileShelfLifetime = null;
         DisposeLyrics();
         DisposeMonitoring();
         foreach (var id in _widgetRequests.Keys.ToArray()) CancelWidgetRequest(id);

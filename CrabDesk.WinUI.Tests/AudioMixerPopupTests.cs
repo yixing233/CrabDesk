@@ -29,8 +29,12 @@ public sealed class AudioMixerPopupTests
         await controller.RefreshAsync();
         OnSta(() =>
         {
-            using var popup = new AudioMixerPopup(controller, dark, Color.FromArgb(79, 100, 154), 1);
+            var background = dark ? Color.FromArgb(28, 37, 53) : Color.FromArgb(241, 245, 249);
+            using var popup = new AudioMixerPopup(controller, dark, Color.FromArgb(79, 100, 154), 1, background);
             var view = popup.ContentView;
+            Assert.Equal(background.ToArgb(), popup.BackColor.ToArgb());
+            var surface = Assert.IsType<Media.SolidColorBrush>(Assert.IsType<WpfControls.Border>(view).Background);
+            Assert.Equal(Media.Color.FromRgb(background.R, background.G, background.B), surface.Color);
             var size = popup.ClientSize;
             view.Measure(new Wpf.Size(size.Width, size.Height));
             view.Arrange(new Wpf.Rect(0, 0, size.Width, size.Height));

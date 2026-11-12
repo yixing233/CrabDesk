@@ -213,6 +213,8 @@ public partial class App : Application
             _todoDatesWindow.Present(widget, task);
         };
         runtime.ExitRequested += (_, _) => Shutdown();
+        runtime.Changed += FileShelvesChanged;
+        ReconcileFileShelves();
         StartCommandListeners(runtime, _window.DispatcherQueue);
         // A context-menu invocation may start CrabDesk as the first instance,
         // in which case there is no resident process to signal above.
@@ -248,6 +250,7 @@ public partial class App : Application
 
     internal void Shutdown()
     {
+        CloseFileShelves();
         _todoDatesWindow?.Close();
         _weatherDetailsWindow?.Close();
         _aiOrganizationWindow?.Close();
@@ -279,7 +282,7 @@ public partial class App : Application
         var dispatcher = DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("WinUI dispatcher queue is unavailable.");
         services.AddSingleton(_ => new CrabDeskRuntime(action =>
-            dispatcher.TryEnqueue(() => action())));
+            dispatcher.TryEnqueue(() => action()), AcrylicBlurEffects.CreateFactory));
         services.AddSingleton<ICrabDeskService, CrabDeskService>();
         services.AddSingleton<IInfoBarService, InfoBarService>();
         services.AddSingleton<IThemeService, ThemeService>();

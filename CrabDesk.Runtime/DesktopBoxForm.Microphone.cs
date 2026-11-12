@@ -17,7 +17,10 @@ internal sealed partial class DesktopBoxForm
         var pressed = IsControlPressed(widget, target);
         var hovered = IsControlHovered(widget, target);
         var ink = ResolveAutoTextColor(background);
-        var fill = Mix(PanelFill(background, ink), ink, pressed ? .22 : hovered || _microphoneWidget == widget ? .18 : .14);
+        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var fill = Mix(PanelFill(background, ink, solid), ink, solid
+            ? pressed ? .12 : hovered || _microphoneWidget == widget ? .08 : .04
+            : pressed ? .22 : hovered || _microphoneWidget == widget ? .18 : .14);
         using var path = RoundedRectangle(bounds, 6);
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
@@ -30,9 +33,12 @@ internal sealed partial class DesktopBoxForm
     {
         if (_microphonePopup is { IsDisposed: false } && _microphoneWidget == widget) { DismissMicrophone(); return; }
         DismissWidgetInputs();
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
-        var popup = new MicrophonePopup(new MicrophoneController(new Microphone()), _runtime.IsDarkTheme,
-            ParseOpaqueColor(appearance.Accent), _scale, _runtime.ApplyContextMenuTheme);
+        var appearance = WidgetBoxAppearance(widget, out var acrylic);
+        var background = ParseOpaqueColor(appearance.Background);
+        var popup = new MicrophonePopup(new MicrophoneController(new Microphone()), UsesLightText(background),
+            ParseOpaqueColor(appearance.Accent), _scale, _runtime.ApplyContextMenuTheme, background,
+            _runtime.State.Settings.Appearance.AnimationEnabled);
+        popup.ApplyPopupMaterial(appearance, _runtime.State.Settings.Appearance, acrylic);
         _microphonePopup = popup;
         _microphoneWidget = widget;
         _microphoneBounds = widget.Bounds;

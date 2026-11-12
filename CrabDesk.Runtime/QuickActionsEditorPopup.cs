@@ -18,8 +18,9 @@ internal sealed class QuickActionsEditorPopup : ControlCenterPopup
     private bool _updating;
 
     internal QuickActionsEditorPopup(IReadOnlyList<ControlCenterQuickAction> selected,
-        Action<IReadOnlyList<ControlCenterQuickAction>> changed, bool dark, Color accent, double scale)
-        : base("编辑快捷操作", dark, accent, scale, 344, 430)
+        Action<IReadOnlyList<ControlCenterQuickAction>> changed, bool dark, Color accent, double scale, Color? background = null,
+        bool animationsEnabled = true)
+        : base("编辑快捷操作", dark, accent, scale, 344, 430, animationsEnabled: animationsEnabled, background: background)
     {
         _selected = ControlQuickActions.Normalize(selected);
         _changed = changed ?? throw new ArgumentNullException(nameof(changed));

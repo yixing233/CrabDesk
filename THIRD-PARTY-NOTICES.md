@@ -1,5 +1,24 @@
 # Third-party notices
 
+## Microsoft.Diagnostics.Tracing.TraceEvent 3.2.8
+
+Network process ranking uses Microsoft's TraceEvent library from
+[PerfView](https://github.com/microsoft/perfview) to read Windows ETW TCP/UDP events.
+
+MIT License. Copyright (c) .NET Foundation and Contributors.
+The complete license is included in [licenses/TraceEvent-LICENSE.txt](licenses/TraceEvent-LICENSE.txt).
+
+Its dependency Microsoft.Diagnostics.NETCore.Client 0.2.510501 is provided by
+[dotnet/diagnostics](https://github.com/dotnet/diagnostics) under the MIT License,
+Copyright (c) .NET Foundation and Contributors.
+
+## Microsoft.Graphics.Win2D 1.4.0
+
+Desktop background blur uses [Win2D](https://github.com/microsoft/Win2D) by Microsoft.
+
+Package license information: [Microsoft Software License Terms](http://www.microsoft.com/web/webpi/eula/eula_win2d_10012014.htm),
+as identified by the NuGet package metadata.
+
 ## lunar-csharp 1.6.8
 
 Chinese lunar calendar, festivals and solar term calculations use

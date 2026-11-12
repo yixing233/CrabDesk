@@ -18,12 +18,13 @@ internal sealed partial class DesktopBoxForm
     {
         ControlCenterQuickAction.WiFi => snapshot?.WiFiEnabled is true ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.WifiOff,
         ControlCenterQuickAction.Bluetooth => LucideRuntimeIcon.Bluetooth,
-        ControlCenterQuickAction.NightLight => LucideRuntimeIcon.Moon,
+        ControlCenterQuickAction.NightLight => snapshot?.NightLightEnabled is false ? LucideRuntimeIcon.Sun : LucideRuntimeIcon.Moon,
         ControlCenterQuickAction.Display => LucideRuntimeIcon.Monitor,
         ControlCenterQuickAction.Cast => LucideRuntimeIcon.Cast,
         ControlCenterQuickAction.Microphone => LucideRuntimeIcon.Mic,
         ControlCenterQuickAction.ApplicationVolume => LucideRuntimeIcon.SlidersHorizontal,
         ControlCenterQuickAction.ScreenCapture => LucideRuntimeIcon.ScanLine,
+        ControlCenterQuickAction.NetworkAdapters => LucideRuntimeIcon.Network,
         _ => LucideRuntimeIcon.Cog
     };
 
@@ -42,9 +43,10 @@ internal sealed partial class DesktopBoxForm
                 var kind = action == ControlCenterQuickAction.WiFi ? ControlConnectionKind.WiFi : ControlConnectionKind.Bluetooth;
                 var target = kind == ControlConnectionKind.WiFi ? ControlCenterPresentation.ControlCenterTarget.WiFiDetails :
                     ControlCenterPresentation.ControlCenterTarget.BluetoothDetails;
-                ShowControlPopup(widget, target, tile, () => new ConnectionDetailsPopup(
+                ShowControlPopup(widget, target, tile, (dark, background) => new ConnectionDetailsPopup(
                     new ConnectionDetailsController(kind == ControlConnectionKind.WiFi ? new WiFiConnectionService() : new BluetoothConnectionService()),
-                    _runtime.IsDarkTheme, ControlPopupAccent(), _scale, OpenControlSettings));
+                    dark, ControlPopupAccent(), _scale, OpenControlSettings,
+                    _runtime.State.Settings.Appearance.AnimationEnabled, background));
             }
             else if (ControlQuickActions.Toggle(action) is { } toggle)
             {
@@ -65,6 +67,12 @@ internal sealed partial class DesktopBoxForm
                 case ControlCenterQuickAction.ApplicationVolume: ShowControlCenterMixer(widget); break;
                 case ControlCenterQuickAction.ScreenCapture: OpenControlSettings("ms-screenclip:"); break;
                 case ControlCenterQuickAction.Settings: OpenControlSettings("ms-settings:"); break;
+                case ControlCenterQuickAction.NetworkAdapters:
+                    ShowControlPopup(widget, ControlCenterPresentation.ControlCenterTarget.NetworkAdapters, tile,
+                        (dark, background) => new NetworkAdaptersPopup(new NetworkAdapterControl(), dark,
+                            ControlPopupAccent(), _scale, OpenControlSettings,
+                            _runtime.State.Settings.Appearance.AnimationEnabled, background));
+                    break;
             }
             return true;
         }
@@ -75,26 +83,30 @@ internal sealed partial class DesktopBoxForm
         _runtime.State.Settings.DefaultBoxAppearance).Accent);
 
     private void ShowDisplayControls(DesktopWidget widget, RectangleF anchor) =>
-        ShowControlPopup(widget, ControlCenterPresentation.ControlCenterTarget.DisplayControls, anchor, () =>
+        ShowControlPopup(widget, ControlCenterPresentation.ControlCenterTarget.DisplayControls, anchor, (dark, background) =>
         {
-            var popup = new DisplayControlsPopup(new WindowsDisplayControl(), _runtime.IsDarkTheme, ControlPopupAccent(), _scale);
+            var popup = new DisplayControlsPopup(new WindowsDisplayControl(), dark, ControlPopupAccent(), _scale, background,
+                _runtime.State.Settings.Appearance.AnimationEnabled);
             popup.ExternalActionFailed += ReportControlError;
             return popup;
         });
 
     private void ShowQuickActionsEditor(DesktopWidget widget) =>
         ShowControlPopup(widget, ControlCenterPresentation.ControlCenterTarget.None,
-            WidgetMenuRectangle(widget, _runtime.State.Settings.Appearance.CornerRadius),
-            () => new QuickActionsEditorPopup(ControlQuickActions.For(widget), actions => _runtime.SetControlQuickActions(widget, actions),
-                _runtime.IsDarkTheme, ControlPopupAccent(), _scale));
+            WidgetMenuRectangle(widget, WidgetCornerRadius),
+            (dark, background) => new QuickActionsEditorPopup(ControlQuickActions.For(widget), actions => _runtime.SetControlQuickActions(widget, actions),
+                dark, ControlPopupAccent(), _scale, background, _runtime.State.Settings.Appearance.AnimationEnabled));
 
     private void ShowControlPopup(DesktopWidget widget, ControlCenterPresentation.ControlCenterTarget target,
-        RectangleF anchor, Func<ControlCenterPopup> create)
+        RectangleF anchor, Func<bool, Color, ControlCenterPopup> create)
     {
         if (_controlPopup is { IsDisposed: false, Visible: true } && _controlPopupWidget == widget && _controlPopupTarget == target)
         { DismissControlPopup(); return; }
         DismissWidgetInputs();
-        var popup = create();
+        var appearance = WidgetBoxAppearance(widget, out var acrylic);
+        var background = ParseOpaqueColor(appearance.Background);
+        var popup = create(UsesLightText(background), background);
+        popup.ApplyPopupMaterial(appearance, _runtime.State.Settings.Appearance, acrylic);
         _controlPopup = popup;
         _controlPopupWidget = widget;
         _controlPopupTarget = target;

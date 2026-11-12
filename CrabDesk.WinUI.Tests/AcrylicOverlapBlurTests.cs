@@ -32,6 +32,16 @@ public sealed class AcrylicOverlapBlurTests
     }
 
     [Fact]
+    public void ZeroBlurStrengthKeepsOverlappingContentSharp()
+    {
+        using var bitmap = Stripes(200, 160);
+        using var expected = (Bitmap)bitmap.Clone();
+        Assert.False(AcrylicOverlapBlur.Apply(bitmap, new(40, 20, 120, 120), 12, 1,
+            [new RectangleF(0, 0, 200, 160)], blurStrength: 0));
+        AssertSamePixels(expected, bitmap);
+    }
+
+    [Fact]
     public void DisjointBoxesDoNotChangeAnyPixels()
     {
         using var bitmap = Stripes(200, 160);

@@ -4,6 +4,8 @@ using System.Runtime.InteropServices;
 using CrabDesk.Core;
 using CrabDesk.Native;
 using CrabDesk.Runtime;
+using Microsoft.Graphics.Canvas.Effects;
+using Windows.UI.Composition;
 
 // Runs against in-memory boxes and an isolated data directory. --wallpaper
 // briefly exposes the desktop, but never hides Explorer icons or starts a
@@ -14,6 +16,16 @@ internal static class Program
     private static void Set(object target, string name, object value) => target.GetType().GetField(name, Hidden)!.SetValue(target, value);
     private static T Get<T>(object target, string name) => (T)target.GetType().GetField(name, Hidden)!.GetValue(target)!;
     private static void Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Hidden)!.Invoke(target, args);
+
+    private static CompositionEffectFactory CreateBlurFactory(Compositor compositor)
+    {
+        using var blur = new GaussianBlurEffect
+        {
+            Name = "BackdropBlur", BlurAmount = 0, BorderMode = EffectBorderMode.Hard,
+            Source = new CompositionEffectSourceParameter("Backdrop")
+        };
+        return compositor.CreateEffectFactory(blur, ["BackdropBlur.BlurAmount"]);
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr LoadLibrary(string path);
@@ -26,6 +38,27 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--popup-loading"))
+        {
+            if (args.Contains("--single")) return PopupMaterialProbe.RunLoading(ControlConnectionKind.WiFi, true, true);
+            var failed = 0;
+            foreach (var kind in new[] { ControlConnectionKind.WiFi, ControlConnectionKind.Bluetooth })
+                foreach (var dark in new[] { false, true })
+                    foreach (var animate in new[] { false, true })
+                        failed += PopupMaterialProbe.RunLoading(kind, dark, animate);
+            return failed == 0 ? 0 : 1;
+        }
+        if (args.Contains("--popup-connection-alignment"))
+        {
+            var failed = 0;
+            foreach (var kind in new[] { ControlConnectionKind.WiFi, ControlConnectionKind.Bluetooth })
+                foreach (var animate in new[] { false, true })
+                    failed += PopupMaterialProbe.Run(kind, animate);
+            return failed == 0 ? 0 : 1;
+        }
+        if (args.Contains("--popup-material")) return PopupMaterialProbe.Run();
+        if (args.Contains("--widget-popup-cards")) return PopupMaterialProbe.RunWidgetCards();
+        if (args.Contains("--popup-entrance")) return PopupEntranceProbe.Run();
         if (args.Contains("--decrypt-coodesker"))
         {
             var dllPath = @"D:\Coodesker\Native-x64.dll";
@@ -73,6 +106,7 @@ internal static class Program
         var interaction = args.Contains("--interaction");
         var drag = args.Contains("--drag");
         var overlap = args.Contains("--overlap");
+        var backgroundControls = args.Contains("--background-controls");
         var previousCursor = Cursor.Position;
         var output = Path.Combine(Environment.GetEnvironmentVariable("PI_SCRATCH_DIR") ?? Path.GetTempPath(),
             "CrabDesk-AcrylicSmokeTest", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
@@ -88,6 +122,13 @@ internal static class Program
             if (interaction) Cursor.Position = new Point(550, 200);
             if (!DesktopAcrylicHost.IsSupported) throw new PlatformNotSupportedException("Windows 11 required.");
             using var source = new PatternSource();
+            if (backgroundControls)
+            {
+                if (wallpaper || fullMonitor || desktopCycle || interaction || drag || overlap || args.Contains("--manager"))
+                    throw new ArgumentException("Run --background-controls separately with the synthetic source.");
+                source.BackgroundControlsPattern = true;
+                Get<System.Windows.Forms.Timer>(source, "_timer").Stop();
+            }
             if (!wallpaper)
             {
                 source.Show();
@@ -112,9 +153,15 @@ internal static class Program
             Set(runtime, "<State>k__BackingField", state);
             Set(runtime, "<Items>k__BackingField", Array.Empty<DesktopItemRef>());
             Set(runtime, "<Monitors>k__BackingField", new[] { monitor });
+            Set(runtime, "<AcrylicBlurFactory>k__BackingField", (Func<Compositor, CompositionEffectFactory>)CreateBlurFactory);
             var a = new DesktopBox { Title = "Acrylic A", MonitorId = "smoke", ExpandOnHover = true, Bounds = new(610 - pixelBounds.X, 275 - pixelBounds.Y, 320, 300) };
             var b = new DesktopBox { Title = "Acrylic B", MonitorId = "smoke", ExpandOnHover = true, Bounds = new(990 - pixelBounds.X, 275 - pixelBounds.Y, 320, 300) };
             a.Appearance.Opacity = b.Appearance.Opacity = 0.5;
+            if (backgroundControls)
+            {
+                a.ExpandOnHover = b.ExpandOnHover = false;
+                a.Appearance.BackgroundOpacity = b.Appearance.BackgroundOpacity = 0;
+            }
             if (overlap)
             {
                 if (wallpaper || interaction || drag || desktopCycle || args.Contains("--manager"))
@@ -155,7 +202,7 @@ internal static class Program
                 }
                 return 0;
             }
-            using var host = new DesktopAcrylicHost(wallpaper ? DesktopHostService.FindDesktopView() : source.Handle, [monitor]);
+            using var host = new DesktopAcrylicHost(wallpaper ? DesktopHostService.FindDesktopView() : source.Handle, [monitor], CreateBlurFactory);
             host.InitializeComposition();
             using var boxes = new DesktopBoxForm(runtime, monitor);
             boxes.SetAcrylicBackground(host.EffectsEnabled);
@@ -177,7 +224,15 @@ internal static class Program
             var expanded = Get<HashSet<Guid>>(boxes, "_hoverExpandedBoxes");
             expanded.Add(a.Id); expanded.Add(b.Id);
             if (!boxes.UpdateInteractionRegion()) throw new InvalidOperationException("Initial frame failed.");
-            host.ShowAtDesktop();
+            if (backgroundControls)
+            {
+                // The synthetic source is topmost. Keep its comparison host
+                // in that same band without Explorer's desktop-order rules.
+                host.TopMost = true;
+                host.Show();
+                ShowWindow(host.Handle, 4);
+            }
+            else host.ShowAtDesktop();
             boxes.Show();
             DesktopWindowTools.ShowAboveDesktop(boxes.Handle, host.AnchorHandle);
             Console.WriteLine($"host effects={host.EffectsEnabled}; boxReady={DesktopWindowTools.IsDesktopSurfaceReady(boxes.Handle, host.AnchorHandle)}");
@@ -194,6 +249,25 @@ internal static class Program
                 framePending = true;
                 try
                 {
+                    if (backgroundControls)
+                    {
+                        if (clock.Elapsed.TotalMilliseconds < 500 * (stage + 1)) return;
+                        var variants = new (int Blur, double Opacity)[] { (0, 0), (25, 0), (50, 0), (75, 0), (100, 0), (0, .25), (0, 1) };
+                        var variant = variants[stage];
+                        state.Settings.Appearance.AcrylicBlurStrength = variant.Blur;
+                        host.SetBlurStrength(variant.Blur);
+                        a.Appearance.BackgroundOpacity = b.Appearance.BackgroundOpacity = variant.Opacity;
+                        if (!boxes.UpdateInteractionRegion()) throw new InvalidOperationException(boxes.LayerDiagnostic);
+                        await host.WaitForCommitAsync();
+                        DwmFlush();
+                        using var shot = new Bitmap(800, 460);
+                        using (var graphics = Graphics.FromImage(shot)) graphics.CopyFromScreen(570, 210, 0, 0, shot.Size);
+                        shot.Save(Path.Combine(output, $"blur-{variant.Blur}-opacity-{variant.Opacity * 100:0}.png"));
+                        var contrast = Enumerable.Range(80, 220).Average(x => Math.Abs(shot.GetPixel(x + 1, 180).G - shot.GetPixel(x, 180).G));
+                        Console.WriteLine($"blur={variant.Blur} opacity={variant.Opacity:P0} backgroundGradient={contrast:F3}");
+                        if (++stage == variants.Length) Application.ExitThread();
+                        return;
+                    }
                     if (overlap)
                     {
                         if (clock.Elapsed.TotalSeconds < stage + 1) return;
@@ -345,6 +419,7 @@ internal static class Program
 
 internal sealed class PatternSource : Form
 {
+    internal bool BackgroundControlsPattern { get; set; }
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 40 };
     private int _frame;
     internal PatternSource()
@@ -359,6 +434,11 @@ internal sealed class PatternSource : Form
     protected override void OnPaint(PaintEventArgs e)
     {
         e.Graphics.Clear((_frame / 30) % 2 == 0 ? Color.Crimson : Color.RoyalBlue);
+        if (BackgroundControlsPattern)
+        {
+            for (var x = 0; x < Width; x += 128) e.Graphics.FillRectangle(Brushes.White, x, 0, 64, Height);
+            return;
+        }
         for (var x = -40 + (_frame * 3) % 40; x < Width; x += 40)
             e.Graphics.FillRectangle(Brushes.White, x, 0, 8, Height);
     }
