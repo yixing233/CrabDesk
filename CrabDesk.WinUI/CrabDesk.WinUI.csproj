@@ -17,7 +17,7 @@
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/yixing233/CrabDesk</RepositoryUrl>
@@ -50,7 +50,7 @@
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\PRIVACY.md" Link="PRIVACY.md" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\licenses\Lyricify-Lyrics-Helper-LICENSE.txt;..\licenses\Newtonsoft-Json-LICENSE.txt;..\licenses\SharpZipLib-LICENSE.txt"
+    <Content Include="..\licenses\Lyricify-Lyrics-Helper-LICENSE.txt;..\licenses\Newtonsoft-Json-LICENSE.txt;..\licenses\SharpZipLib-LICENSE.txt;..\licenses\Tabler-Icons-LICENSE.txt;..\licenses\TraceEvent-LICENSE.txt"
              Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk-256.png" CopyToOutputDirectory="PreserveNewest" />
