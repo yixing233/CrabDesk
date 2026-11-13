@@ -307,7 +307,9 @@ public sealed class DesktopInputHookLatencyTests
             "private void ScheduleIconLoadRetry(");
 
         Assert.Contains("await Task.Run(() =>", loadIcon, StringComparison.Ordinal);
-        Assert.Contains("_runtime.IconProvider.GetIcon", loadIcon, StringComparison.Ordinal);
+        // The shell call moved behind the skin seam so the desktop and box layers
+        // share one renderer; the worker-thread boundary is what this test guards.
+        Assert.Contains("IconSkinRenderer.Load(", loadIcon, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -321,7 +323,7 @@ public sealed class DesktopInputHookLatencyTests
         var loadIcon = ExtractMethod(
             source,
             "private async Task LoadDesktopIconAsync(",
-            "private (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(");
+            "private DesktopIconCacheKey CreateDesktopIconCacheKey(");
 
         Assert.DoesNotContain("ClearDesktopIconCache()", refresh, StringComparison.Ordinal);
         Assert.Contains("PruneDesktopIconCache()", refresh, StringComparison.Ordinal);

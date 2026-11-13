@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
     internal const string ItemKeysFormat = "CrabDesk.DesktopItemKeys";
     internal const string SourceBoxFormat = "CrabDesk.SourceBoxId";
@@ -77,9 +77,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .Append(focusedBoxId)
             .ToArray();
 
-    private readonly CrabDeskRuntime _runtime;
-    private readonly MonitorLayout _monitor;
-    private readonly double _scale;
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
     private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
     private readonly Dictionary<IconBitmapKey, IconLoadRetry> _iconLoadRetries = [];
@@ -204,17 +201,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private int _iconCacheVersion;
     private int _dynamicVisualVersion;
     private int _paintCount;
-    private bool _resourcesDisposed;
     private bool _regionFailureHandled;
 
     internal DesktopBoxForm(
         CrabDeskRuntime runtime,
-        MonitorLayout monitor)
+        MonitorLayout monitor) : base(runtime, monitor)
     {
-        _runtime = runtime;
-        _monitor = monitor;
-        _scale = monitor.DpiScale;
-        InitializeWidgets();
         Text = "CrabDesk Desktop Boxes";
         FormBorderStyle = Forms.FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -1593,46 +1585,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     {
         if (disposing && !_resourcesDisposed)
         {
-            DisposeLyricsVisuals();
             _acrylicFrameBitmap?.Dispose();
             _acrylicFrameBitmap = null;
             _acrylicPartialFramePresenter = null;
-            _controlPopup?.Dispose();
-            _controlPopup = null;
-            _controlPopupWidget = null;
-            _microphonePopup?.Dispose();
-            _microphonePopup = null;
-            _microphoneWidget = null;
-            _controlArtwork?.Dispose();
-            _controlArtwork = null;
-            _controlDeviceMenu?.Dispose();
-            _controlDeviceMenu = null;
-            _controlDeviceWidget = null;
-            _controlMixerPopup?.Dispose();
-            _controlMixerPopup = null;
-            _todoDeleteMenu?.Dispose();
-            _todoDeleteMenu = null; _todoDeleteCard = null; _todoDeletion = null;
-            DismissWidgetTodoInput();
-            _resourcesDisposed = true;
-            _widgetTimer?.Dispose();
-            _calendarToolTipBitmap?.Dispose();
-            _calendarToolTipBitmap = null;
-            _calendarToolTipTimer.Dispose();
-            _calendarToolTipMotion.Dispose();
-            _translationInput?.Dispose();
-            _translationInput = null;
-            _translationResultInput?.Dispose();
-            _translationResultInput = null;
-            foreach (var visual in _translationTextVisuals.Values) visual.Dispose();
-            _translationTextVisuals.Clear();
-            _noteInput?.Dispose();
-            _noteInput = null;
-            foreach (var visual in _noteTextVisuals.Values) visual.Dispose();
-            _noteTextVisuals.Clear();
-            _todoInput?.Dispose();
-            _todoInput = null;
-            foreach (var visual in _todoTextVisuals.Values) visual.Dispose();
-            _todoTextVisuals.Clear();
             _iconLoadCancellation.Cancel();
             _animationFrameClock.Dispose();
             _hoverTimer.Stop();
@@ -1973,7 +1928,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return true;
     }
 
-    private bool UpdateWindowRegion()
+    protected override bool UpdateWindowRegion()
     {
         var desktopBoxes = DesktopBoxes.ToArray();
         var currentRectangles = desktopBoxes.Select(box => new LayoutRect(
@@ -2077,30 +2032,6 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         Math.Abs(second.X - first.X),
         Math.Abs(second.Y - first.Y));
 
-    private PointF ToDip(Point point) => new((float)(point.X / _scale), (float)(point.Y / _scale));
-
-    private int ToPixel(double value) =>
-        (int)Math.Round(value * _scale, MidpointRounding.AwayFromZero);
-
-    private double SnapDipToPixel(double value) => ToPixel(value) / _scale;
-
-    private static Color ParseOpaqueColor(string value)
-    {
-        try
-        {
-            var hex = value.TrimStart('#');
-            var offset = hex.Length == 8 ? 2 : 0;
-            return Color.FromArgb(255,
-                Convert.ToByte(hex.Substring(offset, 2), 16),
-                Convert.ToByte(hex.Substring(offset + 2, 2), 16),
-                Convert.ToByte(hex.Substring(offset + 4, 2), 16));
-        }
-        catch
-        {
-            return Color.FromArgb(40, 44, 50);
-        }
-    }
-
     private static Color ResolveTitleColor(string value, Color boxBackground)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Equals("Auto", StringComparison.OrdinalIgnoreCase))
@@ -2110,106 +2041,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return ParseOpaqueColor(value);
     }
 
-    internal static Color ResolveAccentColor(Color background, Color accent)
-    {
-        const double minimumContrast = 2.6d;
-        if (ContrastRatio(background, accent) >= minimumContrast)
-        {
-            return Color.FromArgb(255, accent.R, accent.G, accent.B);
-        }
+    private double SnapDipToPixel(double value) => ToPixel(value) / _scale;
 
-        var target = UsesLightText(background)
-            ? Color.White
-            : Color.FromArgb(31, 35, 41);
-        for (var step = 1; step <= 10; step++)
-        {
-            var amount = step / 10d;
-            var adjusted = Color.FromArgb(
-                255,
-                (int)Math.Round(accent.R + (target.R - accent.R) * amount),
-                (int)Math.Round(accent.G + (target.G - accent.G) * amount),
-                (int)Math.Round(accent.B + (target.B - accent.B) * amount));
-            if (ContrastRatio(background, adjusted) >= minimumContrast)
-            {
-                return adjusted;
-            }
-        }
-
-        return target;
-    }
-
-    private static Color ResolveAutoTextColor(Color background) => UsesLightText(background)
-        ? Color.White
-        : Color.FromArgb(31, 35, 41);
-
-    private static bool UsesLightText(Color background)
-    {
-        return ContrastRatio(background, Color.White) >=
-            ContrastRatio(background, Color.FromArgb(31, 35, 41));
-    }
-
-    private static double ContrastRatio(Color first, Color second)
-    {
-        var firstLuminance = RelativeLuminance(first);
-        var secondLuminance = RelativeLuminance(second);
-        return (Math.Max(firstLuminance, secondLuminance) + 0.05) /
-            (Math.Min(firstLuminance, secondLuminance) + 0.05);
-    }
-
-    private static double RelativeLuminance(Color color)
-    {
-        static double Linearize(byte channel)
-        {
-            var normalized = channel / 255d;
-            return normalized <= 0.04045d
-                ? normalized / 12.92d
-                : Math.Pow((normalized + 0.055d) / 1.055d, 2.4d);
-        }
-
-        return 0.2126d * Linearize(color.R) +
-            0.7152d * Linearize(color.G) +
-            0.0722d * Linearize(color.B);
-    }
-
-    private static Color ApplyOpacity(Color color, double opacity) =>
-        Color.FromArgb((int)Math.Round(255 * Math.Clamp(opacity, 0, 1)), color.R, color.G, color.B);
-
-
-    private static GraphicsPath RoundedRectangle(RectangleF rectangle, float radius)
-    {
-        radius = Math.Min(Math.Max(0, radius), Math.Min(rectangle.Width, rectangle.Height) / 2);
-        if (radius <= 0.1f)
-        {
-            var rectanglePath = new GraphicsPath();
-            rectanglePath.AddRectangle(rectangle);
-            return rectanglePath;
-        }
-        var diameter = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
-    private void TryAction(Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception exception)
-        {
-            DesktopConfirmationDialog.ShowMessage(
-                this,
-                _runtime.IsDarkTheme,
-                "CrabDesk",
-                exception.Message,
-                DesktopDialogKind.Error);
-        }
-    }
+    private static new GraphicsPath RoundedRectangle(RectangleF rectangle, float radius) => WidgetSurfaceController.RoundedRectangle(rectangle, radius);
 
     private sealed record BoxGeometry(
         DesktopBox Box,
@@ -2280,11 +2114,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         public bool HandledByDesktop { get; set; }
     }
 
+    // SkinStamp carries the icon-skin generation; a skin change therefore misses
+    // the cache instead of serving tiles painted with the previous plates. Kind
+    // rides along so the load worker picks the right plate without re-reading the
+    // item snapshot.
     private readonly record struct IconBitmapKey(
         string ParsingName,
         int PixelSize,
         long ModifiedTicks,
-        long Length);
+        int SkinStamp,
+        IconSkinKind Kind);
 
     private sealed record BoxHeightAnimation(
         double FromHeight,

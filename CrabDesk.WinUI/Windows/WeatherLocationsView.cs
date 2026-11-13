@@ -1,4 +1,5 @@
 using CrabDesk.Core;
+using CrabDesk.WinUI.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -12,7 +13,7 @@ public sealed class WeatherLocationsView : UserControl
     public TextBlock Status { get; } = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap, Opacity = .75, Visibility = Visibility.Collapsed };
     public Button Locate { get; } = new() { Content = "使用当前位置", HorizontalAlignment = HorizontalAlignment.Stretch };
     public HyperlinkButton MoreSettings { get; } = new() { Content = "更多位置设置", Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left };
-    public Button CloseButton { get; } = new() { Content = new FontIcon { Glyph = "\uE711", FontSize = 14 },
+    public Button CloseButton { get; } = new() { Content = new TablerIcon { Icon = TablerIconName.X, FontSize = 14 },
         Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0), Visibility = Visibility.Collapsed };
     private readonly TextBlock _heading = new() { FontSize = 12, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold };
     private string[] _labels = [];

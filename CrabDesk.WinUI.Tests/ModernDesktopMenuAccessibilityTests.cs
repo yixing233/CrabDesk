@@ -6,6 +6,7 @@ using Forms = System.Windows.Forms;
 
 namespace CrabDesk.WinUI.Tests;
 
+[Collection("desktop-probe")]
 public sealed class ModernDesktopMenuAccessibilityTests
 {
     [Fact]

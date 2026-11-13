@@ -66,7 +66,8 @@ public static class WidgetWeatherPresentation
             // switches cities and the hover menu owns the rest.
             empty, new(cityLeft, 28, right - cityLeft, 18),
             empty, new(right - 24, 4, 24, 24),
-            new(inset + 48, 24, 94, 46), new(inset, 26, 42, 42),
+            // Icon artwork sits low in its canvas; align its visible center with the text ink.
+            new(inset + 48, 24, 94, 46), new(inset, 22, 42, 42),
             new(inset + 146, 28, cityLeft - inset - 154, 38), empty, empty, empty,
             new(inset, 70, cityLeft - inset - 10, 16),
             new(inset, bottom - 18, 28, 18), new(right - 28, bottom - 18, 28, 18),

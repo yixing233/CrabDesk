@@ -30,7 +30,7 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
 
     internal NetworkAdaptersPopup(INetworkAdapterControl source, bool dark, Color accent, double scale,
         Action<string> openSettings, bool animationsEnabled = true, Color? background = null)
-        : base("网卡", dark, accent, scale, 360, 408, LucideRuntimeIcon.Network,
+        : base("网卡", dark, accent, scale, 360, 408, TablerRuntimeIcon.Network,
             detailCard: true, animationsEnabled: animationsEnabled, background: background, skeleton: PopupSkeletonLayout.NetworkAdapters)
     {
         _source = source;
@@ -51,11 +51,11 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
         _empty.Margin = new Wpf.Thickness(2, 10, 2, 10);
 
         var footer = new WpfControls.Grid();
-        _settings = TextButton("网络设置", icon: LucideRuntimeIcon.Cog);
+        _settings = TextButton("网络设置", icon: TablerRuntimeIcon.Cog);
         _settings.HorizontalAlignment = Wpf.HorizontalAlignment.Left;
         _settings.Click += (_, _) => { Dismiss(); openSettings("ms-settings:network-advancedsettings"); };
         footer.Children.Add(_settings);
-        _scan = TextButton("刷新", "刷新网卡列表", LucideRuntimeIcon.RefreshCw);
+        _scan = TextButton("刷新", "刷新网卡列表", TablerRuntimeIcon.RefreshCw);
         _scan.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         _scan.Click += (_, _) => _ = RefreshAsync();
         footer.Children.Add(_scan);
@@ -136,7 +136,7 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
             {
                 var updateButton = row.Adapter is null || row.Adapter.Enabled != adapter.Enabled;
                 row.Adapter = adapter;
-                row.Icon.Text = LucideRuntimeIcons.GetGlyph(adapter.Wireless ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.Network);
+                row.Icon.Text = TablerRuntimeIcons.GetGlyph(adapter.Wireless ? TablerRuntimeIcon.Wifi : TablerRuntimeIcon.Network);
                 row.Icon.Foreground = adapter.Enabled is true ? AccentInk : SecondaryInk;
                 row.Name.Text = adapter.Name;
                 row.Name.ToolTip = adapter.Description;
@@ -146,7 +146,7 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
                     false => "已禁用", _ => "不可用"
                 };
                 if (updateButton)
-                    row.Button.Content = ButtonContent(adapter.Enabled is true ? "禁用" : "启用", LucideRuntimeIcon.Power);
+                    row.Button.Content = ButtonContent(adapter.Enabled is true ? "禁用" : "启用", TablerRuntimeIcon.Power);
                 Automation.SetName(row.Button, (adapter.Enabled is true ? "禁用 " : "启用 ") + adapter.Name);
             }
             if (index < _items.Children.Count && ReferenceEquals(_items.Children[index], row.Root)) continue;
@@ -162,7 +162,7 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
         grid.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(26) });
         grid.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(68) });
-        var icon = Glyph(LucideRuntimeIcon.Network, 18);
+        var icon = Glyph(TablerRuntimeIcon.Network, 18);
         grid.Children.Add(icon);
         var labels = new WpfControls.StackPanel { Margin = new Wpf.Thickness(8, 0, 8, 0), VerticalAlignment = Wpf.VerticalAlignment.Center };
         var name = TextLabel("", 13);

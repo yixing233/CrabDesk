@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CrabDesk.WinUI.Controls;
 
 namespace CrabDesk.WinUI.ViewModels;
 
@@ -9,7 +10,7 @@ public partial class AiToolCallViewModel : ObservableObject
     private bool _isRunning;
     private bool _isError;
 
-    public string Icon { get; init; } = "Globe";
+    public TablerIconName Icon { get; init; } = TablerIconName.Globe;
     public string Title { get; init; } = string.Empty;
     public string TimeText { get; init; } = string.Empty;
 

@@ -38,7 +38,7 @@ public sealed partial class FileShelfWindow : Window
     private readonly TextBlock _status = new() { FontSize = 11, Opacity = .8, TextWrapping = TextWrapping.Wrap, MaxLines = 2 };
     private readonly ComboBox _mode = new() { MinWidth = 0, HorizontalAlignment = HorizontalAlignment.Stretch };
     private readonly Button _add = new() { Content = "添加文件", MinWidth = 0 };
-    private readonly ToggleButton _pin = new() { Content = new LucideIcon { Icon = LucideIconName.Pin, FontSize = 15 }, Width = 30, Height = 30, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0) };
+    private readonly ToggleButton _pin = new() { Content = new TablerIcon { Icon = TablerIconName.Pin, FontSize = 15 }, Width = 30, Height = 30, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0) };
     private readonly ListView _list = new() { SelectionMode = ListViewSelectionMode.Extended, CanDragItems = true, AllowDrop = false, IsItemClickEnabled = false, Padding = new Thickness(0) };
     private readonly Grid _empty = new();
     private readonly HyperlinkButton _emptyAdd = new() { Content = "添加文件", HorizontalAlignment = HorizontalAlignment.Center };
@@ -123,7 +123,7 @@ public sealed partial class FileShelfWindow : Window
         header.Children.Add(_pin); Grid.SetColumn(_pin, 1);
         ToolTipService.SetToolTip(_pin, "保持展开"); AutomationProperties.SetName(_pin, "保持中转站展开");
         _pin.Click += (_, _) => { if (!_updating) _runtime.SetFileShelfFloating(Widget, true, _pin.IsChecked != true); };
-        var close = new Button { Content = new LucideIcon { Icon = LucideIconName.X, FontSize = 15 }, Width = 30, Height = 30, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0) };
+        var close = new Button { Content = new TablerIcon { Icon = TablerIconName.X, FontSize = 15 }, Width = 30, Height = 30, MinWidth = 0, MinHeight = 0, Padding = new Thickness(0) };
         close.Style = (Style)Application.Current.Resources["SubtleButtonStyle"];
         ToolTipService.SetToolTip(close, "关闭全局悬浮"); AutomationProperties.SetName(close, "关闭全局文件中转站");
         close.Click += (_, _) => _runtime.SetFileShelfFloating(Widget, false, Widget.FileShelfFloating.AutoHide);
@@ -139,11 +139,12 @@ public sealed partial class FileShelfWindow : Window
         var body = new Grid(); Grid.SetRow(body, 2); _panel.Children.Add(body);
         _list.ItemsSource = _rows;
         _list.ItemTemplate = (DataTemplate)XamlReader.Load("""
-            <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+            <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                          xmlns:controls="using:CrabDesk.WinUI.Controls">
                 <Grid Padding="2,6" ColumnSpacing="10" Opacity="{Binding Opacity}">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <Grid Width="28" Height="28">
-                        <FontIcon Glyph="&#xE8A5;" FontSize="24" Visibility="{Binding FallbackVisibility}"/>
+                        <controls:TablerIcon Icon="File" FontSize="24" Visibility="{Binding FallbackVisibility}"/>
                         <Image Source="{Binding Icon}" Stretch="Uniform"/>
                     </Grid>
                     <StackPanel Grid.Column="1" Spacing="3">

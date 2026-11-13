@@ -40,7 +40,7 @@ public sealed partial class CrabDeskRuntime
         if (_disposed) return;
         _beginInvoke(() =>
         {
-            if (_disposed || IsPaused || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
+            if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
             if (snapshot is not null) widget.Controls = snapshot;
             widget.MonitorError = error;
             NotifyMonitorFrame();
@@ -55,7 +55,7 @@ public sealed partial class CrabDeskRuntime
 
     private void QueueControlChange(double? volume = null, double? brightness = null, bool? muted = null)
     {
-        if (_disposed || IsPaused || ControlCenterWidget is not { } widget) return;
+        if (_disposed || ControlCenterWidget is not { } widget || !IsWidgetActive(widget)) return;
         _controlMonitor ??= new WidgetControlCenterMonitor();
         if (widget.Controls is { } current)
         {
@@ -100,13 +100,13 @@ public sealed partial class CrabDeskRuntime
                 displayId = _pendingControlDisplayId;
                 if (volume is null && brightness is null && muted is null) { Volatile.Write(ref _controlWriting, 0); return; }
             }
-            if (widget is null || _disposed || IsPaused || !State.Widgets.Contains(widget)) continue;
+            if (widget is null || _disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget)) continue;
             var source = _controlMonitor!;
             ControlCenterSnapshot? read = null; var error = "";
             await ControlIoGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_disposed || IsPaused || !State.Widgets.Contains(widget)) continue;
+                if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget)) continue;
                 // A target change cancels brightness already dequeued while slow
                 // hardware I/O was busy. Keep any independent audio changes.
                 if (displayVersion != Volatile.Read(ref _controlBrightnessDisplayVersion))
@@ -129,7 +129,7 @@ public sealed partial class CrabDeskRuntime
             if (_disposed) continue;
             _beginInvoke(() =>
             {
-                if (_disposed || IsPaused || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
+                if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget) || version != Volatile.Read(ref _controlCommandVersion)) return;
                 if (result is not null && widget.Controls is { } current)
                     widget.Controls = current with { VolumePercent = result.VolumePercent, VolumeMuted = result.VolumeMuted,
                         BrightnessPercent = result.BrightnessPercent, OutputDeviceId = result.OutputDeviceId, OutputDeviceName = result.OutputDeviceName };
@@ -141,7 +141,7 @@ public sealed partial class CrabDeskRuntime
 
     private async Task RunControlCommandAsync(DesktopWidget widget, Func<IWidgetControlCenterMonitor, Task<bool>> command, string failure)
     {
-        if (_disposed || IsPaused || !State.Widgets.Contains(widget)) return;
+        if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget)) return;
         var source = _controlMonitor ??= new WidgetControlCenterMonitor();
         var version = Interlocked.Increment(ref _controlCommandVersion);
         var displayId = ResolveControlBrightnessDisplay(widget);
@@ -151,7 +151,7 @@ public sealed partial class CrabDeskRuntime
             await ControlIoGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_disposed || IsPaused || !State.Widgets.Contains(widget)) return;
+                if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget)) return;
                 source.BrightnessDisplayId = displayId;
                 if (!await command(source).ConfigureAwait(false)) error = failure;
                 snapshot = await source.ReadAsync().ConfigureAwait(false);
@@ -211,7 +211,7 @@ public sealed partial class CrabDeskRuntime
 
     public Task SeekControlMediaAsync(DesktopWidget widget, ControlCenterMedia media, TimeSpan position)
     {
-        if (_disposed || IsPaused || !State.Widgets.Contains(widget) || widget.Kind != DesktopWidgetKind.ControlCenter ||
+        if (_disposed || !IsWidgetActive(widget) || !State.Widgets.Contains(widget) || widget.Kind != DesktopWidgetKind.ControlCenter ||
             !media.CanSeek || media.Duration <= TimeSpan.Zero || string.IsNullOrEmpty(media.TrackId) ||
             widget.Controls?.Media?.TrackId != media.TrackId) return Task.CompletedTask;
         var target = ControlCenterPresentation.ClampMediaPosition(media, position);

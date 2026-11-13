@@ -1,4 +1,4 @@
-﻿using System.Collections.Specialized;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -15,7 +15,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private bool IsEffectivelyCollapsed(DesktopBox box) =>

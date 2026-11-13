@@ -26,7 +26,11 @@ public sealed partial class CrabDeskRuntime
             WidgetWeatherDetailsRequested?.Invoke(widget);
     }
 
-    internal void DismissDesktopWidgetInput() => _surfaceManager?.DismissWidgetInputs();
+    internal void DismissDesktopWidgetInput()
+    {
+        _surfaceManager?.DismissWidgetInputs();
+        _widgetCenter?.DismissWidgetInputs();
+    }
 
     private string GetWidgetTranslationApiKeyPath() => Path.Combine(ConfigDirectory, "translation-api-key.dat");
 
@@ -67,7 +71,7 @@ public sealed partial class CrabDeskRuntime
         settings.PromptTemplate = promptTemplate;
         settings.ReuseConversation = reuse;
         settings.ConversationIdleMinutes = idleMinutes;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         Changed?.Invoke(this, EventArgs.Empty);
         ScheduleSave();
     }
@@ -81,7 +85,10 @@ public sealed partial class CrabDeskRuntime
         WidgetChanged(widget);
     }
 
-    public DesktopWidget AddWidget(DesktopWidgetKind kind, string? monitorId = null)
+    public DesktopWidget AddWidget(DesktopWidgetKind kind, string? monitorId = null) =>
+        AddWidget(kind, monitorId, WidgetPlacement.Desktop);
+
+    private DesktopWidget AddWidget(DesktopWidgetKind kind, string? monitorId, WidgetPlacement placement)
     {
         if (!Enum.IsDefined(kind)) throw new ArgumentOutOfRangeException(nameof(kind));
         var existing = State.Widgets.FirstOrDefault(widget => widget.Kind == kind);
@@ -93,7 +100,7 @@ public sealed partial class CrabDeskRuntime
         var area = WidgetWorkArea(monitor);
         if (area.Width < width || area.Height < height) throw new InvalidOperationException("当前显示器工作区无法容纳此组件。");
         var obstacles = State.Boxes.Where(b => b.MonitorId == monitor.Id).Select(b => b.Bounds)
-            .Concat(State.Widgets.Where(w => w.MonitorId == monitor.Id).Select(w => w.Bounds)).ToArray();
+            .Concat(State.Widgets.Where(w => w.MonitorId == monitor.Id && w.Placement == WidgetPlacement.Desktop).Select(w => w.Bounds)).ToArray();
         var bounds = new LayoutRect(area.X + 32, area.Y + 32, width, height).Clamp(area, width, height);
         var found = false;
         for (var y = area.Y + 32; y + height <= area.Y + area.Height && !found; y += 96)
@@ -104,11 +111,12 @@ public sealed partial class CrabDeskRuntime
             bounds = candidate;
             found = true;
         }
-        var widget = new DesktopWidget { Kind = kind, Size = size, MonitorId = monitor.Id, Bounds = bounds };
+        var widget = new DesktopWidget { Kind = kind, Size = size, MonitorId = monitor.Id, Bounds = bounds,
+            Placement = placement, CenterOrder = State.Widgets.Count(w => w.Placement == WidgetPlacement.Center) };
         WidgetAppearance.ApplyNewDefaults(widget);
         State.Widgets.Add(widget);
         WidgetChanged(widget);
-        if (_surfaceManager is not null && DesktopWidgets.RequiresMonitoring(kind)) _ = RefreshMonitorWidgetsAsync(true);
+        if (IsWidgetActive(widget) && DesktopWidgets.RequiresMonitoring(kind)) _ = RefreshMonitorWidgetsAsync(true);
         return widget;
     }
 
@@ -117,6 +125,7 @@ public sealed partial class CrabDeskRuntime
 
     private void RefreshWidgetSurfaces()
     {
+        RefreshWidgetCenter();
         if (_surfaceManager is null) return;
         if (_surfaceManager.AcrylicRequested != WidgetAppearance.RequiresAcrylic(State))
             NotifyWorkspaceChanged(true);
@@ -253,7 +262,7 @@ public sealed partial class CrabDeskRuntime
     internal void RefreshWidgetPosition(DesktopWidget widget, bool save)
     {
         if (_disposed || !State.Widgets.Contains(widget)) return;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         if (save) { Changed?.Invoke(this, EventArgs.Empty); ScheduleSave(); }
     }
 
@@ -330,7 +339,7 @@ public sealed partial class CrabDeskRuntime
         using var cancellation = BeginWidgetRequest(widget, cancellationToken);
         widget.IsLoading = true;
         widget.Error = string.Empty;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         Changed?.Invoke(this, EventArgs.Empty);
         try
         {
@@ -391,7 +400,7 @@ public sealed partial class CrabDeskRuntime
         var target = widget.TargetLanguage;
         widget.IsLoading = true;
         widget.Error = string.Empty;
-        _surfaceManager?.RefreshWidgets();
+        RefreshWidgetSurfaces();
         Changed?.Invoke(this, EventArgs.Empty);
         try
         {

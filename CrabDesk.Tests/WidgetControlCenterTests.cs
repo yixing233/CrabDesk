@@ -6,6 +6,27 @@ namespace CrabDesk.Tests;
 public sealed class WidgetControlCenterTests
 {
     [Theory]
+    [InlineData(292)]
+    [InlineData(360)]
+    public void EmptyMediaCentersContentAndHasNoPlaybackTargets(double height)
+    {
+        var body = ControlCenterPresentation.Body(372, height, 8);
+        var panel = ControlCenterPresentation.MediaPanel(ControlCenterPresentation.MediaArea(body));
+        foreach (var region in new[] { ControlCenterPresentation.EmptyMediaArtwork(panel), ControlCenterPresentation.EmptyMediaTitle(panel) })
+        {
+            Assert.Equal(panel.Y + panel.Height / 2, region.Y + region.Height / 2);
+            Assert.True(region.X >= panel.X && region.X + region.Width <= panel.X + panel.Width);
+            Assert.True(region.Y >= panel.Y && region.Y + region.Height <= panel.Y + panel.Height);
+        }
+        foreach (var button in ControlCenterPresentation.MediaButtonRects(panel))
+            Assert.Equal(ControlCenterPresentation.ControlCenterTarget.None,
+                ControlCenterPresentation.TargetAt(body, button.X + button.Width / 2, button.Y + button.Height / 2, hasMedia: false));
+        var progress = ControlCenterPresentation.MediaProgress(panel);
+        Assert.Equal(ControlCenterPresentation.ControlCenterTarget.None,
+            ControlCenterPresentation.TargetAt(body, progress.X + progress.Width / 2, progress.Y, hasMedia: false));
+    }
+
+    [Theory]
     [InlineData(0)] [InlineData(8)] [InlineData(20)]
     public void CompactMediaLayoutKeepsArtworkTextProgressAndButtonsSeparate(double corners)
     {

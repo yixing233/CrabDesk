@@ -10,11 +10,14 @@ using Windows.UI;
 
 namespace CrabDesk.WinUI.Controls;
 
-public sealed record WidgetPreviewAppearance(BoxAppearance Surface, GlobalAppearanceSettings Settings);
+public sealed record WidgetPreviewAppearance(BoxAppearance Surface, GlobalAppearanceSettings Settings,
+    WidgetColorTheme? CenterColorTheme = null);
 
 public sealed partial class WidgetPreview : UserControl
 {
     private double WidgetCornerRadius => PreviewAppearance?.Settings.ResolveWidgetCornerRadius() ?? 8;
+    private bool ForceSolidPreview => !IsCatalogPreview && Widget?.Placement == WidgetPlacement.Center;
+    private bool IsSolidPreview(DesktopWidget widget) => ForceSolidPreview || widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
     public static readonly DependencyProperty WidgetProperty = DependencyProperty.Register(nameof(Widget), typeof(DesktopWidget),
         typeof(WidgetPreview), new PropertyMetadata(null, OnPreviewChanged));
     public static readonly DependencyProperty PreviewAppearanceProperty = DependencyProperty.Register(nameof(PreviewAppearance), typeof(WidgetPreviewAppearance),
@@ -33,7 +36,7 @@ public sealed partial class WidgetPreview : UserControl
     private readonly TextBlock _calendarUpcomingTitle = new() { Text = "近期节日 · 节气", Margin = new Thickness(192, 0, 36, 0),
         FontSize = 11.5, FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily(BoxAppearance.DefaultFontFamily),
         VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
-    private readonly LucideIcon _todoAdd = new() { Icon = LucideIconName.Plus, FontSize = 14, Width = 24, Height = 24,
+    private readonly TablerIcon _todoAdd = new() { Icon = TablerIconName.Plus, FontSize = 14, Width = 24, Height = 24,
         Margin = new Thickness(0, 4, 40, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
     private readonly Grid _todoHeader = new() { Height = 24, Margin = new Thickness(12, 4, 76, 0), ColumnSpacing = 8, Visibility = Visibility.Collapsed };
     private readonly TextBlock _todoTitle = new() { FontSize = 13.333, FontWeight = FontWeights.SemiBold,
@@ -41,7 +44,7 @@ public sealed partial class WidgetPreview : UserControl
     private readonly TextBlock _todoSummary = new() { FontSize = 13.333,
         FontFamily = new FontFamily(BoxAppearance.DefaultFontFamily), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly Canvas _weatherHeader = new() { Height = 36, Visibility = Visibility.Collapsed };
-    private readonly LucideIcon _fileShelfAdd = new() { Icon = LucideIconName.Plus, FontSize = 14, Width = 24, Height = 24,
+    private readonly TablerIcon _fileShelfAdd = new() { Icon = TablerIconName.Plus, FontSize = 14, Width = 24, Height = 24,
         HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly Border _fileShelfAddButton = new() { Width = 24, Height = 24,
         HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Collapsed };
@@ -100,19 +103,20 @@ public sealed partial class WidgetPreview : UserControl
         _todoSummary.FontWeight = FontWeights.Normal;
         var appearance = PreviewAppearance ?? new WidgetPreviewAppearance(new(), new());
         var surface = WidgetAppearance.Resolve(widget, appearance.Surface,
-            WidgetAppearance.UsesAcrylic(widget, appearance.Settings.UseAcrylicBoxes, appearance.Settings.WidgetAcrylic),
-            widgetAcrylic: appearance.Settings.WidgetAcrylic);
+            !ForceSolidPreview && WidgetAppearance.UsesAcrylic(widget, appearance.Settings.UseAcrylicBoxes, appearance.Settings.WidgetAcrylic),
+            widgetAcrylic: appearance.Settings.WidgetAcrylic, forceSolid: ForceSolidPreview,
+            colorTheme: ForceSolidPreview ? appearance.CenterColorTheme : null);
         var background = Parse(surface.Background, Color.FromArgb(255, 42, 45, 50));
         _background = background;
         var dark = background.R * .299 + background.G * .587 + background.B * .114 < 150;
         _text = new SolidColorBrush(dark ? Colors.White : Color.FromArgb(255, 31, 35, 41));
         _secondary = new SolidColorBrush(dark ? Color.FromArgb(255, 237, 240, 245) : Color.FromArgb(255, 52, 59, 69));
-        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var solid = IsSolidPreview(widget);
         if (solid)
             _secondary = new SolidColorBrush(dark ? Color.FromArgb(255, 176, 183, 195) : Color.FromArgb(255, 102, 113, 128));
         _accent = new SolidColorBrush(Parse(surface.Accent, Color.FromArgb(255, 78, 161, 211)));
         var alpha = surface.Opacity;
-        var hasBackground = DesktopWidgets.HasBackground(widget);
+        var hasBackground = ForceSolidPreview || DesktopWidgets.HasBackground(widget);
         background.A = hasBackground ? (byte)Math.Round(alpha * 255) : (byte)0;
         // Signature cards carry a diagonal wash; a flat brush would
         // preview a different card from the one painted on the desktop.
@@ -272,7 +276,7 @@ public sealed partial class WidgetPreview : UserControl
             panel.Children.Add(new Microsoft.UI.Xaml.Shapes.Line { X1 = start.X, Y1 = start.Y, X2 = end.X, Y2 = end.Y,
                 Stroke = color, StrokeThickness = thickness, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round });
         }
-        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var solid = IsSolidPreview(widget);
         var faceFill = solid ? MixContent(_background, _text.Color, .06)
             : _text.Color.R > 128 ? Color.FromArgb(255, 26, 26, 26) : Color.FromArgb(255, 250, 250, 250);
         var rim = solid ? _accent.Color with { A = 65 } : _text.Color with { A = 35 };
@@ -316,8 +320,8 @@ public sealed partial class WidgetPreview : UserControl
         var month = Text(DateTime.Today.ToString("yyyy.MM"), 12.5, bold: true);
         month.VerticalAlignment = VerticalAlignment.Center;
         _calendarHeader.Children.Add(month);
-        var previous = new LucideIcon { Icon = LucideIconName.ChevronLeft, FontSize = 12, Foreground = _text };
-        var next = new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _text };
+        var previous = new TablerIcon { Icon = TablerIconName.ChevronLeft, FontSize = 12, Foreground = _text };
+        var next = new TablerIcon { Icon = TablerIconName.ChevronRight, FontSize = 12, Foreground = _text };
         var todayLabel = Text("今", 11.5); todayLabel.TextAlignment = TextAlignment.Center; todayLabel.VerticalAlignment = VerticalAlignment.Center;
         var todayFill = _text.Color; todayFill.A = 14;
         var todayButton = new Border { Child = todayLabel, Height = 24, VerticalAlignment = VerticalAlignment.Center,
@@ -422,13 +426,13 @@ public sealed partial class WidgetPreview : UserControl
                     var line = _text.Color; line.A = 20;
                     Place(new Border { Background = new SolidColorBrush(line) }, 4, rowTop, width - 10, 1);
                 }
-                Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, 4, rowTop + 6, 16, 16);
+                Place(new TablerIcon { Icon = TablerIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, 4, rowTop + 6, 16, 16);
                 var caption = Text($"已完成 · {widget.Tasks.Count(task => task.IsCompleted)}", 11, true); caption.VerticalAlignment = VerticalAlignment.Center;
                 Place(caption, 28, rowTop + 2, width - 36, 24);
             }
             else if (item.Task is { } task)
             {
-                var check = new LucideIcon { Icon = task.IsCompleted ? LucideIconName.SquareCheck : LucideIconName.Square,
+                var check = new TablerIcon { Icon = task.IsCompleted ? TablerIconName.SquareCheck : TablerIconName.Square,
                     FontSize = 18, Foreground = task.IsCompleted ? _accent : _secondary };
                 Place(check, 3.5, rowTop + 6, 18, 18);
                 var title = Text(task.Text, 12.5); title.VerticalAlignment = VerticalAlignment.Center;
@@ -536,7 +540,7 @@ public sealed partial class WidgetPreview : UserControl
             header.Foreground = ink; header.VerticalAlignment = VerticalAlignment.Center;
             Place(header, left + 22, -4, Math.Max(0, fieldWidth - 58), 28);
             var enabled = column == 0 ? !string.IsNullOrEmpty(widget.Text) : !string.IsNullOrWhiteSpace(widget.Translation);
-            Place(new LucideIcon { Icon = column == 0 ? LucideIconName.Eraser : LucideIconName.Copy, FontSize = 16,
+            Place(new TablerIcon { Icon = column == 0 ? TablerIconName.Eraser : TablerIconName.Copy, FontSize = 16,
                 Foreground = enabled ? ink : disabled }, left + fieldWidth - 28, -4, 28, 28);
             var value = column == 0 ? widget.Text : widget.Translation;
             var empty = string.IsNullOrWhiteSpace(value);
@@ -580,21 +584,21 @@ public sealed partial class WidgetPreview : UserControl
             var text = Text(value, fontSize, secondary, bold); text.VerticalAlignment = VerticalAlignment.Center;
             Place(text, bounds);
         }
-        void Metric(LucideIconName icon, string value, LayoutRect bounds)
+        void Metric(TablerIconName icon, string value, LayoutRect bounds)
         {
-            var asset = icon switch { LucideIconName.Thermometer => "content-temperature", LucideIconName.Droplets => "content-humidity", LucideIconName.Wind => "content-wind", _ => null };
-            if (asset is null) Place(new LucideIcon { Icon = icon, FontSize = 13, Foreground = _secondary }, bounds with { Width = 14 });
+            var asset = icon switch { TablerIconName.Thermometer => "content-temperature", TablerIconName.Droplets => "content-humidity", TablerIconName.Wind => "content-wind", _ => null };
+            if (asset is null) Place(new TablerIcon { Icon = icon, FontSize = 13, Foreground = _secondary }, bounds with { Width = 14 });
             else Place(ContentIcon(asset, 16), bounds with { Width = 16 });
             Label(value, 12.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19 }, true);
         }
         // Wide cards keep the header free of location controls; only the city
         // name stays so the summary column has room.
         if (layout.Location.Width > 0)
-            Place(new LucideIcon { Icon = LucideIconName.Locate, FontSize = 16, Foreground = _text }, layout.Location, true);
+            Place(new TablerIcon { Icon = TablerIconName.CurrentLocation, FontSize = 16, Foreground = _text }, layout.Location, true);
         var cityText = Text(widget.Location is { } city ? $"{city.Name} ⌄" : widget.DisplayTitle, 13, bold: true);
         cityText.VerticalAlignment = VerticalAlignment.Center; Place(cityText, layout.City, true);
         if (layout.Locations.Width > 0)
-            Place(new LucideIcon { Icon = LucideIconName.MapPin, FontSize = 15, Foreground = _accent }, layout.Locations, true);
+            Place(new TablerIcon { Icon = TablerIconName.MapPin, FontSize = 15, Foreground = _accent }, layout.Locations, true);
         if (width >= 300)
         {
             WideWeather(widget, layout);
@@ -604,22 +608,22 @@ public sealed partial class WidgetPreview : UserControl
         Place(new WidgetColorIcon { AssetName = WidgetIconCatalog.GetWeatherName(widget.Weather, DateTimeOffset.Now) }, layout.Icon);
         if (widget.Weather is { } forecast)
         {
-            if (forecast.FeelsLike is { } feelsLike) Metric(LucideIconName.Thermometer, $"{feelsLike:0}°", layout.FeelsLike);
+            if (forecast.FeelsLike is { } feelsLike) Metric(TablerIconName.Thermometer, $"{feelsLike:0}°", layout.FeelsLike);
             Label($"{forecast.Description} · {forecast.Minimum:0}° / {forecast.Maximum:0}°", 12, layout.Forecast, true);
             if (forecast.Humidity is { } humidity)
             {
-                Metric(LucideIconName.Droplets, $"{(width >= 300 ? "湿度 " : "")}{humidity:0}%", layout.Humidity);
+                Metric(TablerIconName.Droplets, $"{(width >= 300 ? "湿度 " : "")}{humidity:0}%", layout.Humidity);
             }
             if (forecast.WindSpeed is { } wind)
             {
-                Metric(LucideIconName.Wind, $"{(width >= 300 ? "风速 " : "")}{wind:0} km/h", layout.Wind);
+                Metric(TablerIconName.Wind, $"{(width >= 300 ? "风速 " : "")}{wind:0} km/h", layout.Wind);
             }
             var statusFill = _text.Color; statusFill.A = 14;
             Place(new Border { Background = new SolidColorBrush(statusFill), CornerRadius = new CornerRadius(8) }, layout.Status);
-            Metric(forecast.AirQuality is not null ? LucideIconName.Gauge : LucideIconName.ChevronRight,
+            Metric(forecast.AirQuality is not null ? TablerIconName.Gauge : TablerIconName.ChevronRight,
                 widget.IsLoading ? "正在更新…" : !string.IsNullOrEmpty(widget.Error) ? widget.Error :
                 forecast.AirQuality is { } air ? $"AQI {air:0}" : "查看天气详情", layout.Status with { X = layout.Status.X + 8, Width = layout.Status.Width - 32 });
-            Place(new LucideIcon { Icon = LucideIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, layout.Status with { X = layout.Status.X + layout.Status.Width - 20, Width = 12 });
+            Place(new TablerIcon { Icon = TablerIconName.ChevronRight, FontSize = 12, Foreground = _secondary }, layout.Status with { X = layout.Status.X + layout.Status.Width - 20, Width = 12 });
         }
         else Label("搜索所在城市查看天气", 12, layout.Forecast, true);
         var cityIndex = widget.Cities.FindIndex(city => city.Id == widget.ActiveCityId) + 1;
@@ -655,7 +659,7 @@ public sealed partial class WidgetPreview : UserControl
             var cell = WidgetMonitorPresentation.PerformanceCell(body, index); var metric = metrics[index];
             var wide = body.Width >= 300;
             var asset = WidgetContentVisuals.PerformanceAsset(index);
-            var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+            var solid = IsSolidPreview(widget);
             var rowInk = solid ? _text.Color : ContentTone(asset).Color;
             rowInk.A = (byte)(solid ? 6 : 16);
             Place(new Border { Background = new SolidColorBrush(rowInk), CornerRadius = new CornerRadius(7) },
@@ -688,13 +692,13 @@ public sealed partial class WidgetPreview : UserControl
         var snapshot = widget.Controls;
         // Same ink rule as the desktop card, so the thumbnail shows the colours
         // the user will actually get.
-        var ink = widget.ControlCenterLightText is true ? Color.FromArgb(255, 255, 255, 255)
+        var ink = ForceSolidPreview ? _text.Color : widget.ControlCenterLightText is true ? Color.FromArgb(255, 255, 255, 255)
             : widget.ControlCenterLightText is false ? Color.FromArgb(255, 31, 35, 41) : _text.Color;
-        var softInk = widget.ControlCenterLightText is true ? Color.FromArgb(255, 214, 220, 230)
+        var softInk = ForceSolidPreview ? _secondary.Color : widget.ControlCenterLightText is true ? Color.FromArgb(255, 214, 220, 230)
             : widget.ControlCenterLightText is false ? Color.FromArgb(255, 70, 78, 90) : _secondary.Color;
         var baseColor = _background;
         var surfaceInk = _text.Color;
-        var solid = widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
+        var solid = IsSolidPreview(widget);
         var panelFill = MixContent(baseColor, surfaceInk, solid ? .04 : .10);
         TextBlock ControlText(string value, double size = 12, bool secondary = false)
         {
@@ -739,18 +743,18 @@ public sealed partial class WidgetPreview : UserControl
                     VerticalAlignment = VerticalAlignment.Center,
                     Children =
                     {
-                        new LucideIcon { Icon = action switch
+                        new TablerIcon { Icon = action switch
                         {
-                            ControlCenterQuickAction.WiFi => snapshot?.WiFiEnabled is false ? LucideIconName.WifiOff : LucideIconName.Wifi,
-                            ControlCenterQuickAction.Bluetooth => LucideIconName.Bluetooth,
-                            ControlCenterQuickAction.NightLight => snapshot?.NightLightEnabled is false ? LucideIconName.Sun : LucideIconName.Moon,
-                            ControlCenterQuickAction.Display => LucideIconName.Monitor,
-                            ControlCenterQuickAction.Cast => LucideIconName.Cast,
-                            ControlCenterQuickAction.Microphone => LucideIconName.Mic,
-                            ControlCenterQuickAction.ApplicationVolume => LucideIconName.SlidersHorizontal,
-                            ControlCenterQuickAction.ScreenCapture => LucideIconName.ScanLine,
-                            ControlCenterQuickAction.NetworkAdapters => LucideIconName.Network,
-                            _ => LucideIconName.Cog
+                            ControlCenterQuickAction.WiFi => snapshot?.WiFiEnabled is false ? TablerIconName.WifiOff : TablerIconName.Wifi,
+                            ControlCenterQuickAction.Bluetooth => TablerIconName.Bluetooth,
+                            ControlCenterQuickAction.NightLight => snapshot?.NightLightEnabled is false ? TablerIconName.Sun : TablerIconName.Moon,
+                            ControlCenterQuickAction.Display => TablerIconName.DeviceDesktop,
+                            ControlCenterQuickAction.Cast => TablerIconName.Cast,
+                            ControlCenterQuickAction.Microphone => TablerIconName.Microphone,
+                            ControlCenterQuickAction.ApplicationVolume => TablerIconName.AdjustmentsHorizontal,
+                            ControlCenterQuickAction.ScreenCapture => TablerIconName.Scan,
+                            ControlCenterQuickAction.NetworkAdapters => TablerIconName.Network,
+                            _ => TablerIconName.Settings
                         }, FontSize = 22, Width = 22, Height = 22, Foreground = new SolidColorBrush(solid && on ? Colors.White : available ? tone : softInk),
                             HorizontalAlignment = HorizontalAlignment.Center, Opacity = available ? 1 : .45 },
                         new TextBlock { Text = ControlQuickActions.Label(action, snapshot), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
@@ -768,7 +772,7 @@ public sealed partial class WidgetPreview : UserControl
                 var content = tile.Child;
                 tile.Child = null;
                 var combined = new Grid(); combined.Children.Add(content);
-                combined.Children.Add(new LucideIcon { Icon = LucideIconName.ChevronRight, Width = 10, Height = 12,
+                combined.Children.Add(new TablerIcon { Icon = TablerIconName.ChevronRight, Width = 10, Height = 12,
                     HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
                     Margin = new Thickness(0, 8, 5, 0),
                     Foreground = tileInk });
@@ -782,15 +786,15 @@ public sealed partial class WidgetPreview : UserControl
         Slider("音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent,
             new LayoutRect(sliders.X, sliders.Y, half, sliders.Height), labelInset: 26, valueInset: 26);
         var muteButton = ControlCenterPresentation.VolumeMuteButton(body);
-        Place(new LucideIcon { Icon = snapshot?.VolumeMuted is true ? LucideIconName.VolumeX : LucideIconName.Volume2,
+        Place(new TablerIcon { Icon = snapshot?.VolumeMuted is true ? TablerIconName.VolumeOff : TablerIconName.Volume,
             FontSize = 14, Foreground = new SolidColorBrush(ink), Opacity = snapshot?.VolumeMuted is not null ? 1 : .4 },
             new LayoutRect(muteButton.X + 4, muteButton.Y + 3, 14, 14));
         var mixerButton = ControlCenterPresentation.VolumeMixerButton(body);
-        Place(new LucideIcon { Icon = LucideIconName.SlidersHorizontal, Foreground = new SolidColorBrush(ink) },
+        Place(new TablerIcon { Icon = TablerIconName.AdjustmentsHorizontal, Foreground = new SolidColorBrush(ink) },
             new LayoutRect(mixerButton.X + 4, mixerButton.Y + 3, 14, 14));
         Slider("亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent,
             new LayoutRect(sliders.X + half + 14, sliders.Y, half, sliders.Height), labelInset: 20);
-        Place(new LucideIcon { Icon = LucideIconName.Sun, FontSize = 16, Foreground = new SolidColorBrush(ink),
+        Place(new TablerIcon { Icon = TablerIconName.Sun, FontSize = 16, Foreground = new SolidColorBrush(ink),
             Opacity = snapshot?.BrightnessPercent is null ? .45 : 1 },
             new(sliders.X + half + 14, sliders.Y, 16, 16));
 
@@ -826,9 +830,9 @@ public sealed partial class WidgetPreview : UserControl
         displayLabel.VerticalAlignment = VerticalAlignment.Center;
         displayLabel.Margin = new Thickness(28, 0, 24, 0);
         var displayContent = new Grid(); displayContent.Children.Add(displayLabel);
-        displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.Monitor, FontSize = 14, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink),
+        displayContent.Children.Add(new TablerIcon { Icon = TablerIconName.DeviceDesktop, FontSize = 14, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink),
             HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(8, 0, 0, 0) });
-        displayContent.Children.Add(new LucideIcon { Icon = LucideIconName.ChevronsUpDown, Width = 13, Height = 13,
+        displayContent.Children.Add(new TablerIcon { Icon = TablerIconName.Selector, Width = 13, Height = 13,
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 8, 0), Foreground = new SolidColorBrush(softInk) });
         Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, solid ? .04 : .14)), Child = displayContent },
             ControlCenterPresentation.BrightnessDisplayRow(body));
@@ -842,16 +846,16 @@ public sealed partial class WidgetPreview : UserControl
                 Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    new LucideIcon { Icon = snapshot?.OutputDeviceName is { } output &&
+                    new TablerIcon { Icon = snapshot?.OutputDeviceName is { } output &&
                         (output.Contains("耳机") || output.Contains("headphone", StringComparison.OrdinalIgnoreCase) || output.Contains("headset", StringComparison.OrdinalIgnoreCase))
-                        ? LucideIconName.Headphones : LucideIconName.Volume2, FontSize = 14, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
+                        ? TablerIconName.Headphones : TablerIconName.Volume, FontSize = 14, Width = 14, Height = 14, Foreground = new SolidColorBrush(ink) },
                     ControlText(snapshot?.OutputDeviceName is { Length: > 0 } outputName ? outputName : "输出设备不可用", 10.5, true)
                 }
             }
         };
         Place(outputRow, ControlCenterPresentation.OutputRow(media));
         Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, solid ? .04 : .14)),
-            Child = new LucideIcon { Icon = LucideIconName.Mic, FontSize = 14, Foreground = new SolidColorBrush(ink) } },
+            Child = new TablerIcon { Icon = TablerIconName.Microphone, FontSize = 14, Foreground = new SolidColorBrush(ink) } },
             ControlCenterPresentation.MicrophoneButton(body));
 
         var mediaPanel = ControlCenterPresentation.MediaPanel(media);
@@ -864,18 +868,41 @@ public sealed partial class WidgetPreview : UserControl
             artwork.Child = cover;
             _ = LoadMediaArtworkAsync(cover, bytes);
         }
-        else artwork.Child = new LucideIcon { Icon = LucideIconName.Music, FontSize = 24, Foreground = new SolidColorBrush(softInk) };
+        else
+        {
+            // The player's brand logo identifies the source when no cover art is
+            // available; the same logo is drawn on the desktop runtime card.
+            var logo = new Image { Stretch = Stretch.Uniform, Width = 22, Height = 22,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            if (MediaPlayerIcons.TryGetLogoBytes(trackMedia?.SourceAppId) is { } logoBytes)
+            {
+                artwork.Child = logo;
+                _ = LoadMediaArtworkAsync(logo, logoBytes);
+            }
+            else artwork.Child = new TablerIcon { Icon = TablerIconName.Music, FontSize = 24, Foreground = new SolidColorBrush(softInk) };
+        }
+        if (trackMedia is null)
+        {
+            Place(artwork, ControlCenterPresentation.EmptyMediaArtwork(mediaPanel));
+            var emptyLabel = ControlText("没有正在播放的媒体", 11.5, true);
+            emptyLabel.VerticalAlignment = VerticalAlignment.Center;
+            var emptyContent = new Grid();
+            emptyContent.Children.Add(emptyLabel);
+            Place(emptyContent, ControlCenterPresentation.EmptyMediaTitle(mediaPanel));
+            CardBody.Children.Add(panel);
+            return;
+        }
         Place(artwork, ControlCenterPresentation.MediaArtwork(mediaPanel));
         Place(ControlText(trackMedia is null ? "没有正在播放的媒体" : string.IsNullOrWhiteSpace(trackMedia.Title) ? "未知曲目" : trackMedia.Title, 11.5),
             ControlCenterPresentation.MediaTitle(mediaPanel));
         Place(ControlText(trackMedia is null ? "" : string.IsNullOrWhiteSpace(trackMedia.Artist) ? trackMedia.Album : trackMedia.Artist, 10, true),
             ControlCenterPresentation.MediaArtist(mediaPanel));
         var buttons = ControlCenterPresentation.MediaButtonRects(mediaPanel);
-        var icons = new[] { LucideIconName.SkipBack, trackMedia?.IsPlaying is true ? LucideIconName.Pause : LucideIconName.Play, LucideIconName.SkipForward };
+        var icons = new[] { TablerIconName.PlayerSkipBack, trackMedia?.IsPlaying is true ? TablerIconName.PlayerPause : TablerIconName.PlayerPlay, TablerIconName.PlayerSkipForward };
         for (var index = 0; index < buttons.Length; index++)
         {
             var button = buttons[index];
-            Place(new LucideIcon { Icon = icons[index], Foreground = new SolidColorBrush(ink),
+            Place(new TablerIcon { Icon = icons[index], Foreground = new SolidColorBrush(ink),
                 Opacity = trackMedia is null ? .35 : 1 }, new(button.X + (button.Width - 15) / 2, button.Y + 3.5, 15, 15));
         }
         if (trackMedia is { Duration.TotalSeconds: > 0 })
@@ -939,25 +966,25 @@ public sealed partial class WidgetPreview : UserControl
             if (rightAligned) label.TextAlignment = TextAlignment.Right;
             Place(label, bounds);
         }
-        void Speed(LucideIconName direction, string? caption, double? speed, LayoutRect bounds, SolidColorBrush? ink = null, bool compact = false)
+        void Speed(TablerIconName direction, string? caption, double? speed, LayoutRect bounds, SolidColorBrush? ink = null, bool compact = false)
         {
-            var asset = direction == LucideIconName.ArrowUpToLine ? "content-upload" : "content-download";
+            var asset = direction == TablerIconName.ArrowBarToUp ? "content-upload" : "content-download";
             if (compact)
             {
-                Place(new LucideIcon { Icon = direction, FontSize = 18, Foreground = ContentTone(asset) }, bounds with { Width = 18 });
+                Place(new TablerIcon { Icon = direction, FontSize = 18, Foreground = ContentTone(asset) }, bounds with { Width = 18 });
                 SpeedValue(speed, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, 18, rightAligned: true);
                 return;
             }
-            Place(ContentWash(asset, widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid ? (byte)10 : (byte)18),
+            Place(ContentWash(asset, IsSolidPreview(widget) ? (byte)10 : (byte)18),
                 bounds with { X = bounds.X - 3, Y = bounds.Y - 2, Width = bounds.Width + 6, Height = bounds.Height + 4 });
             if (caption is null)
             {
-                Place(new LucideIcon { Icon = direction, FontSize = 16, Foreground = ContentTone(asset) },
+                Place(new TablerIcon { Icon = direction, FontSize = 16, Foreground = ContentTone(asset) },
                     bounds with { Y = bounds.Y + (bounds.Height - 16) / 2, Width = 16, Height = 16 });
                 SpeedValue(speed, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, 21);
                 return;
             }
-            Place(new LucideIcon { Icon = direction, FontSize = 16, Foreground = ContentTone(asset) }, bounds with { Width = 16, Height = 16 });
+            Place(new TablerIcon { Icon = direction, FontSize = 16, Foreground = ContentTone(asset) }, bounds with { Width = 16, Height = 16 });
             Label(caption, 10.5, bounds with { X = bounds.X + 19, Width = bounds.Width - 19, Height = 14 }, true);
             SpeedValue(speed, bounds with { Y = bounds.Y + 14, Height = bounds.Height - 14 }, bounds.Height < 40 ? 20 : 21);
         }
@@ -971,8 +998,8 @@ public sealed partial class WidgetPreview : UserControl
         if (speedsOnly)
         {
             var speeds = WidgetNetworkGraph.SpeedLayout(width, height, radius);
-            Speed(LucideIconName.ArrowDownToLine, "下载", network?.DownloadBytesPerSecond, speeds.Download, _accent, width < 300);
-            Speed(LucideIconName.ArrowUpToLine, "上传", network?.UploadBytesPerSecond, speeds.Upload, uploadInk, width < 300);
+            Speed(TablerIconName.ArrowBarToDown, "下载", network?.DownloadBytesPerSecond, speeds.Download, _accent, width < 300);
+            Speed(TablerIconName.ArrowBarToUp, "上传", network?.UploadBytesPerSecond, speeds.Upload, uploadInk, width < 300);
             CardBody.Children.Add(panel);
             return;
         }
@@ -981,8 +1008,8 @@ public sealed partial class WidgetPreview : UserControl
             // One curve style now: headline speeds above a plot that fills the
             // rest of the card.
             var layout = WidgetNetworkGraph.CurveLayout(width, height, radius);
-            Speed(LucideIconName.ArrowDownToLine, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
-            Speed(LucideIconName.ArrowUpToLine, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
+            Speed(TablerIconName.ArrowBarToDown, "下载", network?.DownloadBytesPerSecond, layout.Download, _accent);
+            Speed(TablerIconName.ArrowBarToUp, "上传", network?.UploadBytesPerSecond, layout.Upload, uploadInk);
             var graph = WidgetNetworkGraph.Project(widget.NetworkHistory, layout.Plot, DateTimeOffset.Now);
             var plot = new Canvas();
             var gridColor = _text.Color; gridColor.A = 24;
@@ -1025,12 +1052,12 @@ public sealed partial class WidgetPreview : UserControl
             CardBody.Children.Add(panel);
             return;
         }
-        Speed(LucideIconName.ArrowDownToLine, null, network?.DownloadBytesPerSecond, fields.Download);
-        Speed(LucideIconName.ArrowUpToLine, null, network?.UploadBytesPerSecond, fields.Upload);
-        Place(new LucideIcon { Icon = LucideIconName.Network, FontSize = 16, Foreground = ContentTone("content-network"),
+        Speed(TablerIconName.ArrowBarToDown, null, network?.DownloadBytesPerSecond, fields.Download);
+        Speed(TablerIconName.ArrowBarToUp, null, network?.UploadBytesPerSecond, fields.Upload);
+        Place(new TablerIcon { Icon = TablerIconName.Network, FontSize = 16, Foreground = ContentTone("content-network"),
             Opacity = network?.IsConnected is false ? .45 : 1 }, fields.Connection with { Y = fields.Connection.Y + 1, Width = 16, Height = 16 });
         Label(WidgetMonitorPresentation.ConnectionText(network), 11.5, fields.Connection with { X = fields.Connection.X + 21, Width = Math.Max(0, fields.Connection.Width - 21) }, true);
-        Place(new LucideIcon { Icon = LucideIconName.Clock, FontSize = 16, Foreground = ContentTone("content-latency") },
+        Place(new TablerIcon { Icon = TablerIconName.Clock, FontSize = 16, Foreground = ContentTone("content-latency") },
             fields.Latency with { Y = fields.Latency.Y + 1, Width = 16, Height = 16 });
         Label(network?.LatencyMilliseconds is { } latency ? "延迟 " + latency + " ms" : "延迟 " + (network?.LatencyStatus ?? "等待测量"), 11,
             fields.Latency with { X = fields.Latency.X + 21, Width = Math.Max(0, fields.Latency.Width - 21) }, true);

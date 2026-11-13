@@ -44,7 +44,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Assets\lucide.ttf" LogicalName="Assets.lucide.ttf" />
+    <EmbeddedResource Include="Assets\tabler-icons.ttf" LogicalName="Assets.tabler-icons.ttf" />
     <EmbeddedResource Include="Assets\CrabDesk-256.png" LogicalName="Assets.CrabDesk-256.png" />
     <EmbeddedResource Include="Assets\CrabDesk.ico" LogicalName="Assets.CrabDesk.ico" />
   </ItemGroup>

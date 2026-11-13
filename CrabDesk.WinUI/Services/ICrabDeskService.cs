@@ -7,6 +7,7 @@ public interface ICrabDeskService
     event EventHandler? Changed;
     CrabDeskState State { get; }
     bool IsPaused { get; }
+    bool IsWidgetCenterVisible { get; }
     bool DesktopConnected { get; }
     bool IsCheckingForUpdates { get; }
     bool IsDownloadingUpdate { get; }
@@ -49,6 +50,14 @@ public interface ICrabDeskService
     void SetMappedFolderCategoryTabsEnabled(DesktopBox box, bool enabled);
     void DeleteBox(DesktopBox box);
     void BoxChanged(DesktopBox box, bool rebuild = false);
+    void SetWidgetCenterEnabled(bool enabled);
+    void SetWidgetCenterThemeMode(ApplicationThemeMode mode);
+    void ShowWidgetCenter();
+    void HideWidgetCenter();
+    void ToggleWidgetCenter();
+    DesktopWidget AddWidgetToCenter(DesktopWidgetKind kind);
+    void MoveWidgetToCenter(DesktopWidget widget);
+    void MoveWidgetToDesktop(DesktopWidget widget);
     void SetHotkey(HotkeyAction action, bool enabled, HotkeyModifiers modifiers, HotkeyKey key);
     Task<LayoutBackupInfo> CreateBackupAsync();
     Task<IReadOnlyList<LayoutBackupInfo>> GetBackupsAsync();
@@ -126,6 +135,10 @@ public interface ICrabDeskService
     void SetSelectionColor(string value);
     void SetIconLabelFontSize(double value);
     void SetIconLabelFontFamily(string value);
+    void SetIconSkinEnabled(bool enabled);
+    void SetShowShortcutArrow(bool show);
+    void SetIconSkinPlates(string appPlate, string folderPlate);
+    void SetIconSkinBadgeColor(string value);
     void SetBoxBackground(Guid? boxId, string value);
     void SetBoxAccent(Guid? boxId, string value);
     void SetBoxOpacity(Guid? boxId, double value);

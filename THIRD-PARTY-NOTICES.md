@@ -1,5 +1,21 @@
 # Third-party notices
 
+## Tabler Icons 3.51.0
+
+CrabDesk draws its interface and desktop icons with
+[Tabler Icons](https://github.com/tabler/tabler-icons), shipped as the bundled
+`tabler-icons.ttf` webfont. CrabDesk's own commands stay monochrome; third-party
+brand logos may keep their official colors when they identify a content source
+(media players, cloud drives, AI services) and are the responsibility of the
+feature that embeds them.
+
+MIT License. Copyright (c) 2020-2026 Paweł Kuna.
+The complete license is included in
+[licenses/Tabler-Icons-LICENSE.txt](licenses/Tabler-Icons-LICENSE.txt).
+
+Regenerate the font and glyph tables with `node tools/generate-tabler-icons.mjs`
+(verified by `--check`).
+
 ## Microsoft.Diagnostics.Tracing.TraceEvent 3.2.8
 
 Network process ranking uses Microsoft's TraceEvent library from

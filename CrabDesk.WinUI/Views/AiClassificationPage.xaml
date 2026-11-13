@@ -3,7 +3,7 @@
     x:Name="RootPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+    xmlns:tabler="using:CrabDesk.WinUI.Controls">
     <Page.Resources>
         <!-- One agent timeline row: status icon + display text (+ spinner while running) -->
         <DataTemplate x:Key="AiActivityRowTemplate">
@@ -13,19 +13,19 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <lucide:LucideIcon Icon="Sparkles" FontSize="12"
+                <tabler:TablerIcon Icon="Sparkles" FontSize="12"
                                    Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                    VerticalAlignment="Center"
                                    Visibility="{Binding IsRunning, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <lucide:LucideIcon Icon="Check" FontSize="12"
+                <tabler:TablerIcon Icon="Check" FontSize="12"
                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
                                    VerticalAlignment="Center"
                                    Visibility="{Binding IsClassified, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <lucide:LucideIcon Icon="CircleAlert" FontSize="12"
+                <tabler:TablerIcon Icon="AlertCircle" FontSize="12"
                                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                    VerticalAlignment="Center"
                                    Visibility="{Binding IsUncertain, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <lucide:LucideIcon Icon="Square" FontSize="10"
+                <tabler:TablerIcon Icon="Square" FontSize="10"
                                    Foreground="{ThemeResource SecondaryTextBrush}"
                                    VerticalAlignment="Center"
                                    Visibility="{Binding IsStopped, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -71,7 +71,7 @@
                                 ToolTipService.ToolTip="刷新桌面图标"
                                 AutomationProperties.Name="刷新桌面图标">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <lucide:LucideIcon Icon="RefreshCw" FontSize="15" />
+                                <tabler:TablerIcon Icon="Refresh" FontSize="15" />
                                 <TextBlock Text="刷新" />
                             </StackPanel>
                         </Button>
@@ -79,7 +79,7 @@
                                 Command="{Binding SelectAllCommand}"
                                 ToolTipService.ToolTip="选择全部桌面图标">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <lucide:LucideIcon Icon="CheckCheck" FontSize="15" />
+                                <tabler:TablerIcon Icon="Checks" FontSize="15" />
                                 <TextBlock Text="全选" />
                             </StackPanel>
                         </Button>
@@ -87,7 +87,7 @@
                                 Command="{Binding ClearSelectionCommand}"
                                 ToolTipService.ToolTip="清除全部选择">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <lucide:LucideIcon Icon="SquareDashed" FontSize="15" />
+                                <tabler:TablerIcon Icon="SquareDashed" FontSize="15" />
                                 <TextBlock Text="清除" />
                             </StackPanel>
                         </Button>
@@ -162,7 +162,7 @@
                                                             ToolTipService.ToolTip="切换选择"
                                                             AutomationProperties.Name="切换桌面图标选择">
                                                         <Grid Width="48" Height="48">
-                                                            <lucide:LucideIcon Icon="File"
+                                                            <tabler:TablerIcon Icon="File"
                                                                                FontSize="32"
                                                                                HorizontalAlignment="Center"
                                                                                VerticalAlignment="Center"
@@ -224,16 +224,16 @@
                                                                         <ColumnDefinition Width="*" />
                                                                         <ColumnDefinition Width="Auto" />
                                                                     </Grid.ColumnDefinitions>
-                                                                    <lucide:LucideIcon Icon="Check" FontSize="11" VerticalAlignment="Center"
+                                                                    <tabler:TablerIcon Icon="Check" FontSize="11" VerticalAlignment="Center"
                                                                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
                                                                                        Visibility="{Binding ShowsAiLabel, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                    <lucide:LucideIcon Icon="PenLine" FontSize="11" VerticalAlignment="Center"
+                                                                    <tabler:TablerIcon Icon="Edit" FontSize="11" VerticalAlignment="Center"
                                                                                        Foreground="{ThemeResource SystemFillColorAttentionBrush}"
                                                                                        Visibility="{Binding IsManuallyLabeled, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                    <lucide:LucideIcon Icon="Ban" FontSize="11" VerticalAlignment="Center"
+                                                                    <tabler:TablerIcon Icon="Ban" FontSize="11" VerticalAlignment="Center"
                                                                                        Foreground="{ThemeResource SecondaryTextBrush}"
                                                                                        Visibility="{Binding IsExcluded, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                    <lucide:LucideIcon Icon="CircleAlert" FontSize="11" VerticalAlignment="Center"
+                                                                    <tabler:TablerIcon Icon="AlertCircle" FontSize="11" VerticalAlignment="Center"
                                                                                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                                                                        Visibility="{Binding IsUncertain, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                                     <TextBlock Grid.Column="1"
@@ -241,7 +241,7 @@
                                                                                FontSize="11.5"
                                                                                TextTrimming="CharacterEllipsis"
                                                                                VerticalAlignment="Center" />
-                                                                    <lucide:LucideIcon Grid.Column="2" Icon="ChevronDown" FontSize="10" VerticalAlignment="Center"
+                                                                    <tabler:TablerIcon Grid.Column="2" Icon="ChevronDown" FontSize="10" VerticalAlignment="Center"
                                                                                        Foreground="{ThemeResource SecondaryTextBrush}" />
                                                                 </Grid>
                                                             </Grid>
@@ -270,7 +270,7 @@
                                     Spacing="8"
                                     IsHitTestVisible="False"
                                     Visibility="{Binding IsWorkspaceEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <lucide:LucideIcon Icon="Inbox" FontSize="32" HorizontalAlignment="Center" />
+                            <tabler:TablerIcon Icon="Inbox" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="当前没有位于桌面的可整理图标" />
                         </StackPanel>
                         <StackPanel HorizontalAlignment="Center"
@@ -278,7 +278,7 @@
                                     Spacing="8"
                                     IsHitTestVisible="False"
                                     Visibility="{Binding HasNoFilterMatches, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <lucide:LucideIcon Icon="SearchX" FontSize="32" HorizontalAlignment="Center" />
+                            <tabler:TablerIcon Icon="SearchOff" FontSize="32" HorizontalAlignment="Center" />
                             <TextBlock Text="{Binding NoFilterMatchesText}" Style="{StaticResource SecondaryBodyStyle}" TextAlignment="Center" />
                         </StackPanel>
                     </Grid>
@@ -303,7 +303,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                             <Border Width="30" Height="30" CornerRadius="15" Background="{ThemeResource AccentFillColorDefaultBrush}">
-                                <lucide:LucideIcon Icon="Sparkles" FontSize="16" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <tabler:TablerIcon Icon="Sparkles" FontSize="16" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <StackPanel Spacing="1">
                                 <TextBlock Text="CrabDesk AI" FontWeight="SemiBold" />
@@ -321,7 +321,7 @@
                                 ToolTipService.ToolTip="AI 设置"
                                 AutomationProperties.Name="打开 AI 设置">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <lucide:LucideIcon Icon="Settings" FontSize="16" />
+                                <tabler:TablerIcon Icon="Settings" FontSize="16" />
                                 <TextBlock Text="设置" />
                             </StackPanel>
                         </Button>
@@ -388,7 +388,7 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
                                                 <Border Width="24" Height="24" CornerRadius="12" Background="{ThemeResource AccentFillColorDefaultBrush}">
-                                                    <lucide:LucideIcon Icon="Sparkles" FontSize="13" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    <tabler:TablerIcon Icon="Sparkles" FontSize="13" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                 </Border>
                                                 <TextBlock Text="CrabDesk AI" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
                                             </StackPanel>
@@ -399,7 +399,7 @@
                                                        VerticalAlignment="Center"
                                                        Margin="4,0,0,0" />
                                             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                <lucide:LucideIcon Icon="CircleAlert" FontSize="13"
+                                                <tabler:TablerIcon Icon="AlertCircle" FontSize="13"
                                                                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                                                                    Visibility="{Binding IsError, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                 <ProgressRing Width="13" Height="13" IsActive="{Binding IsRunning}"
@@ -425,7 +425,7 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                            <lucide:LucideIcon Icon="Brain" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                            <tabler:TablerIcon Icon="Brain" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
                                                             <TextBlock Text="思考过程" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                             <TextBlock Text="{Binding ThinkingStatsText}" Style="{StaticResource SecondaryBodyStyle}" FontSize="10"
                                                                        VerticalAlignment="Center"
@@ -437,7 +437,7 @@
                                                                 Padding="5,2" MinHeight="24" Height="24"
                                                                 Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
                                                                 ToolTipService.ToolTip="复制思考过程" AutomationProperties.Name="复制思考过程">
-                                                            <lucide:LucideIcon Icon="Copy" FontSize="11" />
+                                                            <tabler:TablerIcon Icon="Copy" FontSize="11" />
                                                         </Button>
                                                     </Grid>
                                                 </Expander.Header>
@@ -469,7 +469,7 @@
                                                                 <ColumnDefinition Width="Auto" />
                                                                 <ColumnDefinition Width="Auto" />
                                                             </Grid.ColumnDefinitions>
-                                                            <lucide:LucideIcon Icon="{Binding Icon}" FontSize="12" VerticalAlignment="Center"
+                                                            <tabler:TablerIcon Icon="{Binding Icon}" FontSize="12" VerticalAlignment="Center"
                                                                                Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                                                             <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
                                                                 <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -520,9 +520,9 @@
                                                             ToolTipService.ToolTip="展开或收起分类过程"
                                                             AutomationProperties.Name="切换分类过程显示">
                                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <lucide:LucideIcon Icon="ChevronDown" FontSize="12" VerticalAlignment="Center"
+                                                            <tabler:TablerIcon Icon="ChevronDown" FontSize="12" VerticalAlignment="Center"
                                                                                Visibility="{Binding IsProcessExpanded, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                            <lucide:LucideIcon Icon="ChevronRight" FontSize="12" VerticalAlignment="Center"
+                                                            <tabler:TablerIcon Icon="ChevronRight" FontSize="12" VerticalAlignment="Center"
                                                                                Visibility="{Binding IsProcessExpanded, Converter={StaticResource BooleanNegationToVisibilityConverter}}" />
                                                             <TextBlock Text="过程轨迹" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                             <TextBlock Text="{Binding ClassificationActivitySummary}" FontSize="10" Style="{StaticResource SecondaryBodyStyle}" VerticalAlignment="Center" />
@@ -545,7 +545,7 @@
                                             <!-- Success mark -->
                                             <StackPanel Orientation="Horizontal" Spacing="6"
                                                         Visibility="{Binding ShowSuccessMark, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                <lucide:LucideIcon Icon="CircleCheck" FontSize="13"
+                                                <tabler:TablerIcon Icon="CircleCheck" FontSize="13"
                                                                   Foreground="{ThemeResource SystemFillColorSuccessBrush}"
                                                                   VerticalAlignment="Center" />
                                                 <TextBlock Text="分类完成" FontSize="12" FontWeight="SemiBold"
@@ -565,11 +565,11 @@
                                                                     <ColumnDefinition Width="Auto" />
                                                                 </Grid.ColumnDefinitions>
                                                                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                                    <lucide:LucideIcon Icon="Folder" FontSize="12"
+                                                                    <tabler:TablerIcon Icon="Folder" FontSize="12"
                                                                                        Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                                                                        VerticalAlignment="Center"
                                                                                        Visibility="{Binding IsUncertainGroup, Converter={StaticResource BooleanNegationToVisibilityConverter}}" />
-                                                                    <lucide:LucideIcon Icon="CircleAlert" FontSize="12"
+                                                                    <tabler:TablerIcon Icon="AlertCircle" FontSize="12"
                                                                                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                                                                        VerticalAlignment="Center"
                                                                                        Visibility="{Binding IsUncertainGroup, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -580,7 +580,7 @@
                                                             </Grid>
                                                             <ItemsRepeater ItemsSource="{Binding ItemNames}" Margin="4,0,0,0">
                                                                 <ItemsRepeater.Layout>
-                                                                    <lucide:TagWrapLayout />
+                                                                    <tabler:TagWrapLayout />
                                                                 </ItemsRepeater.Layout>
                                                                 <ItemsRepeater.ItemTemplate>
                                                                     <DataTemplate>
@@ -632,7 +632,7 @@
                                                             <ColumnDefinition Width="Auto" />
                                                         </Grid.ColumnDefinitions>
                                                         <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <lucide:LucideIcon Icon="Braces" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
+                                                            <tabler:TablerIcon Icon="Braces" FontSize="13" Foreground="{ThemeResource AccentFillColorDefaultBrush}" VerticalAlignment="Center" />
                                                             <TextBlock Text="分类结果 JSON" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" />
                                                         </StackPanel>
                                                         <Button Grid.Column="1"
@@ -641,7 +641,7 @@
                                                                 Padding="5,2" MinHeight="24" Height="24"
                                                                 Background="Transparent" BorderBrush="Transparent" BorderThickness="0"
                                                                 ToolTipService.ToolTip="复制 JSON" AutomationProperties.Name="复制分类结果 JSON">
-                                                            <lucide:LucideIcon Icon="Copy" FontSize="11" />
+                                                            <tabler:TablerIcon Icon="Copy" FontSize="11" />
                                                         </Button>
                                                     </Grid>
                                                 </Expander.Header>
@@ -696,7 +696,7 @@
                                         HorizontalContentAlignment="Center"
                                         ToolTipService.ToolTip="对当前勾选的图标运行 AI 分类">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <lucide:LucideIcon Icon="Sparkles" FontSize="15" />
+                                        <tabler:TablerIcon Icon="Sparkles" FontSize="15" />
                                         <TextBlock Text="{Binding ClassifyButtonText}" />
                                     </StackPanel>
                                 </Button>
@@ -709,7 +709,7 @@
                                         HorizontalContentAlignment="Center"
                                         ToolTipService.ToolTip="按当前结果创建盒子并归类；不归类和未勾选的图标保留在桌面">
                                     <StackPanel Orientation="Horizontal" Spacing="5">
-                                        <lucide:LucideIcon Icon="Check" FontSize="14" />
+                                        <tabler:TablerIcon Icon="Check" FontSize="14" />
                                         <TextBlock Text="确认应用" />
                                     </StackPanel>
                                 </Button>
@@ -719,7 +719,7 @@
                                         Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
                                         ToolTipService.ToolTip="终止本次 AI 分类"
                                         AutomationProperties.Name="终止 AI 分类">
-                                    <lucide:LucideIcon Icon="Square" FontSize="14" />
+                                    <tabler:TablerIcon Icon="Square" FontSize="14" />
                                 </Button>
                             </Grid>
                         </StackPanel>

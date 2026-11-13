@@ -54,8 +54,8 @@
              Link="licenses\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\CrabDesk-256.png" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\CrabDesk.Runtime\Assets\lucide.ttf"
-             Link="Assets\lucide.ttf"
+    <Content Include="..\CrabDesk.Runtime\Assets\tabler-icons.ttf"
+             Link="Assets\tabler-icons.ttf"
              CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\CrabDesk.Runtime\Assets\WidgetIcons\*.svg"
              Link="Assets\WidgetIcons\%(Filename)%(Extension)"

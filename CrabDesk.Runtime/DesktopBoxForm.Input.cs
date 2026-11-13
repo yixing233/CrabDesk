@@ -15,7 +15,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private void OnMouseDown(object? sender, Forms.MouseEventArgs eventArgs)
@@ -856,7 +856,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         InvalidateItem(previousHoveredItem);
     }
 
-    private void ClearHoverState()
+    protected override void ClearHoverState()
     {
         _hoverTimer.Stop();
         HideItemHoverOverlay();

@@ -429,7 +429,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.StartWithWindows = StartupRegistration.IsEnabled();
         if (State.Settings.StartWithWindows) StartupRegistration.NormalizeLaunchCommand();
         _trayIcon = new CrabDeskTrayIcon(() => RequestShowSettings(), () => RequestShowSettings("widgets"),
-            () => SetPaused(!IsPaused), RequestExit, () => IsPaused, ApplyContextMenuTheme);
+            () => SetPaused(!IsPaused), RequestExit, () => IsPaused, ApplyContextMenuTheme,
+            OnTrayLeftClick, ToggleWidgetCenter, () => State.Settings.WidgetCenter.Enabled);
         ApplyHotkeys();
         // Expose one desktop-level CrabDesk entry whose secondary commands are
         // handled by the application's single-instance command channel.
@@ -1353,6 +1354,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void NotifyTargetedWorkspaceChanged(Action<DesktopSurfaceManager> refresh)
     {
+        RefreshWidgetCenter();
         _workspaceRevision++;
         try
         {
@@ -2512,9 +2514,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.TakeOverDesktop = !paused;
         if (paused)
         {
-            PauseLyrics();
-            PauseMonitorSampling();
-            foreach (var widget in State.Widgets.Where(widget => widget.IsLocating).ToArray()) CancelWidgetRequest(widget.Id);
+            UpdateWidgetActivity();
+            foreach (var widget in State.Widgets.Where(widget => widget.IsLocating && !IsWidgetActive(widget)).ToArray()) CancelWidgetRequest(widget.Id);
             // 用户主动暂停：接管失败不再自动重试。
             _pausedByTakeoverFailure = false;
             StopTakeoverRetryTimer();
@@ -3002,6 +3003,61 @@ public sealed partial class CrabDeskRuntime : IDisposable
         State.Settings.Appearance.IconLabelFontFamily =
             string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
         NotifyWorkspaceChanged(true);
+    }
+
+    /// <summary>
+    /// Turns the flat icon skin on or off. The skin only changes what CrabDesk
+    /// paints, so this is a redraw — no shell state is written and nothing has to
+    /// be undone when it goes off.
+    /// </summary>
+    public void SetIconSkinEnabled(bool enabled)
+    {
+        if (State.Settings.Appearance.IconSkinEnabled == enabled) return;
+        State.Settings.Appearance.IconSkinEnabled = enabled;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetShowShortcutArrow(bool show)
+    {
+        if (State.Settings.Appearance.ShowShortcutArrow == show) return;
+        State.Settings.Appearance.ShowShortcutArrow = show;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconSkinPlates(string appPlate, string folderPlate)
+    {
+        if (!IsSkinColor(appPlate) || !IsSkinColor(folderPlate)) return;
+        State.Settings.Appearance.IconSkinAppPlate = appPlate;
+        State.Settings.Appearance.IconSkinFolderPlate = folderPlate;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconSkinBadgeColor(string value)
+    {
+        if (!IsSkinColor(value)) return;
+        State.Settings.Appearance.IconSkinBadgeColor = value;
+        NotifyWorkspaceChanged(true);
+    }
+
+    private static bool IsSkinColor(string? value) =>
+        value is { Length: 7 } && value[0] == '#'
+        && value.Skip(1).All(Uri.IsHexDigit);
+
+    /// <summary>
+    /// The appearance options the renderers should apply.
+    /// Both icon surfaces read this so the desktop and the boxes cannot drift.
+    /// </summary>
+    internal IconSkinOptions ResolveIconSkin()
+    {
+        var appearance = State.Settings.Appearance;
+        return IconSkinOptions.FromSettings(
+            appearance.IconSkinEnabled,
+            appearance.IconSkinAppPlate,
+            appearance.IconSkinFolderPlate,
+            appearance.IconSkinBadgeColor) with
+        {
+            ShowShortcutArrow = appearance.ShowShortcutArrow
+        };
     }
 
     public void SetBoxBackground(Guid? boxId, string value)
@@ -4125,6 +4181,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
             return;
         }
         _surfaceManager?.DismissWidgetInputs();
+        DisposeWidgetCenter();
         _disposed = true;
         _trayIcon?.Dispose();
         _trayIcon = null;
@@ -4643,6 +4700,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void NotifyWorkspaceChanged(bool rebuild)
     {
+        RefreshWidgetCenter();
         _workspaceRevision++;
         try
         {
@@ -4898,6 +4956,13 @@ public sealed partial class CrabDeskRuntime : IDisposable
     {
         ApplyHotkey(HotkeyAction.ShowDesktop, State.Settings.Hotkeys.ShowDesktop);
         ApplyHotkey(HotkeyAction.OrganizeDesktop, State.Settings.Hotkeys.OrganizeDesktop);
+        var center = State.Settings.Hotkeys.WidgetCenter;
+        ApplyHotkey(HotkeyAction.WidgetCenter, new HotkeyBinding
+        {
+            Enabled = State.Settings.WidgetCenter.Enabled && center.Enabled,
+            Modifiers = center.Modifiers,
+            Key = center.Key
+        });
     }
 
     private void ApplyHotkey(HotkeyAction action, HotkeyBinding binding)
@@ -4916,6 +4981,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     {
         HotkeyAction.ShowDesktop => State.Settings.Hotkeys.ShowDesktop,
         HotkeyAction.OrganizeDesktop => State.Settings.Hotkeys.OrganizeDesktop,
+        HotkeyAction.WidgetCenter => State.Settings.Hotkeys.WidgetCenter,
         _ => throw new ArgumentOutOfRangeException(nameof(action))
     };
 
@@ -4925,17 +4991,16 @@ public sealed partial class CrabDeskRuntime : IDisposable
         {
             try
             {
-                if (eventArgs.Action == HotkeyAction.ShowDesktop)
+                switch (eventArgs.Action)
                 {
-                    DesktopWindowTools.ToggleDesktop();
-                    return;
+                    case HotkeyAction.ShowDesktop: DesktopWindowTools.ToggleDesktop(); break;
+                    case HotkeyAction.OrganizeDesktop: SmartOrganize(); break;
+                    case HotkeyAction.WidgetCenter: ToggleWidgetCenter(); break;
                 }
-
-                SmartOrganize();
             }
             catch (Exception exception)
             {
-                DiagnosticLog.Error("Hotkey smart organize failed", exception);
+                DiagnosticLog.Error("Global hotkey action failed", exception);
             }
         });
     }
@@ -5513,7 +5578,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
 
     private void OnSystemPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs eventArgs)
     {
-        if (State.Settings.ThemeMode != ApplicationThemeMode.System || _disposed)
+        if (_disposed || (State.Settings.ThemeMode != ApplicationThemeMode.System &&
+            State.Settings.WidgetCenter.ThemeMode != ApplicationThemeMode.System))
         {
             return;
         }
@@ -5674,6 +5740,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     private void ApplyTheme(bool notify)
     {
         IsDarkTheme = ApplicationTheme.ResolveIsDark(State.Settings.ThemeMode);
+        ApplyWidgetCenterTheme();
         _surfaceManager?.Refresh();
         if (notify)
         {

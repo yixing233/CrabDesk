@@ -42,6 +42,29 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <Border x:Name="WidgetCenterHotkeyCard" Style="{StaticResource SectionCardStyle}">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Spacing="6">
+                        <TextBlock Text="组件中心" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding WidgetCenterHint}" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding WidgetCenterStatus}" Foreground="{ThemeResource AccentBrush}"
+                                   Visibility="{Binding WidgetCenterHasStatus, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <ToggleSwitch Style="{StaticResource CompactToggleSwitchStyle}" IsOn="{Binding WidgetCenterEnabled, Mode=TwoWay}"
+                                      IsEnabled="{Binding WidgetCenterAvailable}" AutomationProperties.Name="启用组件中心快捷键" />
+                        <ComboBox Width="132" ItemsSource="{Binding ModifierOptions}" DisplayMemberPath="Label"
+                                  IsEnabled="{Binding WidgetCenterAvailable}"
+                                  SelectedItem="{Binding WidgetCenterModifiers, Mode=TwoWay}" AutomationProperties.Name="组件中心修饰键" />
+                        <TextBox Width="84" MaxLength="3" TextAlignment="Center" IsSpellCheckEnabled="False"
+                                 IsEnabled="{Binding WidgetCenterAvailable}"
+                                 Text="{Binding WidgetCenterKeyText, Mode=TwoWay}"
+                                 ToolTipService.ToolTip="输入 A-Z 或 F1-F12" AutomationProperties.Name="组件中心按键" />
+                    </StackPanel>
+                </Grid>
+            </Border>
         </StackPanel>
     </ScrollViewer>
 </Page>

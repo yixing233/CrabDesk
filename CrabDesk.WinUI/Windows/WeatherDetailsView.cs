@@ -26,9 +26,9 @@ public sealed class WeatherDetailsView : UserControl
     private readonly HashSet<WidgetWeatherAlert> _expandedAlerts = [];
     private string[] _cityLabels = [];
     public ComboBox Cities { get; } = new() { HorizontalAlignment = HorizontalAlignment.Stretch, DisplayMemberPath = nameof(WidgetWeatherCity.DisplayName) };
-    public Button RefreshButton { get; } = new() { Content = new FontIcon { Glyph = "\uE72C", FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
-    public Button CloseButton { get; } = new() { Content = new FontIcon { Glyph = "\uE711", FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
-    public Button LocationsButton { get; } = new() { Content = new LucideIcon { Icon = LucideIconName.MapPin, FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
+    public Button RefreshButton { get; } = new() { Content = new TablerIcon { Icon = TablerIconName.Refresh, FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
+    public Button CloseButton { get; } = new() { Content = new TablerIcon { Icon = TablerIconName.X, FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
+    public Button LocationsButton { get; } = new() { Content = new TablerIcon { Icon = TablerIconName.MapPin, FontSize = 14 }, Width = 32, Height = 32, MinWidth = 32, MinHeight = 32, Padding = new Thickness(0) };
     public ScrollViewer Scroll { get; }
     internal FrameworkElement EntranceContent => (FrameworkElement)_shell.Child;
     private readonly Border _shell;
@@ -206,10 +206,19 @@ public sealed class WeatherDetailsView : UserControl
         for (var i = 0; i < indices.Count; i++)
         {
             var index = indices[i];
-            var glyph = index.Type switch { "uvIndex" or "feelsLike" => "\uE706", "humidity" => "\uEB42", "pressure" => "\uEC4A", "carWash" => "\uE804", "sports" => "\uE805", _ => "\uE946" };
+            // Each life index keeps its own semantic icon instead of a Segoe glyph.
+            var icon = index.Type switch
+            {
+                "uvIndex" or "feelsLike" => TablerIconName.Temperature,
+                "humidity" => TablerIconName.Droplets,
+                "pressure" => TablerIconName.Gauge,
+                "carWash" => TablerIconName.Car,
+                "sports" => TablerIconName.BallBasketball,
+                _ => TablerIconName.InfoCircle
+            };
             var accent = index.Type switch { "uvIndex" or "feelsLike" => _warm, "humidity" or "pressure" => _cool, _ => _green };
             var heading = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            heading.Children.Add(new FontIcon { Glyph = glyph, FontSize = 16, Foreground = accent, VerticalAlignment = VerticalAlignment.Center });
+            heading.Children.Add(new TablerIcon { Icon = icon, FontSize = 16, Foreground = accent, VerticalAlignment = VerticalAlignment.Center });
             heading.Children.Add(Text(index.Name, 12));
             var content = new StackPanel { Spacing = 8 };
             content.Children.Add(heading); content.Children.Add(Text(index.Value, 20, true));

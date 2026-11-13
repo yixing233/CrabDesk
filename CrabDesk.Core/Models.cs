@@ -85,7 +85,8 @@ public enum HotkeyKey
 public enum HotkeyAction
 {
     ShowDesktop,
-    OrganizeDesktop
+    OrganizeDesktop,
+    WidgetCenter
 }
 
 public enum HotkeyRegistrationStatus
@@ -586,6 +587,7 @@ public sealed class AppSettings
     public BackupSettings Backup { get; set; } = new();
     public AiClassificationSettings AiClassification { get; set; } = new();
     public WidgetTranslationSettings WidgetTranslation { get; set; } = new();
+    public WidgetCenterSettings WidgetCenter { get; set; } = new();
     public HotkeySettings Hotkeys { get; set; } = new();
     public UpdateSettings Updates { get; set; } = new();
     public string Language { get; set; } = "zh-CN";
@@ -702,6 +704,11 @@ public sealed class HotkeySettings
         Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
         Key = HotkeyKey.O
     };
+    public HotkeyBinding WidgetCenter { get; set; } = new()
+    {
+        Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
+        Key = HotkeyKey.W
+    };
 }
 
 public sealed class HotkeyBinding
@@ -755,6 +762,15 @@ public sealed class GlobalAppearanceSettings
     // changing the family alone would leave the system icon font in place.
     public string IconLabelFontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
     public double IconLabelFontSize { get; set; } = 9;
+    // The flat icon skin is a pure replacement of what CrabDesk draws — it
+    // never edits .lnk/desktop.ini/registry, so switching it off restores the
+    // stock icons with nothing to undo. Plates follow the same app/folder-file
+    // split the reference look uses.
+    public bool IconSkinEnabled { get; set; }
+    public bool ShowShortcutArrow { get; set; } = true;
+    public string IconSkinAppPlate { get; set; } = "#FFFFFF";
+    public string IconSkinFolderPlate { get; set; } = "#DDE6F2";
+    public string IconSkinBadgeColor { get; set; } = "#FFFFFF";
 }
 
 public sealed class BackupSettings
@@ -793,7 +809,7 @@ public sealed class OrganizationRule
 
 public sealed class CrabDeskState
 {
-    public int SchemaVersion { get; set; } = 24;
+    public int SchemaVersion { get; set; } = 25;
     public AppSettings Settings { get; set; } = new();
     public List<DesktopBox> Boxes { get; set; } = [];
     public List<DesktopWidget> Widgets { get; set; } = [];

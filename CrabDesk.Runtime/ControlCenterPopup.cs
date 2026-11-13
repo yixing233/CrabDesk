@@ -24,7 +24,7 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
     internal Wpf.FrameworkElement ContentView => _content;
 
     protected ControlCenterPopup(string title, bool dark, Color accent, double scale, int width, int height,
-        LucideRuntimeIcon? titleIcon = null, bool detailCard = false, bool animationsEnabled = true, Color? background = null,
+        TablerRuntimeIcon? titleIcon = null, bool detailCard = false, bool animationsEnabled = true, Color? background = null,
         PopupSkeletonLayout? skeleton = null)
     {
         _detailCard = detailCard;
@@ -60,7 +60,7 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
             header.Children.Add(heading);
         }
         else header.Children.Add(titleLabel);
-        var close = IconButton(LucideRuntimeIcon.X, "关闭" + title, detailCard ? 30 : 24);
+        var close = IconButton(TablerRuntimeIcon.X, "关闭" + title, detailCard ? 30 : 24);
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
@@ -95,13 +95,13 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
         VerticalAlignment = Wpf.VerticalAlignment.Center, TextTrimming = Wpf.TextTrimming.CharacterEllipsis
     };
 
-    protected WpfControls.TextBlock Glyph(LucideRuntimeIcon icon, double size = 16) => new()
+    protected WpfControls.TextBlock Glyph(TablerRuntimeIcon icon, double size = 16) => new()
     {
-        Text = LucideRuntimeIcons.GetGlyph(icon), FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(), FontSize = size,
+        Text = TablerRuntimeIcons.GetGlyph(icon), FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(), FontSize = size,
         Foreground = ForegroundInk, VerticalAlignment = Wpf.VerticalAlignment.Center, HorizontalAlignment = Wpf.HorizontalAlignment.Center
     };
 
-    protected Wpf.FrameworkElement ButtonContent(string text, LucideRuntimeIcon? icon = null)
+    protected Wpf.FrameworkElement ButtonContent(string text, TablerRuntimeIcon? icon = null)
     {
         var label = TextLabel(text, 11);
         if (icon is not { } value)
@@ -118,14 +118,14 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
         return content;
     }
 
-    protected WpfControls.Button TextButton(string text, string? name = null, LucideRuntimeIcon? icon = null)
+    protected WpfControls.Button TextButton(string text, string? name = null, TablerRuntimeIcon? icon = null)
     {
         var button = new WpfControls.Button { Content = ButtonContent(text, icon), Height = 28, Style = _buttonStyle, Cursor = Input.Cursors.Hand };
         Automation.SetName(button, name ?? text);
         return button;
     }
 
-    protected WpfControls.Button IconButton(LucideRuntimeIcon icon, string name, double size = 26)
+    protected WpfControls.Button IconButton(TablerRuntimeIcon icon, string name, double size = 26)
     {
         var button = new WpfControls.Button { Content = Glyph(icon), Width = size, Height = size,
             Style = _buttonStyle, ToolTip = name, Cursor = Input.Cursors.Hand };

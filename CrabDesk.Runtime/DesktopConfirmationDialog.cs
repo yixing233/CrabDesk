@@ -251,13 +251,13 @@ internal sealed class DesktopConfirmationDialog : Forms.Form
         var badgeFill = new WpfShapes.Ellipse { Fill = ToBrush(actionTint) };
         var badgeGlyph = new WpfControls.TextBlock
         {
-            Text = LucideRuntimeIcons.GetGlyph(kind switch
+            Text = TablerRuntimeIcons.GetGlyph(kind switch
             {
-                DesktopDialogKind.Warning => LucideRuntimeIcon.TriangleAlert,
-                DesktopDialogKind.Error => LucideRuntimeIcon.CircleAlert,
-                _ => LucideRuntimeIcon.Trash2
+                DesktopDialogKind.Warning => TablerRuntimeIcon.TriangleAlert,
+                DesktopDialogKind.Error => TablerRuntimeIcon.CircleAlert,
+                _ => TablerRuntimeIcon.Trash2
             }),
-            FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(),
+            FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(),
             FontSize = 20,
             Foreground = ToBrush(action),
             HorizontalAlignment = Wpf.HorizontalAlignment.Center,

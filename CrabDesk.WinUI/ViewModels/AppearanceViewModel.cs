@@ -165,6 +165,50 @@ public partial class AppearanceViewModel : ObservableObject
     public BoxViewMode ViewMode { get => CurrentBox.ViewMode; set => _service.SetBoxViewMode(null, value); }
     public BoxSortMode SortMode { get => CurrentBox.SortMode; set => _service.SetBoxSortMode(null, value); }
 
+    public bool IconSkinEnabled
+    {
+        get => _service.State.Settings.Appearance.IconSkinEnabled;
+        set => _service.SetIconSkinEnabled(value);
+    }
+
+    public bool ShowShortcutArrow
+    {
+        get => _service.State.Settings.Appearance.ShowShortcutArrow;
+        set => _service.SetShowShortcutArrow(value);
+    }
+
+    public bool CanEditShortcutBadgeColor => IconSkinEnabled && ShowShortcutArrow;
+
+    public string IconSkinAppPlate
+    {
+        get => _service.State.Settings.Appearance.IconSkinAppPlate;
+        set
+        {
+            if (!IsColor(value)) return;
+            _service.SetIconSkinPlates(value, IconSkinFolderPlate);
+        }
+    }
+
+    public string IconSkinFolderPlate
+    {
+        get => _service.State.Settings.Appearance.IconSkinFolderPlate;
+        set
+        {
+            if (!IsColor(value)) return;
+            _service.SetIconSkinPlates(IconSkinAppPlate, value);
+        }
+    }
+
+    public string IconSkinBadgeColor
+    {
+        get => _service.State.Settings.Appearance.IconSkinBadgeColor;
+        set
+        {
+            if (!IsColor(value)) return;
+            _service.SetIconSkinBadgeColor(value);
+        }
+    }
+
     [RelayCommand] private void Reset() => _service.ResetAppearance();
 
     private void Refresh()

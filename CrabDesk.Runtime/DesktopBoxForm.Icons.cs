@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private Bitmap? GetIconBitmap(DesktopItemRef item, float iconSize)
@@ -31,7 +31,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             .Where(pair =>
                 pair.Key.ParsingName == key.ParsingName &&
                 pair.Key.ModifiedTicks == key.ModifiedTicks &&
-                pair.Key.Length == key.Length)
+                pair.Key.SkinStamp == key.SkinStamp)
             .OrderBy(pair => Math.Abs(pair.Key.PixelSize - key.PixelSize))
             .Select(pair => pair.Value)
             .FirstOrDefault();
@@ -138,8 +138,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             {
                 bitmap = await Task.Run(() =>
                 {
-                    var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
-                    return source is null ? null : new Bitmap(source);
+                    return IconSkinRenderer.Load(
+                        _runtime.IconProvider, key.ParsingName, key.PixelSize, key.Kind, _runtime.ResolveIconSkin());
                 }, token).ConfigureAwait(false);
                 if (bitmap is null && !_iconLoadRetries.ContainsKey(key))
                 {
@@ -283,7 +283,8 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 Math.Clamp(center + offset, 16, 256),
                 _runtime.IconProvider?.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0)
                     ?? item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
-                0);
+                CurrentIconSkinStamp(),
+                IconSkinKindOf(item));
         }
     }
 
@@ -293,6 +294,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         return (int)(16 * Math.Round(pixelSize / 16.0, MidpointRounding.AwayFromZero));
     }
 
+    private int CurrentIconSkinStamp()
+    {
+        var skin = _runtime.ResolveIconSkin();
+        return skin.CacheStamp();
+    }
+
     private IconBitmapKey CreateIconBitmapKey(DesktopItemRef item, float iconSize)
     {
         return new IconBitmapKey(
@@ -300,8 +307,24 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             QuantizeIconPixelSize((int)Math.Round(iconSize * _scale)),
             _runtime.IconProvider?.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0)
                 ?? item.ModifiedAt?.UtcDateTime.Ticks ?? 0,
-            0);
+            CurrentIconSkinStamp(),
+            IconSkinKindOf(item));
     }
+
+    /// <summary>
+    /// Both icon surfaces use the same plate and shortcut classification.
+    /// </summary>
+    internal static IconSkinKind IconSkinKindOf(DesktopItemRef item) =>
+        item.Kind switch
+        {
+            DesktopItemKind.Folder => IconSkinKind.Folder,
+            DesktopItemKind.Shortcut => IconSkinKind.Shortcut,
+            DesktopItemKind.File when string.Equals(
+                Path.GetExtension(item.FileSystemPath ?? item.ParsingName), ".exe",
+                StringComparison.OrdinalIgnoreCase) => IconSkinKind.App,
+            DesktopItemKind.File => IconSkinKind.File,
+            _ => IconSkinKind.App
+        };
 
     private void InvalidateIcon(IconBitmapKey key)
     {

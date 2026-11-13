@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using CrabDesk.Core;
 using CrabDesk.Native;
 using CrabDesk.Runtime;
+using CrabDesk.WinUI.Controls;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Windowing;
@@ -43,7 +44,7 @@ public sealed class TodoDatesWindow : Window
         var heading = new StackPanel { Spacing = 4 };
         heading.Children.Add(new TextBlock { Text = "日期范围", FontSize = 18, FontWeight = FontWeights.SemiBold });
         heading.Children.Add(_taskText); header.Children.Add(heading);
-        var close = new Button { Content = new FontIcon { Glyph = "\uE711", FontSize = 12 }, Width = 28, Height = 28,
+        var close = new Button { Content = new TablerIcon { Icon = TablerIconName.X, FontSize = 12 }, Width = 28, Height = 28,
             MinWidth = 28, MinHeight = 28, Padding = new Thickness(0), VerticalAlignment = VerticalAlignment.Top };
         close.Click += (_, _) => Dismiss(); AutomationProperties.SetName(close, "关闭日期设置");
         header.Children.Add(close); Grid.SetColumn(close, 1);

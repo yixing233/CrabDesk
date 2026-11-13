@@ -38,7 +38,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
     internal ConnectionDetailsPopup(ConnectionDetailsController controller, bool dark, Color accent, double scale, Action<string> openSettings,
         bool animationsEnabled = true, Color? background = null)
         : base(controller.Kind == ControlConnectionKind.WiFi ? "Wi-Fi" : "蓝牙", dark, accent, scale, 344, 408,
-            controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Wifi : LucideRuntimeIcon.Bluetooth,
+            controller.Kind == ControlConnectionKind.WiFi ? TablerRuntimeIcon.Wifi : TablerRuntimeIcon.Bluetooth,
             detailCard: true, animationsEnabled: animationsEnabled, background: background, skeleton: PopupSkeletonLayout.Connections)
     {
         _controller = controller;
@@ -91,7 +91,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         _connect.Margin = new Wpf.Thickness(4, 0, 0, 0);
         _connect.Click += async (_, _) => await RunCommandAsync(SubmitPasswordAsync);
         WpfControls.Grid.SetColumn(_connect, 1); passwordRow.Children.Add(_connect);
-        var cancel = IconButton(LucideRuntimeIcon.X, "取消输入密码");
+        var cancel = IconButton(TablerRuntimeIcon.X, "取消输入密码");
         cancel.Click += (_, _) => HidePassword();
         WpfControls.Grid.SetColumn(cancel, 2); passwordRow.Children.Add(cancel);
         _password.PasswordChanged += (_, _) => _connect.IsEnabled = !CommandBusy && _password.Password.Length > 0;
@@ -104,11 +104,11 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
 
         var footer = new WpfControls.Grid();
         _settings = TextButton(controller.Kind == ControlConnectionKind.WiFi ? "网络设置" : "添加 / 管理设备",
-            icon: controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Cog : LucideRuntimeIcon.Plus);
+            icon: controller.Kind == ControlConnectionKind.WiFi ? TablerRuntimeIcon.Cog : TablerRuntimeIcon.Plus);
         _settings.HorizontalAlignment = Wpf.HorizontalAlignment.Left;
         _settings.Click += (_, _) => OpenSettings(_controller.Snapshot.SettingsUri ?? DefaultSettings);
         footer.Children.Add(_settings);
-        _scan = TextButton("刷新", "刷新" + Text + "列表", LucideRuntimeIcon.RefreshCw);
+        _scan = TextButton("刷新", "刷新" + Text + "列表", TablerRuntimeIcon.RefreshCw);
         _scan.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         _scan.Click += async (_, _) => await _controller.RefreshAsync(scan: true);
         footer.Children.Add(_scan);
@@ -168,7 +168,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         if (_settingsLabel != settingsLabel)
         {
             _settings.Content = ButtonContent(settingsLabel, snapshot.SettingsUri == "ms-settings:privacy-location"
-                ? LucideRuntimeIcon.MapPin : _controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Cog : LucideRuntimeIcon.Plus);
+                ? TablerRuntimeIcon.MapPin : _controller.Kind == ControlConnectionKind.WiFi ? TablerRuntimeIcon.Cog : TablerRuntimeIcon.Plus);
             _settingsLabel = settingsLabel;
         }
         Automation.SetName(_settings, settingsLabel);
@@ -210,7 +210,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         row.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(32) });
         row.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         row.ColumnDefinitions.Add(new() { Width = Wpf.GridLength.Auto });
-        var glyph = Glyph(LucideRuntimeIcon.Bluetooth, 17);
+        var glyph = Glyph(TablerRuntimeIcon.Bluetooth, 17);
         var iconSurface = new WpfControls.Border { Child = glyph, Width = 32, Height = 32,
             CornerRadius = new Wpf.CornerRadius(8), VerticalAlignment = Wpf.VerticalAlignment.Center };
         row.Children.Add(iconSurface);
@@ -258,16 +258,16 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         row.Button.IsEnabled = !busy;
         if (row.Item == item) return;
         row.Item = item;
-        var icon = _controller.Kind == ControlConnectionKind.WiFi ? LucideRuntimeIcon.Wifi : item.DeviceKind switch
+        var icon = _controller.Kind == ControlConnectionKind.WiFi ? TablerRuntimeIcon.Wifi : item.DeviceKind switch
         {
-            ControlConnectionDeviceKind.Computer => LucideRuntimeIcon.Monitor,
-            ControlConnectionDeviceKind.Phone => LucideRuntimeIcon.Smartphone,
-            ControlConnectionDeviceKind.Audio => LucideRuntimeIcon.Headphones,
-            ControlConnectionDeviceKind.Mouse => LucideRuntimeIcon.Mouse,
-            ControlConnectionDeviceKind.Keyboard or ControlConnectionDeviceKind.Input => LucideRuntimeIcon.Keyboard,
-            _ => LucideRuntimeIcon.Bluetooth
+            ControlConnectionDeviceKind.Computer => TablerRuntimeIcon.Monitor,
+            ControlConnectionDeviceKind.Phone => TablerRuntimeIcon.Smartphone,
+            ControlConnectionDeviceKind.Audio => TablerRuntimeIcon.Headphones,
+            ControlConnectionDeviceKind.Mouse => TablerRuntimeIcon.Mouse,
+            ControlConnectionDeviceKind.Keyboard or ControlConnectionDeviceKind.Input => TablerRuntimeIcon.Keyboard,
+            _ => TablerRuntimeIcon.Bluetooth
         };
-        row.Glyph.Text = LucideRuntimeIcons.GetGlyph(icon);
+        row.Glyph.Text = TablerRuntimeIcons.GetGlyph(icon);
         row.Glyph.Foreground = item.Connected ? AccentInk : SecondaryInk;
         row.IconSurface.Background = item.Connected ? _connectedFill : _rowBorder;
         row.Name.Text = item.Name; row.Name.ToolTip = item.Name;

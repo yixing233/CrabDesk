@@ -73,11 +73,11 @@ public sealed class BootstrapperTests
     }
 
     [Fact]
-    public void LucideInstallerIcons_AllIconsHaveValidGlyphs()
+    public void TablerInstallerIcons_AllIconsHaveValidGlyphs()
     {
-        foreach (LucideIcon icon in Enum.GetValues<LucideIcon>())
+        foreach (TablerIcon icon in Enum.GetValues<TablerIcon>())
         {
-            var glyph = LucideInstallerIcons.GetGlyph(icon);
+            var glyph = TablerInstallerIcons.GetGlyph(icon);
             Assert.False(string.IsNullOrWhiteSpace(glyph), $"Icon {icon} must have a non-empty glyph.");
         }
     }
@@ -236,8 +236,8 @@ public sealed class BootstrapperTests
     [Fact]
     public void TestGlyphCenter()
     {
-        LucideInstallerIcons.Initialize();
-        var font = LucideInstallerIcons.GetFont(24);
+        TablerInstallerIcons.Initialize();
+        var font = TablerInstallerIcons.GetFont(24);
         Assert.NotNull(font);
         
         using var path = new System.Drawing.Drawing2D.GraphicsPath();
@@ -247,21 +247,18 @@ public sealed class BootstrapperTests
             LineAlignment = System.Drawing.StringAlignment.Center,
             FormatFlags = System.Drawing.StringFormatFlags.NoWrap | System.Drawing.StringFormatFlags.NoClip
         };
-        var glyph = LucideInstallerIcons.GetGlyph(LucideIcon.RefreshCw);
+        var glyph = TablerInstallerIcons.GetGlyph(TablerIcon.RefreshCw);
         path.AddString(glyph, font.FontFamily, (int)System.Drawing.FontStyle.Regular, 24, new System.Drawing.PointF(0, 0), sf);
         
         var pts = path.PathPoints;
-        // In Lucide RefreshCw SVG:
+        // In the Tabler refresh SVG:
         // SVG viewBox: 0 0 24 24.
-        // Arc 1: M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8
-        // Arrow 1: M21 3v5h-5
-        // Arc 2: M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16
-        // Arrow 2: M8 16H3v5
+        // Arc 1: M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4
+        // Arc 2: M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4
         // Circle center in SVG is exactly (12, 12).
-        // Let's verify that Arrow 1 (21, 3) and Arrow 2 (3, 21) are point-symmetric around (12, 12):
-        // 21 + 3 = 24 -> 24/2 = 12.
-        // 3 + 21 = 24 -> 24/2 = 12.
-        // The whole icon in Lucide is 180-degree rotational symmetric around (12, 12)!
+        // Let's verify that the two arrows are point-symmetric around (12, 12):
+        // (4, 5) and (20, 19) average to (12, 12); (4, 9) and (20, 15) likewise.
+        // The whole icon is 180-degree rotational symmetric around (12, 12)!
         // Therefore, the true center of the icon is exactly the center of the bounding box of the 24x24 grid.
         
         var bounds = path.GetBounds();

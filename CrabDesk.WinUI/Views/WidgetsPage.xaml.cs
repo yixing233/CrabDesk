@@ -68,6 +68,7 @@ public sealed partial class WidgetsPage : Page
     private void ReloadInstances()
     {
         LoadGlobalWidgetAppearance();
+        LoadWidgetCenterSettings();
         if (_runtime.TryConsumeWidgetNavigation(out var requestedId))
         {
             var requested = _runtime.State.Widgets.FirstOrDefault(w => w.Id == requestedId);
@@ -80,7 +81,8 @@ public sealed partial class WidgetsPage : Page
     }
 
     private WidgetPreviewAppearance PreviewAppearance() => new(_runtime.State.Boxes.FirstOrDefault()?.Appearance
-        ?? _runtime.State.Settings.DefaultBoxAppearance, _runtime.State.Settings.Appearance);
+        ?? _runtime.State.Settings.DefaultBoxAppearance, _runtime.State.Settings.Appearance,
+        _runtime.IsWidgetCenterDarkTheme ? WidgetColorTheme.Dark : WidgetColorTheme.Light);
 
     private void RefreshGallery(bool refreshPreviews = true, DesktopWidget? changedWidget = null)
     {
@@ -97,7 +99,8 @@ public sealed partial class WidgetsPage : Page
                 var caption = catalog ? WidgetGalleryItem.Description(kind)
                     : (kind == DesktopWidgetKind.Network ? DesktopWidgets.NetworkDisplayName(widget.NetworkDisplayMode) + " · " :
                         kind == DesktopWidgetKind.FileShelf ? $"{widget.FileShelfItems.Count} 个文件 · " : "")
-                        + DesktopWidgets.SizeLabel(widget) + (widget.IsLocked ? " · 已锁定" : "");
+                        + DesktopWidgets.SizeLabel(widget) + (widget.Placement == WidgetPlacement.Center ? " · 组件中心" : " · 桌面")
+                        + (widget.IsLocked ? " · 已锁定" : "");
                 if (!_galleryCache.TryGetValue(widget.Id, out var item))
                     _galleryCache[widget.Id] = item = new WidgetGalleryItem(widget, appearance, catalog, caption, added.Length);
                 else
@@ -278,6 +281,7 @@ public sealed partial class WidgetsPage : Page
             NetworkEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.Network);
             FileShelfEditor.Visibility = Show(widget.Kind == DesktopWidgetKind.FileShelf);
             LoadWidgetAppearance(widget);
+            LoadWidgetPlacement(widget);
             LoadLyricsSettings(widget);
             LoadWidgetTypography(widget);
             LoadMonitorSettings(widget);
@@ -335,7 +339,7 @@ public sealed partial class WidgetsPage : Page
 
     private void MonitorPicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
-        if (!_loading && _selected is { } widget && MonitorPicker.SelectedItem is MonitorChoice monitor) Try(() => _runtime.MoveWidgetToMonitor(widget, monitor.Id));
+        if (!_loading && !_loadingWidgetCenter && _selected is { Placement: WidgetPlacement.Desktop } widget && MonitorPicker.SelectedItem is MonitorChoice monitor) Try(() => _runtime.MoveWidgetToMonitor(widget, monitor.Id));
     }
 
     private void AddTask_Click(object sender, RoutedEventArgs args) => AddTask();
@@ -377,7 +381,7 @@ public sealed partial class WidgetsPage : Page
                 Visibility = task.HasDateRange ? Visibility.Visible : Visibility.Collapsed };
             _taskDateLabels[task.Id] = dateLabel; content.Children.Add(dateLabel);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
-            var dates = new Button { Content = new FontIcon { Glyph = "\uE787", FontSize = 14 } };
+            var dates = new Button { Content = new TablerIcon { Icon = TablerIconName.CalendarEvent, FontSize = 14 } };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(dates, "设置日期范围：" + task.Text);
             ToolTipService.SetToolTip(dates, "日期范围（可选）");
             dates.Click += (_, _) => _runtime.EditWidgetTaskDates(widget, task.Id);

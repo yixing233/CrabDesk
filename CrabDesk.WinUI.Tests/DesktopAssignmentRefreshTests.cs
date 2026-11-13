@@ -572,7 +572,7 @@ public sealed class DesktopAssignmentRefreshTests
             "private void SetDropPreview(",
             StringComparison.Ordinal);
         var clearStart = source.IndexOf(
-            "private void ClearDropPreview()",
+            "protected override void ClearDropPreview()",
             Math.Max(0, setStart),
             StringComparison.Ordinal);
         var invalidateStart = source.IndexOf(

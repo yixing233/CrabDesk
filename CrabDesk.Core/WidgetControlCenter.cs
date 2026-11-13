@@ -187,6 +187,8 @@ public static class ControlCenterPresentation
 
     public static LayoutRect MediaArtwork(LayoutRect panel) => new(panel.X + 8, panel.Y + 6, 36, 36);
     public static LayoutRect MediaTitle(LayoutRect panel) => new(panel.X + 54, panel.Y + 3, panel.Width - 64, 17);
+    public static LayoutRect EmptyMediaArtwork(LayoutRect panel) => new(panel.X + 12, panel.Y + (panel.Height - 36) / 2, 36, 36);
+    public static LayoutRect EmptyMediaTitle(LayoutRect panel) => new(panel.X + 60, panel.Y + (panel.Height - 24) / 2, Math.Max(0, panel.Width - 72), 24);
     public static LayoutRect MediaArtist(LayoutRect panel) => new(panel.X + 54, panel.Y + 25, Math.Max(0, panel.Width - 148), 16);
     public static LayoutRect MediaTime(LayoutRect panel) => new(panel.X + panel.Width - 92, panel.Y + panel.Height - 16, 82, 14);
 
@@ -223,7 +225,8 @@ public static class ControlCenterPresentation
         DisplayControls, Cast, ScreenCapture, SystemSettings, WiFiDetails, BluetoothDetails, NetworkAdapters
     }
 
-    public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y, IReadOnlyList<ControlCenterQuickAction>? actions = null)
+    public static ControlCenterTarget TargetAt(LayoutRect body, double x, double y, IReadOnlyList<ControlCenterQuickAction>? actions = null,
+        bool hasMedia = true)
     {
         actions ??= ControlQuickActions.Defaults;
         for (var index = 0; index < actions.Count; index++)
@@ -245,6 +248,7 @@ public static class ControlCenterPresentation
         if (BrightnessDisplayRow(body).Contains(x, y)) return ControlCenterTarget.BrightnessDisplayRow;
         if (OutputRow(mediaArea).Contains(x, y)) return ControlCenterTarget.OutputRow;
         if (MicrophoneButton(body).Contains(x, y)) return ControlCenterTarget.Microphone;
+        if (!hasMedia) return ControlCenterTarget.None;
         if (MediaProgressHitArea(MediaPanel(mediaArea)).Contains(x, y)) return ControlCenterTarget.MediaProgress;
         var buttons = MediaButtonRects(MediaPanel(mediaArea));
         for (var index = 0; index < buttons.Length; index++)

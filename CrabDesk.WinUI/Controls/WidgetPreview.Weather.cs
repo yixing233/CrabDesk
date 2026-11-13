@@ -44,9 +44,9 @@ public sealed partial class WidgetPreview
         var status = widget.IsLocating ? "正在定位…" : widget.IsLoading ? "正在更新…" :
             widget.LocationAccessDenied ? "定位未授权" : !string.IsNullOrEmpty(widget.Error) ? widget.Error :
             weather?.AirQuality is { } aqi ? $"AQI {aqi:0}" : "查看天气详情";
-        var statusIcon = widget.IsLocating || widget.IsLoading ? LucideIconName.RefreshCw :
-            widget.LocationAccessDenied || !string.IsNullOrEmpty(widget.Error) ? LucideIconName.CircleAlert : LucideIconName.Gauge;
-        Place(new LucideIcon { Icon = statusIcon, FontSize = 12, Foreground = _secondary }, layout.Status with { Width = 12 });
+        var statusIcon = widget.IsLocating || widget.IsLoading ? TablerIconName.Refresh :
+            widget.LocationAccessDenied || !string.IsNullOrEmpty(widget.Error) ? TablerIconName.AlertCircle : TablerIconName.Gauge;
+        Place(new TablerIcon { Icon = statusIcon, FontSize = 12, Foreground = _secondary }, layout.Status with { Width = 12 });
         Label(status, 10, layout.Status with { X = layout.Status.X + 17, Width = layout.Status.Width - 17 }, true);
         IReadOnlyList<WidgetHourlyWeather> hours = weather is null ? [] : WidgetWeatherPresentation.UpcomingHours(weather, now);
         if (hours.Count == 0)

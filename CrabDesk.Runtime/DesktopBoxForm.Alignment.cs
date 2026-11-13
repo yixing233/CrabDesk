@@ -17,7 +17,7 @@ internal sealed partial class DesktopBoxForm
         var peers = _runtime.State.Boxes.Where(peer => peer.Id != box.Id &&
             string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase))
             .Select(peer => peer.Bounds with { Height = GetVisualBoxHeight(peer) })
-            .Concat(_runtime.State.Widgets.Where(peer =>
+            .Concat(_runtime.State.Widgets.Where(peer => peer.Placement == WidgetPlacement.Desktop &&
                 string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase)).Select(peer => peer.Bounds));
         // Use the visible title strip for a collapsed box, but keep enough
         // room for its stored expanded height so committing cannot jump it up.
@@ -32,7 +32,7 @@ internal sealed partial class DesktopBoxForm
 
     private void ApplyWidgetDragPosition(DesktopWidget widget, LayoutRect bounds, MonitorLayout monitor)
     {
-        var peers = _runtime.State.Widgets.Where(peer => peer.Id != widget.Id &&
+        var peers = _runtime.State.Widgets.Where(peer => peer.Placement == WidgetPlacement.Desktop && peer.Id != widget.Id &&
                 string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase)).Select(peer => peer.Bounds)
             .Concat(_runtime.State.Boxes.Where(peer =>
                 string.Equals(peer.MonitorId, monitor.Id, StringComparison.OrdinalIgnoreCase))
@@ -55,7 +55,7 @@ internal sealed partial class DesktopBoxForm
         return true;
     }
 
-    private void ClearBoxAlignmentGuides() => SetBoxAlignmentGuides([], null);
+    protected override void ClearBoxAlignmentGuides() => SetBoxAlignmentGuides([], null);
 
     private void AccumulateGuideDirtyBounds(RectangleF bounds) =>
         AccumulateTransformDirtyBounds(new LayoutRect(bounds.X, bounds.Y, bounds.Width, bounds.Height));

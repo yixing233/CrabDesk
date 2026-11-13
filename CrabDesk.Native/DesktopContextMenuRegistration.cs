@@ -224,7 +224,7 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
     }
 
     private static PrivateFontCollection? s_fontCollection;
-    private static FontFamily? s_lucideFontFamily;
+    private static FontFamily? s_tablerFontFamily;
     private static readonly object s_fontLock = new();
 
     private static void WriteMultiSizeIcon(string path, Action<Graphics, int> draw)
@@ -333,13 +333,13 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         }
     }
 
-    private static FontFamily? GetLucideFontFamily()
+    private static FontFamily? GetTablerFontFamily()
     {
         lock (s_fontLock)
         {
-            if (s_lucideFontFamily != null)
+            if (s_tablerFontFamily != null)
             {
-                return s_lucideFontFamily;
+                return s_tablerFontFamily;
             }
 
             try
@@ -348,14 +348,14 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
                 var baseDir = AppContext.BaseDirectory;
                 var candidatePaths = new[]
                 {
-                    Path.Combine(baseDir, "Assets", "lucide.ttf"),
-                    Path.Combine(baseDir, "lucide.ttf"),
-                    Path.Combine(assemblyDir, "Assets", "lucide.ttf"),
-                    Path.Combine(assemblyDir, "lucide.ttf"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "lucide.ttf"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lucide.ttf"),
-                    Path.Combine(baseDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "lucide.ttf"),
-                    Path.Combine(assemblyDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "lucide.ttf")
+                    Path.Combine(baseDir, "Assets", "tabler-icons.ttf"),
+                    Path.Combine(baseDir, "tabler-icons.ttf"),
+                    Path.Combine(assemblyDir, "Assets", "tabler-icons.ttf"),
+                    Path.Combine(assemblyDir, "tabler-icons.ttf"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "tabler-icons.ttf"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tabler-icons.ttf"),
+                    Path.Combine(baseDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "tabler-icons.ttf"),
+                    Path.Combine(assemblyDir, "..", "..", "..", "..", "CrabDesk.Runtime", "Assets", "tabler-icons.ttf")
                 };
 
                 foreach (var rawPath in candidatePaths)
@@ -372,8 +372,8 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
                         if (collection.Families.Length > 0)
                         {
                             s_fontCollection = collection;
-                            s_lucideFontFamily = collection.Families[0];
-                            return s_lucideFontFamily;
+                            s_tablerFontFamily = collection.Families[0];
+                            return s_tablerFontFamily;
                         }
                     }
                 }
@@ -386,13 +386,13 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
         }
     }
 
-    private static void DrawLucideGlyph(
+    private static void DrawTablerGlyph(
         Graphics graphics,
         int size,
         string glyph,
         Color color)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family is null)
         {
             return;
@@ -412,10 +412,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawCreateBoxIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE173", MenuIconColor); // SquarePlus
+            DrawTablerGlyph(graphics, size, "\uEB2A", MenuIconColor); // square-plus
         }
         else
         {
@@ -425,10 +425,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawSettingsIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE154", MenuIconColor); // Settings
+            DrawTablerGlyph(graphics, size, "\uEB20", MenuIconColor); // settings
         }
         else
         {
@@ -438,10 +438,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawOrganizeIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE460", MenuIconColor); // ListFilter
+            DrawTablerGlyph(graphics, size, "\uEAA5", MenuIconColor); // filter
         }
         else
         {
@@ -451,10 +451,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawAiOrganizeIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE412", MenuIconColor); // Sparkles
+            DrawTablerGlyph(graphics, size, "\uF6D7", MenuIconColor); // sparkles
         }
         else
         {
@@ -464,10 +464,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawReconnectIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE145", MenuIconColor); // RefreshCw
+            DrawTablerGlyph(graphics, size, "\uEB13", MenuIconColor); // refresh
         }
         else
         {
@@ -477,12 +477,12 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawRefreshIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            // RefreshCcw reads as "re-run" while the reconnect entry keeps the
-            // clockwise glyph, so the two neighbouring commands stay distinct.
-            DrawLucideGlyph(graphics, size, "\uE144", MenuIconColor); // RefreshCcw
+            // reload reads as "re-run" while the reconnect entry keeps the
+            // refresh glyph, so the two neighbouring commands stay distinct.
+            DrawTablerGlyph(graphics, size, "\uF3AE", MenuIconColor); // reload
         }
         else
         {
@@ -492,10 +492,10 @@ public sealed class DesktopContextMenuRegistration : IDesktopContextMenuRegistra
 
     private static void DrawExitIcon(Graphics graphics, int size)
     {
-        var family = GetLucideFontFamily();
+        var family = GetTablerFontFamily();
         if (family != null)
         {
-            DrawLucideGlyph(graphics, size, "\uE10E", MenuIconColor); // LogOut
+            DrawTablerGlyph(graphics, size, "\uEBA8", MenuIconColor); // logout
         }
         else
         {

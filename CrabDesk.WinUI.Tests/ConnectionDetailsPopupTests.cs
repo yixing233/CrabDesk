@@ -13,6 +13,7 @@ using Automation = System.Windows.Automation.AutomationProperties;
 
 namespace CrabDesk.WinUI.Tests;
 
+[Collection("desktop-probe")]
 public sealed class ConnectionDetailsPopupTests
 {
     [Theory]

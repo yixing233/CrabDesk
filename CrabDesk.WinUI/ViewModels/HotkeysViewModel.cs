@@ -91,6 +91,47 @@ public partial class HotkeysViewModel : ObservableObject
     public string OrganizeStatus => FormatStatus(_service.GetHotkeyStatus(HotkeyAction.OrganizeDesktop));
     public bool OrganizeHasStatus => _service.GetHotkeyStatus(HotkeyAction.OrganizeDesktop) != HotkeyRegistrationStatus.Disabled;
 
+    public bool WidgetCenterAvailable => _service.State.Settings.WidgetCenter.Enabled;
+    public string WidgetCenterHint => WidgetCenterAvailable
+        ? "显示或收起组件中心。"
+        : "先在小组件页开启组件中心；关闭功能时保留快捷键配置。";
+    public bool WidgetCenterEnabled
+    {
+        get => _service.State.Settings.Hotkeys.WidgetCenter.Enabled;
+        set
+        {
+            if (value != WidgetCenterEnabled && (!value || WidgetCenterAvailable)) UpdateWidgetCenter(enabled: value);
+            OnPropertyChanged();
+        }
+    }
+    public OptionItem<HotkeyModifiers>? WidgetCenterModifiers
+    {
+        get => ModifierOptions.FirstOrDefault(item => item.Value == _service.State.Settings.Hotkeys.WidgetCenter.Modifiers);
+        set { if (value is not null) { UpdateWidgetCenter(modifiers: value.Value); OnPropertyChanged(); } }
+    }
+    public OptionItem<HotkeyKey>? WidgetCenterKey
+    {
+        get => KeyOptions.FirstOrDefault(item => item.Value == _service.State.Settings.Hotkeys.WidgetCenter.Key);
+        set { if (value is not null) { UpdateWidgetCenter(key: value.Value); OnPropertyChanged(); } }
+    }
+    public string WidgetCenterKeyText
+    {
+        get => _service.State.Settings.Hotkeys.WidgetCenter.Key.ToString();
+        set
+        {
+            if (TryParseKey(value, out var key)) UpdateWidgetCenter(key: key);
+            OnPropertyChanged();
+        }
+    }
+    public string WidgetCenterStatus => FormatStatus(_service.GetHotkeyStatus(HotkeyAction.WidgetCenter));
+    public bool WidgetCenterHasStatus => _service.GetHotkeyStatus(HotkeyAction.WidgetCenter) != HotkeyRegistrationStatus.Disabled;
+
+    private void UpdateWidgetCenter(bool? enabled = null, HotkeyModifiers? modifiers = null, HotkeyKey? key = null)
+    {
+        var binding = _service.State.Settings.Hotkeys.WidgetCenter;
+        _service.SetHotkey(HotkeyAction.WidgetCenter, enabled ?? binding.Enabled, modifiers ?? binding.Modifiers, key ?? binding.Key);
+    }
+
     private void UpdateShowDesktop(bool? enabled = null, HotkeyModifiers? modifiers = null, HotkeyKey? key = null)
     {
         var binding = _service.State.Settings.Hotkeys.ShowDesktop;

@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private void ShowBoxMenu(DesktopBox box, Point location)
@@ -33,9 +33,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         var menu = CreateContextMenu(box.Id);
         if (box.IsMappedFolder)
         {
-            menu.Items.Add(CreateLucideMenuItem(
+            menu.Items.Add(CreateTablerMenuItem(
                 "打开映射文件夹",
-                LucideRuntimeIcon.FolderOpen,
+                TablerRuntimeIcon.FolderOpen,
                 (_, _) =>
                 TryAction(() => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(box.MappedFolder!.Path)
                 {
@@ -47,16 +47,16 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         {
             Enabled = _runtime.CanPasteIntoBox(box)
         };
-        LucideRuntimeIcons.SetMenuIcon(paste, LucideRuntimeIcon.ClipboardPaste);
+        TablerRuntimeIcons.SetMenuIcon(paste, TablerRuntimeIcon.ClipboardPaste);
         paste.Click += async (_, _) => await PasteIntoBoxAsync(box);
         menu.Items.Add(paste);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(CreateLucideMenuItem("重命名", LucideRuntimeIcon.Pencil, (_, _) =>
+        menu.Items.Add(CreateTablerMenuItem("重命名", TablerRuntimeIcon.Pencil, (_, _) =>
         {
             BeginInvoke((Action)(() => BeginTitleEdit(box)));
         }));
         var displayModeMenu = new FluentToolStripMenuItem("显示模式");
-        LucideRuntimeIcons.SetMenuIcon(displayModeMenu, LucideRuntimeIcon.ChevronsUpDown);
+        TablerRuntimeIcons.SetMenuIcon(displayModeMenu, TablerRuntimeIcon.ChevronsUpDown);
         AddMenuChoice(
             displayModeMenu,
             "固定展开",
@@ -73,7 +73,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             AddManualTabMenu(menu, box);
         }
         var accentMenu = new FluentToolStripMenuItem("强调色");
-        LucideRuntimeIcons.SetMenuIcon(accentMenu, LucideRuntimeIcon.Palette);
+        TablerRuntimeIcons.SetMenuIcon(accentMenu, TablerRuntimeIcon.Palette);
 
         foreach (var (name, hex) in AccentPalette)
         {
@@ -84,14 +84,14 @@ internal sealed partial class DesktopBoxForm : Forms.Form
                 () => _runtime.SetBoxAccent(box.Id, hex));
         }
         accentMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
-        accentMenu.DropDownItems.Add(CreateLucideMenuItem(
+        accentMenu.DropDownItems.Add(CreateTablerMenuItem(
             "自定义颜色…",
-            LucideRuntimeIcon.Palette,
+            TablerRuntimeIcon.Palette,
             (_, _) => ShowAccentColorDialog(box)));
         menu.Items.Add(accentMenu);
 
         var viewMenu = new FluentToolStripMenuItem("视图");
-        LucideRuntimeIcons.SetMenuIcon(viewMenu, LucideRuntimeIcon.LayoutGrid);
+        TablerRuntimeIcons.SetMenuIcon(viewMenu, TablerRuntimeIcon.LayoutGrid);
         AddMenuChoice(viewMenu, "图标", box.ViewMode == BoxViewMode.Grid,
             () => _runtime.SetBoxViewMode(box.Id, BoxViewMode.Grid));
         AddMenuChoice(viewMenu, "列表", box.ViewMode == BoxViewMode.List,
@@ -99,7 +99,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         menu.Items.Add(viewMenu);
 
         var sortMenu = new FluentToolStripMenuItem("排序方式");
-        LucideRuntimeIcons.SetMenuIcon(sortMenu, LucideRuntimeIcon.ArrowDownAz);
+        TablerRuntimeIcons.SetMenuIcon(sortMenu, TablerRuntimeIcon.ArrowDownAz);
         AddMenuChoice(sortMenu, "手动", box.SortMode == BoxSortMode.Manual,
             () => _runtime.SetBoxSortMode(box.Id, BoxSortMode.Manual));
         AddMenuChoice(sortMenu, "名称", box.SortMode == BoxSortMode.Name,
@@ -110,12 +110,12 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             () => _runtime.SetBoxSortMode(box.Id, BoxSortMode.Modified));
         menu.Items.Add(sortMenu);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(CreateLucideMenuItem(
+        menu.Items.Add(CreateTablerMenuItem(
             "设置",
-            LucideRuntimeIcon.Cog,
+            TablerRuntimeIcon.Cog,
             (_, _) => _runtime.RequestShowSettings("appearance")));
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add(CreateLucideMenuItem("删除盒子", LucideRuntimeIcon.Trash2, async (_, _) =>
+        menu.Items.Add(CreateTablerMenuItem("删除盒子", TablerRuntimeIcon.Trash2, async (_, _) =>
         {
             try
             {
@@ -142,10 +142,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
     private void AddManualTabMenu(Forms.ContextMenuStrip menu, DesktopBox box)
     {
         var tabMenu = new FluentToolStripMenuItem("子标签");
-        LucideRuntimeIcons.SetMenuIcon(tabMenu, LucideRuntimeIcon.Tags);
-        tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+        TablerRuntimeIcons.SetMenuIcon(tabMenu, TablerRuntimeIcon.Tags);
+        tabMenu.DropDownItems.Add(CreateTablerMenuItem(
             "新建子标签…",
-            LucideRuntimeIcon.SquarePlus,
+            TablerRuntimeIcon.SquarePlus,
             (_, _) => BeginInvoke((Action)(() => CreateManualTab(box)))));
 
         var activeTabId = _activeManualTabIds.GetValueOrDefault(box.Id);
@@ -155,13 +155,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (activeTab is not null)
         {
             tabMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
-            tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+            tabMenu.DropDownItems.Add(CreateTablerMenuItem(
                 "重命名当前标签…",
-                LucideRuntimeIcon.Pencil,
+                TablerRuntimeIcon.Pencil,
                 (_, _) => BeginInvoke((Action)(() => RenameManualTab(box, activeTab)))));
-            tabMenu.DropDownItems.Add(CreateLucideMenuItem(
+            tabMenu.DropDownItems.Add(CreateTablerMenuItem(
                 "删除当前标签",
-                LucideRuntimeIcon.Trash2,
+                TablerRuntimeIcon.Trash2,
                 (_, _) => BeginInvoke((Action)(async () => await DeleteManualTab(box, activeTab)))));
         }
 
@@ -169,10 +169,10 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (box.ManualTabs.Count > 0 && selectedKeys.Length > 0)
         {
             var moveMenu = new FluentToolStripMenuItem("将选中图标移到");
-            LucideRuntimeIcons.SetMenuIcon(moveMenu, LucideRuntimeIcon.FolderInput);
-            moveMenu.DropDownItems.Add(CreateLucideMenuItem(
+            TablerRuntimeIcons.SetMenuIcon(moveMenu, TablerRuntimeIcon.FolderInput);
+            moveMenu.DropDownItems.Add(CreateTablerMenuItem(
                 "全部（移出子标签）",
-                LucideRuntimeIcon.ArrowRight,
+                TablerRuntimeIcon.ArrowRight,
                 (_, _) => MoveSelectedItemsToManualTab(box, selectedKeys, null)));
             foreach (var tab in box.ManualTabs)
             {
@@ -197,28 +197,28 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         if (tab is not null)
         {
             var isActive = activeTabId == tab.Id;
-            var activate = CreateLucideMenuItem(
+            var activate = CreateTablerMenuItem(
                 isActive ? "当前标签" : "切换到此标签",
-                LucideRuntimeIcon.Tags,
+                TablerRuntimeIcon.Tags,
                 (_, _) => ActivateManualTabFromMenu(box, tab.Id));
             activate.Checked = isActive;
             activate.Enabled = !isActive;
             menu.Items.Add(activate);
             menu.Items.Add(new Forms.ToolStripSeparator());
-            menu.Items.Add(CreateLucideMenuItem(
+            menu.Items.Add(CreateTablerMenuItem(
                 "重命名标签…",
-                LucideRuntimeIcon.Pencil,
+                TablerRuntimeIcon.Pencil,
                 (_, _) => BeginInvoke((Action)(() => RenameManualTab(box, tab)))));
-            menu.Items.Add(CreateLucideMenuItem(
+            menu.Items.Add(CreateTablerMenuItem(
                 "删除标签",
-                LucideRuntimeIcon.Trash2,
+                TablerRuntimeIcon.Trash2,
                 (_, _) => BeginInvoke((Action)(async () => await DeleteManualTab(box, tab)))));
             menu.Items.Add(new Forms.ToolStripSeparator());
         }
 
-        menu.Items.Add(CreateLucideMenuItem(
+        menu.Items.Add(CreateTablerMenuItem(
             "新建子标签…",
-            LucideRuntimeIcon.SquarePlus,
+            TablerRuntimeIcon.SquarePlus,
             (_, _) => BeginInvoke((Action)(() => CreateManualTab(box)))));
         return menu;
     }
@@ -284,7 +284,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             Invalidate();
         }
     }
-    private async Task<bool> ConfirmDesktopAsync(string title, string message, string primaryText)
+    protected override async Task<bool> ConfirmDesktopAsync(string title, string message, string primaryText)
     {
         if (_confirmationInProgress)
         {
@@ -706,13 +706,13 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         parent.DropDownItems.Add(item);
     }
 
-    private static Forms.ToolStripMenuItem CreateLucideMenuItem(
+    private static Forms.ToolStripMenuItem CreateTablerMenuItem(
         string text,
-        LucideRuntimeIcon icon,
+        TablerRuntimeIcon icon,
         EventHandler? onClick = null)
     {
         var item = new FluentToolStripMenuItem(text);
-        LucideRuntimeIcons.SetMenuIcon(item, icon);
+        TablerRuntimeIcons.SetMenuIcon(item, icon);
         if (onClick is not null)
         {
             item.Click += onClick;

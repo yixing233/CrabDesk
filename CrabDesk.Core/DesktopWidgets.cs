@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 namespace CrabDesk.Core;
 
 public enum DesktopWidgetKind { Clock, Calendar, Note, Todo, Translation, Weather, Performance, Network, ControlCenter, Lyrics, FileShelf }
+// Zero keeps widgets from older configurations on the desktop.
+public enum WidgetPlacement { Desktop = 0, Center = 1 }
 public enum DesktopWidgetSize
 {
     Small, Medium, Wide, Large, Compact, Landscape, Custom,
@@ -31,6 +33,9 @@ public sealed class DesktopWidget
     public DesktopWidgetKind Kind { get; set; }
     public string Title { get; set; } = string.Empty;
     public string MonitorId { get; set; } = string.Empty;
+    // Placement and center order never change the saved desktop monitor or bounds.
+    public WidgetPlacement Placement { get; set; } = WidgetPlacement.Desktop;
+    public int CenterOrder { get; set; }
     public LayoutRect Bounds { get; set; } = new(32, 32, 180, 180);
     public DesktopWidgetSize Size { get; set; } = DesktopWidgetSize.Medium;
     public bool IsLocked { get; set; }
@@ -366,6 +371,8 @@ public static class DesktopWidgets
         {
             if (widget.Id == Guid.Empty || !ids.Add(widget.Id)) { widget.Id = Guid.NewGuid(); ids.Add(widget.Id); }
             widget.Title ??= string.Empty;
+            if (!Enum.IsDefined(widget.Placement)) widget.Placement = WidgetPlacement.Desktop;
+            widget.CenterOrder = Math.Max(0, widget.CenterOrder);
             WidgetTypography.Normalize(widget);
             WidgetAppearance.Normalize(widget);
             widget.Text = NormalizeText(widget.Text);

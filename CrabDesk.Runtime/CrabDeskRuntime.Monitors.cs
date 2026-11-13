@@ -27,11 +27,11 @@ public sealed partial class CrabDeskRuntime
 
     public async Task RefreshMonitorWidgetsAsync(bool force = false)
     {
-        if (_disposed || IsPaused) return;
+        if (_disposed || !HasActiveWidgets) return;
         _ = RefreshLyricsWidgetsAsync(force);
-        var performance = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Performance);
-        var network = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Network);
-        var controls = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.ControlCenter);
+        var performance = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Performance && IsWidgetActive(widget));
+        var network = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.Network && IsWidgetActive(widget));
+        var controls = State.Widgets.FirstOrDefault(widget => widget.Kind == DesktopWidgetKind.ControlCenter && IsWidgetActive(widget));
         if (network is null) _networkMonitor?.StopProcessMonitoring();
         if (performance is null && network is null && controls is null) return;
         var now = Stopwatch.GetTimestamp();
@@ -81,11 +81,11 @@ public sealed partial class CrabDeskRuntime
                 catch (Exception exception) { controlError = "控制中心采样失败：" + exception.Message; }
                 return (machine, connection, controls, machineError, networkError, controlError);
             }, token);
-            if (IsPaused || network is null || !State.Widgets.Contains(network) ||
+            if (network is null || !IsWidgetActive(network) || !State.Widgets.Contains(network) ||
                 network.NetworkDisplayMode != NetworkWidgetDisplayMode.Details)
                 networkSource?.StopProcessMonitoring();
             if (controlDue) _controlLastTick = Stopwatch.GetTimestamp();
-            if (network is not null && networkSource is not null && !token.IsCancellationRequested && !IsPaused &&
+            if (network is not null && networkSource is not null && !token.IsCancellationRequested && IsWidgetActive(network) &&
                 State.Widgets.Contains(network) && network.NetworkAdapterId == adapter && network.NetworkLatencyTarget == target)
             {
                 var key = adapter + "\n" + target;
@@ -102,17 +102,17 @@ public sealed partial class CrabDeskRuntime
             if (!token.IsCancellationRequested)
                 _beginInvoke(() =>
                 {
-                    if (_disposed || IsPaused) return;
-                    if (performance is not null && State.Widgets.Contains(performance))
+                    if (_disposed || !HasActiveWidgets) return;
+                    if (performance is not null && IsWidgetActive(performance) && State.Widgets.Contains(performance))
                     { performance.Performance = gap > 5 ? null : data.machine; performance.MonitorError = data.machineError; }
-                    if (network is not null && State.Widgets.Contains(network) && network.NetworkAdapterId == adapter && network.NetworkLatencyTarget == target)
+                    if (network is not null && IsWidgetActive(network) && State.Widgets.Contains(network) && network.NetworkAdapterId == adapter && network.NetworkLatencyTarget == target)
                     {
                         if (network.Network?.InterfaceId != data.connection?.InterfaceId || data.connection?.IsConnected != true)
                         { CancelPublicIpRequest(network.Id); network.PublicIp = ""; network.PublicIpError = ""; network.IsPublicIpLoading = false; }
                         WidgetNetworkGraph.Append(network, data.connection);
                         network.Network = data.connection; network.MonitorError = data.networkError;
                     }
-                    if (controls is not null && State.Widgets.Contains(controls) && data.controls is not null &&
+                    if (controls is not null && IsWidgetActive(controls) && State.Widgets.Contains(controls) && data.controls is not null &&
                         controlVersion == Volatile.Read(ref _controlCommandVersion) && Volatile.Read(ref _controlWriting) == 0)
                     { controls.Controls = data.controls; controls.MonitorError = data.controlError; }
                     NotifyMonitorFrame();
@@ -127,6 +127,7 @@ public sealed partial class CrabDeskRuntime
     {
         if (_disposed) return;
         _surfaceManager?.RefreshMonitorVisuals();
+        RefreshWidgetCenter();
         WidgetMonitorUpdated?.Invoke(this, EventArgs.Empty);
     }
 
@@ -172,7 +173,7 @@ public sealed partial class CrabDeskRuntime
 
     public async Task QueryWidgetPublicIpAsync(DesktopWidget widget)
     {
-        if (_disposed || IsPaused || widget.Kind != DesktopWidgetKind.Network || !State.Widgets.Contains(widget) || widget.IsPublicIpLoading) return;
+        if (_disposed || !IsWidgetActive(widget) || widget.Kind != DesktopWidgetKind.Network || !State.Widgets.Contains(widget) || widget.IsPublicIpLoading) return;
         if (widget.Network is not { IsConnected: true } current)
         { widget.PublicIpError = "当前未连接网络"; NotifyMonitorFrame(); return; }
         _monitorLifetime ??= new(); _publicIpRequests ??= new();
@@ -185,7 +186,7 @@ public sealed partial class CrabDeskRuntime
             var address = await (_publicIpQuery ?? WidgetNetworkMonitor.QueryPublicIpAsync)(request.Token);
             _beginInvoke(() =>
             {
-                if (!_disposed && !IsPaused && !request.IsCancellationRequested && State.Widgets.Contains(widget) &&
+                if (!_disposed && IsWidgetActive(widget) && !request.IsCancellationRequested && State.Widgets.Contains(widget) &&
                     widget.NetworkAdapterId == adapter && widget.Network is { IsConnected: true } active && active.InterfaceId == interfaceId) widget.PublicIp = address;
             });
         }

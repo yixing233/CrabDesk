@@ -122,8 +122,17 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
     private readonly Dictionary<string, RectangleF> _expandedItemHitBounds = new(StringComparer.OrdinalIgnoreCase);
     // The shell provider owns and may evict its cached bitmaps. Keep copies
     // here because this full-surface renderer can reuse an icon across frames.
-    private readonly Dictionary<(string ParsingName, int PixelSize, long ModifiedTicks), Bitmap> _desktopIconCache = [];
-    private readonly HashSet<(string ParsingName, int PixelSize, long ModifiedTicks)> _pendingDesktopIconLoads = [];
+    // SkinStamp keeps a skin change from reusing tiles painted with the old
+    // plates; Kind picks the plate bucket on the worker thread.
+    private readonly record struct DesktopIconCacheKey(
+        string ParsingName,
+        int PixelSize,
+        long ModifiedTicks,
+        int SkinStamp,
+        IconSkinKind Kind);
+
+    private readonly Dictionary<DesktopIconCacheKey, Bitmap> _desktopIconCache = [];
+    private readonly HashSet<DesktopIconCacheKey> _pendingDesktopIconLoads = [];
     // A full desktop can contain hundreds of Shell items. Loading all of them
     // concurrently makes their delayed completions flood the UI message queue.
     // Keep only a small number of Shell calls in flight on each monitor.
@@ -2909,9 +2918,7 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         return ShellIconProvider.GetGenericFileIcon();
     }
 
-    private async Task LoadDesktopIconAsync(
-        (string ParsingName, int PixelSize, long ModifiedTicks) key,
-        int cacheVersion)
+    private async Task LoadDesktopIconAsync(DesktopIconCacheKey key, int cacheVersion)
     {
         Bitmap? bitmap = null;
         try
@@ -2921,8 +2928,8 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             {
                 bitmap = await Task.Run(() =>
                 {
-                    var source = _runtime.IconProvider.GetIcon(key.ParsingName, key.PixelSize);
-                    return source is null ? null : new Bitmap(source);
+                    return IconSkinRenderer.Load(
+                        _runtime.IconProvider, key.ParsingName, key.PixelSize, key.Kind, _runtime.ResolveIconSkin());
                 }, _desktopIconLoadCancellation.Token).ConfigureAwait(false);
             }
             finally
@@ -2983,11 +2990,16 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
         }
     }
 
-    private (string ParsingName, int PixelSize, long ModifiedTicks) CreateDesktopIconCacheKey(
-        DesktopItemRef item,
-        int pixelSize) =>
-        (item.ParsingName, pixelSize,
-            _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0));
+    private DesktopIconCacheKey CreateDesktopIconCacheKey(DesktopItemRef item, int pixelSize)
+    {
+        var skin = _runtime.ResolveIconSkin();
+        return new DesktopIconCacheKey(
+            item.ParsingName,
+            pixelSize,
+            _runtime.IconProvider.GetIconCacheStamp(item.ParsingName, item.ModifiedAt?.UtcDateTime.Ticks ?? 0),
+            skin.CacheStamp(),
+            DesktopBoxForm.IconSkinKindOf(item));
+    }
 
     private void PruneDesktopIconCache()
     {
@@ -4617,43 +4629,43 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
             }
         };
 
-        var crabDesk = CreateDesktopBackgroundMenuItem("CrabDesk", LucideRuntimeIcon.AppWindow);
+        var crabDesk = CreateDesktopBackgroundMenuItem("CrabDesk", TablerRuntimeIcon.AppWindow);
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
-            "桌面小组件", LucideRuntimeIcon.AppWindow, (_, _) => _runtime.OpenWidgetEditor()));
+            "桌面小组件", TablerRuntimeIcon.AppWindow, (_, _) => _runtime.OpenWidgetEditor()));
         // Land the new box where the desktop was right-clicked, on this
         // monitor, instead of the first free slot of the primary one.
         var boxAnchor = ToWorkAreaDip(location);
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "创建盒子",
-            LucideRuntimeIcon.SquarePlus,
+            TablerRuntimeIcon.SquarePlus,
             (_, _) => TryAction(() => _runtime.AddBoxAt(_monitor.Id, boxAnchor.X, boxAnchor.Y))));
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "设置中心",
-            LucideRuntimeIcon.Cog,
+            TablerRuntimeIcon.Cog,
             (_, _) => TryAction(() => _runtime.RequestShowSettings("general"))));
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "规则整理",
-            LucideRuntimeIcon.ListFilter,
+            TablerRuntimeIcon.ListFilter,
             (_, _) => TryAction(() => _runtime.SmartOrganize())));
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "AI 整理",
-            LucideRuntimeIcon.Sparkles,
+            TablerRuntimeIcon.Sparkles,
             (_, _) => TryAction(_runtime.RequestAiOrganization)));
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "重新连接桌面",
-            LucideRuntimeIcon.RefreshCw,
+            TablerRuntimeIcon.RefreshCw,
             (_, _) => TryAction(() => _ = _runtime.ReconnectDesktopAsync())));
         crabDesk.DropDownItems.Add(new Forms.ToolStripSeparator());
         crabDesk.DropDownItems.Add(CreateDesktopBackgroundMenuItem(
             "退出 CrabDesk",
-            LucideRuntimeIcon.LogOut,
+            TablerRuntimeIcon.LogOut,
             (_, _) => TryAction(_runtime.RequestExit)));
 
         menu.Items.Add(crabDesk);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(CreateDesktopBackgroundMenuItem(
             "Windows 桌面菜单",
-            LucideRuntimeIcon.Menu,
+            TablerRuntimeIcon.Menu,
             (_, _) => ShowNativeDesktopContextMenu(location)));
         menu.Show(this, location);
     }
@@ -4701,11 +4713,11 @@ internal sealed class DesktopIconSurface : Forms.Form, IDesktopDropForwardTarget
 
     private static Forms.ToolStripMenuItem CreateDesktopBackgroundMenuItem(
         string text,
-        LucideRuntimeIcon icon,
+        TablerRuntimeIcon icon,
         EventHandler? onClick = null)
     {
         var item = new FluentToolStripMenuItem(text);
-        LucideRuntimeIcons.SetMenuIcon(item, icon);
+        TablerRuntimeIcons.SetMenuIcon(item, icon);
         if (onClick is not null)
         {
             item.Click += onClick;

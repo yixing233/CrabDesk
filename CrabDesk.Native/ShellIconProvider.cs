@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32;
 
 namespace CrabDesk.Native;
@@ -73,9 +74,11 @@ public sealed class ShellIconProvider
         }
     }
 
-    public Bitmap? GetIcon(string parsingName, int pixelSize)
+    public Bitmap? GetIcon(string parsingName, int pixelSize) => GetIcon(parsingName, pixelSize, true);
+
+    public Bitmap? GetIcon(string parsingName, int pixelSize, bool includeShortcutOverlay)
     {
-        var key = CreateCacheKey(parsingName, pixelSize);
+        var key = CreateCacheKey(parsingName, pixelSize, includeShortcutOverlay);
         bool? recycleBinIsEmpty;
         lock (_cacheLock)
         {
@@ -89,7 +92,8 @@ public sealed class ShellIconProvider
             recycleBinIsEmpty = _recycleBinIsEmpty;
         }
 
-        var image = IsRecycleBin(key.ParsingName) && recycleBinIsEmpty is { } isEmpty
+        var image = !includeShortcutOverlay ? LoadUnadornedIcon(key.ParsingName, key.PixelSize) : null;
+        image ??= IsRecycleBin(key.ParsingName) && recycleBinIsEmpty is { } isEmpty
             ? LoadRecycleBinImage(isEmpty, key.PixelSize) ?? LoadImage(key.ParsingName, key.PixelSize)
             : LoadImage(key.ParsingName, key.PixelSize);
         lock (_cacheLock)
@@ -144,7 +148,7 @@ public sealed class ShellIconProvider
         }
     }
 
-    private CacheKey CreateCacheKey(string parsingName, int pixelSize)
+    private CacheKey CreateCacheKey(string parsingName, int pixelSize, bool includeShortcutOverlay)
     {
         var normalizedName = parsingName;
         long modifiedTicks = 0;
@@ -175,7 +179,65 @@ public sealed class ShellIconProvider
             normalizedName,
             Math.Clamp(pixelSize, 16, 256),
             GetIconCacheStamp(parsingName, modifiedTicks),
-            length);
+            length,
+            includeShortcutOverlay);
+    }
+
+    private static Bitmap? LoadUnadornedIcon(string parsingName, int pixelSize)
+    {
+        // Internet shortcut handlers can ignore IconFile in their image-list
+        // entry. Read the declared resource through the Windows INI API.
+        if (string.Equals(Path.GetExtension(parsingName), ".url", StringComparison.OrdinalIgnoreCase))
+        {
+            var iconPath = new StringBuilder(32768);
+            if (GetPrivateProfileString("InternetShortcut", "IconFile", null,
+                    iconPath, (uint)iconPath.Capacity, parsingName) > 0)
+            {
+                var path = Environment.ExpandEnvironmentVariables(iconPath.ToString().Trim().Trim('"'));
+                if (!Path.IsPathRooted(path))
+                    path = Path.Combine(Path.GetDirectoryName(parsingName) ?? string.Empty, path);
+                var index = GetPrivateProfileInt("InternetShortcut", "IconIndex", 0, parsingName);
+                if (LoadIconResource(path, index, pixelSize) is { } configured) return configured;
+            }
+        }
+
+        // Retrieve the base image-list entry without an overlay index. The Shell
+        // still resolves custom shortcut icons, including links to files/folders.
+        const uint shgfiSysIconIndex = 0x4000;
+        if (SHGetFileInfo(parsingName, 0, out var info, (uint)Marshal.SizeOf<ShFileInfo>(),
+                shgfiSysIconIndex) == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var interfaceId = new Guid("46EB5926-582E-4017-9FDF-E8998DAA0950");
+        var imageList = IntPtr.Zero;
+        var iconHandle = IntPtr.Zero;
+        try
+        {
+            var listSize = pixelSize <= 16 ? 1 : pixelSize <= 32 ? 0 : pixelSize <= 48 ? 2 : 4;
+            if (SHGetImageList(listSize, ref interfaceId, out imageList) != 0 || imageList == IntPtr.Zero)
+            {
+                return null;
+            }
+            // SHGetImageList explicitly supports using its IImageList pointer as
+            // a HIMAGELIST. No ILD_OVERLAYMASK bits means no shortcut arrow.
+            iconHandle = ImageList_GetIcon(imageList, info.IconIndex, 0);
+            if (iconHandle == IntPtr.Zero) return null;
+            using var icon = (Icon)Icon.FromHandle(iconHandle).Clone();
+            using var source = icon.ToBitmap();
+            var result = new Bitmap(pixelSize, pixelSize, PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(result);
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.DrawImage(source, new Rectangle(0, 0, pixelSize, pixelSize));
+            return result;
+        }
+        finally
+        {
+            if (iconHandle != IntPtr.Zero) DestroyIcon(iconHandle);
+            if (imageList != IntPtr.Zero) Marshal.Release(imageList);
+        }
     }
 
     private static Bitmap? LoadImage(string parsingName, int pixelSize) =>
@@ -433,6 +495,19 @@ public sealed class ShellIconProvider
         uint fileInfoSize,
         uint flags);
 
+    [DllImport("shell32.dll", PreserveSig = true)]
+    private static extern int SHGetImageList(int imageList, ref Guid interfaceId, out IntPtr result);
+
+    [DllImport("comctl32.dll", ExactSpelling = true)]
+    private static extern IntPtr ImageList_GetIcon(IntPtr imageList, int index, uint flags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint GetPrivateProfileString(string section, string key, string? defaultValue,
+        StringBuilder result, uint size, string path);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetPrivateProfileInt(string section, string key, int defaultValue, string path);
+
     [DllImport("shell32.dll")]
     private static extern IntPtr SHGetFileInfo(
         IntPtr pidl,
@@ -674,7 +749,8 @@ public sealed class ShellIconProvider
         string ParsingName,
         int PixelSize,
         long ModifiedTicks,
-        long Length);
+        long Length,
+        bool IncludeShortcutOverlay);
 
     private sealed class CacheEntry(Bitmap? image, long lastAccess)
     {

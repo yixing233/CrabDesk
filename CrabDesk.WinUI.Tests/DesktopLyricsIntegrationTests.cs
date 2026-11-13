@@ -178,6 +178,7 @@ public sealed class DesktopLyricsIntegrationTests
     public void SelectingAcrylicRestoresTheLyricsMaterialAndOnlyNotifiesOnce()
     {
         var (runtime, widget) = Fixture();
+        runtime.State.Settings.Appearance.WidgetAcrylic.FollowBoxAppearance = false;
         widget.BackgroundMaterial = WidgetBackgroundMaterial.Solid;
         using var timer = new RuntimeTimer(TimeSpan.FromHours(1), false, _ => { }, () => { });
         Set(runtime, "_saveTimer", timer);

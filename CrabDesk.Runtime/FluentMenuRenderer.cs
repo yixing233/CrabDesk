@@ -87,9 +87,9 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
         var hasArrow = eventArgs.Item is ToolStripMenuItem { HasDropDownItems: true };
         var layout = CalculateItemLayout(eventArgs.Item.Size, dpiScale, hasArrow);
         var textColor = ResolveItemTextColor(eventArgs.Item.Enabled, eventArgs.TextColor, _isDark);
-        if (LucideRuntimeIcons.TryGetMenuIcon(eventArgs.Item, out var icon))
+        if (TablerRuntimeIcons.TryGetMenuIcon(eventArgs.Item, out var icon))
         {
-            LucideRuntimeIcons.Draw(
+            TablerRuntimeIcons.Draw(
                 eventArgs.Graphics,
                 icon,
                 layout.IconBounds,
@@ -98,9 +98,9 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
         }
         else if (eventArgs.Item is ToolStripMenuItem { Checked: true })
         {
-            LucideRuntimeIcons.Draw(
+            TablerRuntimeIcons.Draw(
                 eventArgs.Graphics,
-                LucideRuntimeIcon.Check,
+                TablerRuntimeIcon.Check,
                 layout.IconBounds,
                 GetCheckColor(eventArgs.Item.Enabled),
                 layout.IconBounds.Width);
@@ -142,9 +142,9 @@ internal sealed class FluentMenuRenderer : ToolStripProfessionalRenderer
         var color = item?.Enabled != false
             ? (_isDark ? Color.FromArgb(224, 227, 232) : Color.FromArgb(61, 66, 73))
             : (_isDark ? Color.FromArgb(125, 130, 138) : Color.FromArgb(145, 150, 158));
-        LucideRuntimeIcons.Draw(
+        TablerRuntimeIcons.Draw(
             eventArgs.Graphics,
-            LucideRuntimeIcon.ChevronRight,
+            TablerRuntimeIcon.ChevronRight,
             layout.ArrowBounds,
             color,
             layout.ArrowBounds.Width);

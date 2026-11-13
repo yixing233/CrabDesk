@@ -12,6 +12,62 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class DesktopIconInteractionTests
 {
     [Theory]
+    [InlineData("qqmusic", "qqmusic")]
+    [InlineData("cloudmusic.exe", "netease")]
+    [InlineData("KuGou.KugouMusic_abc123!KugouMusic", "kugou")]
+    [InlineData("kwmusic.exe", "kuwo")]
+    [InlineData("SpotifyAB.SpotifyMusic_zzabcd!Spotify", "spotify")]
+    [InlineData("AppleInc.AppleMusicWin_abc!AppleMusic", "applemusic")]
+    [InlineData("msedge.exe", null)]
+    [InlineData(null, null)]
+    public void MediaPlayerLogosResolveKnownSessions(string? sourceAppId, string? expected)
+    {
+        Assert.Equal(expected, MediaPlayerIcons.Resolve(sourceAppId));
+    }
+
+    [Fact]
+    public void KnownMediaPlayerSessionsExposePngLogoBytes()
+    {
+        foreach (var (appId, player) in new[] { ("qqmusic.exe", "qqmusic"), ("netease.cloudmusic", "netease"),
+            ("kugou.exe", "kugou"), ("kwmusic.exe", "kuwo"), ("spotify.exe", "spotify"), ("applemusic.exe", "applemusic") })
+        {
+            var bytes = MediaPlayerIcons.TryGetLogoBytes(appId);
+            Assert.NotNull(bytes);
+            Assert.True(bytes.Length > 0, $"{player} logo must not be empty.");
+            // PNG signature: 89 50 4E 47 0D 0A 1A 0A.
+            Assert.Equal(0x89, bytes[0]);
+            Assert.Equal(0x50, bytes[1]);
+            Assert.Equal(0x4E, bytes[2]);
+            Assert.Equal(0x47, bytes[3]);
+        }
+        Assert.Null(MediaPlayerIcons.TryGetLogoBytes("msedge.exe"));
+        Assert.Null(MediaPlayerIcons.TryGetLogoBytes(null));
+    }
+
+    [Fact]
+    public void MediaPlayerLogosDrawPixelsForKnownPlayersAndFallbackGlyphForUnknown()
+    {
+        static int LitPixels(Action<Graphics> draw)
+        {
+            using var bitmap = new Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using var graphics = Graphics.FromImage(bitmap);
+            graphics.Clear(Color.Transparent);
+            draw(graphics);
+            var lit = 0;
+            for (var y = 0; y < bitmap.Height; y++)
+                for (var x = 0; x < bitmap.Width; x++)
+                    if (bitmap.GetPixel(x, y).A > 0) lit++;
+            return lit;
+        }
+
+        var bounds = new RectangleF(4, 4, 24, 24);
+        Assert.True(LitPixels(g => MediaPlayerIcons.Draw(g, "spotify.exe", bounds, Color.Black)) > 50,
+            "A known player must draw its colored logo.");
+        Assert.True(LitPixels(g => MediaPlayerIcons.Draw(g, "msedge.exe", bounds, Color.Black)) > 50,
+            "An unknown player keeps the neutral music glyph.");
+    }
+
+    [Theory]
     [InlineData(true, null, "primary", false, true)]
     [InlineData(false, null, "secondary", false, false)]
     [InlineData(true, "secondary", "primary", true, false)]
@@ -36,78 +92,103 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(LucideIconName.Archive)]
-    [InlineData(LucideIconName.ArrowDown)]
-    [InlineData(LucideIconName.ArrowRight)]
-    [InlineData(LucideIconName.ArrowUp)]
-    [InlineData(LucideIconName.Copy)]
-    [InlineData(LucideIconName.Download)]
-    [InlineData(LucideIconName.ExternalLink)]
-    [InlineData(LucideIconName.Eye)]
-    [InlineData(LucideIconName.FolderGit2)]
-    [InlineData(LucideIconName.FolderOpen)]
-    [InlineData(LucideIconName.House)]
-    [InlineData(LucideIconName.Info)]
-    [InlineData(LucideIconName.Keyboard)]
-    [InlineData(LucideIconName.LayoutGrid)]
-    [InlineData(LucideIconName.Pencil)]
-    [InlineData(LucideIconName.Plus)]
-    [InlineData(LucideIconName.RefreshCw)]
-    [InlineData(LucideIconName.RotateCcw)]
-    [InlineData(LucideIconName.Sparkles)]
-    [InlineData(LucideIconName.Trash2)]
-    [InlineData(LucideIconName.Upload)]
-    [InlineData(LucideIconName.X)]
-    public void WinUiLucideIconsUsedByXamlExposeGlyphs(LucideIconName icon) =>
-        Assert.NotEmpty(LucideGlyphs.ToGlyph(icon));
+    [InlineData(TablerIconName.Archive)]
+    [InlineData(TablerIconName.ArrowDown)]
+    [InlineData(TablerIconName.ArrowRight)]
+    [InlineData(TablerIconName.ArrowUp)]
+    [InlineData(TablerIconName.Copy)]
+    [InlineData(TablerIconName.Download)]
+    [InlineData(TablerIconName.ExternalLink)]
+    [InlineData(TablerIconName.Eye)]
+    [InlineData(TablerIconName.FolderSymlink)]
+    [InlineData(TablerIconName.FolderOpen)]
+    [InlineData(TablerIconName.Home)]
+    [InlineData(TablerIconName.InfoCircle)]
+    [InlineData(TablerIconName.Keyboard)]
+    [InlineData(TablerIconName.LayoutGrid)]
+    [InlineData(TablerIconName.Pencil)]
+    [InlineData(TablerIconName.Plus)]
+    [InlineData(TablerIconName.Refresh)]
+    [InlineData(TablerIconName.ArrowBackUp)]
+    [InlineData(TablerIconName.Sparkles)]
+    [InlineData(TablerIconName.Trash)]
+    [InlineData(TablerIconName.Upload)]
+    [InlineData(TablerIconName.X)]
+    public void WinUiTablerIconsUsedByXamlExposeGlyphs(TablerIconName icon) =>
+        Assert.NotEmpty(TablerGlyphs.ToGlyph(icon));
 
     [Theory]
-    [InlineData(nameof(LucideRuntimeIcon.Menu), "\uE115")]
-    [InlineData(nameof(LucideRuntimeIcon.Search), "\uE151")]
-    [InlineData(nameof(LucideRuntimeIcon.ChevronsUpDown), "\uE211")]
-    [InlineData(nameof(LucideRuntimeIcon.Check), "\uE06C")]
-    [InlineData(nameof(LucideRuntimeIcon.ChevronRight), "\uE06F")]
-    [InlineData(nameof(LucideRuntimeIcon.TriangleAlert), "\uE193")]
-    [InlineData(nameof(LucideRuntimeIcon.CircleAlert), "\uE077")]
-    public void RuntimeLucideIconsExposeExpectedFontGlyphs(
+    [InlineData(nameof(TablerRuntimeIcon.Menu), "\uEC42")]
+    [InlineData(nameof(TablerRuntimeIcon.Search), "\uEB1C")]
+    [InlineData(nameof(TablerRuntimeIcon.ChevronsUpDown), "\uEB1D")]
+    [InlineData(nameof(TablerRuntimeIcon.Check), "\uEA5E")]
+    [InlineData(nameof(TablerRuntimeIcon.ChevronRight), "\uEA61")]
+    [InlineData(nameof(TablerRuntimeIcon.TriangleAlert), "\uEA06")]
+    [InlineData(nameof(TablerRuntimeIcon.CircleAlert), "\uEA05")]
+    public void RuntimeTablerIconsExposeExpectedFontGlyphs(
         string iconName,
         string expected)
     {
-        var icon = Enum.Parse<LucideRuntimeIcon>(iconName);
-        Assert.Equal(expected, LucideRuntimeIcons.GetGlyph(icon));
+        var icon = Enum.Parse<TablerRuntimeIcon>(iconName);
+        Assert.Equal(expected, TablerRuntimeIcons.GetGlyph(icon));
     }
 
     [Fact]
-    public void EveryRuntimeLucideIconExposesAGlyph()
+    public void EveryRuntimeTablerIconExposesAGlyph()
     {
-        foreach (var icon in Enum.GetValues<LucideRuntimeIcon>())
+        foreach (var icon in Enum.GetValues<TablerRuntimeIcon>())
         {
-            Assert.NotEmpty(LucideRuntimeIcons.GetGlyph(icon));
+            Assert.NotEmpty(TablerRuntimeIcons.GetGlyph(icon));
         }
     }
 
     [Fact]
-    public void WidgetIconsUseTheSameLucideGlyphsOnTheDesktopAndInPreviews()
+    public void WidgetIconsUseTheSameTablerGlyphsOnTheDesktopAndInPreviews()
     {
-        var names = new[] { "Sun", "CloudSun", "Cloud", "CloudRain", "CloudSnow", "CloudLightning", "CloudFog", "Haze", "CloudHail", "CloudOff", "Droplets", "Wind", "Thermometer", "Gauge",
-            "ArrowDownToLine", "ArrowUpToLine", "Network", "Clock",
-            "Square", "SquareCheck", "CalendarDays", "ChevronDown", "ChevronRight" };
-        foreach (var name in names)
-            Assert.Equal(LucideGlyphs.ToGlyph(Enum.Parse<LucideIconName>(name)), LucideRuntimeIcons.GetGlyph(Enum.Parse<LucideRuntimeIcon>(name)));
+        // Desktop widgets and settings previews must paint the same glyph for a
+        // given meaning, so the WinUI and runtime tables are compared pairwise.
+        var pairs = new (TablerIconName WinUi, TablerRuntimeIcon Runtime)[]
+        {
+            (TablerIconName.Sun, TablerRuntimeIcon.Sun),
+            (TablerIconName.SunHigh, TablerRuntimeIcon.CloudSun),
+            (TablerIconName.Cloud, TablerRuntimeIcon.Cloud),
+            (TablerIconName.CloudRain, TablerRuntimeIcon.CloudRain),
+            (TablerIconName.CloudSnow, TablerRuntimeIcon.CloudSnow),
+            (TablerIconName.CloudStorm, TablerRuntimeIcon.CloudLightning),
+            (TablerIconName.CloudStorm, TablerRuntimeIcon.CloudHail),
+            (TablerIconName.CloudFog, TablerRuntimeIcon.CloudFog),
+            (TablerIconName.Haze, TablerRuntimeIcon.Haze),
+            (TablerIconName.CloudOff, TablerRuntimeIcon.CloudOff),
+            (TablerIconName.Droplets, TablerRuntimeIcon.Droplets),
+            (TablerIconName.Wind, TablerRuntimeIcon.Wind),
+            (TablerIconName.Thermometer, TablerRuntimeIcon.Thermometer),
+            (TablerIconName.Gauge, TablerRuntimeIcon.Gauge),
+            (TablerIconName.ArrowBarToDown, TablerRuntimeIcon.ArrowDownToLine),
+            (TablerIconName.ArrowBarToUp, TablerRuntimeIcon.ArrowUpToLine),
+            (TablerIconName.Network, TablerRuntimeIcon.Network),
+            (TablerIconName.Clock, TablerRuntimeIcon.Clock),
+            (TablerIconName.Square, TablerRuntimeIcon.Square),
+            (TablerIconName.SquareCheck, TablerRuntimeIcon.SquareCheck),
+            (TablerIconName.CalendarEvent, TablerRuntimeIcon.CalendarDays),
+            (TablerIconName.ChevronDown, TablerRuntimeIcon.ChevronDown),
+            (TablerIconName.ChevronRight, TablerRuntimeIcon.ChevronRight)
+        };
+        foreach (var (winUi, runtime) in pairs)
+            Assert.Equal(TablerGlyphs.ToGlyph(winUi), TablerRuntimeIcons.GetGlyph(runtime));
     }
 
     [Theory]
     [InlineData(15f, 1f, 15f)]
     [InlineData(15f, 1.25f, 15.2f)]
     [InlineData(15f, 1.5f, 15.333333f)]
-    public void RuntimeLucideFontSizeAlignsToPhysicalPixels(
+    public void RuntimeTablerFontSizeAlignsToPhysicalPixels(
         float requestedEmSize,
         float dpiScale,
         float expectedEmSize)
     {
         Assert.Equal(
             expectedEmSize,
-            LucideRuntimeIcons.AlignEmSizeToPhysicalPixels(requestedEmSize, dpiScale),
+            TablerRuntimeIcons.AlignEmSizeToPhysicalPixels(requestedEmSize, dpiScale),
             precision: 3);
     }
 
@@ -1153,9 +1234,9 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(nameof(LucideRuntimeIcon.Menu), 24, 18)]
-    [InlineData(nameof(LucideRuntimeIcon.ChevronsUpDown), 24, 24)]
-    public void RuntimeLucideIconsKeepIndependentStrokesDisconnected(
+    [InlineData(nameof(TablerRuntimeIcon.Menu), 24, 18)]
+    [InlineData(nameof(TablerRuntimeIcon.ChevronsUpDown), 24, 24)]
+    public void RuntimeTablerIconsKeepIndependentStrokesDisconnected(
         string iconName,
         int probeX,
         int probeY)
@@ -1164,9 +1245,9 @@ public sealed class DesktopIconInteractionTests
         using var graphics = Graphics.FromImage(bitmap);
         graphics.Clear(Color.Transparent);
 
-        LucideRuntimeIcons.Draw(
+        TablerRuntimeIcons.Draw(
             graphics,
-            Enum.Parse<LucideRuntimeIcon>(iconName),
+            Enum.Parse<TablerRuntimeIcon>(iconName),
             new RectangleF(0, 0, 48, 48),
             Color.White,
             48f);

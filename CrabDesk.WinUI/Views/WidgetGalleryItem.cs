@@ -9,6 +9,9 @@ public sealed class WidgetGalleryItem : ObservableObject
 {
     public DesktopWidget Widget { get; }
     public bool IsCatalog { get; }
+    private WidgetPlacement _placement;
+    public bool IsInCenter => !IsCatalog && _placement == WidgetPlacement.Center;
+    public string PlacementLabel => IsCatalog ? string.Empty : IsInCenter ? "组件中心" : "桌面";
     public string IconAssetName => WidgetIconCatalog.GetName(Widget.Kind);
     private WidgetPreviewAppearance _appearance;
     public WidgetPreviewAppearance Appearance => _appearance;
@@ -31,6 +34,7 @@ public sealed class WidgetGalleryItem : ObservableObject
         Widget = widget;
         _appearance = appearance;
         IsCatalog = isCatalog;
+        _placement = widget.Placement;
         _caption = caption;
         _title = widget.DisplayTitle;
         _existingCount = existingCount;
@@ -40,6 +44,12 @@ public sealed class WidgetGalleryItem : ObservableObject
     {
         SetProperty(ref _appearance, appearance, nameof(Appearance));
         SetProperty(ref _caption, caption, nameof(Caption));
+        if (SetProperty(ref _placement, Widget.Placement, nameof(PlacementLabel)))
+        {
+            OnPropertyChanged(nameof(IsInCenter));
+            OnPropertyChanged(nameof(StatusLabel));
+            OnPropertyChanged(nameof(AccessibleName));
+        }
         if (SetProperty(ref _title, Widget.DisplayTitle, nameof(Title))) OnPropertyChanged(nameof(AccessibleName));
         if (SetProperty(ref _existingCount, existingCount, nameof(ExistingCount)))
         {
@@ -57,18 +67,19 @@ public sealed class WidgetGalleryItem : ObservableObject
     }
 
     public bool IsAdded => !IsCatalog || ExistingCount > 0;
-    public string StatusLabel => IsCatalog && ExistingCount > 1 ? $"已添加 {ExistingCount} 个" : IsAdded ? "已添加" : "未添加";
+    public string StatusLabel => IsInCenter ? "已添加 · 中心" : IsCatalog && ExistingCount > 1 ? $"已添加 {ExistingCount} 个" : IsAdded ? "已添加" : "未添加";
     public Visibility StatusVisibility => Visibility.Visible;
     public Visibility SelectionVisibility => IsSelected ? Visibility.Visible : Visibility.Collapsed;
     public string ActionLabel => !IsCatalog ? "编辑组件" : IsAdded ? ExistingCount > 1 ? "查看已添加组件" : "编辑已有组件" : "添加到桌面";
-    public string AccessibleName => (IsCatalog && ExistingCount > 1 ? "查看已添加的" : IsAdded ? "编辑已添加的" : "添加") + Title;
-    public LucideIconName ActionIcon => !IsCatalog ? LucideIconName.ArrowRight : IsAdded ? LucideIconName.Check : LucideIconName.Plus;
+    public string AccessibleName => (IsCatalog && ExistingCount > 1 ? "查看已添加的" : IsAdded ? "编辑已添加的" : "添加") + Title
+        + (IsInCenter ? "，位于组件中心" : "");
+    public TablerIconName ActionIcon => !IsCatalog ? TablerIconName.ArrowRight : IsAdded ? TablerIconName.Check : TablerIconName.Plus;
 
     public bool Matches(string? query, bool? isAdded)
     {
         if (isAdded.HasValue && IsAdded != isAdded.Value) return false;
         var text = query?.Trim() ?? string.Empty;
-        return text.Length == 0 || new[] { Title, DesktopWidgets.GetName(Widget.Kind), Description(Widget.Kind), Caption, Widget.Kind.ToString() }
+        return text.Length == 0 || new[] { Title, DesktopWidgets.GetName(Widget.Kind), Description(Widget.Kind), Caption, PlacementLabel, StatusLabel, Widget.Kind.ToString() }
             .Any(value => value.Contains(text, StringComparison.OrdinalIgnoreCase));
     }
 

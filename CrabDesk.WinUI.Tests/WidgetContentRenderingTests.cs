@@ -12,6 +12,76 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class WidgetContentRenderingTests
 {
     [Theory]
+    [InlineData(1d)]
+    [InlineData(1.25d)]
+    [InlineData(1.5d)]
+    public void EmptyMediaContentIsCenteredInThePanel(double scale) => OnSta(() =>
+    {
+        using var fixture = new WidgetCenterRuntimeTests.Fixture();
+        using var surface = new DesktopBoxForm(fixture.Runtime, fixture.Runtime.Monitors[0]);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.ControlCenter };
+        using var image = new Bitmap((int)(340 * scale), (int)(80 * scale));
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.ScaleTransform((float)scale, (float)scale);
+            typeof(WidgetSurfaceController).GetMethod("DrawControlCenterMedia", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(surface, [graphics, new RectangleF(0, 0, 340, 80), null,
+                    Color.Black, Color.Black, Color.Black, Color.White, Color.White, widget]);
+        }
+        var ink = InkBounds(image, new Rectangle(0, 0, image.Width, image.Height),
+            color => color.A > 64 && color.R < 180);
+        Assert.InRange((ink.Top + ink.Height / 2d) / scale, 37, 43);
+        if (Environment.GetEnvironmentVariable("CRABDESK_WIDGET_CONTENT_OUTPUT") is { Length: > 0 } output)
+        {
+            Directory.CreateDirectory(output);
+            image.Save(Path.Combine(output, $"empty-media-{scale}.png"));
+        }
+    });
+
+    [Theory]
+    [InlineData("晴", 1d)]
+    [InlineData("霾", 1d)]
+    [InlineData("小雨", 1.25d)]
+    [InlineData("霾", 1.5d)]
+    public void WeatherSummaryIconAndTemperatureHaveAlignedVisibleCenters(string condition, double scale) => OnSta(() =>
+    {
+        using var fixture = new WidgetCenterRuntimeTests.Fixture();
+        using var surface = new DesktopBoxForm(fixture.Runtime, fixture.Runtime.Monitors[0]);
+        var widget = new DesktopWidget { Kind = DesktopWidgetKind.Weather, Bounds = new(0, 0, 372, 180),
+            Weather = new(4, 3, 16, 0, new DateTimeOffset(2026, 11, 13, 12, 0, 0, TimeSpan.FromHours(8))) { Condition = condition } };
+        var layout = WidgetWeatherPresentation.Arrange(372, 180, 8, false);
+        using var image = new Bitmap((int)(372 * scale), (int)(180 * scale));
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.ScaleTransform((float)scale, (float)scale);
+            typeof(WidgetSurfaceController).GetMethod("DrawWideWeather", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .Invoke(surface, [graphics, widget, layout, Color.Black, Color.Black]);
+        }
+        Rectangle Pixels(LayoutRect rect) => Rectangle.Round(new RectangleF((float)(rect.X * scale),
+            (float)(rect.Y * scale), (float)(rect.Width * scale), (float)(rect.Height * scale)));
+        var icon = InkBounds(image, Pixels(layout.Icon), color => color.A > 64);
+        var temperature = InkBounds(image, Pixels(layout.Temperature), color => color.A > 64);
+        var difference = Math.Abs(icon.Top + icon.Height / 2d - temperature.Top - temperature.Height / 2d) / scale;
+        Assert.True(difference <= 3, $"Visible centers differ by {difference:F2} DIP ({condition}, {scale}).");
+        if (Environment.GetEnvironmentVariable("CRABDESK_WIDGET_CONTENT_OUTPUT") is { Length: > 0 } output)
+        {
+            Directory.CreateDirectory(output);
+            image.Save(Path.Combine(output, $"weather-summary-{condition}-{scale}.png"));
+        }
+    });
+
+    private static Rectangle InkBounds(Bitmap image, Rectangle area, Func<Color, bool> matches)
+    {
+        var ink = Rectangle.Empty;
+        for (var y = area.Top; y < area.Bottom; y++)
+        for (var x = area.Left; x < area.Right; x++)
+            if (matches(image.GetPixel(x, y)))
+                ink = ink.IsEmpty ? new Rectangle(x, y, 1, 1) : Rectangle.Union(ink, new Rectangle(x, y, 1, 1));
+        Assert.False(ink.IsEmpty);
+        return ink;
+    }
+
+    [Theory]
     [InlineData(false, 1d)]
     [InlineData(true, 1d)]
     [InlineData(false, 1.25d)]

@@ -39,7 +39,7 @@ public sealed class WidgetColorIconUiTests
         Assert.Equal("{Binding IsCatalog}", (string?)preview.Attribute("IsCatalogPreview"));
         Assert.Equal("156", (string?)preview.Parent!.Attribute("Height"));
         Assert.Contains(tile.Descendants(ui + "TextBlock"), element => (string?)element.Attribute("Text") == "{Binding ActionLabel}");
-        Assert.Contains(tile.Descendants(icons + "LucideIcon"), element => (string?)element.Attribute("Icon") == "{Binding ActionIcon}");
+        Assert.Contains(tile.Descendants(icons + "TablerIcon"), element => (string?)element.Attribute("Icon") == "{Binding ActionIcon}");
         var editor = document.Descendants(icons + "WidgetColorIcon").Single(element => (string?)element.Attribute(x + "Name") == "EditorIcon");
         Assert.Equal("24", (string?)editor.Attribute("Width"));
         Assert.Equal("24", (string?)editor.Attribute("Height"));

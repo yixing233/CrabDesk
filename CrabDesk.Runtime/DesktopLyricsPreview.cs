@@ -14,6 +14,9 @@ public static class DesktopLyricsPreview
         var now = DateTimeOffset.Now;
         var snapshot = widget.Lyrics ?? Sample(now);
         if (widget.LyricsLightText is { } light) ink = light ? Color.White : Color.FromArgb(31, 35, 41);
+        // The preview card reproduces the desktop header, including the player
+        // brand logo drawn when a known player session is active.
+        MediaPlayerIcons.Draw(graphics, snapshot.Media?.SourceAppId, new(12, 10, 16, 16), Color.FromArgb(165, ink));
         visual.Draw(graphics, snapshot, new(0, 0, bitmap.Width, bitmap.Height), ink, accent,
             widget.LyricsLineSpacing, widget.LyricsFontSize, widget.LyricsOffsetMilliseconds,
             widget.LyricsWordHighlight, false, 1, now, widget.LyricsFontFamily, widget.LyricsFontWeight, widget.LyricsFontStyle);

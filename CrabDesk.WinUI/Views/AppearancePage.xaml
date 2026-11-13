@@ -23,6 +23,7 @@
             <SelectorBarItem Text="标题栏" AutomationProperties.Name="标题栏" />
             <SelectorBarItem Text="图标与标签" AutomationProperties.Name="图标与标签" />
             <SelectorBarItem Text="桌面图标名称" AutomationProperties.Name="桌面图标名称" />
+            <SelectorBarItem Text="桌面图标外观" AutomationProperties.Name="桌面图标外观" />
         </SelectorBar>
 
         <ScrollViewer x:Name="PageScrollViewer"
@@ -831,13 +832,178 @@
                         </Border>
                     </StackPanel>
 
+                <!-- ==================== PANEL 4: 桌面图标外观 ==================== -->
+                <StackPanel x:Name="PanelDesktopIconSkin" Visibility="Collapsed" Spacing="{StaticResource CardSpacing}">
+                    <Border Style="{StaticResource SectionCardStyle}">
+                        <StackPanel Spacing="{StaticResource FormSpacing}">
+                            <TextBlock Text="桌面图标外观" FontSize="14" FontWeight="SemiBold" />
+
+                            <!-- macOS 扁平图标 -->
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="macOS 扁平图标" FontWeight="Medium" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1"
+                                              IsOn="{Binding IconSkinEnabled, Mode=TwoWay}"
+                                              OnContent="" OffContent=""
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              AutomationProperties.Name="macOS 扁平图标" />
+                            </Grid>
+
+                            <!-- 应用图标底板 -->
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="应用图标底板" FontWeight="Medium" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Style="{StaticResource ColorPickerButtonStyle}"
+                                        IsEnabled="{Binding IconSkinEnabled}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        AutomationProperties.Name="选择应用图标底板颜色">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="{StaticResource ColorSwatchSize}"
+                                                Height="{StaticResource ColorSwatchSize}"
+                                                CornerRadius="3"
+                                                Background="{Binding IconSkinAppPlate, Converter={StaticResource HexBrushConverter}}"
+                                                BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                                BorderThickness="1" />
+                                        <TextBlock Grid.Column="1" Text="{Binding IconSkinAppPlate}" FontFamily="Consolas" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Button.Flyout>
+                                        <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
+                                            <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                         IsAlphaEnabled="False"
+                                                         IsColorPreviewVisible="True"
+                                                         IsColorSliderVisible="True"
+                                                         IsColorChannelTextInputVisible="True"
+                                                         IsHexInputVisible="True"
+                                                         Color="{Binding IconSkinAppPlate, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                         AutomationProperties.Name="应用图标底板颜色选择器" />
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </Grid>
+
+                            <!-- 文件夹与文件底板 -->
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="文件夹与文件底板" FontWeight="Medium" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Style="{StaticResource ColorPickerButtonStyle}"
+                                        IsEnabled="{Binding IconSkinEnabled}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        AutomationProperties.Name="选择文件夹与文件底板颜色">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="{StaticResource ColorSwatchSize}"
+                                                Height="{StaticResource ColorSwatchSize}"
+                                                CornerRadius="3"
+                                                Background="{Binding IconSkinFolderPlate, Converter={StaticResource HexBrushConverter}}"
+                                                BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                                BorderThickness="1" />
+                                        <TextBlock Grid.Column="1" Text="{Binding IconSkinFolderPlate}" FontFamily="Consolas" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Button.Flyout>
+                                        <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
+                                            <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                         IsAlphaEnabled="False"
+                                                         IsColorPreviewVisible="True"
+                                                         IsColorSliderVisible="True"
+                                                         IsColorChannelTextInputVisible="True"
+                                                         IsHexInputVisible="True"
+                                                         Color="{Binding IconSkinFolderPlate, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                         AutomationProperties.Name="文件夹与文件底板颜色选择器" />
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </Grid>
+
+                            <!-- 快捷方式角标 -->
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="显示快捷方式箭头" FontWeight="Medium" VerticalAlignment="Center" />
+                                <ToggleSwitch Grid.Column="1"
+                                              IsOn="{Binding ShowShortcutArrow, Mode=TwoWay}"
+                                              OnContent="" OffContent=""
+                                              HorizontalAlignment="Right" VerticalAlignment="Center"
+                                              AutomationProperties.Name="显示快捷方式箭头"
+                                              AutomationProperties.AutomationId="ShowShortcutArrowToggle" />
+                            </Grid>
+
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Text="快捷方式角标底色" FontWeight="Medium" />
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Style="{StaticResource ColorPickerButtonStyle}"
+                                        IsEnabled="{Binding CanEditShortcutBadgeColor}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                                        AutomationProperties.Name="选择快捷方式角标底色">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="{StaticResource ColorSwatchSize}"
+                                                Height="{StaticResource ColorSwatchSize}"
+                                                CornerRadius="3"
+                                                Background="{Binding IconSkinBadgeColor, Converter={StaticResource HexBrushConverter}}"
+                                                BorderBrush="{ThemeResource SubtleBorderBrush}"
+                                                BorderThickness="1" />
+                                        <TextBlock Grid.Column="1" Text="{Binding IconSkinBadgeColor}" FontFamily="Consolas" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Button.Flyout>
+                                        <Flyout Placement="BottomEdgeAlignedRight" Opening="OnColorFlyoutOpening">
+                                            <ColorPicker Width="{StaticResource ColorPickerWidth}"
+                                                         IsAlphaEnabled="False"
+                                                         IsColorPreviewVisible="True"
+                                                         IsColorSliderVisible="True"
+                                                         IsColorChannelTextInputVisible="True"
+                                                         IsHexInputVisible="True"
+                                                         Color="{Binding IconSkinBadgeColor, Mode=TwoWay, Converter={StaticResource HexColorConverter}}"
+                                                         AutomationProperties.Name="快捷方式角标颜色选择器" />
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
                 <!-- 底部重置操作 -->
                 <Border Margin="0,16,0,0">
                     <Button Command="{Binding ResetCommand}"
                             HorizontalAlignment="Right"
                             Padding="12,6">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <controls:LucideIcon Icon="RotateCcw" FontSize="14" VerticalAlignment="Center" />
+                            <controls:TablerIcon Icon="ArrowBackUp" FontSize="14" VerticalAlignment="Center" />
                             <TextBlock Text="恢复默认外观" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>

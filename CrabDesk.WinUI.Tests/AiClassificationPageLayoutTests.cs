@@ -205,12 +205,12 @@ public sealed class AiClassificationPageLayoutTests
             var fill = Assert.Single(chip.Descendants(Presentation + "Border"),
                 element => (string?)element.Attribute("Visibility") == visibility);
             Assert.NotNull(fill.Attribute("Background"));
-            Assert.Single(chip.Descendants().Where(element => element.Name.LocalName == "LucideIcon"),
+            Assert.Single(chip.Descendants().Where(element => element.Name.LocalName == "TablerIcon"),
                 element => (string?)element.Attribute("Visibility") == visibility);
         }
 
         // The trailing chevron tells the user the chip opens a menu.
-        Assert.Contains(chip.Descendants().Where(element => element.Name.LocalName == "LucideIcon"),
+        Assert.Contains(chip.Descendants().Where(element => element.Name.LocalName == "TablerIcon"),
             element => (string?)element.Attribute("Icon") == "ChevronDown");
     }
 

@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\lucide.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\tabler-icons.ttf" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Assets\MediaPlayers\*.png" />
     <EmbeddedResource Include="Assets\WidgetIcons\*.png" />
   </ItemGroup>

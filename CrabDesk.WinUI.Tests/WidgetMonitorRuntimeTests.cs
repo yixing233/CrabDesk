@@ -201,11 +201,11 @@ public sealed class WidgetMonitorRuntimeTests
             new LayoutRect(media.X + 10, media.Y + 8, 100, 18),
             ControlCenterPresentation.MediaButtonRects(media)[1]
         };
-        foreach (var region in new[] { regions[2], regions[4], regions[5],
+        foreach (var region in new[] { regions[2], regions[3], regions[4], regions[5],
             new LayoutRect(tile.X, tile.Y + 27, tile.Width, 28),
             new LayoutRect(offTile.X, offTile.Y + 27, offTile.Width, 28) })
             Assert.True(AverageInk(light, region) > AverageInk(dark, region) + 2, $"Ink did not change in {region}");
-        foreach (var region in new[] { regions[0], regions[1], regions[3] })
+        foreach (var region in new[] { regions[0], regions[1] })
             Assert.Equal(AverageInk(light, region), AverageInk(dark, region), 6);
         var configured = automaticLight ? light : dark;
         foreach (var region in new[]

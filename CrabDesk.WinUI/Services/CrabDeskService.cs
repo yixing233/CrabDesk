@@ -20,6 +20,7 @@ public sealed class CrabDeskService : ICrabDeskService
 
     public CrabDeskState State => _runtime.State;
     public bool IsPaused => _runtime.IsPaused;
+    public bool IsWidgetCenterVisible => _runtime.IsWidgetCenterVisible;
     public bool DesktopConnected => _runtime.DesktopConnected;
     public bool IsCheckingForUpdates => _runtime.IsCheckingForUpdates;
     public bool IsDownloadingUpdate => _runtime.IsDownloadingUpdate;
@@ -65,6 +66,14 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetMappedFolderCategoryTabsEnabled(DesktopBox box, bool enabled) => _runtime.SetMappedFolderCategoryTabsEnabled(box, enabled);
     public void DeleteBox(DesktopBox box) => _runtime.DeleteBox(box);
     public void BoxChanged(DesktopBox box, bool rebuild = false) => _runtime.BoxChanged(box, rebuild);
+    public void SetWidgetCenterEnabled(bool enabled) => _runtime.SetWidgetCenterEnabled(enabled);
+    public void SetWidgetCenterThemeMode(ApplicationThemeMode mode) => _runtime.SetWidgetCenterThemeMode(mode);
+    public void ShowWidgetCenter() => _runtime.ShowWidgetCenter();
+    public void HideWidgetCenter() => _runtime.HideWidgetCenter();
+    public void ToggleWidgetCenter() => _runtime.ToggleWidgetCenter();
+    public DesktopWidget AddWidgetToCenter(DesktopWidgetKind kind) => _runtime.AddWidgetToCenter(kind);
+    public void MoveWidgetToCenter(DesktopWidget widget) => _runtime.MoveWidgetToCenter(widget);
+    public void MoveWidgetToDesktop(DesktopWidget widget) => _runtime.MoveWidgetToDesktop(widget);
     public void SetHotkey(HotkeyAction action, bool enabled, HotkeyModifiers modifiers, HotkeyKey key) => _runtime.SetHotkey(action, enabled, modifiers, key);
     public Task<LayoutBackupInfo> CreateBackupAsync() => _runtime.CreateBackupAsync();
     public Task<IReadOnlyList<LayoutBackupInfo>> GetBackupsAsync() => _runtime.GetBackupsAsync();
@@ -166,6 +175,10 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetSelectionColor(string value) => _runtime.SetSelectionColor(value);
     public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);
     public void SetIconLabelFontFamily(string value) => _runtime.SetIconLabelFontFamily(value);
+    public void SetIconSkinEnabled(bool enabled) => _runtime.SetIconSkinEnabled(enabled);
+    public void SetShowShortcutArrow(bool show) => _runtime.SetShowShortcutArrow(show);
+    public void SetIconSkinPlates(string appPlate, string folderPlate) => _runtime.SetIconSkinPlates(appPlate, folderPlate);
+    public void SetIconSkinBadgeColor(string value) => _runtime.SetIconSkinBadgeColor(value);
     public void SetBoxBackground(Guid? boxId, string value) => _runtime.SetBoxBackground(boxId, value);
     public void SetBoxAccent(Guid? boxId, string value) => _runtime.SetBoxAccent(boxId, value);
     public void SetBoxOpacity(Guid? boxId, double value) => _runtime.SetBoxOpacity(boxId, value);

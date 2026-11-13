@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private string? _folderDropTargetName;
@@ -178,7 +178,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         }
     }
 
-    private void ClearDropPreview()
+    protected override void ClearDropPreview()
     {
         var previousPreview = _dropPreview;
         var folderTargetChanged = SetFolderDropTargetName(null);

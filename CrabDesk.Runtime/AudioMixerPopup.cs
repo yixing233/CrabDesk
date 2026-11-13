@@ -59,13 +59,13 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         var header = new WpfControls.Grid { Margin = new Wpf.Thickness(0, 0, 0, 4) };
         header.Children.Add(Label("应用音量", 14, true));
-        var close = IconButton(LucideRuntimeIcon.X, "关闭", 24);
+        var close = IconButton(TablerRuntimeIcon.X, "关闭", 24);
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
         grid.Children.Add(header);
 
-        _master = CreateRow(null, "总音量", LucideRuntimeIcon.Headphones);
+        _master = CreateRow(null, "总音量", TablerRuntimeIcon.Headphones);
         var masterPanel = new WpfControls.StackPanel { Margin = new Wpf.Thickness(0, 0, 0, 4) };
         masterPanel.Children.Add(_master.Root);
         masterPanel.Children.Add(new WpfControls.Border { Height = 1, Margin = new Wpf.Thickness(0, 4, 0, 2),
@@ -163,14 +163,14 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         VerticalAlignment = Wpf.VerticalAlignment.Center, TextTrimming = Wpf.TextTrimming.CharacterEllipsis
     };
 
-    private WpfControls.TextBlock Glyph(LucideRuntimeIcon icon, double size = 16) => new()
+    private WpfControls.TextBlock Glyph(TablerRuntimeIcon icon, double size = 16) => new()
     {
-        Text = LucideRuntimeIcons.GetGlyph(icon), FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(),
+        Text = TablerRuntimeIcons.GetGlyph(icon), FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(),
         FontSize = size, Foreground = _foreground,
         HorizontalAlignment = Wpf.HorizontalAlignment.Center, VerticalAlignment = Wpf.VerticalAlignment.Center
     };
 
-    private WpfControls.Button IconButton(LucideRuntimeIcon icon, string name, double size)
+    private WpfControls.Button IconButton(TablerRuntimeIcon icon, string name, double size)
     {
         var button = new WpfControls.Button { Content = Glyph(icon), Width = size, Height = size,
             Style = _buttonStyle, ToolTip = name, Cursor = Input.Cursors.Hand };
@@ -178,7 +178,7 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         return button;
     }
 
-    private MixerRow CreateRow(string? id, string name, LucideRuntimeIcon icon)
+    private MixerRow CreateRow(string? id, string name, TablerRuntimeIcon icon)
     {
         var root = new WpfControls.Grid { Height = 44, Margin = new Wpf.Thickness(0, 0, 0, 2) };
         root.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(28) });
@@ -211,7 +211,7 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         content.Children.Add(slider);
         WpfControls.Grid.SetColumn(content, 1);
         root.Children.Add(content);
-        var mute = IconButton(LucideRuntimeIcon.Volume2, name + "静音", 24);
+        var mute = IconButton(TablerRuntimeIcon.Volume2, name + "静音", 24);
         mute.VerticalAlignment = Wpf.VerticalAlignment.Bottom;
         mute.Margin = new Wpf.Thickness(2, 0, 0, 0);
         WpfControls.Grid.SetColumn(mute, 2);
@@ -245,7 +245,7 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
             foreach (var application in snapshot.Applications)
             {
                 var row = CreateRow(application.Id, application.Name,
-                    application.Id == "system-sounds" ? LucideRuntimeIcon.Volume2 : LucideRuntimeIcon.AppWindow);
+                    application.Id == "system-sounds" ? TablerRuntimeIcon.Volume2 : TablerRuntimeIcon.AppWindow);
                 _rows.Add(application.Id, row);
                 _applications.Children.Add(row.Root);
                 if (!string.IsNullOrEmpty(application.ExecutablePath)) _ = LoadIconAsync(row, application.ExecutablePath);
@@ -274,7 +274,7 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
             if (!row.Slider.IsMouseCaptureWithin) row.Slider.Value = volume ?? 0;
             row.IsMuted = muted is true;
             row.Amount.Text = volume is { } value ? $"{value:0}%" : "—";
-            row.Mute.Content = Glyph(row.IsMuted ? LucideRuntimeIcon.VolumeX : LucideRuntimeIcon.Volume2);
+            row.Mute.Content = Glyph(row.IsMuted ? TablerRuntimeIcon.VolumeX : TablerRuntimeIcon.Volume2);
             var action = row.IsMuted ? "取消静音" : "静音";
             row.Mute.ToolTip = action;
             Automation.SetName(row.Mute, row.Name.Text + " · " + action);

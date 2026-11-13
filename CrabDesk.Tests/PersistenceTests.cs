@@ -132,6 +132,62 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task IconSkinSettingsRoundTrip()
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        state.Settings.Appearance.IconSkinEnabled = true;
+        state.Settings.Appearance.ShowShortcutArrow = false;
+        state.Settings.Appearance.IconSkinAppPlate = "#F4F4F1";
+        state.Settings.Appearance.IconSkinFolderPlate = "#DDE6F2";
+        state.Settings.Appearance.IconSkinBadgeColor = "#232328";
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.True(loaded.Settings.Appearance.IconSkinEnabled);
+        Assert.False(loaded.Settings.Appearance.ShowShortcutArrow);
+        Assert.Equal("#F4F4F1", loaded.Settings.Appearance.IconSkinAppPlate);
+        Assert.Equal("#DDE6F2", loaded.Settings.Appearance.IconSkinFolderPlate);
+        Assert.Equal("#232328", loaded.Settings.Appearance.IconSkinBadgeColor);
+    }
+
+    [Fact]
+    public async Task ConfigurationsWithoutShortcutArrowSettingsKeepArrowsVisible()
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        await store.SaveAsync(state);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(store.StatePath))!;
+        json["Settings"]!["Appearance"]!.AsObject().Remove("ShowShortcutArrow");
+        await File.WriteAllTextAsync(store.StatePath, json.ToJsonString());
+
+        var loaded = await store.LoadAsync();
+
+        Assert.True(loaded.Settings.Appearance.ShowShortcutArrow);
+    }
+
+    [Theory]
+    [InlineData("", "#FFFFFF", "#DDE6F2")]
+    [InlineData("White", "#FFFFFF", "#DDE6F2")]
+    [InlineData("#12345", "#FFFFFF", "#DDE6F2")]
+    [InlineData("#GGGGGG", "#FFFFFF", "#DDE6F2")]
+    [InlineData("#102030", "#102030", "#DDE6F2")]
+    public async Task InvalidIconSkinColorsFallBackToTheDefaults(
+        string appPlate, string expectedApp, string expectedFolder)
+    {
+        var store = new JsonLayoutStore(_root);
+        var state = JsonLayoutStore.CreateDefaultState();
+        state.Settings.Appearance.IconSkinAppPlate = appPlate;
+
+        await store.SaveAsync(state);
+        var loaded = await store.LoadAsync();
+
+        Assert.Equal(expectedApp, loaded.Settings.Appearance.IconSkinAppPlate);
+        Assert.Equal(expectedFolder, loaded.Settings.Appearance.IconSkinFolderPlate);
+    }
+
+    [Fact]
     public async Task LastKnownDesktopSortSurvivesStateRoundTrip()
     {
         var store = new JsonLayoutStore(_root);
@@ -142,7 +198,7 @@ public sealed class PersistenceTests : IDisposable
         await store.SaveAsync(state);
         var loaded = await store.LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal("Created", loaded.LastKnownDesktopSortMode);
         Assert.True(loaded.LastKnownDesktopSortDescending);
     }
@@ -348,7 +404,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal(76, loaded.Settings.Appearance.IconHorizontalSpacing);
         Assert.Equal(80, loaded.Settings.Appearance.IconVerticalSpacing);
     }
@@ -374,7 +430,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal(
             [primaryBack, primaryFront],
             BoxStacking.OrderBackToFront(loaded.Boxes, "primary").Select(box => box.Id));
@@ -457,7 +513,7 @@ public sealed class PersistenceTests : IDisposable
 
         var fixedBox = loaded.Boxes.Single(box => box.Title == "固定");
         var hoverBox = loaded.Boxes.Single(box => box.Title == "悬停");
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.False(fixedBox.ExpandOnHover);
         Assert.False(fixedBox.IsCollapsed);
         Assert.True(hoverBox.ExpandOnHover);
@@ -479,7 +535,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Empty(loaded.Assignments);
         Assert.Single(loaded.Boxes);
         Assert.Equal("常用", loaded.Boxes[0].Title);
@@ -502,7 +558,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal(boxId, loaded.Assignments["file:kept"]);
         Assert.Equal(8, loaded.Settings.Appearance.CornerRadius);
         Assert.True(loaded.Settings.DesktopBehavior.RefreshAfterRename);
@@ -527,7 +583,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Empty(loaded.Boxes);
         Assert.False(loaded.Settings.TakeOverDesktop);
     }
@@ -547,7 +603,7 @@ public sealed class PersistenceTests : IDisposable
 
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.True(loaded.Settings.TakeOverDesktop);
     }
 
@@ -608,7 +664,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(restored.MappedFolder!.IsReadOnly);
         Assert.Equal(Path.Combine(_root, "project"), restored.MappedFolder.Path);
         Assert.DoesNotContain("file:invalid-mapped-assignment", loaded.Assignments);
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
     }
 
     [Fact]
@@ -632,7 +688,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await new JsonLayoutStore(_root).LoadAsync();
         var appearance = loaded.Boxes[0].Appearance;
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal("#FF2A2D32", appearance.Background);
         Assert.Equal(1, appearance.Opacity);
         Assert.Equal(38, appearance.TitleBarHeight);
@@ -758,7 +814,7 @@ public sealed class PersistenceTests : IDisposable
         await store.SaveAsync(state);
         var loaded = await store.LoadAsync();
 
-        Assert.Equal(24, loaded.SchemaVersion);
+        Assert.Equal(25, loaded.SchemaVersion);
         Assert.Equal("Segoe UI", loaded.Boxes[0].Appearance.TitleFontFamily);
     }
 

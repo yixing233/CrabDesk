@@ -15,7 +15,7 @@ public sealed partial class CrabDeskRuntime
 
     public Task RefreshLyricsWidgetsAsync(bool force = false)
     {
-        if (_disposed || IsPaused || !State.Widgets.Any(widget => widget.Kind == DesktopWidgetKind.Lyrics)) return Task.CompletedTask;
+        if (_disposed || !State.Widgets.Any(widget => widget.Kind == DesktopWidgetKind.Lyrics && IsWidgetActive(widget))) return Task.CompletedTask;
         var now = Stopwatch.GetTimestamp();
         if (!force && _lyricsLastTick != 0 && Stopwatch.GetElapsedTime(_lyricsLastTick, now).TotalMilliseconds < 700)
             return Task.CompletedTask;
@@ -35,9 +35,9 @@ public sealed partial class CrabDeskRuntime
         if (_disposed) return;
         _beginInvoke(() =>
         {
-            if (_disposed || IsPaused || _lyricsController is null) return;
+            if (_disposed || _lyricsController is null) return;
             var snapshot = _lyricsController.Snapshot;
-            foreach (var widget in State.Widgets.Where(widget => widget.Kind == DesktopWidgetKind.Lyrics))
+            foreach (var widget in State.Widgets.Where(widget => widget.Kind == DesktopWidgetKind.Lyrics && IsWidgetActive(widget)))
                 widget.Lyrics = LyricsForWidget(widget, snapshot);
             NotifyMonitorFrame();
         });

@@ -53,7 +53,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         var stack = new Controls.StackPanel();
         var header = new Controls.Grid { Height = 24, Margin = new Wpf.Thickness(0, 0, 0, 6) };
         header.Children.Add(Label("麦克风", 14, true));
-        var close = Button(LucideRuntimeIcon.X, "关闭麦克风控制");
+        var close = Button(TablerRuntimeIcon.X, "关闭麦克风控制");
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
@@ -63,7 +63,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         _deviceName.Margin = new Wpf.Thickness(8, 0, 28, 0);
         var deviceContent = new Controls.Grid();
         deviceContent.Children.Add(_deviceName);
-        var arrow = Glyph(LucideRuntimeIcon.ChevronsUpDown, 13);
+        var arrow = Glyph(TablerRuntimeIcon.ChevronsUpDown, 13);
         arrow.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         arrow.Margin = new Wpf.Thickness(0, 0, 8, 0);
         deviceContent.Children.Add(arrow);
@@ -92,7 +92,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         Automation.SetName(_volume, "麦克风输入音量");
         _volume.ValueChanged += (_, args) => { if (!_updating) _controller.SetVolume(args.NewValue); };
         volumeRow.Children.Add(_volume);
-        _mute = Button(LucideRuntimeIcon.Mic, "麦克风静音");
+        _mute = Button(TablerRuntimeIcon.Mic, "麦克风静音");
         _mute.Click += (_, _) => _controller.SetMuted(_controller.Snapshot.Muted is not true);
         System.Windows.Controls.Grid.SetColumn(_mute, 1);
         volumeRow.Children.Add(_mute);
@@ -171,7 +171,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
             _volume.IsEnabled = state.VolumePercent is not null;
             if (!_volume.IsMouseCaptureWithin) _volume.Value = state.VolumePercent ?? 0;
             _mute.IsEnabled = state.Muted is not null;
-            _mute.Content = Glyph(state.Muted is true ? LucideRuntimeIcon.MicOff : LucideRuntimeIcon.Mic);
+            _mute.Content = Glyph(state.Muted is true ? TablerRuntimeIcon.MicOff : TablerRuntimeIcon.Mic);
             var action = state.Muted is true ? "取消麦克风静音" : "麦克风静音";
             _mute.ToolTip = action; Automation.SetName(_mute, action);
             _amount.Text = state.VolumePercent is { } level ? $"{level:0}%" + (state.Muted is true ? " · 已静音" : "") : "—";
@@ -237,13 +237,13 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         VerticalAlignment = Wpf.VerticalAlignment.Center, TextTrimming = Wpf.TextTrimming.CharacterEllipsis
     };
 
-    private Controls.TextBlock Glyph(LucideRuntimeIcon icon, double size = 16) => new()
+    private Controls.TextBlock Glyph(TablerRuntimeIcon icon, double size = 16) => new()
     {
-        Text = LucideRuntimeIcons.GetGlyph(icon), FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(), FontSize = size,
+        Text = TablerRuntimeIcons.GetGlyph(icon), FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(), FontSize = size,
         Foreground = _foreground, VerticalAlignment = Wpf.VerticalAlignment.Center, HorizontalAlignment = Wpf.HorizontalAlignment.Center
     };
 
-    private Controls.Button Button(LucideRuntimeIcon icon, string name)
+    private Controls.Button Button(TablerRuntimeIcon icon, string name)
     {
         var button = new Controls.Button { Content = Glyph(icon), Width = 24, Height = 24,
             Style = _buttonStyle, ToolTip = name, Cursor = Input.Cursors.Hand };

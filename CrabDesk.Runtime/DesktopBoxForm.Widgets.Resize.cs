@@ -6,19 +6,7 @@ namespace CrabDesk.Runtime;
 
 internal sealed partial class DesktopBoxForm
 {
-    private WidgetResizeEdges _widgetResizeEdges;
-    private bool _widgetResizing;
-
-    private static Forms.Cursor WidgetResizeCursor(WidgetResizeEdges edges) => edges switch
-    {
-        WidgetResizeEdges.Left or WidgetResizeEdges.Right => Forms.Cursors.SizeWE,
-        WidgetResizeEdges.Top or WidgetResizeEdges.Bottom => Forms.Cursors.SizeNS,
-        WidgetResizeEdges.TopLeft or WidgetResizeEdges.BottomRight => Forms.Cursors.SizeNWSE,
-        WidgetResizeEdges.TopRight or WidgetResizeEdges.BottomLeft => Forms.Cursors.SizeNESW,
-        _ => Forms.Cursors.Default
-    };
-
-    private void UpdateWidgetResize(DesktopWidget widget, PointF point)
+    protected override void UpdateWidgetResize(DesktopWidget widget, PointF point)
     {
         if (widget.IsLocked || _runtime.IsPaused || !_runtime.State.Widgets.Contains(widget)) return;
         var deltaX = SnapDipToMonitorPixel(point.X - _widgetPressPoint.X, _scale);
@@ -29,7 +17,7 @@ internal sealed partial class DesktopBoxForm
         // Snap the edges being dragged to the same lines a dragged card uses, so
         // a resized note can line up with a box or another widget instead of
         // only landing on whole pixels.
-        var peers = _runtime.State.Widgets.Where(peer => peer.Id != widget.Id &&
+        var peers = _runtime.State.Widgets.Where(peer => peer.Placement == WidgetPlacement.Desktop && peer.Id != widget.Id &&
                 string.Equals(peer.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase)).Select(peer => peer.Bounds)
             .Concat(_runtime.State.Boxes.Where(peer =>
                 string.Equals(peer.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase))

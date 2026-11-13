@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private void PaintRegularSurface(Graphics graphics)
@@ -1271,9 +1271,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             graphics.FillPath(fill, path);
         }
 
-        LucideRuntimeIcons.Draw(
+        TablerRuntimeIcons.Draw(
             graphics,
-            LucideRuntimeIcon.Menu,
+            TablerRuntimeIcon.Menu,
             bounds,
             textColor,
             15f);
@@ -1303,9 +1303,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        LucideRuntimeIcons.Draw(
+        TablerRuntimeIcons.Draw(
             graphics,
-            LucideRuntimeIcon.Search,
+            TablerRuntimeIcon.Search,
             bounds,
             textColor,
             15f);
@@ -1335,9 +1335,9 @@ internal sealed partial class DesktopBoxForm : Forms.Form
             }
         }
 
-        LucideRuntimeIcons.Draw(
+        TablerRuntimeIcons.Draw(
             graphics,
-            LucideRuntimeIcon.ChevronsUpDown,
+            TablerRuntimeIcon.ChevronsUpDown,
             bounds,
             textColor,
             15f);

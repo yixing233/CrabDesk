@@ -52,7 +52,7 @@ internal sealed partial class DesktopBoxForm
         return _acrylicFrameBitmap;
     }
 
-    private bool TryPresentLyricsFrame()
+    protected override bool TryPresentLyricsFrame()
     {
         if (_resourcesDisposed || IsDisposed || !_desktopAttached || !_lastPresentSucceeded || _presentingLayer ||
             !_usesAcrylicBackground || _acrylicPartialFramePresenter is null || _acrylicFrameBitmap is null ||

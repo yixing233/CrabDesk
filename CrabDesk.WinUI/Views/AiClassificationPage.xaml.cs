@@ -100,7 +100,7 @@ public sealed partial class AiClassificationPage : Page
     {
         // Categories and "不归类" are one exclusive choice; restoring the suggestion is an action.
         MenuFlyoutItem entry = choice.Kind == AiWorkbenchLabelChoiceKind.RestoreAiSuggestion
-            ? new MenuFlyoutItem { Icon = new LucideIcon { Icon = LucideIconName.Sparkles } }
+            ? new MenuFlyoutItem { Icon = new TablerIcon { Icon = TablerIconName.Sparkles } }
             : new RadioMenuFlyoutItem { GroupName = "classification", IsChecked = choice.IsCurrent };
         entry.Text = choice.Text;
         entry.Command = ViewModel.ChooseWorkspaceItemLabelCommand;

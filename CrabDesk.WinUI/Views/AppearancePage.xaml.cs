@@ -29,6 +29,7 @@ public sealed partial class AppearancePage : Page
         PanelTitleBar.Visibility = selectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         PanelIconsAndLabels.Visibility = selectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
         PanelDesktopIconNames.Visibility = selectedIndex == 3 ? Visibility.Visible : Visibility.Collapsed;
+        PanelDesktopIconSkin.Visibility = selectedIndex == 4 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnColorFlyoutOpening(object? sender, object e)

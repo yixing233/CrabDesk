@@ -29,15 +29,19 @@ public static class WidgetAppearance
         (!(widgetAcrylic?.FollowBoxAppearance ?? true) || globalAcrylic);
 
     public static bool RequiresAcrylic(CrabDeskState state) => state.Settings.Appearance.UseAcrylicBoxes ||
-        state.Widgets.Any(widget => UsesAcrylic(widget, false, state.Settings.Appearance.WidgetAcrylic));
+        state.Widgets.Any(widget => widget.Placement == WidgetPlacement.Desktop &&
+            UsesAcrylic(widget, false, state.Settings.Appearance.WidgetAcrylic));
 
     public static WidgetSurfaceAppearance Resolve(DesktopWidget widget, BoxAppearance inherited, bool acrylic,
-        DateTimeOffset? now = null, WidgetAcrylicSettings? widgetAcrylic = null)
+        DateTimeOffset? now = null, WidgetAcrylicSettings? widgetAcrylic = null, bool forceSolid = false,
+        WidgetColorTheme? colorTheme = null)
     {
-        if (widget.Kind != DesktopWidgetKind.Lyrics && widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid)
+        // Center hosts can override the surface without changing saved desktop materials or lyrics transparency.
+        if (forceSolid || (widget.Kind != DesktopWidgetKind.Lyrics && widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid))
         {
-            var dark = widget.ColorTheme == WidgetColorTheme.Dark ||
-                widget.ColorTheme == WidgetColorTheme.Signature &&
+            var theme = colorTheme ?? widget.ColorTheme;
+            var dark = theme == WidgetColorTheme.Dark ||
+                theme == WidgetColorTheme.Signature &&
                 widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Weather or DesktopWidgetKind.Performance or
                     DesktopWidgetKind.Network or DesktopWidgetKind.ControlCenter;
             return new(dark ? widget.Kind == DesktopWidgetKind.Calendar ? "#FF000000" : "#FF1C1C1E" : "#FFFFFFFF",

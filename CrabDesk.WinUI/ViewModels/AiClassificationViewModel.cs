@@ -4,6 +4,7 @@ using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CrabDesk.Core;
+using CrabDesk.WinUI.Controls;
 using CrabDesk.WinUI.Services;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Controls;
@@ -1121,7 +1122,7 @@ public partial class AiClassificationViewModel : ObservableObject, IDisposable
                 _activeWebSearchIndex = live.ToolCalls.Count;
                 live.ToolCalls.Add(new AiToolCallViewModel
                 {
-                    Icon = "Globe",
+                    Icon = TablerIconName.Globe,
                     Title = $"联网检索 {progress.CandidateCount} 个待确认项目",
                     Detail = "Tavily 搜索中…",
                     TimeText = DateTime.Now.ToString("HH:mm:ss"),

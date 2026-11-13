@@ -14,7 +14,7 @@ using WpfMedia = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
 
-internal sealed partial class DesktopBoxForm : Forms.Form
+internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 {
 
     private void InvalidateItem(ItemGeometry? item)
@@ -34,7 +34,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         RequestLayerRender();
     }
 
-    private void RequestLayerRender()
+    protected override void RequestLayerRender()
     {
         if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
         {
@@ -44,7 +44,7 @@ internal sealed partial class DesktopBoxForm : Forms.Form
         PresentLayer();
     }
 
-    private void RequestVisualLayerRender()
+    protected override void RequestVisualLayerRender()
     {
         if (_resourcesDisposed || IsDisposed || !IsHandleCreated)
         {

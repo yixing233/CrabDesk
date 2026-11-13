@@ -33,10 +33,10 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
         summary.Children.Add(_current); summary.Children.Add(_count);
         stack.Children.Add(summary);
 
-        AddMode(stack, ControlDisplayMode.Internal, "仅主屏", "只在主屏幕上显示", LucideRuntimeIcon.Monitor);
-        AddMode(stack, ControlDisplayMode.Clone, "复制", "两个屏幕显示相同内容", LucideRuntimeIcon.Copy);
-        AddMode(stack, ControlDisplayMode.Extend, "扩展", "将桌面扩展到第二个屏幕", LucideRuntimeIcon.ArrowRight);
-        AddMode(stack, ControlDisplayMode.External, "仅第二屏", "只在第二个屏幕上显示", LucideRuntimeIcon.Monitor);
+        AddMode(stack, ControlDisplayMode.Internal, "仅主屏", "只在主屏幕上显示", TablerRuntimeIcon.Monitor);
+        AddMode(stack, ControlDisplayMode.Clone, "复制", "两个屏幕显示相同内容", TablerRuntimeIcon.Copy);
+        AddMode(stack, ControlDisplayMode.Extend, "扩展", "将桌面扩展到第二个屏幕", TablerRuntimeIcon.ArrowRight);
+        AddMode(stack, ControlDisplayMode.External, "仅第二屏", "只在第二个屏幕上显示", TablerRuntimeIcon.Monitor);
         _singleScreenHint = TextLabel("连接第二台屏幕后可使用其他投影模式。", 10);
         _singleScreenHint.Foreground = SecondaryInk;
         _singleScreenHint.Margin = new Wpf.Thickness(2, 5, 2, 0);
@@ -61,7 +61,7 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
     }
 
     private void AddMode(WpfControls.StackPanel parent, ControlDisplayMode mode, string title,
-        string description, LucideRuntimeIcon icon)
+        string description, TablerRuntimeIcon icon)
     {
         var content = new WpfControls.Grid();
         content.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(28) });
@@ -74,7 +74,7 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
         var detail = TextLabel(description, 10); detail.Foreground = SecondaryInk;
         labels.Children.Add(name); labels.Children.Add(detail);
         WpfControls.Grid.SetColumn(labels, 1); content.Children.Add(labels);
-        var check = Glyph(LucideRuntimeIcon.Check, 16); check.Foreground = AccentInk;
+        var check = Glyph(TablerRuntimeIcon.Check, 16); check.Foreground = AccentInk;
         check.Visibility = Wpf.Visibility.Hidden;
         WpfControls.Grid.SetColumn(check, 2); content.Children.Add(check);
         var button = TextButton(title);

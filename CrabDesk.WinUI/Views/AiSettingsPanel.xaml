@@ -3,7 +3,7 @@
     x:Name="RootPanel"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+    xmlns:tabler="using:CrabDesk.WinUI.Controls">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
@@ -20,7 +20,7 @@
                     Padding="14">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="7">
-                        <lucide:LucideIcon Icon="Cpu" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <tabler:TablerIcon Icon="Cpu" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                         <TextBlock Text="模型接口" FontWeight="SemiBold" />
                     </StackPanel>
                     <TextBox Header="接口地址"
@@ -79,7 +79,7 @@
                     Padding="14">
                 <StackPanel Spacing="10">
                     <StackPanel Orientation="Horizontal" Spacing="7">
-                        <lucide:LucideIcon Icon="Globe" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <tabler:TablerIcon Icon="Globe" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                         <TextBlock Text="联网辅助识别" FontWeight="SemiBold" />
                     </StackPanel>
                     <StackPanel Spacing="2">
@@ -116,7 +116,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Spacing="7">
-                            <lucide:LucideIcon Icon="Tags" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                            <tabler:TablerIcon Icon="Tags" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                             <TextBlock Text="分类设置" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
                         <Button Grid.Column="1"
@@ -124,7 +124,7 @@
                                 ToolTipService.ToolTip="添加分类标签"
                                 AutomationProperties.Name="添加分类标签">
                             <StackPanel Orientation="Horizontal" Spacing="5">
-                                <lucide:LucideIcon Icon="Plus" FontSize="15" />
+                                <tabler:TablerIcon Icon="Plus" FontSize="15" />
                                 <TextBlock Text="添加" />
                             </StackPanel>
                         </Button>
@@ -132,7 +132,7 @@
                     <ItemsRepeater ItemsSource="{Binding CategoryTags}"
                                    HorizontalAlignment="Stretch">
                         <ItemsRepeater.Layout>
-                            <lucide:TagWrapLayout />
+                            <tabler:TagWrapLayout />
                         </ItemsRepeater.Layout>
                         <ItemsRepeater.ItemTemplate>
                             <DataTemplate>
@@ -159,7 +159,7 @@
                                                 CommandParameter="{Binding}"
                                                 ToolTipService.ToolTip="移除此标签"
                                                 AutomationProperties.Name="移除分类标签">
-                                            <lucide:LucideIcon Icon="X" FontSize="13" />
+                                            <tabler:TablerIcon Icon="X" FontSize="13" />
                                         </Button>
                                     </StackPanel>
                                 </Border>

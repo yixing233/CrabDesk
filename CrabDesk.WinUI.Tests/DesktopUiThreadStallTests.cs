@@ -31,7 +31,7 @@ public sealed class DesktopUiThreadStallTests
     {
         var constructor = ExtractMethod(
             ReadRuntimeSource("CrabDeskRuntime.cs"),
-            "public CrabDeskRuntime(Action<Action> beginInvoke)",
+            "public CrabDeskRuntime(",
             "private void BeginInvoke(string name, Action action)");
 
         Assert.Contains("UiThreadWatchdog.Start();", constructor, StringComparison.Ordinal);

@@ -107,21 +107,21 @@ public sealed class FluentContextMenuStripTests
     [Fact]
     public void MenuIconDrawsIdenticallyFromTheGlyphCache()
     {
-        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "lucide.ttf")));
+        Assert.True(File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "tabler-icons.ttf")));
 
-        var first = RenderIcon(LucideRuntimeIcon.Trash2);
-        var second = RenderIcon(LucideRuntimeIcon.Trash2);
+        var first = RenderIcon(TablerRuntimeIcon.Trash2);
+        var second = RenderIcon(TablerRuntimeIcon.Trash2);
 
         Assert.Contains(first, pixel => ((pixel >> 24) & 0xFF) != 0);
         Assert.Equal(first, second);
     }
 
-    private static int[] RenderIcon(LucideRuntimeIcon icon)
+    private static int[] RenderIcon(TablerRuntimeIcon icon)
     {
         using var bitmap = new Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var graphics = Graphics.FromImage(bitmap))
         {
-            LucideRuntimeIcons.Draw(graphics, icon, new RectangleF(4, 4, 24, 24), Color.Black, 24);
+            TablerRuntimeIcons.Draw(graphics, icon, new RectangleF(4, 4, 24, 24), Color.Black, 24);
         }
 
         var pixels = new int[bitmap.Width * bitmap.Height];

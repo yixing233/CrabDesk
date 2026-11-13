@@ -48,7 +48,7 @@ public sealed class DesktopWidgetTests : IDisposable
             """);
         var store = new JsonLayoutStore(_root);
         var state = await store.LoadAsync();
-        Assert.Equal(24, state.SchemaVersion);
+        Assert.Equal(25, state.SchemaVersion);
         Assert.True(state.Settings.WidgetTranslation.MigratedFromSharedProfile);
         Assert.Equal("https://legacy.test/v1", state.Settings.WidgetTranslation.BaseUrl);
         Assert.Equal("legacy-model", state.Settings.WidgetTranslation.Model);

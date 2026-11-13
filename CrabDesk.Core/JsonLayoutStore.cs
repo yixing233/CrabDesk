@@ -99,8 +99,9 @@ public sealed class JsonLayoutStore : ILayoutStore
     internal static void NormalizeState(CrabDeskState state)
     {
         var previousVersion = state.SchemaVersion;
-        state.SchemaVersion = 24;
+        state.SchemaVersion = 25;
         state.Settings ??= new AppSettings();
+        state.Settings.WidgetCenter = WidgetCenterSettings.Normalize(state.Settings.WidgetCenter);
         DesktopWidgets.Normalize(state);
         state.LastKnownDesktopSortMode = state.LastKnownDesktopSortMode?.Trim() ?? string.Empty;
         state.Settings.WindowBackdrop = NormalizeWindowBackdrop(state.Settings.WindowBackdrop);
@@ -163,8 +164,14 @@ public sealed class JsonLayoutStore : ILayoutStore
             Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
             Key = HotkeyKey.O
         };
+        state.Settings.Hotkeys.WidgetCenter ??= new HotkeyBinding
+        {
+            Modifiers = HotkeyModifiers.Control | HotkeyModifiers.Alt,
+            Key = HotkeyKey.W
+        };
         NormalizeHotkey(state.Settings.Hotkeys.ShowDesktop, HotkeyKey.D);
         NormalizeHotkey(state.Settings.Hotkeys.OrganizeDesktop, HotkeyKey.O);
+        NormalizeHotkey(state.Settings.Hotkeys.WidgetCenter, HotkeyKey.W);
         if (state.Settings.Backup.IntervalHours <= 0)
         {
             state.Settings.Backup.IntervalHours = 24;
@@ -184,6 +191,19 @@ public sealed class JsonLayoutStore : ILayoutStore
         if (string.IsNullOrWhiteSpace(state.Settings.Appearance.BorderColor))
         {
             state.Settings.Appearance.BorderColor = "Auto";
+        }
+        var appearance = state.Settings.Appearance;
+        if (!IsHexColor(appearance.IconSkinAppPlate))
+        {
+            appearance.IconSkinAppPlate = "#FFFFFF";
+        }
+        if (!IsHexColor(appearance.IconSkinFolderPlate))
+        {
+            appearance.IconSkinFolderPlate = "#DDE6F2";
+        }
+        if (!IsHexColor(appearance.IconSkinBadgeColor))
+        {
+            appearance.IconSkinBadgeColor = "#FFFFFF";
         }
         if (previousVersion < 18)
         {
@@ -529,6 +549,13 @@ public sealed class JsonLayoutStore : ILayoutStore
     // state file still migrates.
     private static bool IsLegacyDefaultFont(string? value) =>
         string.Equals(value?.Trim(), "Segoe UI", StringComparison.OrdinalIgnoreCase);
+
+    // A skin plate must be a plain #RRGGBB value; anything else (a hand-edited
+    // file, a palette name from an older build) falls back to the default rather
+    // than reaching the renderer as an unparseable colour.
+    private static bool IsHexColor(string? value) =>
+        value is { Length: 7 } && value[0] == '#' &&
+        value.Skip(1).All(Uri.IsHexDigit);
 
     private static void NormalizeHotkey(HotkeyBinding binding, HotkeyKey defaultKey)
     {

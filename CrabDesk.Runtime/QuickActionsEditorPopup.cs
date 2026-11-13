@@ -67,8 +67,8 @@ internal sealed class QuickActionsEditorPopup : ControlCenterPopup
         check.Checked += (_, _) => ChangeSelection(action, true);
         check.Unchecked += (_, _) => ChangeSelection(action, false);
         row.Children.Add(check);
-        var up = IconButton(LucideRuntimeIcon.ArrowUp, "上移 " + name, 26);
-        var down = IconButton(LucideRuntimeIcon.ArrowDown, "下移 " + name, 26);
+        var up = IconButton(TablerRuntimeIcon.ArrowUp, "上移 " + name, 26);
+        var down = IconButton(TablerRuntimeIcon.ArrowDown, "下移 " + name, 26);
         up.VerticalAlignment = down.VerticalAlignment = Wpf.VerticalAlignment.Center;
         up.Click += (_, _) => MoveAction(action, -1);
         down.Click += (_, _) => MoveAction(action, 1);

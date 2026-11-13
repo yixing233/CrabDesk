@@ -69,8 +69,8 @@ internal sealed class DesktopTextInputDialog : Forms.Form
         heading.ColumnDefinitions.Add(new WpfControls.ColumnDefinition { Width = Wpf.GridLength.Auto });
         var glyph = new WpfControls.TextBlock
         {
-            Text = LucideRuntimeIcons.GetGlyph(LucideRuntimeIcon.Tags),
-            FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(),
+            Text = TablerRuntimeIcons.GetGlyph(TablerRuntimeIcon.Tags),
+            FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(),
             FontSize = 19,
             Foreground = ToBrush(accent),
             VerticalAlignment = Wpf.VerticalAlignment.Center,
@@ -89,7 +89,7 @@ internal sealed class DesktopTextInputDialog : Forms.Form
         WpfAutomation.SetName(titleText, title);
         heading.Children.Add(titleText);
         WpfControls.Grid.SetColumn(titleText, 1);
-        var close = CreateIconButton(LucideRuntimeIcon.X, titleColor);
+        var close = CreateIconButton(TablerRuntimeIcon.X, titleColor);
         close.ToolTip = "关闭";
         close.Click += (_, _) => Complete(false);
         heading.Children.Add(close);
@@ -238,12 +238,12 @@ internal sealed class DesktopTextInputDialog : Forms.Form
 
     protected override void OnSizeChanged(EventArgs e) { base.OnSizeChanged(e); UpdateRoundedRegion(); }
 
-    private static WpfControls.Button CreateIconButton(LucideRuntimeIcon icon, Color foreground)
+    private static WpfControls.Button CreateIconButton(TablerRuntimeIcon icon, Color foreground)
     {
         var button = new WpfControls.Button
         {
-            Content = LucideRuntimeIcons.GetGlyph(icon),
-            FontFamily = LucideRuntimeIcons.CreateWpfFontFamily(),
+            Content = TablerRuntimeIcons.GetGlyph(icon),
+            FontFamily = TablerRuntimeIcons.CreateWpfFontFamily(),
             FontSize = 17,
             Foreground = ToBrush(foreground),
             Background = WpfMedia.Brushes.Transparent,

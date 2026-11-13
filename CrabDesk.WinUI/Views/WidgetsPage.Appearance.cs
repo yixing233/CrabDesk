@@ -91,7 +91,13 @@ public sealed partial class WidgetsPage
 
     private void UpdateWidgetMaterialHint()
     {
-        WidgetThemePicker.Visibility = Show(WidgetMaterialPicker.SelectedIndex == 0);
+        var inCenter = _selected?.Placement == WidgetPlacement.Center;
+        WidgetThemePicker.Visibility = Show(!inCenter && WidgetMaterialPicker.SelectedIndex == 0);
+        if (inCenter)
+        {
+            WidgetMaterialHint.Text = "配色跟随组件中心主题。";
+            return;
+        }
         WidgetMaterialHint.Text = WidgetMaterialPicker.SelectedIndex switch
         {
             0 => "黑白背景始终不透明，浅色为白底、深色为黑底；特色主题按组件类型搭配，图标与状态保留功能色。",

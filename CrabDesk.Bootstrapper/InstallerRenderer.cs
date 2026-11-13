@@ -174,7 +174,7 @@ internal static class InstallerRenderer
         var logoSize = (int)(18 * scale);
         var logoY = (tbH - logoSize) / 2;
 
-        LucideInstallerIcons.DrawAppLogo(g, new Rectangle((int)(14 * scale), logoY, logoSize, logoSize));
+        TablerInstallerIcons.DrawAppLogo(g, new Rectangle((int)(14 * scale), logoY, logoSize, logoSize));
 
         using (var brush = new SolidBrush(theme.TextPrimary))
         {
@@ -224,7 +224,7 @@ internal static class InstallerRenderer
         var headerY = (int)(46 * scale);
         var logoSize = (int)(44 * scale);
 
-        LucideInstallerIcons.DrawAppLogo(g, new Rectangle(headerX, headerY, logoSize, logoSize));
+        TablerInstallerIcons.DrawAppLogo(g, new Rectangle(headerX, headerY, logoSize, logoSize));
 
         var textLeft = headerX + logoSize + (int)(12 * scale);
         var title = "CrabDesk 桌面整理器";
@@ -264,9 +264,9 @@ internal static class InstallerRenderer
         var cardBounds = new Rectangle(cardLeft, cardTop, cardWidth, cardHeight);
         DrawCard(g, theme, cardBounds);
 
-        // Header: Lucide ShieldCheck Icon + Title
+        // Header: Tabler ShieldCheck Icon + Title
         var iconY = cardTop + (int)(10 * scale);
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.ShieldCheck, new RectangleF(cardLeft + (int)(14 * scale), iconY + (int)(2 * scale), (int)(16 * scale), (int)(16 * scale)), theme.Accent, 15 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.ShieldCheck, new RectangleF(cardLeft + (int)(14 * scale), iconY + (int)(2 * scale), (int)(16 * scale), (int)(16 * scale)), theme.Accent, 15 * scale);
 
         using (var sectionTitleBrush = new SolidBrush(theme.TextPrimary))
         {
@@ -282,20 +282,20 @@ internal static class InstallerRenderer
             switch (dep.Status)
             {
                 case DependencyCheckStatus.Checking:
-                    LucideInstallerIcons.DrawIconRotated(g, LucideIcon.RefreshCw, iconBounds, theme.Accent, 13 * scale, state.CheckingAnimationAngle);
+                    TablerInstallerIcons.DrawIconRotated(g, TablerIcon.RefreshCw, iconBounds, theme.Accent, 13 * scale, state.CheckingAnimationAngle);
                     break;
                 case DependencyCheckStatus.Installed:
-                    LucideInstallerIcons.DrawIcon(g, LucideIcon.Check, iconBounds, theme.SuccessColor, 13 * scale);
+                    TablerInstallerIcons.DrawIcon(g, TablerIcon.Check, iconBounds, theme.SuccessColor, 13 * scale);
                     break;
                 case DependencyCheckStatus.Missing:
-                    LucideInstallerIcons.DrawIcon(g, LucideIcon.Download, iconBounds, theme.WarningColor, 13 * scale);
+                    TablerInstallerIcons.DrawIcon(g, TablerIcon.Download, iconBounds, theme.WarningColor, 13 * scale);
                     break;
                 case DependencyCheckStatus.Failed:
-                    LucideInstallerIcons.DrawIcon(g, LucideIcon.CircleAlert, iconBounds, theme.ErrorColor, 13 * scale);
+                    TablerInstallerIcons.DrawIcon(g, TablerIcon.CircleAlert, iconBounds, theme.ErrorColor, 13 * scale);
                     break;
                 case DependencyCheckStatus.Pending:
                 default:
-                    LucideInstallerIcons.DrawIcon(g, LucideIcon.Clock, iconBounds, theme.TextMuted, 13 * scale);
+                    TablerInstallerIcons.DrawIcon(g, TablerIcon.Clock, iconBounds, theme.TextMuted, 13 * scale);
                     break;
             }
 
@@ -350,7 +350,7 @@ internal static class InstallerRenderer
         // Section 2: Path Row
         var pathBoxBounds = GetPathBoxBounds(scale);
         var pathIconY = pathBoxBounds.Y + (pathBoxBounds.Height - (int)(16 * scale)) / 2;
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.FolderOpen, new RectangleF(cardLeft, pathIconY, (int)(16 * scale), (int)(16 * scale)), theme.TextSecondary, 15 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.FolderOpen, new RectangleF(cardLeft, pathIconY, (int)(16 * scale), (int)(16 * scale)), theme.TextSecondary, 15 * scale);
 
         using (var pathLabelBrush = new SolidBrush(theme.TextSecondary))
         {
@@ -370,7 +370,7 @@ internal static class InstallerRenderer
 
         // Section 3: Space Information Row
         var spaceY = pathBoxBounds.Bottom + (int)(8 * scale);
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.HardDrive, new RectangleF(cardLeft, spaceY + (int)(2 * scale), (int)(14 * scale), (int)(14 * scale)), theme.TextMuted, 13 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.HardDrive, new RectangleF(cardLeft, spaceY + (int)(2 * scale), (int)(14 * scale), (int)(14 * scale)), theme.TextMuted, 13 * scale);
 
         var (freeText, isSufficient, driveName) = state.GetAvailableSpaceInfo();
         var requiredText = $"所需空间：约 {state.GetRequiredSpaceText()}";
@@ -422,7 +422,7 @@ internal static class InstallerRenderer
         var headerY = (int)(46 * scale);
         var iconSize = (int)(34 * scale);
 
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.Package, new RectangleF(headerX, headerY, iconSize, iconSize), theme.Accent, 30 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.Package, new RectangleF(headerX, headerY, iconSize, iconSize), theme.Accent, 30 * scale);
 
         var titleLeft = headerX + iconSize + (int)(12 * scale);
         var installHeaderTitle = state.IsUpgrade ? "正在升级 CrabDesk..." : "正在安装 CrabDesk...";
@@ -450,7 +450,7 @@ internal static class InstallerRenderer
         // Current Action with Refresh/Activity Icon
         var actionIconSize = (int)(16 * scale);
         var actionY = cardTop + (int)(26 * scale);
-        LucideInstallerIcons.DrawIconRotated(g, LucideIcon.RefreshCw, new RectangleF(cardLeft + (int)(22 * scale), actionY + (int)(1 * scale), actionIconSize, actionIconSize), theme.Accent, 15 * scale, state.CheckingAnimationAngle);
+        TablerInstallerIcons.DrawIconRotated(g, TablerIcon.RefreshCw, new RectangleF(cardLeft + (int)(22 * scale), actionY + (int)(1 * scale), actionIconSize, actionIconSize), theme.Accent, 15 * scale, state.CheckingAnimationAngle);
 
         using (var actionBrush = new SolidBrush(theme.TextPrimary))
         {
@@ -490,10 +490,10 @@ internal static class InstallerRenderer
         var winW = GetScaledWidth(scale);
         var winH = GetScaledHeight(scale);
 
-        // Big Success Check Icon using Lucide CheckCircle with plenty of headroom to prevent clipping
+        // Big Success Check Icon using Tabler CheckCircle with plenty of headroom to prevent clipping
         var iconBoxSize = (int)(96 * scale);
         var iconCenter = new Point(winW / 2, (int)(102 * scale));
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.CheckCircle, new RectangleF(iconCenter.X - iconBoxSize / 2, iconCenter.Y - iconBoxSize / 2, iconBoxSize, iconBoxSize), theme.SuccessColor, 56 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.CheckCircle, new RectangleF(iconCenter.X - iconBoxSize / 2, iconCenter.Y - iconBoxSize / 2, iconBoxSize, iconBoxSize), theme.SuccessColor, 56 * scale);
 
         // Title
         var completedTitle = state.IsUpgrade ? "CrabDesk 升级完成！" : "CrabDesk 安装完成！";
@@ -531,7 +531,7 @@ internal static class InstallerRenderer
 
         var iconSize = (int)(56 * scale);
         var iconCenter = new Point(winW / 2, (int)(90 * scale));
-        LucideInstallerIcons.DrawIcon(g, LucideIcon.CircleAlert, new RectangleF(iconCenter.X - iconSize / 2, iconCenter.Y - iconSize / 2, iconSize, iconSize), theme.ErrorColor, 52 * scale);
+        TablerInstallerIcons.DrawIcon(g, TablerIcon.CircleAlert, new RectangleF(iconCenter.X - iconSize / 2, iconCenter.Y - iconSize / 2, iconSize, iconSize), theme.ErrorColor, 52 * scale);
 
         using (var titleBrush = new SolidBrush(theme.TextPrimary))
         {
@@ -665,7 +665,7 @@ internal static class InstallerRenderer
 
         if (isChecked)
         {
-            LucideInstallerIcons.DrawIcon(g, LucideIcon.Check, new RectangleF(boxRect.X, boxRect.Y + 1, boxRect.Width, boxRect.Height), Color.White, 12 * scale);
+            TablerInstallerIcons.DrawIcon(g, TablerIcon.Check, new RectangleF(boxRect.X, boxRect.Y + 1, boxRect.Width, boxRect.Height), Color.White, 12 * scale);
         }
 
         using (var textBrush = new SolidBrush(theme.TextPrimary))

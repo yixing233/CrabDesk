@@ -149,7 +149,8 @@ public sealed partial class CrabDeskRuntime
 
     public async Task RefreshFileShelfAvailabilityAsync(bool force = false)
     {
-        if (_disposed || _fileShelfRefreshing || IsPaused && !State.Widgets.Any(widget => widget.FileShelfFloating.Enabled)) return;
+        if (_disposed || _fileShelfRefreshing || !State.Widgets.Any(widget =>
+            widget.Kind == DesktopWidgetKind.FileShelf && (IsWidgetActive(widget) || widget.FileShelfFloating.Enabled))) return;
         var now = Stopwatch.GetTimestamp();
         if (!force && _fileShelfLastRefresh != 0 && Stopwatch.GetElapsedTime(_fileShelfLastRefresh, now).TotalSeconds < 10) return;
         var widgets = State.Widgets.Where(widget => widget.Kind == DesktopWidgetKind.FileShelf && !widget.FileShelfBusy).ToArray();
@@ -184,6 +185,7 @@ public sealed partial class CrabDeskRuntime
     {
         if (!HasFileShelf(widget)) return;
         _surfaceManager?.RefreshWidgets();
+        RefreshWidgetCenter();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

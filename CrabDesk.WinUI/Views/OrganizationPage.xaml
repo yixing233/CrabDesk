@@ -2,7 +2,7 @@
     x:Class="CrabDesk.WinUI.Views.OrganizationPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:lucide="using:CrabDesk.WinUI.Controls">
+    xmlns:tabler="using:CrabDesk.WinUI.Controls">
     <ScrollViewer VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled"
                   IsTabStop="True">
@@ -45,7 +45,7 @@
                             Click="OpenAiOrganization_OnClick"
                             Style="{StaticResource AccentButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <lucide:LucideIcon Icon="Sparkles" FontSize="16" />
+                            <tabler:TablerIcon Icon="Sparkles" FontSize="16" />
                             <TextBlock Text="打开 AI 整理" />
                         </StackPanel>
                     </Button>
@@ -53,14 +53,14 @@
             </Border>
 
             <CommandBar DefaultLabelPosition="Collapsed" Background="Transparent">
-                <AppBarButton Label="新建规则" Command="{Binding AddRuleCommand}" ToolTipService.ToolTip="新建规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Plus" /></AppBarButton.Icon></AppBarButton>
-                <AppBarButton Label="编辑规则" Command="{Binding EditRuleCommand}" ToolTipService.ToolTip="编辑规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Pencil" /></AppBarButton.Icon></AppBarButton>
-                <AppBarButton Label="复制规则" Command="{Binding DuplicateRuleCommand}" ToolTipService.ToolTip="复制规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Copy" /></AppBarButton.Icon></AppBarButton>
-                <AppBarButton Label="上移" Command="{Binding MoveUpCommand}" ToolTipService.ToolTip="上移"><AppBarButton.Icon><lucide:LucideIcon Icon="ArrowUp" /></AppBarButton.Icon></AppBarButton>
-                <AppBarButton Label="下移" Command="{Binding MoveDownCommand}" ToolTipService.ToolTip="下移"><AppBarButton.Icon><lucide:LucideIcon Icon="ArrowDown" /></AppBarButton.Icon></AppBarButton>
-                <AppBarButton Label="删除" Command="{Binding DeleteRulesCommand}" ToolTipService.ToolTip="删除选中的规则"><AppBarButton.Icon><lucide:LucideIcon Icon="Trash2" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="新建规则" Command="{Binding AddRuleCommand}" ToolTipService.ToolTip="新建规则"><AppBarButton.Icon><tabler:TablerIcon Icon="Plus" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="编辑规则" Command="{Binding EditRuleCommand}" ToolTipService.ToolTip="编辑规则"><AppBarButton.Icon><tabler:TablerIcon Icon="Pencil" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="复制规则" Command="{Binding DuplicateRuleCommand}" ToolTipService.ToolTip="复制规则"><AppBarButton.Icon><tabler:TablerIcon Icon="Copy" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="上移" Command="{Binding MoveUpCommand}" ToolTipService.ToolTip="上移"><AppBarButton.Icon><tabler:TablerIcon Icon="ArrowUp" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="下移" Command="{Binding MoveDownCommand}" ToolTipService.ToolTip="下移"><AppBarButton.Icon><tabler:TablerIcon Icon="ArrowDown" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="删除" Command="{Binding DeleteRulesCommand}" ToolTipService.ToolTip="删除选中的规则"><AppBarButton.Icon><tabler:TablerIcon Icon="Trash" /></AppBarButton.Icon></AppBarButton>
                 <AppBarSeparator />
-                <AppBarButton Label="预览" Command="{Binding PreviewCommand}" ToolTipService.ToolTip="预览本次整理将移动的项目"><AppBarButton.Icon><lucide:LucideIcon Icon="Eye" /></AppBarButton.Icon></AppBarButton>
+                <AppBarButton Label="预览" Command="{Binding PreviewCommand}" ToolTipService.ToolTip="预览本次整理将移动的项目"><AppBarButton.Icon><tabler:TablerIcon Icon="Eye" /></AppBarButton.Icon></AppBarButton>
                 <CommandBar.SecondaryCommands>
                     <AppBarButton Label="安装默认规则" Command="{Binding InstallDefaultsCommand}" />
                 </CommandBar.SecondaryCommands>
@@ -108,7 +108,7 @@
                                         Orientation="Horizontal"
                                         Spacing="7"
                                         VerticalAlignment="Center">
-                                <lucide:LucideIcon Icon="ArrowRight"
+                                <tabler:TablerIcon Icon="ArrowRight"
                                                   FontSize="13"
                                                   Foreground="{ThemeResource SecondaryTextBrush}" />
                                 <TextBlock Text="{Binding DestinationText}"
@@ -131,7 +131,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <lucide:LucideIcon Icon="Eye" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
+                        <tabler:TablerIcon Icon="Eye" FontSize="16" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
                         <TextBlock Grid.Column="1" Text="整理预览" FontWeight="SemiBold" VerticalAlignment="Center" />
                         <Button Grid.Column="2"
                                 Padding="6"
@@ -139,7 +139,7 @@
                                 BorderThickness="0"
                                 Command="{Binding ClosePreviewCommand}"
                                 ToolTipService.ToolTip="关闭预览">
-                            <lucide:LucideIcon Icon="X" FontSize="14" />
+                            <tabler:TablerIcon Icon="X" FontSize="14" />
                         </Button>
                     </Grid>
                     <TextBlock Text="{Binding PreviewSummaryText}" Style="{StaticResource SecondaryBodyStyle}" />

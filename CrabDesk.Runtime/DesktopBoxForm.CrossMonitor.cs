@@ -44,7 +44,7 @@ internal sealed partial class DesktopBoxForm
         PresentLayer();
     }
 
-    private void UpdateMovingWidget(DesktopWidget widget, PointF point)
+    protected override void UpdateMovingWidget(DesktopWidget widget, PointF point)
     {
         var screenX = _monitor.PixelBounds.X + point.X * _scale;
         var screenY = _monitor.PixelBounds.Y + point.Y * _scale;

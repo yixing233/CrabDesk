@@ -12,7 +12,8 @@ public sealed class WidgetWeatherPresentationTests
         Assert.Equal(6, layout.Hours.Count);
         Assert.Equal(layout.City.Y, layout.Forecast.Y);
         Assert.Equal(layout.City.Height, layout.Description.Height);
-        Assert.Equal(layout.Temperature.Y + layout.Temperature.Height / 2, layout.Icon.Y + layout.Icon.Height / 2);
+        Assert.InRange(layout.Icon.Y + layout.Icon.Height / 2,
+            layout.Temperature.Y + layout.Temperature.Height / 2 - 6, layout.Temperature.Y + layout.Temperature.Height / 2);
         Assert.Equal(layout.Temperature.Y + layout.Temperature.Height / 2, layout.Forecast.Y + layout.Forecast.Height / 2);
         // The wide card has no header location controls, so those slots collapse.
         Assert.False(layout.Location.Width > 0);

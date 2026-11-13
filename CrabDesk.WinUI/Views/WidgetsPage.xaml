@@ -39,7 +39,7 @@
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <TextBlock Text="{Binding ActionLabel}" Foreground="{ThemeResource AccentBrush}" FontSize="12" />
-                        <icons:LucideIcon Icon="{Binding ActionIcon}" FontSize="14" Foreground="{ThemeResource AccentBrush}" />
+                        <icons:TablerIcon Icon="{Binding ActionIcon}" FontSize="14" Foreground="{ThemeResource AccentBrush}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -56,7 +56,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <Button x:Name="WidgetPageBack" Click="WidgetPageBack_Click" Visibility="Collapsed" VerticalAlignment="Center"
                     AutomationProperties.Name="返回小组件" ToolTipService.ToolTip="返回">
-                <icons:LucideIcon Icon="ArrowLeft" FontSize="18" />
+                <icons:TablerIcon Icon="ArrowLeft" FontSize="18" />
             </Button>
             <StackPanel Grid.Column="1" Spacing="4">
                 <TextBlock x:Name="WidgetPageTitle" Text="小组件" FontSize="24" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -65,15 +65,34 @@
             <Button x:Name="WidgetAppearanceButton" Grid.Column="2" Click="WidgetAppearanceButton_Click"
                     VerticalAlignment="Center" AutomationProperties.Name="组件外观设置">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <icons:LucideIcon Icon="Settings" FontSize="16" />
+                    <icons:TablerIcon Icon="Settings" FontSize="16" />
                     <TextBlock Text="外观设置" />
                 </StackPanel>
             </Button>
         </Grid>
         <Grid Grid.Row="1">
             <Grid x:Name="OverviewView" RowSpacing="16">
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                <Grid x:Name="GalleryToolbar" ColumnSpacing="12" Margin="0,0,12,0" SizeChanged="GalleryToolbar_SizeChanged">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <Border x:Name="WidgetCenterCard" Style="{StaticResource SectionCardStyle}" Margin="0,0,12,0">
+                    <Grid ColumnSpacing="12" RowSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <icons:TablerIcon Icon="LayoutDashboard" FontSize="24" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock Text="组件中心" FontWeight="SemiBold" />
+                                <TextBlock Text="将组件集中在悬浮面板，开启后单击托盘图标打开" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                        <ToggleSwitch x:Name="WidgetCenterEnabledToggle" Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}"
+                                      IsOn="False" Toggled="WidgetCenterEnabled_Toggled" VerticalAlignment="Center" AutomationProperties.Name="启用组件中心" />
+                        <TextBlock x:Name="WidgetCenterStatus" Grid.Row="1" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <Button x:Name="OpenWidgetCenterButton" Grid.Row="1" Grid.Column="1" Content="打开" IsEnabled="False"
+                                Click="OpenWidgetCenter_Click" AutomationProperties.Name="打开组件中心" />
+                    </Grid>
+                </Border>
+                <Grid x:Name="GalleryToolbar" Grid.Row="1" ColumnSpacing="12" Margin="0,0,12,0" SizeChanged="GalleryToolbar_SizeChanged">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                     <AutoSuggestBox x:Name="WidgetSearch" Header="搜索组件" PlaceholderText="搜索名称或功能"
@@ -87,16 +106,16 @@
                         <ComboBoxItem Content="未添加" />
                     </ComboBox>
                 </Grid>
-                <TextBlock x:Name="GalleryCaption" Grid.Row="1" Style="{StaticResource SecondaryBodyStyle}" />
-                <GridView x:Name="WidgetGallery" Grid.Row="2" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="WidgetGallery_ItemClick"
+                <TextBlock x:Name="GalleryCaption" Grid.Row="2" Style="{StaticResource SecondaryBodyStyle}" />
+                <GridView x:Name="WidgetGallery" Grid.Row="3" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="WidgetGallery_ItemClick"
                           ItemTemplate="{StaticResource WidgetTileTemplate}" ItemContainerStyle="{StaticResource WidgetTileStyle}"
                           SizeChanged="WidgetGallery_SizeChanged" HorizontalAlignment="Stretch"
                           ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto">
                     <GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal" ItemWidth="240" /></ItemsPanelTemplate></GridView.ItemsPanel>
                 </GridView>
-                    <StackPanel x:Name="EmptyState" Grid.Row="2" Visibility="Collapsed" Spacing="12"
+                    <StackPanel x:Name="EmptyState" Grid.Row="3" Visibility="Collapsed" Spacing="12"
                                 HorizontalAlignment="Center" VerticalAlignment="Top" Padding="20" Margin="0,32,12,0">
-                        <icons:LucideIcon Icon="PanelsTopLeft" FontSize="32" HorizontalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
+                        <icons:TablerIcon Icon="LayoutDashboard" FontSize="32" HorizontalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
                         <TextBlock x:Name="EmptyStateTitle" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center"
                                    TextWrapping="Wrap" TextAlignment="Center" />
                         <Button Content="显示全部组件" Click="ClearGalleryFilters_Click" HorizontalAlignment="Center" />
@@ -124,6 +143,16 @@
                               VerticalScrollMode="Enabled" HorizontalScrollMode="Disabled"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" ZoomMode="Disabled">
                 <StackPanel Spacing="20">
+                    <Border x:Name="WidgetPlacementSettings" Style="{StaticResource SectionCardStyle}">
+                        <StackPanel Spacing="12">
+                            <ComboBox x:Name="WidgetPlacementPicker" Header="组件位置" HorizontalAlignment="Stretch"
+                                      SelectionChanged="WidgetPlacementPicker_SelectionChanged" AutomationProperties.Name="组件位置">
+                                <ComboBoxItem Content="桌面" Tag="Desktop" />
+                                <ComboBoxItem x:Name="WidgetCenterPlacementOption" Content="组件中心" Tag="Center" />
+                            </ComboBox>
+                            <TextBlock x:Name="WidgetPlacementHint" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
                     <StackPanel x:Name="LyricsEditor" Visibility="Collapsed" Spacing="14">
                         <TextBlock Text="组件尺寸" FontWeight="SemiBold" />
                         <Grid ColumnSpacing="12">
@@ -147,6 +176,8 @@
                         <ComboBox x:Name="LyricsInk" Header="文字颜色" HorizontalAlignment="Stretch" SelectionChanged="LyricsInk_SelectionChanged">
                             <ComboBoxItem Content="自动" /><ComboBoxItem Content="浅色" /><ComboBoxItem Content="深色" />
                         </ComboBox>
+                        <TextBlock x:Name="WidgetCenterLyricsMaterialHint" Text="中心使用实色背景，背景与文字配色跟随组件中心主题。"
+                                   Visibility="Collapsed" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
                         <ToggleSwitch x:Name="LyricsTransparentBackground" Header="背景模式" OnContent="透明" OffContent="亚克力" Toggled="LyricsTransparentBackground_Toggled" />
                         <ToggleSwitch x:Name="LyricsWords" Header="逐字覆盖动画" OnContent="已开启" OffContent="已关闭" Toggled="LyricsWords_Toggled" />
                         <TextBlock Text="按歌词时间轴点亮每个字；仅有逐行时间轴时突出显示当前句。" Style="{StaticResource SecondaryBodyStyle}" />
@@ -265,7 +296,7 @@
                                 <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <ComboBox x:Name="SavedCities" PlaceholderText="添加一个城市" DisplayMemberPath="DisplayName" HorizontalAlignment="Stretch" SelectionChanged="SavedCities_SelectionChanged" AutomationProperties.Name="桌面显示城市" />
                                     <Button x:Name="RemoveCityButton" Grid.Column="1" Padding="8,0" Click="RemoveCity_Click" AutomationProperties.Name="移除当前城市" ToolTipService.ToolTip="移除当前城市">
-                                        <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                                        <icons:TablerIcon Icon="Trash" FontSize="14" />
                                     </Button>
                                 </Grid>
                             </StackPanel>
@@ -281,7 +312,7 @@
                             <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="天气状态" FontWeight="SemiBold" VerticalAlignment="Center" />
                                 <Button x:Name="RefreshWeatherButton" Grid.Column="1" Padding="8,0" Click="RefreshWeather_Click" ToolTipService.ToolTip="刷新天气" AutomationProperties.Name="刷新天气">
-                                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                                    <icons:TablerIcon Icon="Refresh" FontSize="14" />
                                 </Button>
                             </Grid>
                             <TextBlock x:Name="CurrentCity" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -294,6 +325,8 @@
                     <Border x:Name="WidgetAppearanceSettings" Style="{StaticResource SectionCardStyle}">
                         <StackPanel Spacing="12">
                             <TextBlock Text="外观风格" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                            <TextBlock x:Name="WidgetCenterMaterialHint" Text="中心使用实色背景，配色跟随组件中心主题。"
+                                       Visibility="Collapsed" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" />
                             <ComboBox x:Name="WidgetMaterialPicker" Header="背景材质" HorizontalAlignment="Stretch" SelectionChanged="WidgetMaterialPicker_SelectionChanged" AutomationProperties.Name="组件背景材质">
                                 <ComboBoxItem Content="实色" />
                                 <ComboBoxItem Content="亚克力" />
@@ -344,6 +377,18 @@
             <ScrollViewer x:Name="AppearanceView" Visibility="Collapsed" IsTabStop="False" HorizontalScrollMode="Disabled"
                           HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" Padding="0,0,12,16">
                 <StackPanel Spacing="20">
+                    <Border Style="{StaticResource SectionCardStyle}" Padding="24">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="组件中心" FontSize="18" FontWeight="SemiBold" />
+                            <ComboBox x:Name="WidgetCenterThemePicker" Header="组件中心主题"
+                                      HorizontalAlignment="Stretch" SelectionChanged="WidgetCenterThemePicker_SelectionChanged"
+                                      AutomationProperties.Name="组件中心主题">
+                                <ComboBoxItem Content="跟随系统" Tag="System" />
+                                <ComboBoxItem Content="浅色" Tag="Light" />
+                                <ComboBoxItem Content="深色" Tag="Dark" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Border>
                     <Border Style="{StaticResource SectionCardStyle}" Padding="24">
                         <StackPanel Spacing="16">
                             <TextBlock Text="组件圆角" FontSize="18" FontWeight="SemiBold" />
