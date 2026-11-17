@@ -21,7 +21,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
     private readonly WpfControls.Button _scan, _settings, _connect;
     private readonly WpfControls.StackPanel _passwordPanel;
     private readonly WpfControls.PasswordBox _password;
-    private readonly Media.Brush _rowFill, _rowBorder, _connectedFill, _connectedBorder;
+    private readonly Media.Brush _connectedFill;
     private string? _passwordNetwork;
     private bool _commandPending, _updatingRadio;
     private bool? _requestedRadioState;
@@ -43,10 +43,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
     {
         _controller = controller;
         _openSettings = openSettings;
-        _rowFill = Brush(dark ? Color.FromArgb(10, 255, 255, 255) : Color.FromArgb(160, 255, 255, 255));
-        _rowBorder = Brush(dark ? Color.FromArgb(14, 255, 255, 255) : Color.FromArgb(14, 31, 35, 41));
-        _connectedFill = Brush(Color.FromArgb(dark ? 42 : 22, accent));
-        _connectedBorder = Brush(Color.FromArgb(dark ? 100 : 72, accent));
+        _connectedFill = Brush(Color.FromArgb(dark ? 38 : 26, accent));
         Body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         Body.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         Body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
@@ -83,8 +80,9 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         passwordRow.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         passwordRow.ColumnDefinitions.Add(new() { Width = Wpf.GridLength.Auto });
         passwordRow.ColumnDefinitions.Add(new() { Width = Wpf.GridLength.Auto });
-        _password = new WpfControls.PasswordBox { Height = 28, Padding = new Wpf.Thickness(6, 2, 6, 2),
-            Background = HoverInk, Foreground = ForegroundInk, BorderBrush = TrackInk, CaretBrush = ForegroundInk };
+        _password = new WpfControls.PasswordBox { Height = 28,
+            Background = RowInk, Foreground = ForegroundInk, CaretBrush = ForegroundInk,
+            Template = (WpfControls.ControlTemplate)Wpf.Markup.XamlReader.Parse(PasswordTemplate) };
         Automation.SetName(_password, "Wi-Fi 网络密码");
         passwordRow.Children.Add(_password);
         _connect = TextButton("连接", "使用密码连接网络");
@@ -112,8 +110,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         _scan.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         _scan.Click += async (_, _) => await _controller.RefreshAsync(scan: true);
         footer.Children.Add(_scan);
-        Footer.Children.Add(new WpfControls.Border { Child = footer, BorderBrush = _rowBorder,
-            BorderThickness = new Wpf.Thickness(0, 1, 0, 0), Padding = new Wpf.Thickness(0, 10, 0, 0) });
+        Footer.Children.Add(footer);
         _controller.Changed += OnChanged;
         _refresh.Tick += async (_, _) => { if (!CommandBusy) await _controller.RefreshAsync(); };
         Shown += async (_, _) => { _refresh.Start(); await _controller.RefreshAsync(scan: true); };
@@ -225,11 +222,11 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         var button = TextButton("");
         WpfControls.Grid.SetColumn(button, 2); row.Children.Add(button);
         button.Height = 30;
-        var root = new WpfControls.Border { Child = row, CornerRadius = new Wpf.CornerRadius(10), BorderThickness = new Wpf.Thickness(1),
+        var root = new WpfControls.Border { Child = row, CornerRadius = new Wpf.CornerRadius(12),
             Padding = new Wpf.Thickness(8, 7, 6, 7), Margin = new Wpf.Thickness(0, 0, 0, 8) };
         var entry = new ConnectionRow(root, iconSurface, glyph, name, detail, button, (WpfControls.TextBlock)button.Content);
         root.MouseEnter += (_, _) => { if (entry.Item?.Connected is not true) root.Background = HoverInk; };
-        root.MouseLeave += (_, _) => root.Background = entry.Item?.Connected is true ? _connectedFill : _rowFill;
+        root.MouseLeave += (_, _) => root.Background = entry.Item?.Connected is true ? _connectedFill : RowInk;
         button.Click += async (_, _) =>
         {
             if (entry.Item is not { } selected) return;
@@ -269,7 +266,7 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         };
         row.Glyph.Text = TablerRuntimeIcons.GetGlyph(icon);
         row.Glyph.Foreground = item.Connected ? AccentInk : SecondaryInk;
-        row.IconSurface.Background = item.Connected ? _connectedFill : _rowBorder;
+        row.IconSurface.Background = item.Connected ? _connectedFill : RowInk;
         row.Name.Text = item.Name; row.Name.ToolTip = item.Name;
         row.Name.FontWeight = item.Connected ? Wpf.FontWeights.SemiBold : Wpf.FontWeights.Normal;
         row.Detail.Text = item.Detail + (item.SignalPercent is { } signal ? $" · {signal}%" : "");
@@ -277,9 +274,23 @@ internal sealed partial class ConnectionDetailsPopup : ControlCenterPopup
         var label = item.Connected && item.CanDisconnect ? "断开" : item.CanConnect ? "连接" : "管理";
         row.Action.Text = label;
         Automation.SetName(row.Button, label + " " + item.Name);
-        row.Root.Background = item.Connected ? _connectedFill : row.Root.IsMouseOver ? HoverInk : _rowFill;
-        row.Root.BorderBrush = item.Connected ? _connectedBorder : _rowBorder;
+        row.Root.Background = item.Connected ? _connectedFill : row.Root.IsMouseOver ? HoverInk : RowInk;
     }
+
+    private const string PasswordTemplate = """
+        <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="PasswordBox">
+          <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="8"
+                  BorderThickness="1" BorderBrush="Transparent" Padding="8,3">
+            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Focusable="False"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource MixerAccent}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+        """;
 
     private async Task RunCommandAsync(Func<Task> command)
     {

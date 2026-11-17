@@ -6,12 +6,11 @@ public static class WidgetCenterLayout
 {
     // Center bounds are transient and never replace a widget's saved desktop bounds.
     public static WidgetCenterLayoutResult Arrange(IReadOnlyList<DesktopWidget> widgets, double availableWidth, double gap = 16,
-        double gripHeight = 0, IReadOnlyList<Guid>? order = null)
+        IReadOnlyList<Guid>? order = null)
     {
         var bounds = new Dictionary<Guid, LayoutRect>();
         if (!double.IsFinite(availableWidth) || availableWidth <= 0) return new(bounds, 0);
         gap = double.IsFinite(gap) ? Math.Max(0, gap) : 16;
-        gripHeight = double.IsFinite(gripHeight) ? Math.Max(0, gripHeight) : 0;
         var orderedWidgets = widgets.Where(widget => widget.Placement == WidgetPlacement.Center)
             .OrderBy(widget => widget.CenterOrder).ThenBy(widget => widget.Id);
         if (order is not null)
@@ -32,9 +31,9 @@ public static class WidgetCenterLayout
                 y += rowHeight + gap;
                 rowHeight = 0;
             }
-            bounds[widget.Id] = new(x, y + gripHeight, width, height);
+            bounds[widget.Id] = new(x, y, width, height);
             x += width + gap;
-            rowHeight = Math.Max(rowHeight, height + gripHeight);
+            rowHeight = Math.Max(rowHeight, height);
         }
         return new(bounds, y + rowHeight);
     }

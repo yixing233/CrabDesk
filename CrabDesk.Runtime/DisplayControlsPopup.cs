@@ -51,7 +51,7 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
         actions.ColumnDefinitions.Add(new() { Width = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         _cast = TextButton("无线投屏", "连接无线显示器");
         _settings = TextButton("显示设置", "打开显示设置");
-        _cast.Background = HoverInk; _settings.Background = HoverInk;
+        _cast.Background = RowInk; _settings.Background = RowInk;
         _cast.Click += (_, _) => PendingOperation = OpenExternalAsync(true);
         _settings.Click += (_, _) => PendingOperation = OpenExternalAsync(false);
         actions.Children.Add(_cast); WpfControls.Grid.SetColumn(_settings, 2); actions.Children.Add(_settings);
@@ -191,7 +191,8 @@ internal sealed class DisplayControlsPopup : ControlCenterPopup
             row.Button.IsEnabled = !_busy && _hasSnapshot && (_snapshot.DisplayCount >= 2 || mode == ControlDisplayMode.Internal);
             if (selected) row.Button.Background = HoverInk;
             else row.Button.ClearValue(WpfControls.Control.BackgroundProperty);
-            row.Title.Foreground = row.Icon.Foreground = selected ? AccentInk : ForegroundInk;
+            row.Title.Foreground = ForegroundInk;
+            row.Icon.Foreground = selected ? AccentInk : ForegroundInk;
             row.Check.Visibility = selected ? Wpf.Visibility.Visible : Wpf.Visibility.Hidden;
             Automation.SetItemStatus(row.Button, selected ? "已选中" : "");
         }

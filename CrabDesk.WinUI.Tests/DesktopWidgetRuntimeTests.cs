@@ -1646,7 +1646,7 @@ public sealed class DesktopWidgetRuntimeTests
         runtime.State.Widgets.Add(widget);
         using var surface = new DesktopBoxForm(runtime, monitor);
         surface.Location = new(-12000, -12000); _ = surface.Handle;
-        Call(surface, "BeginWidgetTodoInput", widget, task);
+        Call(surface, "BeginWidgetTodoInput", widget, task, null);
         var editor = (DesktopWidgetTextInput)typeof(DesktopBoxForm).GetField("_todoInput", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(surface)!;
         var field = (RectangleF)Call(surface, "TodoTextRectangle", widget, 0, false)!;
         var body = (RectangleF)typeof(DesktopBoxForm).GetMethod("WidgetBodyRectangle", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [widget])!;
@@ -1886,7 +1886,11 @@ public sealed class DesktopWidgetRuntimeTests
         var widget = new DesktopWidget { Kind = DesktopWidgetKind.Todo, Tasks = [task] };
         runtime.State.Widgets.Add(widget);
         var requests = new List<(DesktopWidget, WidgetTodoItem)>();
-        runtime.WidgetTodoDatesRequested += (owner, selected) => requests.Add((owner, selected));
+        runtime.WidgetTodoDatesRequested += (owner, selected, anchor) =>
+        {
+            Assert.Null(anchor);
+            requests.Add((owner, selected));
+        };
         runtime.EditWidgetTaskDates(widget, task.Id);
         Assert.Equal((widget, task), Assert.Single(requests));
         Assert.Equal(new DateOnly(2026, 10, 29), task.StartDate); Assert.Null(task.EndDate);

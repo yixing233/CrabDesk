@@ -51,8 +51,8 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
         grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         var stack = new Controls.StackPanel();
-        var header = new Controls.Grid { Height = 24, Margin = new Wpf.Thickness(0, 0, 0, 6) };
-        header.Children.Add(Label("麦克风", 14, true));
+        var header = new Controls.Grid { Height = 30, Margin = new Wpf.Thickness(0, 0, 0, 10) };
+        header.Children.Add(Label("麦克风", 16, true));
         var close = Button(TablerRuntimeIcon.X, "关闭麦克风控制");
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
@@ -71,7 +71,7 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
             HorizontalContentAlignment = Wpf.HorizontalAlignment.Stretch, Margin = new Wpf.Thickness(0, 0, 0, 10), Cursor = Input.Cursors.Hand };
         // The shared icon template centers its content; stretch the device grid explicitly.
         _device.SizeChanged += (_, _) => deviceContent.Width = Math.Max(0, _device.ActualWidth);
-        _device.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "MixerHover");
+        _device.Background = ControlCenterPopup.SurfaceInk(dark, 12);
         Automation.SetName(_device, "选择麦克风输入设备");
         _device.Click += (_, _) => ShowDevices();
         stack.Children.Add(_device);
@@ -125,8 +125,8 @@ internal sealed class MicrophonePopup : DesktopWidgetInputForm
             Background = Brush(BackColor), Child = grid };
         InitializePopupEntrance(_content, animationsEnabled);
         _content.Resources["MixerAccent"] = Brush(accent);
-        _content.Resources["MixerTrack"] = Brush(dark ? Color.FromArgb(88, 95, 109) : Color.FromArgb(191, 198, 211));
-        _content.Resources["MixerHover"] = Brush(dark ? Color.FromArgb(61, 67, 80) : Color.FromArgb(228, 233, 242));
+        _content.Resources["MixerTrack"] = ControlCenterPopup.SurfaceInk(dark, 44);
+        _content.Resources["MixerHover"] = ControlCenterPopup.SurfaceInk(dark, 24);
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
         _controller.Changed += OnChanged;
         _refresh.Tick += async (_, _) => await _controller.RefreshAsync();

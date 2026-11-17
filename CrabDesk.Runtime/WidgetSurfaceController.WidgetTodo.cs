@@ -128,7 +128,7 @@ internal abstract partial class WidgetSurfaceController
         _widgetScroll[widget.Id] = start;
     }
 
-    protected void BeginWidgetTodoInput(DesktopWidget widget, WidgetTodoItem? task = null)
+    protected void BeginWidgetTodoInput(DesktopWidget widget, WidgetTodoItem? task = null, PointF? point = null)
     {
         using var widgetView = EnterWidgetView();
         DismissWidgetInputs();
@@ -146,13 +146,12 @@ internal abstract partial class WidgetSurfaceController
         var start = WidgetTodoStart(widget);
         _widgetScroll[widget.Id] = start;
         var field = TodoTextRectangle(widget, index - start);
-        var location = WidgetPointToScreen(new(field.X, field.Y));
         var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
         var foreground = ResolveAutoTextColor(background);
         RequestVisualLayerRender();
-        _todoInput.Owner = this;
-        _todoInput.Present(new(location, new Size(ToPixel(field.Width), ToPixel(field.Height))), _todoDraft,
+        var bounds = PlaceWidgetTextEditor(_todoInput, field.Location, new(ToPixel(field.Width), ToPixel(field.Height)));
+        _todoInput.Present(bounds, _todoDraft,
             TranslationFieldColor(background, foreground, 12), foreground, ParseOpaqueColor(appearance.Accent),
             value => _todoDraft = value, () => { }, dismissed: _ =>
             {
@@ -161,6 +160,7 @@ internal abstract partial class WidgetSurfaceController
                     _runtime.SaveWidgetTask(widget, task?.Id, _todoDraft);
                 if (!_resourcesDisposed && !IsDisposed) RequestVisualLayerRender();
             }, cornerRadius: Math.Min(6, WidgetCornerRadius), singleLine: true,
+            caretPoint: point is { } click ? new PointF(click.X - field.X, click.Y - field.Y) : null,
             cancelled: () => _todoInputCancelled = true, showFocusBorder: false, borderThickness: 0, typography: widget, fontSize: 12.5);
     }
 
@@ -210,6 +210,7 @@ internal abstract partial class WidgetSurfaceController
             return;
         }
         if (visible[row].Row.Task is not { } task) return;
+        var dateButton = TodoDatesRectangle(widget, row);
         if (point.X < layout.List.X + 24)
         {
             _runtime.ToggleWidgetTask(widget, task.Id);
@@ -217,10 +218,19 @@ internal abstract partial class WidgetSurfaceController
             _hoveredTodoTaskId = TodoTaskAtPoint(widget, point);
             RequestVisualLayerRender();
         }
-        else if (TodoDatesRectangle(widget, row).Contains(point)) _runtime.EditWidgetTaskDates(widget, task.Id);
+        else if (dateButton.Contains(point))
+        {
+            var topLeft = WidgetPointToScreen(dateButton.Location);
+            var bottomRight = WidgetPointToScreen(new(dateButton.Right, dateButton.Bottom));
+            var anchor = Rectangle.FromLTRB(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
+            _runtime.EditWidgetTaskDates(widget, task.Id,
+                new(anchor, _monitor, ResolveWidgetSurface(widget), this is WidgetCenterForm ? Handle : IntPtr.Zero));
+        }
         else if (TodoEditRectangle(widget, row).Contains(point)) BeginWidgetTodoInput(widget, task);
         else if (TodoDeleteRectangle(widget, row).Contains(point))
             ShowTodoDeleteConfirmation(widget, task, TodoDeleteRectangle(widget, row));
+        else if (TodoTextRectangle(widget, row).Contains(point))
+            BeginWidgetTodoInput(widget, task, point);
     }
 
     protected void ShowTodoDeleteConfirmation(DesktopWidget widget, WidgetTodoItem task, RectangleF anchor)

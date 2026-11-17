@@ -48,9 +48,8 @@ public sealed class WidgetCenterSettingsTests
         var toggle = Named(document, "WidgetCenterEnabledToggle");
         Assert.Equal("False", (string?)toggle.Attribute("IsOn"));
         Assert.Equal("WidgetCenterEnabled_Toggled", (string?)toggle.Attribute("Toggled"));
-        var open = Named(document, "OpenWidgetCenterButton");
-        Assert.Equal("False", (string?)open.Attribute("IsEnabled"));
-        Assert.Equal("OpenWidgetCenter_Click", (string?)open.Attribute("Click"));
+        Assert.DoesNotContain(card.Descendants(), element => (string?)element.Attribute(Xaml + "Name") == "WidgetCenterStatus");
+        Assert.Empty(card.Descendants(Ui + "Button"));
         Assert.Contains(Named(document, "WidgetGallery"), overview.Descendants());
         Assert.DoesNotContain(card.DescendantsAndSelf().Attributes(), attribute =>
             (attribute.Name.LocalName is "Background" or "Foreground") && attribute.Value.StartsWith('#'));
@@ -69,7 +68,6 @@ public sealed class WidgetCenterSettingsTests
         var source = File.ReadAllText(Path.Combine(SolutionDirectory(), "CrabDesk.WinUI", "Views", "WidgetsPage.WidgetCenter.cs"));
         Assert.Contains("ApplyWidgetPlacement(_widgetCenterService, widget, placement)", source);
         Assert.Contains("_widgetCenterService.SetWidgetCenterEnabled(WidgetCenterEnabledToggle.IsOn)", source);
-        Assert.Contains("Try(_widgetCenterService.ShowWidgetCenter)", source);
         Assert.DoesNotContain("AddWidgetToCenter(", source);
     }
 
@@ -109,7 +107,6 @@ public sealed class WidgetCenterSettingsTests
         Assert.Contains("colorTheme: ForceSolidPreview ? appearance.CenterColorTheme : null", source);
         Assert.Contains("var hasBackground = ForceSolidPreview || DesktopWidgets.HasBackground(widget)", source);
         Assert.Contains("var solid = IsSolidPreview(widget)", source);
-        Assert.Contains("ContentWash(asset, IsSolidPreview(widget)", source);
         Assert.DoesNotContain("var solid = widget.BackgroundMaterial", source);
         Assert.DoesNotMatch(@"\bwidget\.BackgroundMaterial\s*=(?!=)", source);
         Assert.DoesNotMatch(@"\bwidget\.LyricsTransparentBackground\s*=(?!=)", source);

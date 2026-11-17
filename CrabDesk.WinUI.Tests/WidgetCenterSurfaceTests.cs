@@ -345,6 +345,47 @@ public sealed class WidgetCenterSurfaceTests
     public void OwnedEditorsMenusPickersAndSameProcessWinUIAreNotOutsideClicks(bool visible, bool busy, bool owner, uint process, uint host, bool expected) =>
         Assert.Equal(expected, WidgetCenterForm.ShouldDismissForActivation(visible, busy, owner, process, host));
 
+    [Theory]
+    [InlineData(ApplicationThemeMode.Light, "#FFFFFFFF", "#FF1550C8")]
+    [InlineData(ApplicationThemeMode.Dark, "#FF1C1C1E", "#FF8FB6FF")]
+    public void TodoDatesUseTheVisibleButtonRatherThanTheSavedDesktopPosition(ApplicationThemeMode theme, string background, string accent) => RunSta(() =>
+    {
+        using var fixture = new WidgetCenterRuntimeTests.Fixture();
+        var runtime = fixture.Runtime;
+        runtime.SetWidgetCenterThemeMode(theme);
+        var widget = Add(runtime, DesktopWidgetKind.Todo, new(620, 500, 180, 180));
+        var task = new WidgetTodoItem { Text = "带日期的待办" };
+        widget.Tasks.Add(task);
+        using var center = new WidgetCenterForm(runtime, runtime.Monitors[0]) { Location = new(100, 200) };
+        WidgetTodoDateAnchor? request = null;
+        runtime.WidgetTodoDatesRequested += (selected, item, anchor) =>
+        {
+            Assert.Same(widget, selected);
+            Assert.Same(task, item);
+            request = anchor;
+        };
+        var button = center.TodoDatesRectangle(widget, 0);
+        Call(center, "HandleWidgetClick", widget, new PointF(button.X + 4, button.Y + 4));
+
+        var actual = Assert.IsType<WidgetTodoDateAnchor>(request);
+        Assert.Equal(center.PointToScreen(Point.Round(button.Location)), actual.ButtonBounds.Location);
+        Assert.Equal(center.Handle, actual.OwnerHandle);
+        Assert.Equal(background, actual.Appearance.Background);
+        Assert.Equal(accent, actual.Appearance.Accent);
+        Assert.False(actual.Appearance.Acrylic);
+    });
+
+    [Theory]
+    [InlineData(320, -296, 354)]
+    [InlineData(720, -296, 390)]
+    [InlineData(425, -330, 425)]
+    public void TodoDateCardStaysInTheWorkAreaAndClearsTheButton(int buttonY, int expectedX, int expectedY)
+    {
+        var bounds = CrabDesk.WinUI.Windows.TodoDatesWindow.PlaceByButton(new(0, buttonY, 24, 24), new(-720, 100, 900, 650), 320, 320, 10);
+        Assert.Equal(expectedX, bounds.X);
+        Assert.Equal(expectedY, bounds.Y);
+    }
+
     private static DesktopWidget Add(CrabDeskRuntime runtime, DesktopWidgetKind kind, LayoutRect bounds)
     {
         var widget = new DesktopWidget { Kind = kind, Placement = WidgetPlacement.Center, Size = DesktopWidgetSize.Custom, MonitorId = runtime.Monitors[0].Id, Bounds = bounds, CenterOrder = runtime.State.Widgets.Count };

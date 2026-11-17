@@ -69,31 +69,31 @@ public sealed class WidgetCenterReorderingTests
     {
         DesktopWidget[] widgets = [Widget(First, 0), Widget(Second, 1)];
         Guid[] order = [First, Second];
-        var snapshot = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: 16);
-        var target = WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 286, 106);
+        var snapshot = WidgetCenterLayout.Arrange(widgets, 376);
+        var target = WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 286, 90);
         var previewOrder = WidgetCenterReordering.Move(order, First, target);
-        var preview = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: 16, order: previewOrder);
+        var preview = WidgetCenterLayout.Arrange(widgets, 376, order: previewOrder);
         Assert.Equal(new[] { Second, First }, previewOrder);
-        Assert.Equal(new LayoutRect(196, 16, 180, 180), preview.Bounds[First]);
-        Assert.Equal(new LayoutRect(0, 16, 180, 180), snapshot.Bounds[First]);
-        Assert.Equal(target, WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 286, 106));
+        Assert.Equal(new LayoutRect(196, 0, 180, 180), preview.Bounds[First]);
+        Assert.Equal(new LayoutRect(0, 0, 180, 180), snapshot.Bounds[First]);
+        Assert.Equal(target, WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 286, 90));
         Assert.Equal(new[] { First, Second }, order);
         Assert.Equal(0, widgets[0].CenterOrder);
         Assert.Equal(1, widgets[1].CenterOrder);
     }
 
     [Theory]
-    [InlineData(90, 106, 0)]
-    [InlineData(286, 106, 1)]
-    [InlineData(350, 318, 2)]
-    [InlineData(90, 204, 0)]
-    [InlineData(90, 214, 2)]
-    [InlineData(1000, 15, 0)]
+    [InlineData(90, 90, 0)]
+    [InlineData(286, 90, 1)]
+    [InlineData(350, 286, 2)]
+    [InlineData(90, 186, 0)]
+    [InlineData(90, 190, 2)]
+    [InlineData(1000, -1, 0)]
     [InlineData(-1000, 409, 2)]
     public void TargetIndexHandlesWideCardsAcrossRowsAndVerticalExtremes(double x, double y, int expected)
     {
         var snapshot = WidgetCenterLayout.Arrange([Widget(First, 0), Widget(Second, 1), Widget(Third, 2, 372)],
-            376, gripHeight: 16);
+            376);
         Assert.Equal(expected, WidgetCenterReordering.TargetIndex([First, Second, Third], snapshot.Bounds, x, y));
     }
 
@@ -103,16 +103,16 @@ public sealed class WidgetCenterReorderingTests
         DesktopWidget[] widgets = [Widget(First, 0), Widget(Second, 1), Widget(Third, 2, 372)];
         Guid[] order = [First, Second, Third];
         var originals = widgets.ToDictionary(widget => widget.Id, widget => (widget.Bounds, widget.CenterOrder, widget.MonitorId));
-        var snapshot = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: 16);
-        var target = WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 90, 106);
+        var snapshot = WidgetCenterLayout.Arrange(widgets, 376);
+        var target = WidgetCenterReordering.TargetIndex(order, snapshot.Bounds, 90, 90);
         var previewOrder = WidgetCenterReordering.Move(order, Third, target);
-        var preview = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: 16, order: previewOrder);
+        var preview = WidgetCenterLayout.Arrange(widgets, 376, order: previewOrder);
         Assert.Equal(new[] { Third, First, Second }, previewOrder);
-        Assert.Equal(new LayoutRect(0, 16, 372, 180), preview.Bounds[Third]);
-        Assert.Equal(new LayoutRect(0, 228, 180, 180), preview.Bounds[First]);
-        Assert.Equal(new LayoutRect(196, 228, 180, 180), preview.Bounds[Second]);
-        Assert.Equal(new LayoutRect(0, 228, 372, 180), snapshot.Bounds[Third]);
-        Assert.Equal(408, preview.Height);
+        Assert.Equal(new LayoutRect(0, 0, 372, 180), preview.Bounds[Third]);
+        Assert.Equal(new LayoutRect(0, 196, 180, 180), preview.Bounds[First]);
+        Assert.Equal(new LayoutRect(196, 196, 180, 180), preview.Bounds[Second]);
+        Assert.Equal(new LayoutRect(0, 196, 372, 180), snapshot.Bounds[Third]);
+        Assert.Equal(376, preview.Height);
         foreach (var widget in widgets)
         {
             Assert.Equal(originals[widget.Id].Bounds, widget.Bounds);
@@ -169,28 +169,15 @@ public sealed class WidgetCenterReorderingTests
     }
 
     [Fact]
-    public void ArrangeReservesGripForEachCardAndIncludesItInRowHeight()
+    public void ArrangeUsesCardHeightWithOneGapBetweenRows()
     {
         DesktopWidget[] widgets = [Widget(First, 0, height: 240), Widget(Second, 1), Widget(Third, 2, 372)];
-        var result = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: 16);
-        Assert.Equal(new LayoutRect(0, 16, 180, 240), result.Bounds[First]);
-        Assert.Equal(new LayoutRect(196, 16, 180, 180), result.Bounds[Second]);
-        Assert.Equal(new LayoutRect(0, 288, 372, 180), result.Bounds[Third]);
-        Assert.Equal(468, result.Height);
-        Assert.Equal(0, WidgetCenterLayout.Arrange([], 376, gripHeight: 16).Height);
-    }
-
-    [Theory]
-    [InlineData(-16)]
-    [InlineData(double.NaN)]
-    [InlineData(double.PositiveInfinity)]
-    public void ArrangeNormalizesInvalidGripWithoutChangingDefaultLayout(double gripHeight)
-    {
-        DesktopWidget[] widgets = [Widget(First, 0), Widget(Second, 1)];
-        var normal = WidgetCenterLayout.Arrange(widgets, 376);
-        var result = WidgetCenterLayout.Arrange(widgets, 376, gripHeight: gripHeight);
-        Assert.Equal(normal.Height, result.Height);
-        foreach (var widget in widgets) Assert.Equal(normal.Bounds[widget.Id], result.Bounds[widget.Id]);
+        var result = WidgetCenterLayout.Arrange(widgets, 376);
+        Assert.Equal(new LayoutRect(0, 0, 180, 240), result.Bounds[First]);
+        Assert.Equal(new LayoutRect(196, 0, 180, 180), result.Bounds[Second]);
+        Assert.Equal(new LayoutRect(0, 256, 372, 180), result.Bounds[Third]);
+        Assert.Equal(436, result.Height);
+        Assert.Equal(0, WidgetCenterLayout.Arrange([], 376).Height);
     }
 
     [Fact]

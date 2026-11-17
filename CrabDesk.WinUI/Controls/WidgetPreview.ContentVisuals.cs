@@ -16,6 +16,12 @@ public sealed partial class WidgetPreview
     private Border ContentWash(string asset, byte alpha = 18, double radius = 7)
         => new() { Background = new SolidColorBrush(ContentTone(asset).Color with { A = alpha }), CornerRadius = new CornerRadius(radius) };
 
+    private Border MetricRowWash() => new()
+    {
+        Background = new SolidColorBrush(_text.Color with { A = WidgetContentVisuals.MetricRowOpacity }),
+        CornerRadius = new CornerRadius(7)
+    };
+
     private static Color MixContent(Color from, Color to, double amount) => Color.FromArgb(255,
         (byte)Math.Round(from.R + (to.R - from.R) * amount),
         (byte)Math.Round(from.G + (to.G - from.G) * amount),

@@ -57,19 +57,21 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
-        var header = new WpfControls.Grid { Margin = new Wpf.Thickness(0, 0, 0, 4) };
-        header.Children.Add(Label("应用音量", 14, true));
-        var close = IconButton(TablerRuntimeIcon.X, "关闭", 24);
+        var header = new WpfControls.Grid { Height = 30, Margin = new Wpf.Thickness(0, 0, 0, 10) };
+        header.Children.Add(Label("应用音量", 16, true));
+        var close = IconButton(TablerRuntimeIcon.X, "关闭", 28);
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
         grid.Children.Add(header);
 
         _master = CreateRow(null, "总音量", TablerRuntimeIcon.Headphones);
-        var masterPanel = new WpfControls.StackPanel { Margin = new Wpf.Thickness(0, 0, 0, 4) };
-        masterPanel.Children.Add(_master.Root);
-        masterPanel.Children.Add(new WpfControls.Border { Height = 1, Margin = new Wpf.Thickness(0, 4, 0, 2),
-            Background = Brush(dark ? Color.FromArgb(61, 66, 77) : Color.FromArgb(223, 227, 234)) });
+        var masterPanel = new WpfControls.Border
+        {
+            CornerRadius = new Wpf.CornerRadius(12), Margin = new Wpf.Thickness(0, 0, 0, 8),
+            Padding = new Wpf.Thickness(4, 2, 4, 2), Background = ControlCenterPopup.SurfaceInk(dark, 12),
+            Child = _master.Root
+        };
         var body = new WpfControls.Grid();
         body.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         body.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
@@ -104,9 +106,9 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
         };
         InitializePopupEntrance(_content, animationsEnabled);
         _content.Resources["MixerAccent"] = Brush(accent);
-        _content.Resources["MixerTrack"] = Brush(dark ? Color.FromArgb(88, 95, 109) : Color.FromArgb(191, 198, 211));
-        _content.Resources["MixerHover"] = Brush(dark ? Color.FromArgb(61, 67, 80) : Color.FromArgb(228, 233, 242));
-        _content.Resources["MixerScrollThumb"] = Brush(dark ? Color.FromArgb(105, 116, 135) : Color.FromArgb(169, 179, 196));
+        _content.Resources["MixerTrack"] = ControlCenterPopup.SurfaceInk(dark, 44);
+        _content.Resources["MixerHover"] = ControlCenterPopup.SurfaceInk(dark, 24);
+        _content.Resources["MixerScrollThumb"] = ControlCenterPopup.SurfaceInk(dark, 74);
         _content.Resources[typeof(WpfControls.Primitives.ScrollBar)] = Wpf.Markup.XamlReader.Parse(ScrollBarStyle);
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
         _controller.Changed += OnSnapshotChanged;
@@ -332,17 +334,25 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     internal const string ButtonStyle = """
-        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button">
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="Button">
           <Setter Property="Background" Value="Transparent"/>
           <Setter Property="BorderThickness" Value="0"/>
           <Setter Property="Template"><Setter.Value>
-            <ControlTemplate TargetType="Button"><Border Background="{TemplateBinding Background}" CornerRadius="6">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border></ControlTemplate>
+            <ControlTemplate TargetType="Button">
+              <Grid>
+                <Border Background="{TemplateBinding Background}" CornerRadius="8"/>
+                <Border x:Name="Feedback" Background="{DynamicResource MixerHover}" CornerRadius="8" Opacity="0"/>
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Grid>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Feedback" Property="Opacity" Value="1"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Feedback" Property="Opacity" Value="1"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Feedback" Property="Opacity" Value="0.65"/></Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
           </Setter.Value></Setter>
           <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource MixerHover}"/></Trigger>
-            <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="Background" Value="{DynamicResource MixerHover}"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
           </Style.Triggers>
         </Style>
@@ -371,9 +381,9 @@ internal sealed class AudioMixerPopup : DesktopWidgetInputForm
               <Track.Thumb>
                 <Thumb Width="16" Height="16">
                   <Thumb.Template><ControlTemplate TargetType="Thumb">
-                    <Border Background="White" CornerRadius="8" BorderThickness="1" BorderBrush="#18000000" Padding="3">
-                      <Ellipse Fill="{DynamicResource MixerAccent}"/>
-                    </Border>
+                    <Grid Background="Transparent">
+                      <Ellipse Width="9" Height="9" Fill="{DynamicResource MixerAccent}"/>
+                    </Grid>
                   </ControlTemplate></Thumb.Template>
                 </Thumb>
               </Track.Thumb>

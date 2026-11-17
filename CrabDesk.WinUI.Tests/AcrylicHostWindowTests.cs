@@ -456,6 +456,32 @@ public sealed class AcrylicHostWindowTests
         return false;
     }
 
+    [Fact]
+    public void TodoDatePopupCanRiseAboveTheTopmostCenterAndReturnToTheNormalLayer()
+    {
+        RunInSta(() =>
+        {
+            using var center = TestWindow();
+            using var popup = TestWindow();
+            center.ShowInTaskbar = true;
+            popup.ShowInTaskbar = true;
+            center.Show();
+            popup.Show();
+            Assert.True(SetWindowPos(center.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013));
+            Assert.Equal(WsExTopmost, GetWindowLongPtr(center.Handle, GwlExStyle) & WsExTopmost);
+            Assert.True(IsAbove(center.Handle, popup.Handle));
+
+            CrabDesk.WinUI.Windows.TodoDatesWindow.SetPopupTopmost(popup.Handle, true);
+            Assert.True(IsAbove(popup.Handle, center.Handle));
+            Assert.Equal(WsExTopmost, GetWindowLongPtr(popup.Handle, GwlExStyle) & WsExTopmost);
+
+            popup.Hide();
+            CrabDesk.WinUI.Windows.TodoDatesWindow.SetPopupTopmost(popup.Handle, false);
+            Assert.Equal(IntPtr.Zero, GetWindowLongPtr(popup.Handle, GwlExStyle) & WsExTopmost);
+            Assert.Equal(WsExTopmost, GetWindowLongPtr(center.Handle, GwlExStyle) & WsExTopmost);
+        });
+    }
+
     private static void PumpMessagesUntil(Func<bool> condition)
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();

@@ -29,6 +29,9 @@ public sealed class EnumDisplayConverter : IValueConverter
         BoxViewMode.Grid => "图标",
         BoxViewMode.List => "列表",
 
+        IconSkinStyle.Flat => "macOS 扁平",
+        IconSkinStyle.Gradient => "柔光渐变",
+
         BoxSortMode.Manual => "手动",
         BoxSortMode.Name => "名称",
         BoxSortMode.Type => "类型",

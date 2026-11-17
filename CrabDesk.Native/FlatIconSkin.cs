@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using CrabDesk.Core;
 
 namespace CrabDesk.Native;
 
@@ -17,7 +18,7 @@ public enum IconSkinKind
 }
 
 /// <summary>
-/// Flat icon colors shared by desktop icons and box icons.
+/// Icon appearance shared by the desktop and boxes.
 /// </summary>
 public sealed record IconSkinOptions(
     bool Enabled,
@@ -26,6 +27,7 @@ public sealed record IconSkinOptions(
     Color BadgeColor)
 {
     public bool ShowShortcutArrow { get; init; } = true;
+    public IconSkinStyle Style { get; init; }
 
     public static readonly IconSkinOptions Disabled =
         new(false, Color.White, Color.FromArgb(0xDD, 0xE6, 0xF2), Color.White);
@@ -52,6 +54,7 @@ public sealed record IconSkinOptions(
             FolderPlate.ToArgb(),
             BadgeColor.ToArgb(),
             ShowShortcutArrow,
+            Style,
             FlatIconSkin.Version);
 
     private static Color ParseColor(string? value, Color fallback)
@@ -154,9 +157,12 @@ public static partial class FlatIconSkin
         }
         else
         {
-            FillPlate(tile, work, plate);
+            FillPlate(tile, work, plate, options.Style);
             DrawArtworkFit(artwork, source.Width, source.Height, (artX, artY, artW, artH), tile, work, fullBleed: false);
         }
+
+        if (options.Style == IconSkinStyle.Gradient)
+            DrawPlateRim(tile, work);
 
         // Both lanes end up shaped by the same mask: a plated icon is clipped back
         // to its own anti-aliased rim, and a full-bleed tile is carved into the
@@ -234,15 +240,54 @@ public static partial class FlatIconSkin
 
     // ---- compose -----------------------------------------------------------
 
-    private static void FillPlate(byte[] tile, int size, Color plate)
+    private static void FillPlate(byte[] tile, int size, Color plate, IconSkinStyle style)
     {
-        for (var i = 0; i < size * size; i++)
+        var gradient = style == IconSkinStyle.Gradient;
+        var top = gradient ? PlateHighlight(plate) : plate;
+        var bottom = gradient ? PlateShade(plate) : plate;
+        for (var y = 0; y < size; y++)
         {
-            var offset = i * 4;
-            tile[offset] = plate.R;
-            tile[offset + 1] = plate.G;
-            tile[offset + 2] = plate.B;
-            tile[offset + 3] = 255;
+            var row = gradient ? MixColor(top, bottom, y / (double)(size - 1)) : plate;
+            for (var x = 0; x < size; x++)
+            {
+                var offset = (y * size + x) * 4;
+                tile[offset] = row.R;
+                tile[offset + 1] = row.G;
+                tile[offset + 2] = row.B;
+                tile[offset + 3] = 255;
+            }
+        }
+    }
+
+    private static Color PlateHighlight(Color plate) => MixColor(plate, Color.White, .40);
+
+    private static Color PlateShade(Color plate) =>
+        MixColor(plate, Color.FromArgb(48, 75, 118), .24);
+
+    private static Color MixColor(Color first, Color second, double fraction) => Color.FromArgb(
+        (int)Math.Round(first.R + (second.R - first.R) * fraction),
+        (int)Math.Round(first.G + (second.G - first.G) * fraction),
+        (int)Math.Round(first.B + (second.B - first.B) * fraction));
+
+    private static void DrawPlateRim(byte[] tile, int size)
+    {
+        var inset = Math.Max(1, (int)Math.Round(size * .032));
+        var innerSize = size - 2 * inset;
+        var innerMask = SquircleMask(innerSize);
+        for (var y = 0; y < size; y++)
+        {
+            var progress = y / (double)(size - 1);
+            var color = MixColor(Color.White, Color.FromArgb(38, 57, 93), progress);
+            for (var x = 0; x < size; x++)
+            {
+                var innerX = x - inset;
+                var innerY = y - inset;
+                var innerCoverage = (uint)innerX < innerSize && (uint)innerY < innerSize
+                    ? innerMask[(innerY * innerSize + innerX) * 4 + 3] : 0;
+                var offset = (y * size + x) * 4;
+                var alpha = (byte)Math.Round((255 - innerCoverage) * (.48 - .22 * progress) * tile[offset + 3] / 255);
+                if (alpha > 0) BlendOver(tile, offset, color.R, color.G, color.B, alpha);
+            }
         }
     }
 

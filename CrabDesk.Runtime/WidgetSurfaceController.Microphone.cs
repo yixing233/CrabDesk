@@ -10,7 +10,7 @@ internal abstract partial class WidgetSurfaceController
     protected DesktopWidget? _microphoneWidget;
     protected LayoutRect _microphoneBounds;
 
-    protected void DrawMicrophoneButton(Graphics graphics, DesktopWidget widget, Color text, Color accent, Color background)
+    protected void DrawMicrophoneButton(Graphics graphics, DesktopWidget widget, Color text, Color background)
     {
         using var widgetView = EnterWidgetView();
         var bounds = MonitorRectangle(widget, ControlCenterPresentation.MicrophoneButton(MonitorBody(widget)));
@@ -18,11 +18,8 @@ internal abstract partial class WidgetSurfaceController
         var pressed = IsControlPressed(widget, target);
         var hovered = IsControlHovered(widget, target);
         var ink = ResolveAutoTextColor(background);
-        var solid = IsWidgetSolid(widget);
-        var fill = Mix(PanelFill(background, ink, solid), ink, solid
-            ? pressed ? .12 : hovered || _microphoneWidget == widget ? .08 : .04
-            : pressed ? .22 : hovered || _microphoneWidget == widget ? .18 : .14);
-        using var path = RoundedRectangle(bounds, 6);
+        var fill = Mix(background, ink, WidgetContentVisuals.ControlRowTint(hovered || _microphoneWidget == widget, pressed));
+        using var path = RoundedRectangle(bounds, WidgetContentVisuals.ControlRowRadius);
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
         var size = pressed ? 13f : 14f;

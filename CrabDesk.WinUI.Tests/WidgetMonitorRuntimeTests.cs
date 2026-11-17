@@ -481,9 +481,6 @@ public sealed class WidgetMonitorRuntimeTests
             var body = ControlCenterPresentation.Body(372, 292, runtime.State.Settings.Appearance.CornerRadius);
             var button = ControlCenterPresentation.VolumeMuteButton(body);
             var point = new PointF((float)(100 + button.X + button.Width / 2), (float)(100 + button.Y + button.Height / 2));
-            var isSlider = (bool)typeof(DesktopBoxForm).GetMethod("IsControlCenterDragTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
-                .Invoke(form, [widget, point])!;
-            Assert.False(isSlider);
             Assert.True((bool)typeof(DesktopBoxForm).GetMethod("HandleControlCenterClick", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .Invoke(form, [widget, point])!);
             Assert.Equal(!initialMuted, widget.Controls!.VolumeMuted);
@@ -958,24 +955,20 @@ public sealed class WidgetMonitorRuntimeTests
         var sliders = ControlCenterPresentation.SliderArea(body);
         var half = (sliders.Width - 14) / 2;
 
-        var captures = (bool)typeof(DesktopBoxForm)
-            .GetMethod("IsControlCenterDragTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(form, [widget, new PointF((float)(100 + sliders.X + half / 2), (float)(100 + sliders.Y + 10))])!;
-        Assert.True(captures);
-
-        var update = typeof(DesktopBoxForm)
-            .GetMethod("UpdateControlCenterDrag", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        typeof(DesktopBoxForm).GetField("_controlPressedWidgetId", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(form, (Guid?)widget.Id);
-        typeof(DesktopBoxForm).GetField("_controlPressedTarget", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .SetValue(form, ControlCenterPresentation.ControlCenterTarget.VolumeSlider);
+        var start = new PointF((float)(100 + sliders.X + half / 2), (float)(100 + sliders.Y + 10));
+        var mouse = new MouseEventArgs(MouseButtons.Left, 1, (int)start.X, (int)start.Y, 0);
+        typeof(DesktopBoxForm).GetMethod("HandleWidgetMouseDown", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(form, [mouse, start]);
+        Assert.True(form.Capture);
+        var move = typeof(DesktopBoxForm).GetMethod("HandleWidgetMouseMove", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
         foreach (var fraction in new[] { 0.25, 0.75 })
         {
             var x = (float)(100 + sliders.X + half * fraction);
-            update.Invoke(form, [widget, new PointF(x, (float)(100 + sliders.Y + 10))]);
+            move.Invoke(form, [new PointF(x, start.Y)]);
             // The level tracks the pointer rather than staying where it was pressed.
             Assert.Equal(fraction * 100, widget.Controls!.VolumePercent!.Value, 1);
+            Assert.Equal(new LayoutRect(100, 100, 372, 292), widget.Bounds);
         }
     });
 

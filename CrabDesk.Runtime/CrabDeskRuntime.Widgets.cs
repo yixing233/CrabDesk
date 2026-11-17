@@ -2,6 +2,9 @@ using CrabDesk.Core;
 
 namespace CrabDesk.Runtime;
 
+public sealed record WidgetTodoDateAnchor(System.Drawing.Rectangle ButtonBounds, MonitorLayout Monitor,
+    WidgetSurfaceAppearance Appearance, IntPtr OwnerHandle);
+
 public sealed partial class CrabDeskRuntime
 {
     private readonly WidgetWeatherService _widgetWeatherService = new();
@@ -12,7 +15,7 @@ public sealed partial class CrabDeskRuntime
     private bool _widgetNavigationPending;
     public event Action<DesktopWidget>? WidgetWeatherDetailsRequested;
     public event Action<DesktopWidget>? WidgetWeatherLocationsRequested;
-    public event Action<DesktopWidget, WidgetTodoItem>? WidgetTodoDatesRequested;
+    public event Action<DesktopWidget, WidgetTodoItem, WidgetTodoDateAnchor?>? WidgetTodoDatesRequested;
 
     public void OpenWidgetWeatherLocations(DesktopWidget widget)
     {
@@ -279,12 +282,12 @@ public sealed partial class CrabDeskRuntime
         return true;
     }
 
-    public void EditWidgetTaskDates(DesktopWidget widget, Guid taskId)
+    public void EditWidgetTaskDates(DesktopWidget widget, Guid taskId, WidgetTodoDateAnchor? anchor = null)
     {
         if (_disposed || widget.Kind != DesktopWidgetKind.Todo || !State.Widgets.Contains(widget) ||
             widget.Tasks.FirstOrDefault(task => task.Id == taskId) is not { } task) return;
         DismissDesktopWidgetInput();
-        WidgetTodoDatesRequested?.Invoke(widget, task);
+        WidgetTodoDatesRequested?.Invoke(widget, task, anchor);
     }
 
     public Task<IReadOnlyList<WeatherLocation>> SearchWidgetCitiesAsync(string city, CancellationToken cancellationToken = default) =>

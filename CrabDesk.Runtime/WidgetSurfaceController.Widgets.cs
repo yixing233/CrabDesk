@@ -109,27 +109,48 @@ internal abstract partial class WidgetSurfaceController
         if (_widgetResizeEdges == WidgetResizeEdges.None && WidgetMenuRectangle(widget, WidgetCornerRadius).Contains(point)) { ShowWidgetMenu(widget, args.Location); return true; }
         // Show the press immediately rather than waiting for the click to finish:
         // that delay is what made the card's buttons feel inert.
-        if (widget.Kind == DesktopWidgetKind.ControlCenter) BeginControlCenterPress(widget, point);
+        var controlPressed = widget.Kind == DesktopWidgetKind.ControlCenter && BeginControlCenterPress(widget, point);
         _pressedWidget = widget;
         _widgetPressPoint = point;
         _widgetStartBounds = GetWidgetBounds(widget);
         _widgetDragging = false;
         _widgetResizing = false;
-        _widgetCanDrag = CanTransformWidgets && _widgetResizeEdges == WidgetResizeEdges.None && !widget.IsLocked && !IsWeatherLocationPoint(widget, point) && !IsCalendarNavigationPoint(widget, point) &&
-            !(widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.FileShelf && GetFileShelfLayout(widget, WidgetCornerRadius).Add.Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, WidgetCornerRadius).Contains(point)) &&
-            !(widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, WidgetCornerRadius).Contains(point)) &&
-            (widget.Kind is DesktopWidgetKind.Clock or DesktopWidgetKind.Lyrics || widget.Kind == DesktopWidgetKind.Network && widget.NetworkDisplayMode == NetworkWidgetDisplayMode.Speeds ||
-             point.Y < GetWidgetBounds(widget).Y + (widget.Kind == DesktopWidgetKind.ControlCenter ? MonitorBody(widget).Y : 28) ||
-             widget.Kind == DesktopWidgetKind.Weather &&
-             (GetWeatherLayout(widget, WidgetCornerRadius).Temperature.Contains(point) || GetWeatherLayout(widget, WidgetCornerRadius).Icon.Contains(point))) &&
-            // A slider must not drag the card: pressing one and moving adjusts the
-            // level, and the pointer routinely leaves the control while dragging,
-            // which used to start moving the whole widget instead.
-            !(widget.Kind == DesktopWidgetKind.ControlCenter && IsControlCenterDragTarget(widget, point));
+        _widgetCanDrag = CanMoveWidget(widget) && _widgetResizeEdges == WidgetResizeEdges.None &&
+            !controlPressed && !IsWidgetActionPoint(widget, point);
         Capture = true;
         return true;
+    }
+
+    private bool IsWidgetActionPoint(DesktopWidget widget, PointF point)
+    {
+        switch (widget.Kind)
+        {
+            case DesktopWidgetKind.Calendar:
+                return IsCalendarNavigationPoint(widget, point);
+            case DesktopWidgetKind.Weather:
+                var weather = WeatherPresentation(widget, WidgetCornerRadius);
+                return IsWeatherLocationPoint(widget, point) || WeatherRectangle(widget, weather.Locations).Contains(point) ||
+                    widget.Location is not null && WeatherRectangle(widget, weather.City).Contains(point) ||
+                    widget.Cities.Count > 1 && (WeatherRectangle(widget, weather.Previous).Contains(point) ||
+                        WeatherRectangle(widget, weather.Next).Contains(point));
+            case DesktopWidgetKind.FileShelf:
+                var shelf = GetFileShelfLayout(widget, WidgetCornerRadius);
+                return _pressedFileShelfItemId is not null || shelf.Add.Contains(point) || shelf.Mode.Contains(point);
+            case DesktopWidgetKind.Todo:
+                if (GetTodoLayout(widget).Add.Contains(point) || TodoCompletedHeaderRectangle(widget).Contains(point)) return true;
+                var row = TodoRowAtPoint(widget, point);
+                return row >= 0 && TodoTaskAtPoint(widget, point) is not null &&
+                    (point.X < GetTodoLayout(widget).List.X + 24 || TodoDatesRectangle(widget, row).Contains(point) ||
+                        TodoEditRectangle(widget, row).Contains(point) || TodoDeleteRectangle(widget, row).Contains(point));
+            case DesktopWidgetKind.Translation:
+                var translation = GetTranslationLayout(widget);
+                return translation.Language.Contains(point) || translation.Clear.Contains(point) ||
+                    translation.Copy.Contains(point) || translation.Translate.Contains(point);
+            case DesktopWidgetKind.Network:
+                return NetworkSortRectangle(widget, false).Contains(point) || NetworkSortRectangle(widget, true).Contains(point);
+            default:
+                return false;
+        }
     }
 
     protected bool HandleWidgetMouseMove(PointF point)
@@ -224,7 +245,7 @@ internal abstract partial class WidgetSurfaceController
             widget.Kind == DesktopWidgetKind.Todo && GetTodoLayout(widget).Add.Contains(point) || WidgetBodyRectangle(widget).Contains(point)
             || widget.Kind == DesktopWidgetKind.Weather && WeatherLocationsButtonRectangle(widget, WidgetCornerRadius).Contains(point)
             || widget.Kind == DesktopWidgetKind.Weather && widget.Location is not null && WeatherCityButtonRectangle(widget, WidgetCornerRadius).Contains(point)
-            ? Forms.Cursors.Hand : !widget.IsLocked ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
+            ? Forms.Cursors.Hand : CanMoveWidget(widget) ? Forms.Cursors.SizeAll : Forms.Cursors.Default;
         return true;
     }
 
@@ -283,7 +304,7 @@ internal abstract partial class WidgetSurfaceController
         { ShowWeatherCityMenu(widget); return; }
         if (widget.Kind == DesktopWidgetKind.ControlCenter && HandleControlCenterClick(widget, point)) return;
         if (widget.Kind == DesktopWidgetKind.Note && WidgetBodyRectangle(widget).Contains(point))
-        { BeginWidgetNoteInput(widget); return; }
+        { BeginWidgetNoteInput(widget, point); return; }
         if (widget.Kind == DesktopWidgetKind.Translation) { HandleTranslationWidgetClick(widget, point); return; }
         if (widget.Kind == DesktopWidgetKind.Weather && widget.Cities.Count > 1)
         {

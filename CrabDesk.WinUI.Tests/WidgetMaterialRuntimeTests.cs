@@ -298,6 +298,7 @@ public sealed class WidgetMaterialRuntimeTests
         using var inactive = Render(surface, widget, 412, 332, scale);
         var body = ControlCenterPresentation.Body(widget.Bounds.Width, widget.Bounds.Height,
             runtime.State.Settings.Appearance.CornerRadius);
+        var ink = theme == WidgetColorTheme.Light ? Color.FromArgb(31, 35, 41) : Color.White;
         var actions = ControlQuickActions.For(widget);
         for (var index = 0; index < actions.Count; index++)
         {
@@ -309,9 +310,15 @@ public sealed class WidgetMaterialRuntimeTests
             var off = inactive.GetPixel(x, y);
             Assert.Equal(255, on.A);
             Assert.Equal(255, off.A);
-            Assert.True((1.05 / (Luminance(on) + .05)) >= 4.5, $"{actions[index]} has insufficient contrast on {theme}.");
+            foreach (var fill in new[] { on, off })
+            {
+                var inkLight = Luminance(ink);
+                var fillLight = Luminance(fill);
+                var contrast = (Math.Max(inkLight, fillLight) + .05) / (Math.Min(inkLight, fillLight) + .05);
+                Assert.True(contrast >= 4.5, $"{actions[index]} has insufficient contrast on {theme}.");
+            }
             Assert.InRange(Math.Max(off.R, Math.Max(off.G, off.B)) - Math.Min(off.R, Math.Min(off.G, off.B)), 0, 2);
-            Assert.True(Math.Abs(on.R - off.R) + Math.Abs(on.G - off.G) + Math.Abs(on.B - off.B) > 50);
+            Assert.InRange(Math.Max(on.R, Math.Max(on.G, on.B)) - Math.Min(on.R, Math.Min(on.G, on.B)), 10, 45);
         }
     });
 

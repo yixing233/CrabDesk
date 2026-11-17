@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using CrabDesk.Core;
 using CrabDesk.Native;
 
 namespace CrabDesk.Tests;
@@ -185,9 +186,23 @@ public class FlatIconSkinTests
         Assert.NotEqual(baseline, (Flat with { FolderPlate = Color.Black }).CacheStamp());
         Assert.NotEqual(baseline, (Flat with { BadgeColor = Color.Black }).CacheStamp());
         Assert.NotEqual(baseline, (Flat with { ShowShortcutArrow = false }).CacheStamp());
+        Assert.NotEqual(baseline, (Flat with { Style = IconSkinStyle.Gradient }).CacheStamp());
         Assert.NotEqual(IconSkinOptions.Disabled.CacheStamp(),
             (IconSkinOptions.Disabled with { ShowShortcutArrow = false }).CacheStamp());
         Assert.NotEqual(baseline, IconSkinOptions.Disabled.CacheStamp());
+    }
+
+    [Fact]
+    public void GradientChangesThePlateAndRimWithoutTintingTheLogo()
+    {
+        using var source = BareLogo(96, Color.CornflowerBlue);
+        using var flat = FlatIconSkin.Render(source, 96, IconSkinKind.App, Flat);
+        using var gradient = FlatIconSkin.Render(source, 96, IconSkinKind.App, Flat with { Style = IconSkinStyle.Gradient });
+
+        Assert.NotEqual(flat.GetPixel(48, 87), gradient.GetPixel(48, 87));
+        Assert.True(gradient.GetPixel(48, 8).GetBrightness() > gradient.GetPixel(48, 87).GetBrightness());
+        Assert.Equal(flat.GetPixel(48, 48), gradient.GetPixel(48, 48));
+        Assert.Equal(0, gradient.GetPixel(0, 0).A);
     }
 
     [Theory]

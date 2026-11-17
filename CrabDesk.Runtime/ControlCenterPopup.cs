@@ -17,7 +17,7 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
     private readonly Wpf.Style _buttonStyle;
     protected readonly WpfControls.Grid Body = new();
     protected readonly WpfControls.StackPanel Footer = new();
-    protected readonly Media.Brush ForegroundInk, SecondaryInk, AccentInk, HoverInk, TrackInk;
+    protected readonly Media.Brush ForegroundInk, SecondaryInk, AccentInk, RowInk, HoverInk, TrackInk;
     private readonly WpfControls.TextBlock _status;
     protected bool IsClosing { get; private set; }
     protected virtual bool CanDismissOnDeactivate => true;
@@ -39,20 +39,21 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
         ForegroundInk = Brush(dark ? Color.FromArgb(242, 244, 248) : Color.FromArgb(31, 35, 41));
         SecondaryInk = Brush(dark ? Color.FromArgb(176, 183, 195) : Color.FromArgb(102, 110, 124));
         AccentInk = Brush(accent);
-        HoverInk = Brush(dark ? Color.FromArgb(61, 67, 80) : Color.FromArgb(228, 233, 242));
-        TrackInk = Brush(dark ? Color.FromArgb(88, 95, 109) : Color.FromArgb(191, 198, 211));
+        RowInk = SurfaceInk(dark, 12);
+        HoverInk = SurfaceInk(dark, 24);
+        TrackInk = SurfaceInk(dark, 44);
         _buttonStyle = (Wpf.Style)Wpf.Markup.XamlReader.Parse(AudioMixerPopup.ButtonStyle);
         var grid = new WpfControls.Grid();
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = new Wpf.GridLength(1, Wpf.GridUnitType.Star) });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
         grid.RowDefinitions.Add(new() { Height = Wpf.GridLength.Auto });
-        var header = new WpfControls.Grid { Height = detailCard ? 34 : 26, Margin = new Wpf.Thickness(0, 0, 0, detailCard ? 12 : 8) };
-        var titleLabel = TextLabel(title, detailCard ? 18 : 14, true);
+        var header = new WpfControls.Grid { Height = 30, Margin = new Wpf.Thickness(0, 0, 0, 10) };
+        var titleLabel = TextLabel(title, 16, true);
         if (titleIcon is { } icon)
         {
             var heading = new WpfControls.StackPanel { Orientation = WpfControls.Orientation.Horizontal };
-            var glyph = Glyph(icon, 18);
+            var glyph = Glyph(icon, 16);
             glyph.Foreground = detailCard ? AccentInk : SecondaryInk;
             glyph.Margin = new Wpf.Thickness(0, 0, detailCard ? 10 : 8, 0);
             heading.Children.Add(glyph);
@@ -60,7 +61,7 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
             header.Children.Add(heading);
         }
         else header.Children.Add(titleLabel);
-        var close = IconButton(TablerRuntimeIcon.X, "关闭" + title, detailCard ? 30 : 24);
+        var close = IconButton(TablerRuntimeIcon.X, "关闭" + title, 28);
         close.HorizontalAlignment = Wpf.HorizontalAlignment.Right;
         close.Click += (_, _) => Dismiss();
         header.Children.Add(close);
@@ -74,7 +75,7 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
         _status.Visibility = Wpf.Visibility.Collapsed;
         _status.Margin = new Wpf.Thickness(0, 6, 0, 0);
         WpfControls.Grid.SetRow(_status, 3); grid.Children.Add(_status);
-        _content = new WpfControls.Border { CornerRadius = new Wpf.CornerRadius(detailCard ? 8 : 12),
+        _content = new WpfControls.Border { CornerRadius = new Wpf.CornerRadius(12),
             UseLayoutRounding = detailCard, SnapsToDevicePixels = detailCard,
             Padding = detailCard ? new Wpf.Thickness(16) : new Wpf.Thickness(12, 10, 12, 10),
             Background = Brush(BackColor), Child = grid };
@@ -82,11 +83,14 @@ internal abstract partial class ControlCenterPopup : DesktopWidgetInputForm
         _content.Resources["MixerAccent"] = AccentInk;
         _content.Resources["MixerTrack"] = TrackInk;
         _content.Resources["MixerHover"] = HoverInk;
-        _content.Resources["MixerScrollThumb"] = Brush(dark ? Color.FromArgb(105, 116, 135) : Color.FromArgb(169, 179, 196));
+        _content.Resources["MixerScrollThumb"] = SurfaceInk(dark, 74);
         _content.Resources[typeof(WpfControls.Primitives.ScrollBar)] = Wpf.Markup.XamlReader.Parse(AudioMixerPopup.ScrollBarStyle);
         _content.PreviewKeyDown += (_, args) => { if (args.Key == Input.Key.Escape) { args.Handled = true; Dismiss(); } };
         Deactivate += (_, _) => { if (CanDismissOnDeactivate) Dismiss(); };
     }
+
+    internal static Media.Brush SurfaceInk(bool dark, int opacity)
+        => Brush(Color.FromArgb(opacity, dark ? Color.White : Color.FromArgb(31, 35, 41)));
 
     protected WpfControls.TextBlock TextLabel(string text, double size = 12, bool bold = false) => new()
     {

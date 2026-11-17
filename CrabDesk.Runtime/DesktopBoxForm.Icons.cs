@@ -320,6 +320,9 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             DesktopItemKind.Folder => IconSkinKind.Folder,
             DesktopItemKind.Shortcut => IconSkinKind.Shortcut,
             DesktopItemKind.File when string.Equals(
+                Path.GetExtension(item.FileSystemPath ?? item.ParsingName), ".url",
+                StringComparison.OrdinalIgnoreCase) => IconSkinKind.Shortcut,
+            DesktopItemKind.File when string.Equals(
                 Path.GetExtension(item.FileSystemPath ?? item.ParsingName), ".exe",
                 StringComparison.OrdinalIgnoreCase) => IconSkinKind.App,
             DesktopItemKind.File => IconSkinKind.File,

@@ -136,6 +136,7 @@ public interface ICrabDeskService
     void SetIconLabelFontSize(double value);
     void SetIconLabelFontFamily(string value);
     void SetIconSkinEnabled(bool enabled);
+    void SetIconSkinStyle(IconSkinStyle style);
     void SetShowShortcutArrow(bool show);
     void SetIconSkinPlates(string appPlate, string folderPlate);
     void SetIconSkinBadgeColor(string value);

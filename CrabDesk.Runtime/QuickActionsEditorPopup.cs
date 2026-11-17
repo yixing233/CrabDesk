@@ -43,7 +43,7 @@ internal sealed class QuickActionsEditorPopup : ControlCenterPopup
         foreach (var action in Enum.GetValues<ControlCenterQuickAction>()) AddRow(action, checkboxStyle);
 
         _reset = TextButton("恢复默认");
-        _reset.Background = HoverInk;
+        _reset.Background = RowInk;
         _reset.HorizontalAlignment = Wpf.HorizontalAlignment.Left;
         _reset.Click += (_, _) => RestoreDefaults();
         Footer.Children.Add(_reset);
@@ -159,10 +159,10 @@ internal sealed class QuickActionsEditorPopup : ControlCenterPopup
           <Setter Property="Template">
             <Setter.Value>
               <ControlTemplate TargetType="CheckBox">
-                <Border x:Name="Row" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="5" Padding="4,0">
+                <Border x:Name="Row" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="8" Padding="4,0">
                   <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border x:Name="Box" Width="18" Height="18" CornerRadius="4" BorderThickness="1" BorderBrush="{TemplateBinding BorderBrush}" VerticalAlignment="Center">
+                    <Border x:Name="Box" Width="18" Height="18" CornerRadius="6" BorderThickness="1" BorderBrush="{TemplateBinding BorderBrush}" VerticalAlignment="Center">
                       <Path x:Name="Tick" Data="M 3,8 L 6.5,11.5 L 13,4.5" Stroke="White" StrokeThickness="1.7" Visibility="Hidden"/>
                     </Border>
                     <ContentPresenter Grid.Column="2" VerticalAlignment="Center" RecognizesAccessKey="True"/>

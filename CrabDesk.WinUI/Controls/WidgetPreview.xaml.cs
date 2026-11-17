@@ -165,25 +165,13 @@ public sealed partial class WidgetPreview : UserControl
         _fileShelfAdd.Foreground = widget.FileShelfBusy ? _secondary : _accent;
         var fileShelfAdd = WidgetFileShelfPresentation.AddButton(WidgetCornerRadius);
         _fileShelfAddButton.Margin = new Thickness(fileShelfAdd.X, fileShelfAdd.Y, 0, 0);
-        CardTitle.Margin = widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? new Thickness(60, 0, 60, 0) : new Thickness(28, 0, 28, 0);
-        if (widget.Kind == DesktopWidgetKind.FileShelf)
-            CardTitle.Margin = new Thickness(fileShelfAdd.X + fileShelfAdd.Width + 8, 0, fileShelfAdd.X + fileShelfAdd.Width + 8, 0);
-        CardTitle.Text = widget.Kind == DesktopWidgetKind.Calendar ? DateTime.Today.ToString("yyyy.MM") : widget.DisplayTitle;
-        CardTitle.TextAlignment = widget.Kind == DesktopWidgetKind.Weather ? TextAlignment.Left : TextAlignment.Center;
-        CardTitle.FontSize = widget.Kind == DesktopWidgetKind.Weather ? 12 : 13.333;
-        if (widget.Kind == DesktopWidgetKind.Weather)
-        {
-            CardTitle.Margin = new Thickness(34, 0, 64, 0);
-            CardTitle.Text = widget.Location is { } city ? $"{city.Name}  ⌄" : widget.DisplayTitle;
-        }
-        CardTitle.Foreground = widget.Kind == DesktopWidgetKind.Note ? ContentTone("note") : _text;
-        if (solid && widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network)
-        {
-            CardTitle.Margin = new Thickness(12, 0, 32, 0);
-            CardTitle.FontSize = 11.5;
-            CardTitle.TextAlignment = TextAlignment.Left;
-            CardTitle.Foreground = _secondary;
-        }
+        var heading = WidgetContentVisuals.CardHeading(widget.Kind, width, WidgetCornerRadius);
+        var utilityTitle = widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network;
+        CardTitle.Margin = new Thickness(heading.X, 0, 32, 0);
+        CardTitle.Text = widget.DisplayTitle;
+        CardTitle.TextAlignment = TextAlignment.Left;
+        CardTitle.FontSize = utilityTitle ? 12 : 13;
+        CardTitle.Foreground = utilityTitle ? _secondary : _text;
         Grid.SetRow(CardBody, fullCardBody ? 0 : 1);
         Grid.SetRowSpan(CardBody, fullCardBody ? 2 : 1);
         CardBody.Margin = fullCardBody || widget.Kind == DesktopWidgetKind.Weather ? new Thickness(0) :
@@ -659,18 +647,15 @@ public sealed partial class WidgetPreview : UserControl
             var cell = WidgetMonitorPresentation.PerformanceCell(body, index); var metric = metrics[index];
             var wide = body.Width >= 300;
             var asset = WidgetContentVisuals.PerformanceAsset(index);
-            var solid = IsSolidPreview(widget);
-            var rowInk = solid ? _text.Color : ContentTone(asset).Color;
-            rowInk.A = (byte)(solid ? 6 : 16);
-            Place(new Border { Background = new SolidColorBrush(rowInk), CornerRadius = new CornerRadius(7) },
+            Place(MetricRowWash(),
                 cell with { X = cell.X - 4, Y = cell.Y - 2, Width = cell.Width + 8, Height = cell.Height - 2 });
             Place(ContentIcon(asset, 20), cell with { Width = 20, Height = 20 });
             Place(Text(metric.Label, 12, true), cell with { X = cell.X + 26, Width = cell.Width - 78, Height = 20 });
             var value = Text(metric.Value, 13.5, bold: true); value.TextAlignment = TextAlignment.Center;
             Place(value, cell with { X = cell.X + cell.Width - 52, Width = 52, Height = 20 });
             if (wide) Place(Text(metric.Detail, 10.5, true), cell with { Y = cell.Y + 24, Height = 20 });
-            var track = cell with { Y = cell.Y + cell.Height - (wide ? 4 : 7), Height = 3 };
-            var trackColor = ContentTone(asset).Color; trackColor.A = 36;
+            var track = cell with { Y = cell.Y + cell.Height - (wide ? 2 : 7), Height = 3 };
+            var trackColor = _text.Color with { A = WidgetContentVisuals.SliderTrackOpacity };
             Place(new Border { Background = new SolidColorBrush(trackColor), CornerRadius = new CornerRadius(Math.Min(1.5, radius)) }, track);
             if (metric.Percentage is { } percentage && double.IsFinite(percentage) && percentage > 0)
                 Place(new Border { Background = ContentTone(asset), CornerRadius = new CornerRadius(Math.Min(1.5, radius)) },
@@ -698,8 +683,8 @@ public sealed partial class WidgetPreview : UserControl
             : widget.ControlCenterLightText is false ? Color.FromArgb(255, 70, 78, 90) : _secondary.Color;
         var baseColor = _background;
         var surfaceInk = _text.Color;
-        var solid = IsSolidPreview(widget);
-        var panelFill = MixContent(baseColor, surfaceInk, solid ? .04 : .10);
+        var panelFill = MixContent(baseColor, surfaceInk, WidgetContentVisuals.ControlGroupTint);
+        var rowBrush = new SolidColorBrush(MixContent(baseColor, surfaceInk, WidgetContentVisuals.ControlRowTint()));
         TextBlock ControlText(string value, double size = 12, bool secondary = false)
         {
             var text = Text(value, size, secondary);
@@ -727,16 +712,14 @@ public sealed partial class WidgetPreview : UserControl
                 ControlCenterToggle.NightLight => snapshot?.NightLightEnabled is true,
                 _ => false
             };
-            var tileInk = new SolidColorBrush(solid && on ? Colors.White : available ? ink : softInk);
+            var tileInk = new SolidColorBrush(available ? ink : softInk);
             var asset = WidgetContentVisuals.ControlAsset(action, snapshot);
             var tone = Parse(WidgetContentVisuals.Tone(asset, surfaceInk.R > 128), _accent.Color);
-            var tileFill = solid
-                ? on ? MixContent(Parse(WidgetContentVisuals.Tone(asset, false), _accent.Color), Colors.Black, .12)
-                    : MixContent(panelFill, surfaceInk, .03)
-                : MixContent(panelFill, available ? tone : surfaceInk, on ? .30 : available ? .12 : .06);
+            var tileFill = MixContent(baseColor, on ? tone : surfaceInk,
+                WidgetContentVisuals.ControlTileTint(available, on, surfaceInk.R > 128));
             var tile = new Border
             {
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(WidgetContentVisuals.ControlTileRadius),
                 Background = new SolidColorBrush(tileFill),
                 Child = new StackPanel
                 {
@@ -755,7 +738,7 @@ public sealed partial class WidgetPreview : UserControl
                             ControlCenterQuickAction.ScreenCapture => TablerIconName.Scan,
                             ControlCenterQuickAction.NetworkAdapters => TablerIconName.Network,
                             _ => TablerIconName.Settings
-                        }, FontSize = 22, Width = 22, Height = 22, Foreground = new SolidColorBrush(solid && on ? Colors.White : available ? tone : softInk),
+                        }, FontSize = 22, Width = 22, Height = 22, Foreground = new SolidColorBrush(available ? tone : softInk),
                             HorizontalAlignment = HorizontalAlignment.Center, Opacity = available ? 1 : .45 },
                         new TextBlock { Text = ControlQuickActions.Label(action, snapshot), FontSize = 11, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 2, 0, 0),
                             HorizontalAlignment = HorizontalAlignment.Center,
@@ -805,25 +788,27 @@ public sealed partial class WidgetPreview : UserControl
             Place(header, area with { X = area.X + labelInset, Width = area.Width / 2 - labelInset, Height = 16 });
             var amount = ControlText(value, 11, true); amount.TextAlignment = TextAlignment.Right;
             Place(amount, area with { Width = area.Width - valueInset, Height = 16 });
+            const double trackHeight = WidgetContentVisuals.SliderTrackHeight;
+            const double thumb = WidgetContentVisuals.SliderThumbDiameter;
+            var position = percent is { } level && double.IsFinite(level)
+                ? area.Width * ControlCenterPresentation.ClampPercent(level) / 100 : (double?)null;
             var track = new Border
             {
-                CornerRadius = new CornerRadius(2.5), Height = 5,
-                Background = new SolidColorBrush(_text.Color with { A = 28 }),
+                CornerRadius = new CornerRadius(trackHeight / 2), Height = trackHeight,
+                Background = new SolidColorBrush(_text.Color with { A = WidgetContentVisuals.SliderTrackOpacity }),
                 VerticalAlignment = VerticalAlignment.Top,
                 Child = new Border
                 {
-                    CornerRadius = new CornerRadius(2.5),
+                    CornerRadius = new CornerRadius(trackHeight / 2),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    Width = percent is { } level ? area.Width * ControlCenterPresentation.ClampPercent(level) / 100 : 0,
+                    Width = position ?? 0,
                     Background = color
                 }
             };
-            Place(track, area with { Y = area.Y + 24, Height = 5 });
-            if (percent is { } current && double.IsFinite(current) && current > 0)
-            {
-                var position = area.Width * ControlCenterPresentation.ClampPercent(current) / 100;
-                Place(new Microsoft.UI.Xaml.Shapes.Ellipse { Fill = color }, new(area.X + position - 5, area.Y + 21.5, 10, 10));
-            }
+            Place(track, area with { Y = area.Y + 25, Height = trackHeight });
+            if (position is { } thumbCenter)
+                Place(new Microsoft.UI.Xaml.Shapes.Ellipse { Fill = color },
+                    new(area.X + thumbCenter - thumb / 2, area.Y + 25 + (trackHeight - thumb) / 2, thumb, thumb));
         }
 
         var displayLabel = ControlText("亮度 · " + (string.IsNullOrEmpty(widget.ControlBrightnessDisplayId) ? "组件所在显示器" : widget.ControlBrightnessDisplayId.Replace(@"\\.\DISPLAY", "显示器 ")), 10.5);
@@ -834,13 +819,13 @@ public sealed partial class WidgetPreview : UserControl
             HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(8, 0, 0, 0) });
         displayContent.Children.Add(new TablerIcon { Icon = TablerIconName.Selector, Width = 13, Height = 13,
             HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 0, 8, 0), Foreground = new SolidColorBrush(softInk) });
-        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, solid ? .04 : .14)), Child = displayContent },
+        Place(new Border { CornerRadius = new CornerRadius(WidgetContentVisuals.ControlRowRadius), Background = rowBrush, Child = displayContent },
             ControlCenterPresentation.BrightnessDisplayRow(body));
         var media = ControlCenterPresentation.MediaArea(body);
         var outputRow = new Border
         {
-            CornerRadius = new CornerRadius(6),
-            Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, solid ? .04 : .14)),
+            CornerRadius = new CornerRadius(WidgetContentVisuals.ControlRowRadius),
+            Background = rowBrush,
             Child = new StackPanel
             {
                 Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center,
@@ -854,13 +839,13 @@ public sealed partial class WidgetPreview : UserControl
             }
         };
         Place(outputRow, ControlCenterPresentation.OutputRow(media));
-        Place(new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, solid ? .04 : .14)),
+        Place(new Border { CornerRadius = new CornerRadius(WidgetContentVisuals.ControlRowRadius), Background = rowBrush,
             Child = new TablerIcon { Icon = TablerIconName.Microphone, FontSize = 14, Foreground = new SolidColorBrush(ink) } },
             ControlCenterPresentation.MicrophoneButton(body));
 
         var mediaPanel = ControlCenterPresentation.MediaPanel(media);
         var trackMedia = snapshot?.Media;
-        Place(new Border { CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(panelFill) }, mediaPanel);
+        Place(new Border { CornerRadius = new CornerRadius(WidgetContentVisuals.ControlGroupRadius), Background = new SolidColorBrush(panelFill) }, mediaPanel);
         var artwork = new Border { CornerRadius = new CornerRadius(6), Background = new SolidColorBrush(MixContent(panelFill, surfaceInk, .08)) };
         if (trackMedia?.Artwork is { Length: > 0 } bytes)
         {
@@ -975,7 +960,7 @@ public sealed partial class WidgetPreview : UserControl
                 SpeedValue(speed, bounds with { X = bounds.X + 22, Width = bounds.Width - 22 }, 18, rightAligned: true);
                 return;
             }
-            Place(ContentWash(asset, IsSolidPreview(widget) ? (byte)10 : (byte)18),
+            Place(MetricRowWash(),
                 bounds with { X = bounds.X - 3, Y = bounds.Y - 2, Width = bounds.Width + 6, Height = bounds.Height + 4 });
             if (caption is null)
             {

@@ -838,20 +838,34 @@
                         <StackPanel Spacing="{StaticResource FormSpacing}">
                             <TextBlock Text="桌面图标外观" FontSize="14" FontWeight="SemiBold" />
 
-                            <!-- macOS 扁平图标 -->
                             <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Spacing="2" VerticalAlignment="Center">
-                                    <TextBlock Text="macOS 扁平图标" FontWeight="Medium" />
+                                    <TextBlock Text="启用图标套皮" FontWeight="Medium" />
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1"
                                               IsOn="{Binding IconSkinEnabled, Mode=TwoWay}"
                                               OnContent="" OffContent=""
                                               HorizontalAlignment="Right" VerticalAlignment="Center"
-                                              AutomationProperties.Name="macOS 扁平图标" />
+                                              AutomationProperties.Name="启用图标套皮" />
+                            </Grid>
+                            <Grid Padding="{StaticResource SettingRowPadding}" ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="图标风格" FontWeight="Medium" VerticalAlignment="Center" />
+                                <ComboBox Grid.Column="1"
+                                          Width="{StaticResource SettingsControlWidth}"
+                                          IsEnabled="{Binding IconSkinEnabled}"
+                                          ItemsSource="{Binding IconSkinStyles}"
+                                          ItemTemplate="{StaticResource LocalizedEnumItemTemplate}"
+                                          SelectedItem="{Binding IconSkinStyle, Mode=TwoWay}"
+                                          HorizontalAlignment="Right" VerticalAlignment="Center"
+                                          AutomationProperties.Name="图标风格" />
                             </Grid>
 
                             <!-- 应用图标底板 -->

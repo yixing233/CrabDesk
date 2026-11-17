@@ -17,15 +17,23 @@ namespace CrabDesk.WinUI.Tests;
 public sealed class ShortcutArrowTests
 {
     [Theory]
-    [InlineData("app")]
-    [InlineData("folder")]
-    [InlineData("file")]
-    [InlineData("custom")]
-    [InlineData("url")]
-    public void RealShortcutsHonorTheArrowSettingWithAndWithoutTheFlatSkin(string targetKind)
+    [InlineData("app", IconSkinStyle.Flat)]
+    [InlineData("folder", IconSkinStyle.Flat)]
+    [InlineData("file", IconSkinStyle.Flat)]
+    [InlineData("custom", IconSkinStyle.Flat)]
+    [InlineData("url", IconSkinStyle.Flat)]
+    [InlineData("steam", IconSkinStyle.Flat)]
+    [InlineData("steam", IconSkinStyle.Gradient)]
+    public void RealShortcutsHonorTheArrowSettingWithAndWithoutTheSkin(string targetKind, IconSkinStyle style)
     {
         using var fixture = new ShortcutFixture();
         var path = fixture.Create(targetKind);
+        var kind = DesktopBoxForm.IconSkinKindOf(new DesktopItemRef
+        {
+            Key = new DesktopItemKey("path", path), DisplayName = Path.GetFileNameWithoutExtension(path),
+            ParsingName = path, FileSystemPath = path,
+            Kind = targetKind is "url" or "steam" ? DesktopItemKind.File : DesktopItemKind.Shortcut
+        });
         var provider = new ShellIconProvider();
         try
         {
@@ -38,9 +46,9 @@ public sealed class ShortcutArrowTests
                 var before = Pixels(original);
                 foreach (var enabled in new[] { false, true })
                 {
-                    var hiddenOptions = IconSkinOptions.Disabled with { Enabled = enabled, ShowShortcutArrow = false };
-                    using var hidden = IconSkinRenderer.Load(provider, path, size, IconSkinKind.Shortcut, hiddenOptions);
-                    using var shown = IconSkinRenderer.Load(provider, path, size, IconSkinKind.Shortcut,
+                    var hiddenOptions = IconSkinOptions.Disabled with { Enabled = enabled, ShowShortcutArrow = false, Style = style };
+                    using var hidden = IconSkinRenderer.Load(provider, path, size, kind, hiddenOptions);
+                    using var shown = IconSkinRenderer.Load(provider, path, size, kind,
                         hiddenOptions with { ShowShortcutArrow = true });
                     Assert.NotNull(hidden);
                     Assert.NotNull(shown);
@@ -53,7 +61,7 @@ public sealed class ShortcutArrowTests
                 }
                 Assert.Same(clean, provider.GetIcon(path, size, false));
                 Assert.Equal(before, Pixels(original));
-                if (targetKind is "custom" or "url")
+                if (targetKind is "custom" or "url" or "steam")
                 {
                     var bluePixels = Pixels(clean).Count(pixel => Color.FromArgb(pixel).B > 200
                         && Color.FromArgb(pixel).R is > 70 and < 130);
@@ -216,11 +224,12 @@ public sealed class ShortcutArrowTests
 
         internal string Create(string targetKind)
         {
-            if (targetKind == "url")
+            if (targetKind is "url" or "steam")
             {
-                var urlPath = Path.Combine(_root, "website.url");
+                var urlPath = Path.Combine(_root, targetKind == "steam" ? "Steam Game.URL" : "website.url");
+                var targetUrl = targetKind == "steam" ? "steam://rungameid/123456" : "https://example.com/";
                 File.WriteAllText(urlPath,
-                    $"[InternetShortcut]\r\nURL=https://example.com/\r\nIconFile={_iconPath}\r\nIconIndex=0\r\n");
+                    $"[InternetShortcut]\r\nURL={targetUrl}\r\nIconFile={_iconPath}\r\nIconIndex=0\r\n");
                 return urlPath;
             }
             var path = Path.Combine(_root, $"{targetKind}.lnk");

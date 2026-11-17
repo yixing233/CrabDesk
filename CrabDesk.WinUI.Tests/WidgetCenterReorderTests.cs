@@ -54,16 +54,33 @@ public sealed class WidgetCenterReorderTests
     [InlineData(DesktopWidgetKind.FileShelf)]
     [InlineData(DesktopWidgetKind.ControlCenter)]
     [InlineData(DesktopWidgetKind.Lyrics)]
-    public void GripDoesNotOverlapCardContent(DesktopWidgetKind kind) => Sta(() =>
+    [InlineData(DesktopWidgetKind.Todo)]
+    [InlineData(DesktopWidgetKind.Translation)]
+    [InlineData(DesktopWidgetKind.Weather)]
+    [InlineData(DesktopWidgetKind.Performance)]
+    [InlineData(DesktopWidgetKind.Network)]
+    public void DragStartsOnTheCardBodyAndSkipsTheGap(DesktopWidgetKind kind) => Sta(() =>
     {
         using var fixture = new WidgetCenterRuntimeTests.Fixture();
-        fixture.Runtime.State.Widgets.Add(new() { Kind = kind, Placement = WidgetPlacement.Center, MonitorId = fixture.Runtime.Monitors[0].Id });
-        using var center = new WidgetCenterForm(fixture.Runtime, fixture.Runtime.Monitors[0]);
+        var runtime = fixture.Runtime;
+        runtime.SetWidgetCenterEnabled(true);
+        runtime.AddWidgetToCenter(kind);
+        using var center = CreateActiveCenter(runtime);
         var view = center.WidgetViewBounds.Values.Single();
-        var grip = WidgetCenterForm.ReorderGripBounds(view);
-        Assert.Equal(view.Y, grip.Bottom);
-        Assert.True(grip.Left >= view.X);
-        Assert.True(grip.Right <= view.X + view.Width);
+        var x = (int)(view.X + view.Width / 2);
+        var gap = (int)view.Y - 6;
+        Call(center, "OnMouseDown", Mouse(x, gap));
+        Call(center, "OnMouseMove", Mouse(x + 15, gap));
+        Assert.False(center.Capture);
+
+        var body = (int)(view.Y + view.Height - 14);
+        Call(center, "OnMouseDown", Mouse(x, body));
+        Call(center, "OnMouseMove", Mouse(x + 2, body));
+        Assert.Null(ReorderingWidget(center));
+        Call(center, "OnMouseMove", Mouse(x + 15, body));
+        Assert.NotNull(ReorderingWidget(center));
+        Call(center, "OnMouseUp", Mouse(-20, body));
+        Assert.False(center.Capture);
     });
 
     [Theory]
@@ -78,22 +95,33 @@ public sealed class WidgetCenterReorderTests
         var second = runtime.AddWidgetToCenter(DesktopWidgetKind.Calendar);
         var third = runtime.AddWidgetToCenter(DesktopWidgetKind.Clock);
         var original = first.Bounds;
-        using var center = new WidgetCenterForm(runtime, runtime.Monitors[0]);
+        using var center = CreateActiveCenter(runtime);
         var firstView = center.WidgetViewBounds[first.Id];
         var thirdView = center.WidgetViewBounds[third.Id];
-        var grip = WidgetCenterForm.ReorderGripBounds(firstView);
-        var press = new PointF(grip.X + grip.Width / 2, grip.Y + grip.Height / 2);
-        Assert.True((bool)Call(center, "BeginWidgetReorder", new Forms.MouseEventArgs(Forms.MouseButtons.Left, 1, (int)press.X, (int)press.Y, 0), press)!);
-        var target = new PointF((float)(thirdView.X + thirdView.Width / 2), (float)(thirdView.Y + thirdView.Height / 2));
-        Call(center, "MoveWidgetReorder", new Forms.MouseEventArgs(Forms.MouseButtons.Left, 0, (int)target.X, (int)target.Y, 0), target);
+        var press = Mouse((int)(firstView.X + firstView.Width / 2), (int)(firstView.Y + firstView.Height / 2));
+        var target = Mouse((int)(thirdView.X + thirdView.Width / 2), (int)(thirdView.Y + thirdView.Height / 2));
+        Call(center, "OnMouseDown", press);
+        Call(center, "OnMouseMove", target);
+        Assert.Same(first, ReorderingWidget(center));
         Assert.Equal(0, first.CenterOrder);
         Assert.Equal(original, first.Bounds);
-        Call(center, "FinishWidgetReorder", commit);
+        Call(center, "OnMouseUp", commit ? target : Mouse(-20, target.Y));
         var expected = commit ? new[] { second.Id, third.Id, first.Id } : new[] { first.Id, second.Id, third.Id };
         Assert.Equal(expected, runtime.State.Widgets.OrderBy(widget => widget.CenterOrder).Select(widget => widget.Id));
         Assert.Equal(original, first.Bounds);
         Assert.False(center.Capture);
     });
+
+    private static WidgetCenterForm CreateActiveCenter(CrabDeskRuntime runtime)
+    {
+        typeof(CrabDeskRuntime).GetField("_widgetCenterVisible", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(runtime, true);
+        return new WidgetCenterForm(runtime, runtime.Monitors[0]) { ClientSize = new(420, 700) };
+    }
+
+    private static DesktopWidget? ReorderingWidget(WidgetCenterForm center) =>
+        (DesktopWidget?)typeof(WidgetCenterForm).GetField("_reorderWidget", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(center);
+
+    private static Forms.MouseEventArgs Mouse(int x, int y) => new(Forms.MouseButtons.Left, 1, x, y, 0);
 
     private static object? Call(object instance, string name, params object[] arguments) =>
         typeof(WidgetCenterForm).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(instance, arguments);

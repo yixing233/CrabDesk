@@ -25,8 +25,8 @@ internal abstract partial class WidgetSurfaceController
             var metric = rows[index]; var cell = MonitorRectangle(widget, WidgetMonitorPresentation.PerformanceCell(body, index));
             var asset = WidgetContentVisuals.PerformanceAsset(index);
             var tone = ContentTone(asset, text);
-            var solid = IsWidgetSolid(widget);
-            DrawContentWash(graphics, new(cell.X - 4, cell.Y - 2, cell.Width + 8, cell.Height - 2), solid ? text : tone, solid ? 6 : 16);
+            DrawContentWash(graphics, new(cell.X - 4, cell.Y - 2, cell.Width + 8, cell.Height - 2),
+                text, WidgetContentVisuals.MetricRowOpacity);
             DrawContentIcon(graphics, asset, new(cell.X, cell.Y, 20, 20));
             WidgetText(graphics, metric.Label, new(cell.X + 26, cell.Y, cell.Width - 78, 20), muted, 12);
             WidgetText(graphics, metric.Value, new(cell.Right - 52, cell.Y, 52, 20), text, 13.5f, bold: true, centered: true);
@@ -43,7 +43,8 @@ internal abstract partial class WidgetSurfaceController
             if (wide) WidgetText(graphics, metric.Detail, new(cell.X, cell.Y + 24, cell.Width, 20), muted, 10.5f);
             var track = new RectangleF(cell.X, cell.Bottom - (wide ? 2 : 7), cell.Width, 3);
             using var path = RoundedRectangle(track, 1.5f);
-            using var background = new SolidBrush(Color.FromArgb(36, tone)); graphics.FillPath(background, path);
+            using var background = new SolidBrush(Color.FromArgb(WidgetContentVisuals.SliderTrackOpacity, text));
+            graphics.FillPath(background, path);
             if (metric.Percentage is { } percent && percent > 0 && double.IsFinite(percent))
             {
                 var fillBounds = track; fillBounds.Width *= (float)Math.Clamp(percent / 100, 0, 1);
@@ -76,8 +77,7 @@ internal abstract partial class WidgetSurfaceController
         {
             var bounds = MonitorRectangle(widget, rect);
             var asset = icon == TablerRuntimeIcon.ArrowUpToLine ? "content-upload" : "content-download";
-            DrawContentWash(graphics, RectangleF.Inflate(bounds, 3, 2), ContentTone(asset, text),
-                IsWidgetSolid(widget) ? 10 : 18);
+            DrawContentWash(graphics, RectangleF.Inflate(bounds, 3, 2), text, WidgetContentVisuals.MetricRowOpacity);
             TablerRuntimeIcons.Draw(graphics, icon, new(bounds.X, bounds.Y + (bounds.Height - 16) / 2, 16, 16), ContentTone(asset, text), 16);
             DrawSpeedValue(graphics, bytes, new(bounds.X + 22, bounds.Y, bounds.Width - 22, bounds.Height), text, 21);
         }

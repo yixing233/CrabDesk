@@ -16,7 +16,7 @@ internal abstract partial class WidgetSurfaceController
         return new(body.X, body.Y, body.Width, body.Height - 24);
     }
 
-    protected void BeginWidgetNoteInput(DesktopWidget widget)
+    protected void BeginWidgetNoteInput(DesktopWidget widget, PointF? point = null)
     {
         using var widgetView = EnterWidgetView();
         DismissWidgetInputs();
@@ -25,11 +25,10 @@ internal abstract partial class WidgetSurfaceController
         _noteEditingWidget = widget;
         _noteEditingBounds = GetWidgetBounds(widget);
         var region = NoteFieldRectangle(widget);
-        var location = WidgetPointToScreen(new(region.X, region.Y));
         var appearance = ResolveWidgetSurface(widget);
         var background = ParseOpaqueColor(appearance.Background);
-        _noteInput.Owner = this;
-        _noteInput.Present(new Rectangle(location, new Size(ToPixel(region.Width), ToPixel(region.Height))), widget.Text,
+        var bounds = PlaceWidgetTextEditor(_noteInput, region.Location, new(ToPixel(region.Width), ToPixel(region.Height)));
+        _noteInput.Present(bounds, widget.Text,
             background, ResolveAutoTextColor(background), ParseOpaqueColor(appearance.Accent),
             text => _runtime.UpdateWidgetNoteText(widget, text), dismissed: offset =>
             {
@@ -39,6 +38,7 @@ internal abstract partial class WidgetSurfaceController
                 RequestVisualLayerRender();
             }, verticalOffset: _widgetScroll.GetValueOrDefault(widget.Id),
             cornerRadius: Math.Min(8, WidgetCornerRadius),
+            caretPoint: point is { } click && region.Contains(click) ? new PointF(click.X - region.X, click.Y - region.Y) : null,
             contentPadding: new System.Windows.Thickness(6), showFocusBorder: false, borderThickness: 0, typography: widget);
     }
 

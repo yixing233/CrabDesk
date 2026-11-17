@@ -14,7 +14,7 @@ internal sealed partial class ConnectionDetailsPopup
         var toggle = new WpfControls.Primitives.ToggleButton
         {
             Width = 48, Height = 32, IsThreeState = false,
-            Foreground = SecondaryInk, BorderBrush = SecondaryInk,
+            Foreground = SecondaryInk,
             HorizontalAlignment = Wpf.HorizontalAlignment.Right, VerticalAlignment = Wpf.VerticalAlignment.Center,
             Cursor = Input.Cursors.Hand, FocusVisualStyle = null,
             Template = (WpfControls.ControlTemplate)Wpf.Markup.XamlReader.Parse(RadioSwitchTemplate)
@@ -56,8 +56,8 @@ internal sealed partial class ConnectionDetailsPopup
         <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                          xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="ToggleButton">
           <Grid x:Name="SwitchRoot" Background="Transparent">
-            <Border Width="40" Height="20" CornerRadius="10" BorderThickness="1"
-                    BorderBrush="{TemplateBinding BorderBrush}" Background="Transparent"/>
+            <Border Width="40" Height="20" CornerRadius="10"
+                    Background="{DynamicResource MixerTrack}"/>
             <Border x:Name="OnTrack" Width="40" Height="20" CornerRadius="10"
                     Background="{DynamicResource MixerAccent}" Opacity="0"/>
             <Border x:Name="Thumb" Width="12" Height="12" CornerRadius="6"

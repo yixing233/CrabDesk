@@ -12,6 +12,7 @@ public sealed class FlatIconSkinRuntimeTests
     [Theory]
     [InlineData(DesktopItemKind.Shortcut, "editor.lnk", IconSkinKind.Shortcut)]
     [InlineData(DesktopItemKind.Shortcut, "website.url", IconSkinKind.Shortcut)]
+    [InlineData(DesktopItemKind.File, "Steam Game.URL", IconSkinKind.Shortcut)]
     [InlineData(DesktopItemKind.Folder, "Work", IconSkinKind.Folder)]
     [InlineData(DesktopItemKind.File, "notes.txt", IconSkinKind.File)]
     [InlineData(DesktopItemKind.File, "editor.EXE", IconSkinKind.App)]
@@ -51,8 +52,10 @@ public sealed class FlatIconSkinRuntimeTests
         }
     }
 
-    [Fact]
-    public void RealShellIconsRenderAtDesktopSizes()
+    [Theory]
+    [InlineData(IconSkinStyle.Flat, "Flat")]
+    [InlineData(IconSkinStyle.Gradient, "Gradient")]
+    public void RealShellIconsRenderAtDesktopSizes(IconSkinStyle style, string name)
     {
         var provider = new ShellIconProvider();
         try
@@ -68,13 +71,13 @@ public sealed class FlatIconSkinRuntimeTests
                 ("Recycle Bin", "::{645FF040-5081-101B-9F08-00AA002F954E}", IconSkinKind.App),
                 ("Shortcut", Path.Combine(windows, "explorer.exe"), IconSkinKind.Shortcut)
             };
-            var options = IconSkinOptions.Disabled with { Enabled = true };
+            var options = IconSkinOptions.Disabled with { Enabled = true, Style = style };
             using var sheet = new Bitmap(960, 540);
             using var graphics = Graphics.FromImage(sheet);
             using var headingFont = new Font("Segoe UI", 12);
             using var labelFont = new Font("Segoe UI", 10);
             graphics.Clear(Color.FromArgb(229, 233, 238));
-            graphics.DrawString("Flat desktop icons", headingFont, Brushes.Black, 20, 12);
+            graphics.DrawString($"{name} desktop icons", headingFont, Brushes.Black, 20, 12);
 
             foreach (var (size, row) in new[] { (32, 0), (48, 1), (96, 2) })
             {
@@ -93,7 +96,7 @@ public sealed class FlatIconSkinRuntimeTests
                     graphics.DrawString(sample.Label, labelFont, Brushes.Black, x, y + 102);
                 }
             }
-            sheet.Save(Path.Combine(Path.GetTempPath(), "CrabDesk-Flat-Icons.png"), ImageFormat.Png);
+            sheet.Save(Path.Combine(Path.GetTempPath(), $"CrabDesk-{name}-Icons.png"), ImageFormat.Png);
         }
         finally
         {

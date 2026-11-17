@@ -762,16 +762,15 @@ public sealed class GlobalAppearanceSettings
     // changing the family alone would leave the system icon font in place.
     public string IconLabelFontFamily { get; set; } = BoxAppearance.DefaultFontFamily;
     public double IconLabelFontSize { get; set; } = 9;
-    // The flat icon skin is a pure replacement of what CrabDesk draws — it
-    // never edits .lnk/desktop.ini/registry, so switching it off restores the
-    // stock icons with nothing to undo. Plates follow the same app/folder-file
-    // split the reference look uses.
     public bool IconSkinEnabled { get; set; }
+    public IconSkinStyle IconSkinStyle { get; set; }
     public bool ShowShortcutArrow { get; set; } = true;
     public string IconSkinAppPlate { get; set; } = "#FFFFFF";
     public string IconSkinFolderPlate { get; set; } = "#DDE6F2";
     public string IconSkinBadgeColor { get; set; } = "#FFFFFF";
 }
+
+public enum IconSkinStyle { Flat, Gradient }
 
 public sealed class BackupSettings
 {

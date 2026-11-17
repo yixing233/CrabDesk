@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
+using CrabDesk.Core;
 
 namespace CrabDesk.Native;
 
@@ -90,7 +91,10 @@ public static partial class FlatIconSkin
             paper.AddLine(left, bottom - 0.035f, left, top + 0.035f);
             paper.AddArc(left, top, 0.07f, 0.07f, 180, 90);
             paper.CloseFigure();
-            using var body = new SolidBrush(options.FolderPlate);
+            using Brush body = options.Style == IconSkinStyle.Gradient
+                ? new LinearGradientBrush(new PointF(0, top), new PointF(0, bottom),
+                    PlateHighlight(options.FolderPlate), PlateShade(options.FolderPlate))
+                : new SolidBrush(options.FolderPlate);
             graphics.FillPath(body, paper);
 
             var darkPaper = Luminance(options.FolderPlate) < 0.45;

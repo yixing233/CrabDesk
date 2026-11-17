@@ -1,9 +1,11 @@
 using System.Drawing;
+using System.Runtime.InteropServices;
 using CrabDesk.Core;
 using Forms = System.Windows.Forms;
 using Wpf = System.Windows;
 using WpfControls = System.Windows.Controls;
 using Input = System.Windows.Input;
+using Interop = System.Windows.Interop;
 using Media = System.Windows.Media;
 
 namespace CrabDesk.Runtime;
@@ -17,6 +19,9 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
     private Action? _submit;
     private Action<double>? _dismissed;
     private WpfControls.Border? _frame;
+    private Forms.Control? _inlineParent;
+    private Interop.HwndSource? _inlineSource;
+    private Rectangle _inlineViewport;
     private int _presentationRevision;
     private bool _singleLine;
     private Action? _cancel;
@@ -56,6 +61,17 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
         Controls.Add(_host);
         Deactivate += (_, _) => Dismiss();
     }
+
+    internal void AttachInline(Forms.Control parent, Rectangle viewport)
+    {
+        _inlineViewport = viewport;
+        if (_inlineParent == parent) return;
+        _inlineParent = parent;
+        _host.Child = null;
+    }
+
+    internal bool IsPresented => _inlineParent is null ? Visible :
+        _inlineSource is { IsDisposed: false } source && IsWindowVisible(source.Handle);
 
     internal void Present(Rectangle bounds, string text, Color background, Color foreground, Color accent,
         Action<string> changed, Action? submit = null, Action<double>? dismissed = null, double? verticalOffset = null,
@@ -103,14 +119,18 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
         _changed = changed;
         _submit = submit;
         _dismissed = dismissed;
-        // Negotiate the HWND's monitor DPI before applying monitor-pixel bounds.
-        CreateControl();
-        Bounds = bounds;
-        Show();
-        Bounds = bounds;
-        if (cornerRadius is { } nativeRadius) UpdateRoundedRegion(nativeRadius);
-        Activate();
-        _host.Focus();
+        if (_inlineParent is { } parent) PresentInline(parent, bounds);
+        else
+        {
+            // Negotiate the HWND's monitor DPI before applying monitor-pixel bounds.
+            CreateControl();
+            Bounds = bounds;
+            Show();
+            Bounds = bounds;
+            if (cornerRadius is { } nativeRadius) UpdateRoundedRegion(nativeRadius);
+            Activate();
+            _host.Focus();
+        }
         InputBox.Focus();
         InputBox.Select(Math.Min(selectionStart, InputBox.Text.Length), Math.Min(selectionLength, Math.Max(0, InputBox.Text.Length - selectionStart)));
         InputBox.UpdateLayout();
@@ -123,12 +143,39 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
         if (verticalOffset is { } restoredOffset)
             InputBox.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
             {
-                if (IsDisposed || !Visible || revision != _presentationRevision) return;
+                if (IsDisposed || !IsPresented || revision != _presentationRevision) return;
                 InputBox.ScrollToVerticalOffset(restoredOffset);
                 InputBox.UpdateLayout();
                 if (caretPoint is { } restoredPoint)
                     PlaceCaretAtPoint(restoredPoint);
             }));
+    }
+
+    private void PresentInline(Forms.Control parent, Rectangle bounds)
+    {
+        var root = (Wpf.FrameworkElement?)_frame ?? InputBox;
+        if (_inlineSource is null || _inlineSource.IsDisposed)
+        {
+            // A layered child shows the composed card through pixels that WPF
+            // has not painted yet, including the rounded corners of the field.
+            _inlineSource = new Interop.HwndSource(new Interop.HwndSourceParameters(Text, bounds.Width, bounds.Height)
+            {
+                ParentWindow = parent.Handle,
+                WindowStyle = 0x40000000, // WS_CHILD
+                UsesPerPixelTransparency = true,
+                TreatAsInputRoot = true
+            });
+            _inlineSource.CompositionTarget.BackgroundColor = Media.Colors.Transparent;
+            _inlineSource.RootVisual = root;
+        }
+
+        var dpi = Media.VisualTreeHelper.GetDpi(root);
+        var visible = Rectangle.Intersect(bounds, _inlineViewport);
+        root.Clip = visible == bounds ? null : new Media.RectangleGeometry(new Wpf.Rect(
+            (visible.X - bounds.X) / dpi.DpiScaleX, (visible.Y - bounds.Y) / dpi.DpiScaleY,
+            visible.Width / dpi.DpiScaleX, visible.Height / dpi.DpiScaleY));
+        SetWindowPos(_inlineSource.Handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0050); // SHOWWINDOW | NOACTIVATE
+        SetFocus(_inlineSource.Handle);
     }
 
     private void PlaceCaretAtPoint(PointF point)
@@ -180,7 +227,16 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
         // When that is Explorer, it raises the desktop over the acrylic host
         // for a frame. Hide natively without activating/reordering anything,
         // then synchronize WinForms' managed visibility with the hidden HWND.
-        HideWithoutActivation();
+        if (_inlineParent is null) HideWithoutActivation();
+        else if (_inlineSource is { IsDisposed: false } source && IsWindowVisible(source.Handle))
+        {
+            if (InputBox.IsKeyboardFocusWithin)
+            {
+                Input.Keyboard.ClearFocus();
+                _inlineParent.Focus();
+            }
+            SetWindowPos(source.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0097); // HIDEWINDOW | NOACTIVATE | NOZORDER | NOMOVE | NOSIZE
+        }
         dismissed?.Invoke(offset);
     }
 
@@ -219,7 +275,7 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
                 """));
             _host.Child = null;
             _frame = new WpfControls.Border { Child = InputBox };
-            _host.Child = _frame;
+            if (_inlineParent is null) _host.Child = _frame;
             InputBox.FocusVisualStyle = null;
             InputBox.Padding = new Wpf.Thickness(8, 6, 8, 6);
             InputBox.BorderThickness = new Wpf.Thickness(0);
@@ -251,4 +307,17 @@ internal sealed class DesktopWidgetTextInput : DesktopWidgetInputForm
         Region = new Region(path);
         previous?.Dispose();
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _inlineSource?.Dispose();
+        base.Dispose(disposing);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 }

@@ -19,6 +19,7 @@ namespace CrabDesk.WinUI.Windows;
 /// <summary>Fluent date range editor anchored to the desktop widget.</summary>
 public sealed class TodoDatesWindow : Window
 {
+    private const uint KeepPopupPositionAndFocus = 0x0213; // NOMOVE | NOSIZE | NOACTIVATE | NOOWNERZORDER
     private readonly CrabDeskRuntime _runtime;
     private readonly IntPtr _hwnd;
     private readonly Border _shell;
@@ -32,6 +33,7 @@ public sealed class TodoDatesWindow : Window
     private WidgetTodoItem? _task;
     private bool _visible;
     private bool _presenting;
+    private bool _openedFromCenter;
     private readonly DetailPopupEntrance _entrance;
 
     public TodoDatesWindow(CrabDeskRuntime runtime)
@@ -84,7 +86,7 @@ public sealed class TodoDatesWindow : Window
         Closed += (_, _) => { _runtime.Changed -= RuntimeChanged; _entrance.Dispose(); DesktopInputProxy.Unregister(_hwnd); };
     }
 
-    public void Present(DesktopWidget widget, WidgetTodoItem task)
+    public void Present(DesktopWidget widget, WidgetTodoItem task, WidgetTodoDateAnchor? anchor = null)
     {
         _presenting = true;
         try
@@ -93,34 +95,88 @@ public sealed class TodoDatesWindow : Window
             _widget = widget; _task = task; _taskText.Text = task.Text;
             _start.Date = ToOffset(task.StartDate); _end.Date = ToOffset(task.EndDate);
             ShowStatus("日期可留空，点击保存后生效。");
-            ApplyAppearance();
-            var monitor = _runtime.Monitors.FirstOrDefault(m => m.Id == widget.MonitorId) ?? _runtime.Monitors.First();
+            _openedFromCenter = anchor is not null && anchor.OwnerHandle != IntPtr.Zero;
+            _ = SetWindowLongPtr(_hwnd, -8, anchor?.OwnerHandle ?? IntPtr.Zero); // GWLP_HWNDPARENT on a top-level window sets its owner.
+            ApplyAppearance(anchor?.Appearance ?? ResolveAppearance(widget));
+            var monitor = anchor?.Monitor ?? _runtime.Monitors.FirstOrDefault(m => m.Id == widget.MonitorId) ?? _runtime.Monitors.First();
             var scale = monitor.DpiScale; var area = monitor.PixelWorkArea;
-            var width = Math.Min(360 * scale, area.Width - 24);
+            var width = Math.Max(1, Math.Min(360 * scale, area.Width - 24));
             _shell.Measure(new global::Windows.Foundation.Size(width / scale, double.PositiveInfinity));
-            var height = Math.Min(Math.Max(320, Math.Ceiling(_shell.DesiredSize.Height)) * scale, area.Height - 24);
-            var x = monitor.PixelBounds.X + (widget.Bounds.X + widget.Bounds.Width) * scale + 12;
-            if (x + width > area.X + area.Width) x = monitor.PixelBounds.X + widget.Bounds.X * scale - width - 12;
-            var y = monitor.PixelBounds.Y + widget.Bounds.Y * scale;
-            AppWindow.MoveAndResize(new RectInt32((int)Math.Clamp(x, area.X, area.X + area.Width - width), (int)Math.Clamp(y, area.Y, area.Y + area.Height - height), (int)width, (int)height));
+            var height = Math.Max(1, Math.Min(Math.Max(320, Math.Ceiling(_shell.DesiredSize.Height)) * scale, area.Height - 24));
+            if (anchor is not null)
+            {
+                AppWindow.MoveAndResize(PlaceByButton(anchor.ButtonBounds, area, (int)width, (int)height, (int)Math.Round(8 * scale)));
+            }
+            else
+            {
+                var x = monitor.PixelBounds.X + (widget.Bounds.X + widget.Bounds.Width) * scale + 12;
+                if (x + width > area.X + area.Width) x = monitor.PixelBounds.X + widget.Bounds.X * scale - width - 12;
+                var y = monitor.PixelBounds.Y + widget.Bounds.Y * scale;
+                AppWindow.MoveAndResize(new RectInt32((int)Math.Clamp(x, area.X, area.X + Math.Max(0, area.Width - width)),
+                    (int)Math.Clamp(y, area.Y, area.Y + Math.Max(0, area.Height - height)), (int)width, (int)height));
+            }
             _entrance.Prepare();
-            _visible = true; AppWindow.Show(); Activate();
+            _visible = true;
+            AppWindow.Show();
+            Activate();
+            SetPopupTopmost(_hwnd, _openedFromCenter);
         }
         finally { _presenting = false; }
     }
 
-    private void ApplyAppearance()
+    internal static RectInt32 PlaceByButton(System.Drawing.Rectangle button, LayoutRect area, int width, int height, int gap)
     {
-        var appearance = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var right = area.X + area.Width;
+        var bottom = area.Y + area.Height;
+        var x = button.Right - width;
+        var y = button.Bottom + gap;
+        if (y + height > bottom)
+        {
+            y = button.Top - height - gap;
+            if (y < area.Y)
+            {
+                // Leave the date button clear when the card is too tall to fit above or below it.
+                if (button.Right + gap + width <= right) x = button.Right + gap;
+                else if (button.Left - gap - width >= area.X) x = button.Left - gap - width;
+                y = button.Top;
+            }
+        }
+        return new((int)Math.Clamp(x, area.X, Math.Max(area.X, right - width)),
+            (int)Math.Clamp(y, area.Y, Math.Max(area.Y, bottom - height)), width, height);
+    }
+
+    private WidgetSurfaceAppearance ResolveAppearance(DesktopWidget widget)
+    {
+        var inherited = _runtime.State.Boxes.FirstOrDefault()?.Appearance ?? _runtime.State.Settings.DefaultBoxAppearance;
+        var settings = _runtime.State.Settings.Appearance;
+        var inCenter = widget.Placement == WidgetPlacement.Center;
+        var centerTheme = _runtime.IsWidgetCenterDarkTheme ? WidgetColorTheme.Dark : WidgetColorTheme.Light;
+        return WidgetAppearance.Resolve(widget, inherited, WidgetAppearance.UsesAcrylic(widget, settings.UseAcrylicBoxes, settings.WidgetAcrylic),
+            widgetAcrylic: settings.WidgetAcrylic, forceSolid: inCenter, colorTheme: inCenter ? centerTheme : null);
+    }
+
+    private void ApplyAppearance(WidgetSurfaceAppearance appearance)
+    {
         var settings = _runtime.State.Settings.Appearance;
         var color = Converters.HexColor.TryParse(appearance.Background, out var parsed) ? parsed : global::Windows.UI.Color.FromArgb(255, 42, 45, 50);
         var dark = color.R * .299 + color.G * .587 + color.B * .114 < 150;
         _shell.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
-        color.A = (byte)Math.Round(255 * appearance.ResolveBackgroundOpacity(settings.UseAcrylicBoxes));
+        color.A = appearance.Acrylic ? (byte)Math.Round(255 * appearance.Opacity) : (byte)255;
         _shell.Background = new SolidColorBrush(color);
-        _shell.CornerRadius = new CornerRadius(settings.CornerRadius > 0 ? 8 : 0);
-        SystemBackdrop = settings.UseAcrylicBoxes ? new DesktopAcrylicBackdrop() : null;
-        var nativeDark = dark ? 1 : 0; var corner = settings.CornerRadius > 0 ? 2 : 1; var noBorder = unchecked((int)0xFFFFFFFE);
+        if (Converters.HexColor.TryParse(appearance.Accent, out var accent))
+        {
+            _save.Background = new SolidColorBrush(accent);
+            _save.Foreground = new SolidColorBrush(accent.R * .299 + accent.G * .587 + accent.B * .114 < 150 ? Colors.White : Colors.Black);
+        }
+        else
+        {
+            _save.ClearValue(Control.BackgroundProperty);
+            _save.ClearValue(Control.ForegroundProperty);
+        }
+        var rounded = settings.ResolveWidgetCornerRadius() > 0;
+        _shell.CornerRadius = new CornerRadius(rounded ? 8 : 0);
+        SystemBackdrop = appearance.Acrylic ? new DesktopAcrylicBackdrop() : null;
+        var nativeDark = dark ? 1 : 0; var corner = rounded ? 2 : 1; var noBorder = unchecked((int)0xFFFFFFFE);
         _ = DwmSetWindowAttribute(_hwnd, 20, ref nativeDark, 4);
         _ = DwmSetWindowAttribute(_hwnd, 33, ref corner, 4);
         _ = DwmSetWindowAttribute(_hwnd, 34, ref noBorder, 4);
@@ -147,13 +203,22 @@ public sealed class TodoDatesWindow : Window
         _save.Focus(FocusState.Programmatic); _ = SetFocus(IntPtr.Zero);
         SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0297);
         AppWindow.Hide(); _widget = null; _task = null;
+        _ = SetWindowLongPtr(_hwnd, -8, IntPtr.Zero);
+        if (_openedFromCenter) SetPopupTopmost(_hwnd, false);
+        _openedFromCenter = false;
         _entrance.Cancel();
     }
 
     private void RuntimeChanged(object? sender, EventArgs args)
     {
-        if (_visible && (_widget is null || !_runtime.State.Widgets.Contains(_widget) || _task is null || !_widget.Tasks.Contains(_task) || _runtime.IsPaused)) Dismiss();
+        if (_visible && (_widget is null || !_runtime.State.Widgets.Contains(_widget) || _task is null ||
+            !_widget.Tasks.Contains(_task) || _runtime.IsPaused ||
+            _openedFromCenter && (_widget.Placement != WidgetPlacement.Center || !_runtime.IsWidgetCenterVisible))) Dismiss();
     }
+
+    internal static void SetPopupTopmost(IntPtr window, bool topmost) =>
+        _ = SetWindowPos(window, new IntPtr(topmost ? -1 : -2), 0, 0, 0, 0, KeepPopupPositionAndFocus);
+
     private static DateTimeOffset? ToOffset(DateOnly? date) => date is { } value ? new DateTimeOffset(value.ToDateTime(TimeOnly.MinValue)) : null;
     private static DateOnly? ToDate(DateTimeOffset? date) => date is { } value ? DateOnly.FromDateTime(value.DateTime) : null;
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);

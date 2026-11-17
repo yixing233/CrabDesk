@@ -215,6 +215,65 @@ public sealed class WidgetCenterMotionTests(ITestOutputHelper output)
         Assert.False(center.Visible);
     });
 
+    [Theory]
+    [InlineData(DesktopWidgetKind.Note, false)]
+    [InlineData(DesktopWidgetKind.Todo, false)]
+    [InlineData(DesktopWidgetKind.Todo, true)]
+    public void CenterTextEditorsAcceptInputAfterClick(DesktopWidgetKind kind, bool existingTask) => OnSta(() =>
+    {
+        using var fixture = new WidgetCenterRuntimeTests.Fixture();
+        var runtime = fixture.Runtime;
+        runtime.State.Settings.Appearance.AnimationEnabled = false;
+        runtime.SetWidgetCenterEnabled(true);
+        if (existingTask) runtime.SetWidgetCenterThemeMode(ApplicationThemeMode.Dark);
+        var widget = runtime.AddWidgetToCenter(kind);
+        if (existingTask) runtime.SaveWidgetTask(widget, null, "original");
+        if (kind == DesktopWidgetKind.Note) widget.Text = "original";
+        runtime.ShowWidgetCenter();
+        using var center = Assert.IsType<WidgetCenterForm>(typeof(CrabDeskRuntime).GetField("_widgetCenter", Hidden)!.GetValue(runtime));
+        try
+        {
+            Pump(50);
+            RectangleF hit;
+            using (center.EnterWidgetView())
+            {
+                hit = kind == DesktopWidgetKind.Note
+                    ? (RectangleF)typeof(WidgetSurfaceController).GetMethod("NoteFieldRectangle", BindingFlags.Static | BindingFlags.NonPublic)!
+                        .Invoke(null, [widget])!
+                    : existingTask ? (RectangleF)typeof(WidgetSurfaceController).GetMethod("TodoTextRectangle", Hidden)!
+                        .Invoke(center, [widget, 0, true])! : WidgetSurfaceController.GetTodoLayout(widget).Add;
+            }
+            var x = (int)hit.X + (kind == DesktopWidgetKind.Note ? 7 : 1);
+            var y = (int)hit.Y + (kind == DesktopWidgetKind.Note ? 10 : (int)hit.Height / 2);
+            var coordinates = new IntPtr((y << 16) | x);
+            SendMessage(center.Handle, 0x0201, new IntPtr(1), coordinates);
+            SendMessage(center.Handle, 0x0202, IntPtr.Zero, coordinates);
+            var editor = Assert.IsType<DesktopWidgetTextInput>(Get(center, kind == DesktopWidgetKind.Note ? "_noteInput" : "_todoInput"));
+            Assert.True(editor.IsPresented);
+            var source = Assert.IsType<System.Windows.Interop.HwndSource>(System.Windows.PresentationSource.FromVisual(editor.InputBox));
+            Assert.Equal(center.Handle, GetAncestor(source.Handle, 1));
+            Assert.Equal(System.Windows.Media.Colors.Transparent, source.CompositionTarget!.BackgroundColor);
+            Assert.True(editor.InputBox.IsKeyboardFocused, $"Active={Forms.Form.ActiveForm?.Text}, ContainsFocus={editor.ContainsFocus}, Bounds={editor.Bounds}");
+            if (kind == DesktopWidgetKind.Note || existingTask) Assert.Equal(0, editor.InputBox.CaretIndex);
+            editor.InputBox.SelectAll();
+            var keyboard = GetFocus();
+            Assert.Equal(center.Handle, GetAncestor(keyboard, 2));
+            foreach (var letter in "edited")
+                Assert.True(PostMessage(keyboard, 0x0102, new IntPtr(letter), new IntPtr(1)));
+            PumpNativeInput();
+            Assert.Equal("edited", editor.InputBox.Text);
+            if (kind == DesktopWidgetKind.Todo)
+            {
+                Assert.True(PostMessage(keyboard, 0x0100, new IntPtr(13), new IntPtr(1)));
+                PumpNativeInput();
+                Assert.False(editor.IsPresented);
+                Assert.Equal("edited", Assert.Single(widget.Tasks).Text);
+            }
+            else Assert.Equal("edited", widget.Text);
+        }
+        finally { runtime.HideWidgetCenter(); }
+    });
+
     private static void Populate(CrabDeskRuntime runtime)
     {
         runtime.State.Settings.WidgetCenter.Enabled = true;
@@ -296,6 +355,29 @@ public sealed class WidgetCenterMotionTests(ITestOutputHelper output)
     private static extern int CreateDispatcherQueueController(QueueOptions options, out IntPtr controller);
     [DllImport("user32.dll")]
     private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetFocus();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool PeekMessage(out System.Windows.Interop.MSG message, IntPtr window, uint min, uint max, uint remove);
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage(ref System.Windows.Interop.MSG message);
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref System.Windows.Interop.MSG message);
+
+    private static void PumpNativeInput()
+    {
+        while (PeekMessage(out var message, IntPtr.Zero, 0x0100, 0x0109, 1))
+        {
+            TranslateMessage(ref message);
+            DispatchMessage(ref message);
+        }
+    }
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
     [DllImport("user32.dll", SetLastError = true)]

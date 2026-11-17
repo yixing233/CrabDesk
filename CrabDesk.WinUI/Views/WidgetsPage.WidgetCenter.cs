@@ -15,15 +15,9 @@ public sealed partial class WidgetsPage
         _loadingWidgetCenter = true;
         try
         {
-            var enabled = _widgetCenterService.State.Settings.WidgetCenter.Enabled;
-            WidgetCenterEnabledToggle.IsOn = enabled;
-            OpenWidgetCenterButton.IsEnabled = enabled;
+            WidgetCenterEnabledToggle.IsOn = _widgetCenterService.State.Settings.WidgetCenter.Enabled;
             WidgetCenterThemePicker.SelectedItem = WidgetCenterThemePicker.Items.OfType<ComboBoxItem>()
                 .FirstOrDefault(item => (string)item.Tag == _widgetCenterService.State.Settings.WidgetCenter.ThemeMode.ToString());
-            var count = _widgetCenterService.State.Widgets.Count(widget => widget.Placement == WidgetPlacement.Center);
-            WidgetCenterStatus.Text = enabled
-                ? $"{count} 个组件在中心 · " + (_widgetCenterService.IsWidgetCenterVisible ? "已打开" : "未打开")
-                : count > 0 ? $"已关闭 · 保留中心内的 {count} 个组件" : "默认关闭，开启后可选择移入已有组件。";
             if (_selected is { } widget) LoadWidgetPlacement(widget);
         }
         finally { _loadingWidgetCenter = false; }
@@ -38,13 +32,6 @@ public sealed partial class WidgetsPage
         finally { _saving = false; }
         LoadWidgetCenterSettings();
         RefreshGallery(refreshPreviews: false);
-    }
-
-    private void OpenWidgetCenter_Click(object sender, RoutedEventArgs args)
-    {
-        if (!_widgetCenterService.State.Settings.WidgetCenter.Enabled) return;
-        Try(_widgetCenterService.ShowWidgetCenter);
-        LoadWidgetCenterSettings();
     }
 
     private void WidgetCenterThemePicker_SelectionChanged(object sender, SelectionChangedEventArgs args)

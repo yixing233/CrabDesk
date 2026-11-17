@@ -202,7 +202,7 @@ public partial class App : Application
         }
         runtime.WidgetWeatherDetailsRequested += widget => ShowWeather(widget, false);
         runtime.WidgetWeatherLocationsRequested += widget => ShowWeather(widget, true);
-        runtime.WidgetTodoDatesRequested += (widget, task) =>
+        runtime.WidgetTodoDatesRequested += (widget, task, anchor) =>
         {
             if (_todoDatesWindow is null)
             {
@@ -210,7 +210,7 @@ public partial class App : Application
                 _todoDatesWindow = dates;
                 dates.Closed += (_, _) => { if (ReferenceEquals(_todoDatesWindow, dates)) _todoDatesWindow = null; };
             }
-            _todoDatesWindow.Present(widget, task);
+            _todoDatesWindow.Present(widget, task, anchor);
         };
         runtime.ExitRequested += (_, _) => Shutdown();
         runtime.Changed += FileShelvesChanged;

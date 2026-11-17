@@ -54,6 +54,7 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
         _picker.Selected += () => { _pickerVisible = false; _picker.Hide(); _scrollOffset = 0; RefreshWidgets(); };
         Controls.Add(_picker);
         _outsideTimer.Tick += (_, _) => CheckOutsideActivation();
+        _reorderScrollTimer.Tick += ScrollWidgetReorder;
         _panelMotion.Frame += AdvancePanelMotion;
         _placementTimer.Tick += (_, _) => { _placementTimer.Stop(); SavePlacement(); };
         _ready = true;
@@ -62,6 +63,8 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
     }
 
     protected override bool CanTransformWidgets => false;
+    protected override bool CanMoveWidget(DesktopWidget widget) => !_acceptingDrop;
+    protected override Rectangle? InlineTextEditorViewport => Rectangle.FromLTRB(0, ToPixel(HeaderHeight), ClientSize.Width, ClientSize.Height);
     protected override WidgetColorTheme? SurfaceColorTheme =>
         _runtime.IsWidgetCenterDarkTheme ? WidgetColorTheme.Dark : WidgetColorTheme.Light;
     protected override IReadOnlyList<DesktopWidget> HostWidgets => _hostWidgets;
@@ -133,7 +136,7 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
         if (_reorderWidget is not null && !_reorderOriginalOrder.ToHashSet().SetEquals(widgets.Select(widget => widget.Id)))
             FinishWidgetReorder(false);
         var available = Math.Max(1, ClientSize.Width / _scale - PaddingDip * 2 - ScrollGutterDip);
-        var layout = WidgetCenterLayout.Arrange(widgets, available, gripHeight: ReorderGripHeight, order: _reorderPreviewOrder);
+        var layout = WidgetCenterLayout.Arrange(widgets, available, order: _reorderPreviewOrder);
         var bounds = layout.Bounds.ToDictionary(pair => pair.Key,
             pair => pair.Value with { X = pair.Value.X + PaddingDip, Y = pair.Value.Y + HeaderHeight + PaddingDip });
         var changed = bounds.Count != _viewBounds.Count || bounds.Any(pair => !_viewBounds.TryGetValue(pair.Key, out var old) || old != pair.Value);
@@ -268,7 +271,7 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
         {
             graphics.SetClip(new RectangleF(0, (float)HeaderHeight, width, Math.Max(1, height - (float)HeaderHeight)));
             graphics.TranslateTransform(0, -(float)_scrollOffset);
-            foreach (var widget in _hostWidgets.Where(widget => !_reorderDragging || widget != _reorderWidget))
+            foreach (var widget in _hostWidgets.Where(widget => widget != _reorderWidget))
                 if (new RectangleF((float)ViewBounds(widget).X, (float)ViewBounds(widget).Y,
                     (float)ViewBounds(widget).Width, (float)ViewBounds(widget).Height).IntersectsWith(
                     new RectangleF(0, (float)(HeaderHeight + _scrollOffset), width, height)))
@@ -295,9 +298,10 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
     protected override void OnMouseDown(Forms.MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (_noteEditingWidget is not null) DismissWidgetNoteInput();
+        if (_todoEditingWidget is not null) DismissWidgetTodoInput();
         if (_panelMotion.Enabled || HandleChromeMouseDown(e)) return;
         if (e.Y < ToPixel(HeaderHeight) || _pickerVisible) return;
-        if (BeginWidgetReorder(e, ToDip(e.Location))) return;
         CaptureControlPopupToggle(e);
         HandleWidgetMouseDown(e, ToDip(e.Location));
     }
@@ -305,16 +309,23 @@ internal sealed partial class WidgetCenterForm : WidgetSurfaceController
     {
         base.OnMouseMove(e);
         if (_panelMotion.Enabled) return;
-        if (MoveWidgetReorder(e, ToDip(e.Location))) return;
+        if (_pressedWidget is not null)
+        {
+            HandleWidgetMouseMove(ToDip(e.Location));
+            return;
+        }
         if (HandleChromeMouseMove(e)) return;
-        if (!_pickerVisible && !_panelMotion.Enabled && e.Y >= ToPixel(HeaderHeight)) HandleWidgetMouseMove(ToDip(e.Location));
+        if (!_pickerVisible && e.Y >= ToPixel(HeaderHeight)) HandleWidgetMouseMove(ToDip(e.Location));
     }
     protected override void OnMouseUp(Forms.MouseEventArgs e)
     {
         base.OnMouseUp(e);
-        if (_reorderWidget is not null)
+        if (_reorderWidget is { } widget)
         {
-            FinishWidgetReorder(e.Button == Forms.MouseButtons.Left && ClientRectangle.Contains(e.Location));
+            if (e.Button != Forms.MouseButtons.Left) return;
+            var commit = ClientRectangle.Contains(e.Location);
+            if (commit) UpdateMovingWidget(widget, ToDip(e.Location));
+            FinishWidgetReorder(commit);
             return;
         }
         if (HandleChromeMouseUp(e)) return;

@@ -74,9 +74,8 @@
             <Grid x:Name="OverviewView" RowSpacing="16">
                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                 <Border x:Name="WidgetCenterCard" Style="{StaticResource SectionCardStyle}" Margin="0,0,12,0">
-                    <Grid ColumnSpacing="12" RowSpacing="12">
+                    <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <icons:TablerIcon Icon="LayoutDashboard" FontSize="24" VerticalAlignment="Center" Foreground="{ThemeResource AccentBrush}" />
@@ -87,9 +86,6 @@
                         </Grid>
                         <ToggleSwitch x:Name="WidgetCenterEnabledToggle" Grid.Column="1" Style="{StaticResource CompactToggleSwitchStyle}"
                                       IsOn="False" Toggled="WidgetCenterEnabled_Toggled" VerticalAlignment="Center" AutomationProperties.Name="启用组件中心" />
-                        <TextBlock x:Name="WidgetCenterStatus" Grid.Row="1" Style="{StaticResource SecondaryBodyStyle}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                        <Button x:Name="OpenWidgetCenterButton" Grid.Row="1" Grid.Column="1" Content="打开" IsEnabled="False"
-                                Click="OpenWidgetCenter_Click" AutomationProperties.Name="打开组件中心" />
                     </Grid>
                 </Border>
                 <Grid x:Name="GalleryToolbar" Grid.Row="1" ColumnSpacing="12" Margin="0,0,12,0" SizeChanged="GalleryToolbar_SizeChanged">

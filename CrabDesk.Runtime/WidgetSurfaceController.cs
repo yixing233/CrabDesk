@@ -29,6 +29,8 @@ internal abstract partial class WidgetSurfaceController : Forms.Form, IWidgetHos
         widget.Placement == WidgetPlacement.Desktop && string.Equals(widget.MonitorId, _monitor.Id, StringComparison.OrdinalIgnoreCase)).ToArray();
     protected virtual LayoutRect ViewBounds(DesktopWidget widget) => widget.Bounds;
     protected virtual bool CanTransformWidgets => true;
+    protected virtual bool CanMoveWidget(DesktopWidget widget) => CanTransformWidgets && !widget.IsLocked;
+    protected virtual Rectangle? InlineTextEditorViewport => null;
     protected virtual bool ForceSolidAppearance => false;
     protected virtual WidgetColorTheme? SurfaceColorTheme => null;
     protected static bool IsWidgetSolid(DesktopWidget widget) => _currentWidgetHost is WidgetSurfaceController { ForceSolidAppearance: true } || widget.BackgroundMaterial == WidgetBackgroundMaterial.Solid;
@@ -52,6 +54,19 @@ internal abstract partial class WidgetSurfaceController : Forms.Form, IWidgetHos
     protected int ToPixel(double value) => (int)Math.Round(value * _scale, MidpointRounding.AwayFromZero);
     protected virtual PointF ToDip(Point point) => new((float)(point.X / _scale), (float)(point.Y / _scale));
     protected Point WidgetPointToScreen(PointF point) => ((IWidgetHostContext)this).ViewToScreen(point);
+    protected Rectangle PlaceWidgetTextEditor(DesktopWidgetTextInput editor, PointF point, Size size)
+    {
+        var screen = WidgetPointToScreen(point);
+        if (InlineTextEditorViewport is not { } viewport)
+        {
+            editor.Owner = this;
+            return new(screen, size);
+        }
+
+        editor.AttachInline(this, viewport);
+        return new(PointToClient(screen), size);
+    }
+
     protected void ShowWidgetMenuAt(Forms.ToolStripDropDown menu, PointF point) => menu.Show(this, PointToClient(WidgetPointToScreen(point)));
 
     IReadOnlyList<DesktopWidget> IWidgetHostContext.Widgets => HostWidgets;

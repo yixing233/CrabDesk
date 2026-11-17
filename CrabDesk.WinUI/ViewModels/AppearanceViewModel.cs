@@ -28,6 +28,7 @@ public partial class AppearanceViewModel : ObservableObject
 
     public IReadOnlyList<BoxViewMode> ViewModes { get; } = Enum.GetValues<BoxViewMode>();
     public IReadOnlyList<BoxSortMode> SortModes { get; } = Enum.GetValues<BoxSortMode>();
+    public IReadOnlyList<IconSkinStyle> IconSkinStyles { get; } = Enum.GetValues<IconSkinStyle>();
     public IReadOnlyList<string> FontFamilies { get; }
     private DesktopBox CurrentBox => _service.Boxes.FirstOrDefault() ?? new DesktopBox { Appearance = _service.State.Settings.DefaultBoxAppearance };
 
@@ -175,6 +176,12 @@ public partial class AppearanceViewModel : ObservableObject
     {
         get => _service.State.Settings.Appearance.ShowShortcutArrow;
         set => _service.SetShowShortcutArrow(value);
+    }
+
+    public IconSkinStyle IconSkinStyle
+    {
+        get => _service.State.Settings.Appearance.IconSkinStyle;
+        set => _service.SetIconSkinStyle(value);
     }
 
     public bool CanEditShortcutBadgeColor => IconSkinEnabled && ShowShortcutArrow;

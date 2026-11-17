@@ -107,14 +107,10 @@ internal abstract partial class WidgetSurfaceController
             !(widget.Kind == DesktopWidgetKind.Network &&
               widget.NetworkDisplayMode is NetworkWidgetDisplayMode.Speeds or NetworkWidgetDisplayMode.Curve))
         {
-            var utilityTitle = IsWidgetSolid(widget) &&
-                widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network;
-            var titleMargin = utilityTitle ? 12 : widget.Kind == DesktopWidgetKind.FileShelf
-                ? (float)(WidgetFileShelfPresentation.AddButton(WidgetCornerRadius).X + 32)
-                : widget.Kind is DesktopWidgetKind.Todo or DesktopWidgetKind.Weather ? 60 : 32;
-            var titleColor = utilityTitle ? muted : widget.Kind == DesktopWidgetKind.Note ? ContentTone("note", text) : text;
-            WidgetText(graphics, widget.DisplayTitle, new(bounds.X + titleMargin, bounds.Y, bounds.Width - titleMargin * 2, 28),
-                titleColor, utilityTitle ? 11.5f : 13.333f, true, !utilityTitle);
+            var utilityTitle = widget.Kind is DesktopWidgetKind.Performance or DesktopWidgetKind.Network;
+            var heading = WidgetContentVisuals.CardHeading(widget.Kind, bounds.Width, WidgetCornerRadius);
+            WidgetText(graphics, widget.DisplayTitle, new(bounds.X + (float)heading.X, bounds.Y,
+                (float)heading.Width, (float)heading.Height), utilityTitle ? muted : text, utilityTitle ? 12 : 13, bold: true);
         }
         if (widget.Kind == DesktopWidgetKind.Weather) DrawWeatherLocationButton(graphics, widget, text, accent);
         var body = WidgetBodyRectangle(widget);

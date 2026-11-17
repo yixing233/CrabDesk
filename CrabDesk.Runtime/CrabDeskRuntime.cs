@@ -3006,7 +3006,7 @@ public sealed partial class CrabDeskRuntime : IDisposable
     }
 
     /// <summary>
-    /// Turns the flat icon skin on or off. The skin only changes what CrabDesk
+    /// Turns icon skins on or off. The skin only changes what CrabDesk
     /// paints, so this is a redraw — no shell state is written and nothing has to
     /// be undone when it goes off.
     /// </summary>
@@ -3021,6 +3021,14 @@ public sealed partial class CrabDeskRuntime : IDisposable
     {
         if (State.Settings.Appearance.ShowShortcutArrow == show) return;
         State.Settings.Appearance.ShowShortcutArrow = show;
+        NotifyWorkspaceChanged(true);
+    }
+
+    public void SetIconSkinStyle(IconSkinStyle style)
+    {
+        var appearance = State.Settings.Appearance;
+        if (!Enum.IsDefined(style) || appearance.IconSkinStyle == style) return;
+        appearance.IconSkinStyle = style;
         NotifyWorkspaceChanged(true);
     }
 
@@ -3056,7 +3064,8 @@ public sealed partial class CrabDeskRuntime : IDisposable
             appearance.IconSkinFolderPlate,
             appearance.IconSkinBadgeColor) with
         {
-            ShowShortcutArrow = appearance.ShowShortcutArrow
+            ShowShortcutArrow = appearance.ShowShortcutArrow,
+            Style = appearance.IconSkinStyle
         };
     }
 

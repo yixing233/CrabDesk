@@ -11,7 +11,7 @@ internal abstract partial class WidgetSurfaceController
     protected LayoutRect _controlMixerBounds;
 
     protected void DrawControlCenterMixerButton(Graphics graphics, DesktopWidget widget, RectangleF bounds,
-        Color text, Color accent, Color background)
+        Color text, Color background)
     {
         using var widgetView = EnterWidgetView();
         var target = ControlCenterPresentation.ControlCenterTarget.VolumeMixer;
@@ -19,12 +19,10 @@ internal abstract partial class WidgetSurfaceController
         var pressed = IsControlPressed(widget, target);
         if (hovered || pressed || _controlMixerWidget == widget)
         {
-            var fill = Mix(background, ResolveAutoTextColor(background), pressed ? 0.34 : 0.28);
-            using var path = RoundedRectangle(bounds, 6);
+            var fill = Mix(background, ResolveAutoTextColor(background), WidgetContentVisuals.ControlRowTint(hovered: true, pressed: pressed));
+            using var path = RoundedRectangle(bounds, WidgetContentVisuals.ControlRowRadius);
             using var brush = new SolidBrush(fill);
-            using var border = new Pen(Mix(fill, accent, 0.30), 1f);
             graphics.FillPath(brush, path);
-            graphics.DrawPath(border, path);
         }
         var size = pressed ? 13f : 14f;
         TablerRuntimeIcons.Draw(graphics, TablerRuntimeIcon.SlidersHorizontal,

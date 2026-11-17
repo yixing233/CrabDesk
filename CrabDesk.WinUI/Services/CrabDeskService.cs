@@ -176,6 +176,7 @@ public sealed class CrabDeskService : ICrabDeskService
     public void SetIconLabelFontSize(double value) => _runtime.SetIconLabelFontSize(value);
     public void SetIconLabelFontFamily(string value) => _runtime.SetIconLabelFontFamily(value);
     public void SetIconSkinEnabled(bool enabled) => _runtime.SetIconSkinEnabled(enabled);
+    public void SetIconSkinStyle(IconSkinStyle style) => _runtime.SetIconSkinStyle(style);
     public void SetShowShortcutArrow(bool show) => _runtime.SetShowShortcutArrow(show);
     public void SetIconSkinPlates(string appPlate, string folderPlate) => _runtime.SetIconSkinPlates(appPlate, folderPlate);
     public void SetIconSkinBadgeColor(string value) => _runtime.SetIconSkinBadgeColor(value);

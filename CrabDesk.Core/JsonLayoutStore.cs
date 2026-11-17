@@ -193,6 +193,8 @@ public sealed class JsonLayoutStore : ILayoutStore
             state.Settings.Appearance.BorderColor = "Auto";
         }
         var appearance = state.Settings.Appearance;
+        if (!Enum.IsDefined(appearance.IconSkinStyle))
+            appearance.IconSkinStyle = IconSkinStyle.Flat;
         if (!IsHexColor(appearance.IconSkinAppPlate))
         {
             appearance.IconSkinAppPlate = "#FFFFFF";

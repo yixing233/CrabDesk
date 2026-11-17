@@ -65,14 +65,13 @@ internal abstract partial class WidgetSurfaceController
         // a translucent white, which let the wallpaper through and turned a light
         // backdrop into a pale surface that white text could not be read on.
         var surfaceInk = ResolveAutoTextColor(background);
-        var solid = IsWidgetSolid(widget);
-        var panel = PanelFill(background, surfaceInk, solid);
+        var panel = Mix(background, surfaceInk, WidgetContentVisuals.ControlGroupTint);
 
         var actions = ControlQuickActions.For(widget);
         for (var index = 0; index < actions.Count; index++)
         {
             var cell = MonitorRectangle(widget, ControlCenterPresentation.QuickAction(body, index, actions.Count));
-            DrawControlCenterQuickAction(graphics, cell, actions[index], snapshot, text, muted, accent, panel, surfaceInk, widget);
+            DrawControlCenterQuickAction(graphics, cell, actions[index], snapshot, text, muted, background, surfaceInk, widget);
         }
 
         var sliders = MonitorRectangle(widget, ControlCenterPresentation.SliderArea(body));
@@ -80,9 +79,9 @@ internal abstract partial class WidgetSurfaceController
         DrawControlCenterSlider(graphics, new RectangleF(sliders.X, sliders.Y, half, sliders.Height),
             "音量", ControlCenterPresentation.VolumeText(snapshot), snapshot?.VolumePercent, surfaceInk, muted, ContentTone("content-volume", text), labelInset: 26, valueInset: 26);
         DrawControlCenterMuteButton(graphics, widget,
-            MonitorRectangle(widget, ControlCenterPresentation.VolumeMuteButton(body)), text, muted, accent, background);
+            MonitorRectangle(widget, ControlCenterPresentation.VolumeMuteButton(body)), text, muted, background);
         DrawControlCenterMixerButton(graphics, widget,
-            MonitorRectangle(widget, ControlCenterPresentation.VolumeMixerButton(body)), text, accent, background);
+            MonitorRectangle(widget, ControlCenterPresentation.VolumeMixerButton(body)), text, background);
         DrawControlCenterSlider(graphics, new RectangleF(sliders.X + half + 14, sliders.Y, half, sliders.Height),
             "亮度", ControlCenterPresentation.BrightnessText(snapshot), snapshot?.BrightnessPercent, surfaceInk, muted, ContentTone("content-brightness", text), labelInset: 20);
         TablerRuntimeIcons.Draw(graphics, TablerRuntimeIcon.Sun, new(sliders.X + half + 14, sliders.Y, 16, 16),
@@ -91,9 +90,8 @@ internal abstract partial class WidgetSurfaceController
         var displayTarget = ControlCenterPresentation.ControlCenterTarget.BrightnessDisplayRow;
         DrawControlCenterDevice(graphics, MonitorRectangle(widget, ControlCenterPresentation.BrightnessDisplayRow(body)),
             new ControlCenterSnapshot { OutputDeviceName = "亮度 · " + _runtime.ControlBrightnessDisplayLabel(widget) }, text, muted,
-            Mix(panel, surfaceInk, solid
-                ? IsControlPressed(widget, displayTarget) ? .12 : IsControlHovered(widget, displayTarget) ? .08 : .04
-                : IsControlPressed(widget, displayTarget) ? .22 : IsControlHovered(widget, displayTarget) ? .18 : .14),
+            Mix(background, surfaceInk, WidgetContentVisuals.ControlRowTint(
+                IsControlHovered(widget, displayTarget), IsControlPressed(widget, displayTarget))),
             leadingIcon: TablerRuntimeIcon.Monitor, forceChoice: true);
 
         var mediaArea = MonitorRectangle(widget, ControlCenterPresentation.MediaArea(body));
@@ -102,15 +100,15 @@ internal abstract partial class WidgetSurfaceController
         var outputHovered = IsControlHovered(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
         var outputPressed = IsControlPressed(widget, ControlCenterPresentation.ControlCenterTarget.OutputRow);
         DrawControlCenterDevice(graphics, outputRow, snapshot, text, muted,
-            Mix(panel, surfaceInk, solid ? outputPressed ? .12 : outputHovered ? .08 : .04 : outputPressed ? .22 : outputHovered ? .18 : .14));
-        DrawMicrophoneButton(graphics, widget, text, accent, background);
+            Mix(background, surfaceInk, WidgetContentVisuals.ControlRowTint(outputHovered, outputPressed)));
+        DrawMicrophoneButton(graphics, widget, text, background);
         var panelBounds = MonitorRectangle(widget, ControlCenterPresentation.MediaPanel(
             ControlCenterPresentation.MediaArea(body)));
         DrawControlCenterMedia(graphics, panelBounds, snapshot, text, muted, accent, panel, surfaceInk, widget);
     }
 
     protected void DrawControlCenterQuickAction(Graphics graphics, RectangleF cell, ControlCenterQuickAction action,
-        ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color panel, Color surfaceInk, DesktopWidget widgetRef)
+        ControlCenterSnapshot? snapshot, Color text, Color muted, Color background, Color surfaceInk, DesktopWidget widgetRef)
     {
         using var widgetView = EnterWidgetView();
         var toggle = ControlQuickActions.Toggle(action);
@@ -122,7 +120,7 @@ internal abstract partial class WidgetSurfaceController
             ControlCenterToggle.NightLight => snapshot?.NightLightEnabled is true,
             _ => false
         };
-        using var path = RoundedRectangle(cell, 8);
+        using var path = RoundedRectangle(cell, WidgetContentVisuals.ControlTileRadius);
         var asset = WidgetContentVisuals.ControlAsset(action, snapshot);
         var tone = ContentTone(asset, surfaceInk);
         var target = ControlQuickActions.Target(action);
@@ -130,21 +128,12 @@ internal abstract partial class WidgetSurfaceController
             action == ControlCenterQuickAction.Bluetooth ? ControlCenterPresentation.ControlCenterTarget.BluetoothDetails : ControlCenterPresentation.ControlCenterTarget.None;
         var hovered = available && IsControlHovered(widgetRef, target);
         var pressed = available && IsControlPressed(widgetRef, target);
-        var fill = on
-            ? Mix(panel, tone, pressed ? .42 : hovered ? .36 : .30)
-            : Mix(panel, available ? tone : surfaceInk, available ? (pressed ? .25 : hovered ? .20 : .12) : .06);
-        var solid = IsWidgetSolid(widgetRef);
-        if (solid)
-        {
-            var active = Mix(ColorTranslator.FromHtml(WidgetContentVisuals.Tone(asset, false)), Color.Black, .12);
-            fill = on
-                ? Mix(active, pressed ? Color.Black : Color.White, pressed ? .10 : hovered ? .06 : 0)
-                : Mix(panel, surfaceInk, pressed ? .11 : hovered ? .07 : .03);
-        }
+        var fill = Mix(background, on ? tone : surfaceInk,
+            WidgetContentVisuals.ControlTileTint(available, on, surfaceInk.R > 128, hovered, pressed));
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
-        var labelInk = solid && on ? Color.White : available ? text : muted;
+        var labelInk = available ? text : muted;
         // The glyph carries the meaning at a glance; the words underneath say
         // which switch it is and what state it is in.
         var iconSize = 22f;
@@ -163,7 +152,7 @@ internal abstract partial class WidgetSurfaceController
         };
         TablerRuntimeIcons.Draw(graphics, icon,
             new RectangleF(cell.X + (cell.Width - iconSize) / 2, cell.Y + 3, iconSize, iconSize),
-            solid && on ? Color.White : available ? tone : Color.FromArgb(115, muted), iconSize);
+            available ? tone : Color.FromArgb(115, muted), iconSize);
         WidgetText(graphics, ControlQuickActions.Label(action, snapshot),
             new RectangleF(cell.X, cell.Y + 27, cell.Width, 15), labelInk, 11f, bold: true, centered: true);
         WidgetText(graphics, ControlQuickActions.Status(action, snapshot),
@@ -174,7 +163,7 @@ internal abstract partial class WidgetSurfaceController
             if (IsControlHovered(widgetRef, details) || IsControlPressed(widgetRef, details))
             {
                 using var hoverPath = RoundedRectangle(RectangleF.Inflate(bounds, -2, -2), 5);
-                using var hoverBrush = new SolidBrush(Mix(fill, on ? ResolveAutoTextColor(accent) : surfaceInk, .16));
+                using var hoverBrush = new SolidBrush(Mix(fill, surfaceInk, .12));
                 graphics.FillPath(hoverBrush, hoverPath);
             }
             TablerRuntimeIcons.Draw(graphics, TablerRuntimeIcon.ChevronRight,
@@ -183,7 +172,7 @@ internal abstract partial class WidgetSurfaceController
     }
 
     protected void DrawControlCenterMuteButton(Graphics graphics, DesktopWidget widget, RectangleF bounds,
-        Color text, Color muted, Color accent, Color background)
+        Color text, Color muted, Color background)
     {
         using var widgetView = EnterWidgetView();
         var enabled = widget.Controls?.VolumeMuted is not null;
@@ -193,12 +182,10 @@ internal abstract partial class WidgetSurfaceController
         var pressed = enabled && IsControlPressed(widget, target);
         if (hovered || pressed)
         {
-            var fill = Mix(background, ResolveAutoTextColor(background), pressed ? 0.34 : 0.28);
-            using var path = RoundedRectangle(bounds, 6);
+            var fill = Mix(background, ResolveAutoTextColor(background), WidgetContentVisuals.ControlRowTint(hovered, pressed));
+            using var path = RoundedRectangle(bounds, WidgetContentVisuals.ControlRowRadius);
             using var brush = new SolidBrush(fill);
-            using var border = new Pen(Mix(fill, accent, pressed ? 0.45 : 0.30), 1f);
             graphics.FillPath(brush, path);
-            graphics.DrawPath(border, path);
         }
         var size = pressed ? 13f : 14f;
         TablerRuntimeIcons.Draw(graphics, isMuted ? TablerRuntimeIcon.VolumeX : TablerRuntimeIcon.Volume2,
@@ -211,20 +198,22 @@ internal abstract partial class WidgetSurfaceController
     {
         WidgetText(graphics, label, new RectangleF(cell.X + labelInset, cell.Y, cell.Width / 2 - labelInset, 16), muted, 11);
         WidgetText(graphics, value, new RectangleF(cell.X + cell.Width / 2, cell.Y, cell.Width / 2 - valueInset, 16), muted, 11, rightAligned: true);
-        var track = new RectangleF(cell.X, cell.Y + 24, cell.Width, 5);
-        using var trackPath = RoundedRectangle(track, 2.5f);
-        using var trackBrush = new SolidBrush(Color.FromArgb(28, text));
+        const float height = (float)WidgetContentVisuals.SliderTrackHeight;
+        const float thumb = (float)WidgetContentVisuals.SliderThumbDiameter;
+        var track = new RectangleF(cell.X, cell.Y + 25, cell.Width, height);
+        using var trackPath = RoundedRectangle(track, height / 2);
+        using var trackBrush = new SolidBrush(Color.FromArgb(WidgetContentVisuals.SliderTrackOpacity, text));
         graphics.FillPath(trackBrush, trackPath);
         if (percent is not { } level || !double.IsFinite(level)) return;
         var clamped = (float)ControlCenterPresentation.ClampPercent(level) / 100;
-        if (clamped <= 0) return;
         var filled = track; filled.Width *= clamped;
-        using var fillPath = RoundedRectangle(filled, 2.5f);
         using var fillBrush = new SolidBrush(accent);
-        graphics.FillPath(fillBrush, fillPath);
-        // Knob marks the exact position; the bar alone is hard to read at 5 px.
-        using var knob = new SolidBrush(accent);
-        graphics.FillEllipse(knob, filled.Right - 5, track.Y - 2.5f, 10, 10);
+        if (filled.Width > 0)
+        {
+            using var fillPath = RoundedRectangle(filled, Math.Min(height, filled.Width) / 2);
+            graphics.FillPath(fillBrush, fillPath);
+        }
+        graphics.FillEllipse(fillBrush, filled.Right - thumb / 2, track.Y + (height - thumb) / 2, thumb, thumb);
     }
 
     /// <summary>
@@ -238,7 +227,7 @@ internal abstract partial class WidgetSurfaceController
         // A filled row with body-coloured text and a speaker glyph: the previous
         // accent-on-transparent version was unreadable over a light or acrylic
         // backdrop, and gave no hint that the row is clickable.
-        using var path = RoundedRectangle(bounds, 6);
+        using var path = RoundedRectangle(bounds, WidgetContentVisuals.ControlRowRadius);
         using var brush = new SolidBrush(rowFill);
         graphics.FillPath(brush, path);
         var speaker = new RectangleF(bounds.X + 8, bounds.Y + (bounds.Height - 14) / 2, 14, 14);
@@ -259,7 +248,7 @@ internal abstract partial class WidgetSurfaceController
         ControlCenterSnapshot? snapshot, Color text, Color muted, Color accent, Color fill, Color surfaceInk, DesktopWidget widgetRef)
     {
         using var widgetView = EnterWidgetView();
-        using var path = RoundedRectangle(bounds, 8);
+        using var path = RoundedRectangle(bounds, WidgetContentVisuals.ControlGroupRadius);
         using var brush = new SolidBrush(fill);
         graphics.FillPath(brush, path);
 
@@ -355,7 +344,6 @@ internal abstract partial class WidgetSurfaceController
     }
 
     /// <summary>Opaque shade of the card colour, used as the surface for inner panels.</summary>
-    protected static Color PanelFill(Color background, Color text, bool solid = false) => Mix(background, text, solid ? .04 : .10);
 
     /// <summary>Linear blend of two colours, always opaque.</summary>
     protected static Color Mix(Color from, Color to, double amount)
@@ -424,27 +412,14 @@ internal abstract partial class WidgetSurfaceController
     }
 
     /// <summary>
-    /// True for controls that capture the pointer instead of dragging the card:
-    /// the volume and brightness sliders.
-    /// </summary>
-    protected bool IsControlCenterDragTarget(DesktopWidget widget, PointF point)
-    {
-        using var widgetView = EnterWidgetView();
-        var target = ControlCenterTargetAt(widget, point);
-        return target is ControlCenterPresentation.ControlCenterTarget.VolumeSlider
-            or ControlCenterPresentation.ControlCenterTarget.BrightnessSlider or ControlCenterPresentation.ControlCenterTarget.MediaProgress;
-    }
-
-    /// <summary>
     /// Continues a slider drag. Called for every mouse move while the button is
     /// held, so the level follows the pointer instead of only jumping on click.
     /// </summary>
     protected bool UpdateControlCenterDrag(DesktopWidget widget, PointF point)
     {
         using var widgetView = EnterWidgetView();
-        var target = _controlPressedWidgetId == widget.Id
-            ? _controlPressedTarget
-            : ControlCenterTargetAt(widget, point);
+        if (_controlPressedWidgetId != widget.Id) return false;
+        var target = _controlPressedTarget;
         if (target == ControlCenterPresentation.ControlCenterTarget.MediaProgress) { UpdateControlSeek(widget, point); return true; }
         if (target is not (ControlCenterPresentation.ControlCenterTarget.VolumeSlider
             or ControlCenterPresentation.ControlCenterTarget.BrightnessSlider)) return false;

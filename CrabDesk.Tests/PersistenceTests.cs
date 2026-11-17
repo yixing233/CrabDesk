@@ -137,6 +137,7 @@ public sealed class PersistenceTests : IDisposable
         var store = new JsonLayoutStore(_root);
         var state = JsonLayoutStore.CreateDefaultState();
         state.Settings.Appearance.IconSkinEnabled = true;
+        state.Settings.Appearance.IconSkinStyle = IconSkinStyle.Gradient;
         state.Settings.Appearance.ShowShortcutArrow = false;
         state.Settings.Appearance.IconSkinAppPlate = "#F4F4F1";
         state.Settings.Appearance.IconSkinFolderPlate = "#DDE6F2";
@@ -146,6 +147,7 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await store.LoadAsync();
 
         Assert.True(loaded.Settings.Appearance.IconSkinEnabled);
+        Assert.Equal(IconSkinStyle.Gradient, loaded.Settings.Appearance.IconSkinStyle);
         Assert.False(loaded.Settings.Appearance.ShowShortcutArrow);
         Assert.Equal("#F4F4F1", loaded.Settings.Appearance.IconSkinAppPlate);
         Assert.Equal("#DDE6F2", loaded.Settings.Appearance.IconSkinFolderPlate);

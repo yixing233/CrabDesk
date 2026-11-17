@@ -177,7 +177,7 @@ internal sealed class NetworkAdaptersPopup : ControlCenterPopup
         button.Height = 30;
         WpfControls.Grid.SetColumn(button, 2);
         grid.Children.Add(button);
-        var root = new WpfControls.Border { Child = grid, CornerRadius = new Wpf.CornerRadius(8), Background = HoverInk,
+        var root = new WpfControls.Border { Child = grid, CornerRadius = new Wpf.CornerRadius(12), Background = RowInk,
             Padding = new Wpf.Thickness(8), Margin = new Wpf.Thickness(0, 0, 0, 8) };
         var row = new AdapterRow(root, icon, name, detail, button);
         button.Click += (_, _) =>
