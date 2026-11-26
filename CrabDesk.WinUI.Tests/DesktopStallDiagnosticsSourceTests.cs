@@ -132,7 +132,7 @@ public sealed class DesktopStallDiagnosticsSourceTests
     private static string ReadNativeSource(string fileName) => ReadSource("CrabDesk.Native", fileName);
 
     private static string ReadSource(string projectDirectory, string fileName) => File.ReadAllText(
-        Path.Combine(FindSolutionDirectory(), projectDirectory, fileName));
+        Path.Combine(FindSolutionDirectory(), projectDirectory, fileName)).ReplaceLineEndings("\n");
 
     private static string ExtractMethod(string source, string startAnchor, string endAnchor)
     {
