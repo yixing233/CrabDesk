@@ -131,7 +131,7 @@ internal sealed partial class DesktopBoxForm
         _scrollAnimationKey = null;
         _scrollHoverResumeTimer.Stop();
         _dynamicVisualVersion++;
-        _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0);
+        _animationFrameClock.StopWhenIdle(HasFrameAnimations);
     }
 
     private void DrawVerticalScrollBar(

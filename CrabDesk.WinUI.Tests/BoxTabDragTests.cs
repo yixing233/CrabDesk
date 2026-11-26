@@ -11,7 +11,7 @@ using Forms = System.Windows.Forms;
 
 namespace CrabDesk.WinUI.Tests;
 
-public sealed class BoxTabDragTests
+public sealed partial class BoxTabDragTests
 {
     [Fact]
     public void HoveringAnotherTabPreservesTheSelectionAndDroppingInItsBodyMovesTheWholeGroup()

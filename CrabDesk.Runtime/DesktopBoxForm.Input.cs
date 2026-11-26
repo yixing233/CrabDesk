@@ -38,6 +38,11 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         RebuildGeometry();
         if (HandleWidgetMouseDown(eventArgs, point)) return;
         var box = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
+        if (box is not null && !box.TabBar.Contains(point) && _tabTransitions.ContainsKey(box.Box.Id))
+        {
+            CancelTabTransition(box.Box.Id);
+            RequestManualTabRender(box.Bounds);
+        }
         if (eventArgs.Button == Forms.MouseButtons.Left &&
             box is not null &&
             TryBeginScrollBarDrag(box, point))
@@ -917,7 +922,8 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
                     _scrollHoverResumeTimer.Enabled))
             {
                 var hoveredBox = _boxes.LastOrDefault(candidate => candidate.Bounds.Contains(point));
-                hoveredItem = GetItemAtPoint(hoveredBox, point);
+                hoveredItem = hoveredBox is not null && _tabTransitions.ContainsKey(hoveredBox.Box.Id)
+                    ? null : GetItemAtPoint(hoveredBox, point);
             }
             var itemKey = hoveredItem?.Item.Key.ToString();
             hoverChanged = !string.Equals(_hoveredItemKey, itemKey, StringComparison.OrdinalIgnoreCase);
@@ -1717,6 +1723,11 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return false;
         }
         var scrollKey = GetItemViewKey(box);
+        if (_tabTransitions.ContainsKey(box.Box.Id))
+        {
+            CancelTabTransition(box.Box.Id);
+            RequestManualTabRender(box.Bounds);
+        }
         var itemCount = GetVisibleItemsForBox(box).Count;
         var extent = DesktopItemLayoutEngine.GetScrollExtent(
             box.Box.ViewMode,
@@ -1734,22 +1745,27 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return false;
         }
 
-        // Continue from the offset that is currently on screen, so rapid
-        // wheel input glides through every notch instead of skipping to the
-        // latest target.
-        var current = _scrollAnimationKey == scrollKey && IsScrollAnimationActive
+        // Same-direction input during an active glide continues from its queued
+        // destination. Opposite-direction input retargets from the current frame
+        // so reversing the wheel responds immediately.
+        var animationActive = _scrollAnimationKey == scrollKey && IsScrollAnimationActive;
+        var current = animationActive
             ? GetAnimatedScrollOffset()
             : _scrollOffsets.GetValueOrDefault(scrollKey);
-        // A standard notch is 120 units. Map the configured wheel lines onto
-        // thirds of an item cell, then apply a small reduction so the default
-        // three-line setting advances about 0.75 cell instead of jumping three
-        // complete rows. High-resolution touchpads keep their proportional
-        // delta and therefore remain finer than a mouse wheel.
+        // A standard notch is 120 units. The Windows setting describes lines
+        // per notch; map three configured lines to one icon row. High-resolution
+        // touchpads retain proportional movement for smaller deltas.
         var step = CalculateSmoothScrollStep(
             GetScrollUnit(box),
             Forms.SystemInformation.MouseWheelScrollLines,
             Math.Abs(delta));
-        var target = Math.Clamp(current - Math.Sign(delta) * step, 0, extent);
+        var target = CalculateNextScrollTarget(
+            current,
+            _scrollAnimationTo,
+            animationActive,
+            delta,
+            step,
+            extent);
         if (Math.Abs(target - current) < 0.5)
         {
             return false;
@@ -1782,20 +1798,44 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
         var lines = configuredScrollLines > 0 ? configuredScrollLines : 3;
         var deltaScale = Math.Abs(wheelDelta) / 120d;
-        return Math.Max(
-            2d,
-            itemUnit * (lines / 3d) * ScrollWheelStepFraction * deltaScale);
+        return Math.Max(2d, itemUnit * (lines / 3d) * deltaScale);
     }
 
-    private double GetAnimatedScrollOffset()
+    internal static double CalculateNextScrollTarget(
+        double currentOffset,
+        double activeAnimationTarget,
+        bool animationActive,
+        int wheelDelta,
+        double step,
+        double extent)
     {
-        var progress = Math.Min(
-            1,
-            Stopwatch.GetElapsedTime(_scrollAnimationStartedTimestamp).TotalMilliseconds /
-            ScrollAnimationDurationMilliseconds);
-        var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
-        return _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
+        var scrollDirection = -Math.Sign(wheelDelta);
+        var animationDirection = Math.Sign(activeAnimationTarget - currentOffset);
+        var continuesCurrentDirection = animationActive &&
+            scrollDirection != 0 && scrollDirection == animationDirection;
+        var baseTarget = continuesCurrentDirection ? activeAnimationTarget : currentOffset;
+        return Math.Clamp(
+            baseTarget + scrollDirection * Math.Max(0, step),
+            0,
+            Math.Max(0, extent));
     }
+
+    internal static double AdvanceSmoothScrollOffset(
+        double currentOffset,
+        double targetOffset,
+        double elapsedMilliseconds)
+    {
+        if (elapsedMilliseconds <= 0 || Math.Abs(targetOffset - currentOffset) < double.Epsilon)
+        {
+            return currentOffset;
+        }
+
+        var elapsed = Math.Min(elapsedMilliseconds, MaximumScrollFrameElapsedMilliseconds);
+        var progress = 1 - Math.Exp(-elapsed / ScrollSmoothingTimeConstantMilliseconds);
+        return currentOffset + (targetOffset - currentOffset) * progress;
+    }
+
+    private double GetAnimatedScrollOffset() => _scrollAnimationOffset;
 
     private void StartScrollAnimation(ItemViewKey key, double from, double to)
     {
@@ -1809,15 +1849,23 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             _scrollAnimationKey = null;
             _dynamicVisualVersion++;
             ApplyScrollOffset(key, to);
-            _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0);
+            _animationFrameClock.StopWhenIdle(HasFrameAnimations);
             _scrollHoverResumeTimer.Start();
             return;
         }
+        if (IsScrollAnimationActive && _scrollAnimationKey == key)
+        {
+            // Retarget the running glide without resetting its current position
+            // or motion, so a wheel burst does not repeatedly ease from rest.
+            _scrollAnimationTo = to;
+            return;
+        }
+
         var startsNewDynamicPass = !IsScrollAnimationActive || _scrollAnimationKey != key;
         _scrollAnimationKey = key;
-        _scrollAnimationFrom = from;
+        _scrollAnimationOffset = from;
         _scrollAnimationTo = to;
-        _scrollAnimationStartedTimestamp = Stopwatch.GetTimestamp();
+        _scrollAnimationLastTimestamp = Stopwatch.GetTimestamp();
         _animationFrameClock.RequestFrames();
         if (startsNewDynamicPass)
         {
@@ -1833,17 +1881,19 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return false;
         }
 
-        var progress = Math.Min(
-            1,
-            Stopwatch.GetElapsedTime(_scrollAnimationStartedTimestamp).TotalMilliseconds /
-            ScrollAnimationDurationMilliseconds);
-        var eased = 1 - Math.Pow(1 - progress, ScrollEaseExponent);
-        var offset = _scrollAnimationFrom + (_scrollAnimationTo - _scrollAnimationFrom) * eased;
-        var completed = !_runtime.State.Settings.Appearance.AnimationEnabled || progress >= 1;
+        var now = Stopwatch.GetTimestamp();
+        var elapsedMilliseconds = Stopwatch.GetElapsedTime(_scrollAnimationLastTimestamp, now).TotalMilliseconds;
+        _scrollAnimationLastTimestamp = now;
+        var offset = !_runtime.State.Settings.Appearance.AnimationEnabled
+            ? _scrollAnimationTo
+            : AdvanceSmoothScrollOffset(_scrollAnimationOffset, _scrollAnimationTo, elapsedMilliseconds);
+        var completed = !_runtime.State.Settings.Appearance.AnimationEnabled ||
+            Math.Abs(_scrollAnimationTo - offset) < ScrollCompletionThresholdPixels;
         if (completed)
         {
             offset = _scrollAnimationTo;
         }
+        _scrollAnimationOffset = offset;
         ApplyScrollOffset(key, offset, requestRender: requestRender && !completed);
         if (completed)
         {

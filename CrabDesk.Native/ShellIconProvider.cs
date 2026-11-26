@@ -201,8 +201,20 @@ public sealed class ShellIconProvider
             }
         }
 
-        // Retrieve the base image-list entry without an overlay index. The Shell
-        // still resolves custom shortcut icons, including links to files/folders.
+        // The image-list API can return a large bitmap whose actual icon is
+        // still only the small 16px entry in the top-left corner. That makes
+        // some shortcut icons appear tiny when the desktop asks for a large
+        // surface. The Shell item image factory resolves the same shortcut
+        // into a correctly scaled, full-size icon; keep the image-list path as
+        // a fallback for Shell items that do not support the factory.
+        if (LoadShellItemImage(parsingName, pixelSize) is { } shellImage)
+        {
+            return shellImage;
+        }
+
+        // Retrieve the base image-list entry without an overlay index as a
+        // compatibility fallback. The Shell still resolves custom shortcut
+        // icons, including links to files/folders.
         const uint shgfiSysIconIndex = 0x4000;
         if (SHGetFileInfo(parsingName, 0, out var info, (uint)Marshal.SizeOf<ShFileInfo>(),
                 shgfiSysIconIndex) == IntPtr.Zero)

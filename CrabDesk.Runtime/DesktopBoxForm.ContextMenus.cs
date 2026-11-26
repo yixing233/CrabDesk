@@ -612,11 +612,16 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         // Keep the grid label width, then grow only downward for however many
         // lines the complete name needs at that same wrap width. List mode is
         // handled above with its native single-row label region.
-        var wrappedTextHeight = MeasureFullGridLabelHeight(
-            measureGraphics,
-            item.Item.DisplayName,
-            labelFont,
-            width);
+        // The native rename TextBox still uses GDI font metrics. Keep its
+        // editor height independent of the grayscale display label's layout.
+        using var renameFormat = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near,
+            Trimming = StringTrimming.None
+        };
+        var wrappedTextHeight = measureGraphics.MeasureString(
+            item.Item.DisplayName, labelFont, new SizeF(width, 100_000), renameFormat).Height + 2;
         var height = DesktopRenameEditor.CalculateEditorHeight(
             wrappedTextHeight,
             lineHeight,

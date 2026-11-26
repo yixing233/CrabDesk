@@ -189,6 +189,7 @@ internal sealed partial class DesktopBoxForm
             return;
         }
 
+        CancelTabTransition(boxId);
         var previousBounds = _boxes.FirstOrDefault(box => box.Box.Id == boxId)?.Bounds ?? RectangleF.Empty;
         RemoveSearchScrollOffsets(boxId);
         _geometryDirty = true;

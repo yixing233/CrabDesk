@@ -331,6 +331,13 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     private void InvalidateIcon(IconBitmapKey key)
     {
+        // New icons can arrive during a tab fade. Rebuild the target snapshot
+        // on its next paint so placeholders do not persist until completion.
+        foreach (var transition in _tabTransitions.Values)
+        {
+            transition.Incoming?.Dispose();
+            transition.Incoming = null;
+        }
         var dirtyBounds = DesktopBoxes
             .Where(box =>
                 ShouldPresentLoadedBoxIcon(

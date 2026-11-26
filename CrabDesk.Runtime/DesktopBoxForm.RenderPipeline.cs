@@ -65,12 +65,33 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     private void RequestItemHoverVisualUpdate()
     {
-        if (_isCompositedByIconSurface && !_itemHoverOverlayUnavailable)
+        if (!_itemHoverRenderState.Publish(_hoveredItemKey))
         {
-            if (PresentItemHoverOverlay())
-            {
-                return;
-            }
+            return;
+        }
+
+        try
+        {
+            BeginInvoke((Action)RenderQueuedItemHoverVisualUpdate);
+        }
+        catch (InvalidOperationException)
+        {
+            _itemHoverRenderState.TryTake(out _);
+        }
+    }
+
+    private void RenderQueuedItemHoverVisualUpdate()
+    {
+        if (!_itemHoverRenderState.TryTake(out _) ||
+            _resourcesDisposed || IsDisposed || !IsHandleCreated)
+        {
+            return;
+        }
+
+        if (_isCompositedByIconSurface && !_itemHoverOverlayUnavailable &&
+            PresentItemHoverOverlay())
+        {
+            return;
         }
 
         RequestVisualLayerRender();
@@ -215,6 +236,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     private void HideItemHoverOverlay()
     {
+        _itemHoverRenderState.TryTake(out _);
         _itemHoverOverlay.HideOverlay();
         _lastItemHoverOverlayBounds = null;
     }

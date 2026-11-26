@@ -173,8 +173,13 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         {
             graphics.Clear(Color.Transparent);
             graphics.CompositingMode = CompositingMode.SourceOver;
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            // This bitmap is used only during the short height transition.
+            // Keep the interactive prewarm cheap; the settled frame is drawn
+            // again through the regular high-quality renderer afterwards.
+            graphics.CompositingQuality = CompositingQuality.HighSpeed;
+            graphics.SmoothingMode = SmoothingMode.HighSpeed;
+            graphics.InterpolationMode = InterpolationMode.Low;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
             graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             graphics.TextContrast = 4;
             graphics.Transform = new Matrix(
@@ -449,9 +454,9 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             // it wearing a name with no way to tell it apart from a real box of
             // that name. The tab bar already marks the active tab with the
             // accent colour and an underline.
-            graphics.DrawString(
+            _boxText.Draw(graphics,
                 geometry.Box.Title,
-                titleFont, titleBrush,
+                titleFont, titleBrush.Color,
                 titleBounds,
                 titleFormat);
         }
@@ -505,8 +510,34 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return;
         }
 
+        if (!DrawTabTransitionContent(graphics, geometry))
+        {
+            DrawBoxContent(graphics, geometry, clipBounds, includeDropPreview,
+                selectedItemKeys, includeSelectionRectangle, suppressedHoverItemKeys, includeItemHoverFeedback);
+        }
+        DrawVerticalScrollBar(graphics, geometry,
+            ResolveAccentColor(baseColor, ParseOpaqueColor(geometry.Box.Appearance.Accent)), textColor);
+        if (includeDropPreview)
+        {
+            DrawDropTargetFeedback(graphics, geometry, clipBounds);
+        }
+        if (_runtime.State.Settings.Appearance.ShowResizeGrip)
+        {
+            using var grip = new Pen(Color.FromArgb(130, textColor), 1);
+            graphics.DrawLine(grip, geometry.Resize.Right - 10, geometry.Resize.Bottom - 3, geometry.Resize.Right - 3, geometry.Resize.Bottom - 10);
+            graphics.DrawLine(grip, geometry.Resize.Right - 6, geometry.Resize.Bottom - 3, geometry.Resize.Right - 3, geometry.Resize.Bottom - 6);
+        }
+    }
+
+    private void DrawBoxContent(
+        Graphics graphics, BoxGeometry geometry, RectangleF clipBounds,
+        bool includeDropPreview = true, IReadOnlySet<string>? selectedItemKeys = null,
+        bool includeSelectionRectangle = true, IReadOnlySet<string>? suppressedHoverItemKeys = null,
+        bool includeItemHoverFeedback = true)
+    {
+        var textColor = ResolveAutoTextColor(ParseOpaqueColor(geometry.Box.Appearance.Background));
         var state = graphics.Save();
-        graphics.SetClip(geometry.Body);
+        graphics.SetClip(geometry.Body, CombineMode.Intersect);
         using var itemFont = geometry.Box.Appearance.ShowItemLabels
             ? CreateFont(
                 geometry.Box.Appearance.LabelFontFamily,
@@ -576,26 +607,6 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
                 _selectionRectangle.Height);
         }
         graphics.Restore(state);
-
-        DrawVerticalScrollBar(
-            graphics,
-            geometry,
-            ResolveAccentColor(
-                baseColor,
-                ParseOpaqueColor(geometry.Box.Appearance.Accent)),
-            textColor);
-
-        if (includeDropPreview)
-        {
-            DrawDropTargetFeedback(graphics, geometry, clipBounds);
-        }
-
-        if (_runtime.State.Settings.Appearance.ShowResizeGrip)
-        {
-            using var grip = new Pen(Color.FromArgb(130, textColor), 1);
-            graphics.DrawLine(grip, geometry.Resize.Right - 10, geometry.Resize.Bottom - 3, geometry.Resize.Right - 3, geometry.Resize.Bottom - 10);
-            graphics.DrawLine(grip, geometry.Resize.Right - 6, geometry.Resize.Bottom - 3, geometry.Resize.Right - 3, geometry.Resize.Bottom - 6);
-        }
     }
 
     private void DrawMarqueeSelectionOverlay(
@@ -720,6 +731,23 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return [];
         }
 
+        // A scroll frame has just rebuilt _items for the current offset. Reuse
+        // that viewport geometry instead of calculating the item layout a
+        // second time while drawing the same frame.
+        var currentScrollGeometry = _scrollAnimationKey is { } scrollKey &&
+            scrollKey.BoxId == geometry.Box.Id &&
+            _boxes.Any(candidate => ReferenceEquals(candidate, geometry));
+        if (ShouldReuseScrollFrameItemGeometry(
+                currentScrollGeometry,
+                _geometryDirty,
+                _dragStarted))
+        {
+            return _items
+                .Where(item => item.Box.Id == geometry.Box.Id &&
+                               item.Bounds.IntersectsWith(clipBounds))
+                .ToArray();
+        }
+
         // During a box marquee the geometry built for hit testing already is
         // the visible layout. Reusing it avoids recalculating the layout,
         // tab projection and scroll state for every overlay frame.
@@ -820,23 +848,17 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             using var labelBrush = new SolidBrush(active
                 ? accent
                 : Color.FromArgb(isDarkSurface ? 196 : 184, textColor));
-            graphics.DrawString(
+            _boxText.Draw(graphics,
                 label,
                 active ? activeFont : inactiveFont,
-                labelBrush,
+                labelBrush.Color,
                 RectangleF.Inflate(bounds, -2, 0),
                 format);
-            if (active)
-            {
-                using var underline = new Pen(accent, 2);
-                graphics.DrawLine(
-                    underline,
-                    bounds.Left + 7,
-                    geometry.TabBar.Bottom - 1,
-                    bounds.Right - 7,
-                    geometry.TabBar.Bottom - 1);
-            }
         }
+        var indicator = GetTabIndicatorBounds(geometry);
+        using var underline = new Pen(accent, 2);
+        graphics.DrawLine(underline, indicator.Left + 7, indicator.Bottom - 1,
+            Math.Max(indicator.Left + 7, indicator.Right - 7), indicator.Bottom - 1);
         DrawManualTabInsertion(graphics, geometry, accent);
     }
 
@@ -864,7 +886,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             LineAlignment = StringAlignment.Center,
             Trimming = StringTrimming.EllipsisCharacter
         };
-        graphics.DrawString(message, font, brush, geometry.Body, format);
+        _boxText.Draw(graphics, message, font, brush.Color, geometry.Body, format);
     }
 
     private void DrawItem(
@@ -968,10 +990,10 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         {
             return;
         }
-        graphics.DrawString(
+        _boxText.Draw(graphics,
             item.Item.DisplayName,
             labelFont!,
-            labelBrush!,
+            ((SolidBrush)labelBrush!).Color,
             textBounds,
             showsFullLabel && item.Box.ViewMode == BoxViewMode.Grid
                 ? selectedGridItemFormat!
@@ -1012,9 +1034,14 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         RectangleF textBounds, Font? labelFont, StringFormat? labelFormat)
     {
         if (item.Box.ViewMode == BoxViewMode.List) return RectangleF.Inflate(item.Bounds, -2, -2);
-        var labelBounds = labelFont is not null && labelFormat is not null
-            ? DesktopItemVisualStyle.MeasureLabelBounds(graphics, item.Item.DisplayName, textBounds, labelFont, labelFormat)
-            : RectangleF.Empty;
+        var labelBounds = RectangleF.Empty;
+        if (labelFont is not null && labelFormat is not null && !textBounds.IsEmpty)
+        {
+            var measured = DesktopBoxTextRenderer.Measure(graphics, item.Item.DisplayName, labelFont, textBounds.Size, labelFormat);
+            var width = Math.Min(textBounds.Width, Math.Max(labelFont.Size, measured.Width));
+            labelBounds = new(textBounds.X + (textBounds.Width - width) / 2, textBounds.Y,
+                width, Math.Min(textBounds.Height, measured.Height));
+        }
         return DesktopItemVisualStyle.HighlightBounds(iconBounds, labelBounds, (float)item.Box.Appearance.IconSize);
     }
 
@@ -1077,7 +1104,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         };
         // Measure the whole filename first; the caller then caps it at the
         // visible bottom edge of the box rather than at an arbitrary line count.
-        return graphics.MeasureString(displayName, labelFont, new SizeF(width, 100_000), format).Height + 2;
+        return DesktopBoxTextRenderer.Measure(graphics, displayName, labelFont, new SizeF(width, 100_000), format).Height + 2;
     }
 
     internal static float ResolveSelectedGridLabelHeight(

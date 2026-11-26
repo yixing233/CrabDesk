@@ -404,14 +404,13 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
                 return true;
             }
 
+            var transition = PrepareTabTransition(box, preserveItemSelection);
             _activeManualTabIds[box.Box.Id] = manualTab.Id;
             _scrollOffsets.Remove(new ItemViewKey(
                 box.Box.Id,
                 $"manual:{manualTab.Id?.ToString("N") ?? "all"}"));
             if (!preserveItemSelection) ClearBoxItemSelection(box.Box.Id);
-            _geometryDirty = true;
-            InvalidateDip(box.TabBar);
-            InvalidateDip(box.Body);
+            CompleteTabSelection(box, transition);
             return true;
         }
 
@@ -426,12 +425,11 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             return true;
         }
 
+        var categoryTransition = PrepareTabTransition(box, preserveItemSelection);
         _activeMappedFolderCategories[box.Box.Id] = tab.Category;
         _scrollOffsets.Remove(new ItemViewKey(box.Box.Id, $"mapped:{tab.Category}"));
         if (!preserveItemSelection) ClearBoxItemSelection(box.Box.Id);
-        _geometryDirty = true;
-        InvalidateDip(box.TabBar);
-        InvalidateDip(box.Body);
+        CompleteTabSelection(box, categoryTransition);
         return true;
     }
 

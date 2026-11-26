@@ -31,9 +31,9 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
     // while still filtering out a quick pointer pass over the header.
     private const int HoverExpansionDelayMilliseconds = 45;
     private const int HoverCollapseDelayMilliseconds = 120;
-    private const double ScrollAnimationDurationMilliseconds = 190;
-    private const double ScrollEaseExponent = 2.2;
-    private const double ScrollWheelStepFraction = 0.75;
+    private const double ScrollSmoothingTimeConstantMilliseconds = 48;
+    private const double MaximumScrollFrameElapsedMilliseconds = 32;
+    private const double ScrollCompletionThresholdPixels = 0.5;
     private const int ScrollHoverResumeDelayMilliseconds = 120;
     // Budgeted in frames, not in milliseconds: the frame clock can only deliver
     // one frame per ~15.6 ms system tick, so 150 ms was a nine-frame animation
@@ -78,6 +78,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
             .ToArray();
 
     private readonly Dictionary<IconBitmapKey, Bitmap?> _iconCache = [];
+    private readonly DesktopBoxTextRenderer _boxText = new();
     private readonly HashSet<IconBitmapKey> _pendingIconLoads = [];
     private readonly Dictionary<IconBitmapKey, IconLoadRetry> _iconLoadRetries = [];
     private readonly CancellationTokenSource _iconLoadCancellation = new();
@@ -123,11 +124,12 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
     private readonly Forms.Timer _dragRenderTimer;
     private readonly Forms.Timer _scrollHoverResumeTimer;
     private ItemViewKey? _scrollAnimationKey;
-    private double _scrollAnimationFrom;
+    private double _scrollAnimationOffset;
     private double _scrollAnimationTo;
-    private long _scrollAnimationStartedTimestamp;
+    private long _scrollAnimationLastTimestamp;
     private readonly DesktopHoverOverlay _itemHoverOverlay;
     private readonly DesktopHoverOverlay _headerActionOverlay;
+    private readonly DesktopHoverRenderState _itemHoverRenderState = new();
     private DesktopRenameEditor? _renameEditor;
     private Guid? _renamingBoxId;
     private string? _renamingItemKey;
@@ -410,6 +412,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     internal bool RefreshWorkspace()
     {
+        ClearTabTransitions();
         HideItemHoverOverlay();
         HideHeaderActionOverlay();
         ClearHeightAnimationVisualCaches();
@@ -448,6 +451,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     internal bool RefreshBoxItems(Guid boxId)
     {
+        CancelTabTransition(boxId);
         var diagnosticStarted = System.Diagnostics.Stopwatch.StartNew();
         var box = _runtime.State.Boxes.FirstOrDefault(candidate =>
             candidate.Id == boxId &&
@@ -798,6 +802,12 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         bool scrollAnimationActive,
         bool hoverResumePending) =>
         !scrollAnimationActive && !hoverResumePending;
+
+    internal static bool ShouldReuseScrollFrameItemGeometry(
+        bool currentScrollGeometry,
+        bool geometryDirty,
+        bool itemDragActive) =>
+        currentScrollGeometry && !geometryDirty && !itemDragActive;
 
     internal static bool ShouldShowHeaderActions(
         Guid boxId,
@@ -1585,6 +1595,8 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
     {
         if (disposing && !_resourcesDisposed)
         {
+            ClearTabTransitions();
+            _boxText.Dispose();
             _acrylicFrameBitmap?.Dispose();
             _acrylicFrameBitmap = null;
             _acrylicPartialFramePresenter = null;

@@ -93,4 +93,58 @@ public sealed class ShellIconProviderTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void ShortcutIconsUseTheFullShellSurfaceWhenTheOverlayIsSuppressed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"CrabDeskShortcut-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var shortcutPath = Path.Combine(root, "cmd.lnk");
+        dynamic? shell = null;
+        dynamic? shortcut = null;
+        var provider = new ShellIconProvider();
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell", throwOnError: true)!)!;
+            shortcut = shell.CreateShortcut(shortcutPath);
+            shortcut.TargetPath = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            shortcut.Save();
+
+            var icon = provider.GetIcon(shortcutPath, 96, includeShortcutOverlay: false);
+
+            Assert.NotNull(icon);
+            var bounds = AlphaBounds(icon!);
+            Assert.True(bounds.Width >= 48 && bounds.Height >= 48,
+                $"Shortcut artwork was unexpectedly tiny: {bounds.Width}x{bounds.Height}.");
+        }
+        finally
+        {
+            if (shortcut is not null) Marshal.FinalReleaseComObject(shortcut);
+            if (shell is not null) Marshal.FinalReleaseComObject(shell);
+            provider.ClearCache();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static Rectangle AlphaBounds(Bitmap bitmap)
+    {
+        var left = bitmap.Width;
+        var top = bitmap.Height;
+        var right = -1;
+        var bottom = -1;
+        for (var y = 0; y < bitmap.Height; y++)
+        {
+            for (var x = 0; x < bitmap.Width; x++)
+            {
+                if (bitmap.GetPixel(x, y).A == 0) continue;
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+        return right < left || bottom < top
+            ? Rectangle.Empty
+            : Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+    }
 }

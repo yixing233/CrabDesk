@@ -971,11 +971,30 @@ public sealed class DesktopIconInteractionTests
     }
 
     [Theory]
-    [InlineData(100, 3, 120, 75)]
-    [InlineData(100, 1, 120, 25)]
-    [InlineData(100, 3, 60, 37.5)]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    public void ScrollFrameReusesOnlyCurrentItemGeometryWhenSafe(
+        bool currentScrollGeometry,
+        bool geometryDirty,
+        bool itemDragActive,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.ShouldReuseScrollFrameItemGeometry(
+                currentScrollGeometry,
+                geometryDirty,
+                itemDragActive));
+    }
+
+    [Theory]
+    [InlineData(100, 3, 120, 100)]
+    [InlineData(100, 1, 120, 33.333)]
+    [InlineData(100, 3, 60, 50)]
     [InlineData(100, 3, 0, 0)]
-    public void SmoothScrollStepUsesFineWheelGranularity(
+    public void SmoothScrollStepMatchesConfiguredWheelGranularity(
         double itemUnit,
         int configuredScrollLines,
         int wheelDelta,
@@ -988,6 +1007,44 @@ public sealed class DesktopIconInteractionTests
                 configuredScrollLines,
                 wheelDelta),
             precision: 3);
+    }
+
+    [Theory]
+    [InlineData(30, 100, true, -120, 50, 500, 150)]
+    [InlineData(120, 200, true, 120, 50, 500, 70)]
+    [InlineData(30, 100, false, -120, 50, 500, 80)]
+    [InlineData(450, 480, true, -120, 100, 500, 500)]
+    [InlineData(30, 100, true, 0, 50, 500, 30)]
+    public void RepeatedWheelInputAccumulatesAndReversesItsTarget(
+        double currentOffset,
+        double animationTarget,
+        bool animationActive,
+        int wheelDelta,
+        double step,
+        double extent,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            DesktopBoxForm.CalculateNextScrollTarget(
+                currentOffset,
+                animationTarget,
+                animationActive,
+                wheelDelta,
+                step,
+                extent),
+            precision: 3);
+    }
+
+    [Fact]
+    public void SmoothScrollAdvancesWithoutOvershootingItsTarget()
+    {
+        var firstFrame = DesktopBoxForm.AdvanceSmoothScrollOffset(0, 100, 15);
+        var secondFrame = DesktopBoxForm.AdvanceSmoothScrollOffset(firstFrame, 100, 15);
+
+        Assert.InRange(firstFrame, 0, 100);
+        Assert.InRange(secondFrame, firstFrame, 100);
+        Assert.True(secondFrame > firstFrame);
     }
 
     [Theory]

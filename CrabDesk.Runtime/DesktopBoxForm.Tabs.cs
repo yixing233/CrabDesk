@@ -22,6 +22,7 @@ internal sealed partial class DesktopBoxForm
         }
         if (Math.Abs(point.X - _pressPoint.X) < 4 && Math.Abs(point.Y - _pressPoint.Y) < 4)
             return true;
+        CancelTabTransition(tab.BoxId);
         _pressedManualTab = null;
         var data = new Forms.DataObject();
         data.SetData(ManualTabDragFormat, false, tab);

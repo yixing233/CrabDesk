@@ -349,17 +349,19 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     private void PrepareBoxTransform(DesktopBox box)
     {
+        CancelTabTransition(box.Id);
         CloseBoxSearch(clearFilter: true);
         ReleaseMovingBoxVisualCache();
         ReleaseHeightAnimationVisualCache(box.Id);
         _transformDirtyBounds = ToVisualBounds(box, box.Bounds);
         _heightAnimations.Remove(box.Id);
         _geometryDirty = true;
-        _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
+        _animationFrameClock.StopWhenIdle(HasFrameAnimations);
     }
 
     private void StartBoxHeightAnimation(DesktopBox box, double fromHeight)
     {
+        CancelTabTransition(box.Id);
         var targetHeight = GetSettledBoxHeight(box);
         if (!_runtime.State.Settings.Appearance.AnimationEnabled || Math.Abs(targetHeight - fromHeight) < 0.5)
         {
@@ -416,6 +418,17 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
 
     private void OnAnimationFrame(object? sender, EventArgs eventArgs)
     {
+        var tabDirtyBounds = AdvanceTabTransitions();
+        if (tabDirtyBounds is { } tabBounds)
+        {
+            RequestManualTabRender(tabBounds);
+            // Tab frames use the existing partial refresh channel and do not
+            // rebuild the hit mask or the geometry of unrelated boxes.
+            if (_heightAnimations.Count == 0 && _scrollAnimationKey is null)
+            {
+                return;
+            }
+        }
         var hadScrollAnimation = _scrollAnimationKey is not null;
         var scrollCompleted = AdvanceScrollAnimation(requestRender: false);
         var animatedBoxIds = _animationFrameBoxIds;
@@ -474,7 +487,7 @@ internal sealed partial class DesktopBoxForm : WidgetSurfaceController
         {
             _pendingHeightAnimationFrameDirtyBounds = null;
         }
-        _animationFrameClock.StopWhenIdle(_heightAnimations.Count > 0 || IsScrollAnimationActive);
+        _animationFrameClock.StopWhenIdle(HasFrameAnimations);
         if (ShouldRebuildHeightAnimationGeometry(
                 _isCompositedByIconSurface,
                 completedBoxIds.Count > 0))
